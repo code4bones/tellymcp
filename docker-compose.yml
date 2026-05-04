@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+  telegram-human-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: telegram-human-mcp:local
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      MCP_HTTP_HOST: 0.0.0.0
+      MCP_HTTP_PORT: 8787
+      MCP_HTTP_PATH: /mcp
+    ports:
+      - "8787:8787"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data/logs:/var/log/telegram-human-mcp
+      - ./data/redis:/var/lib/redis

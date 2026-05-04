@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 
 function randomBase36(size: number): string {
   return randomBytes(size)
@@ -17,7 +17,7 @@ export function createRequestId(now = new Date()): string {
 }
 
 export function createPairCode(): string {
-  return `${randomBase36(4)}-${randomBase36(4)}`;
+  return randomInt(0, 1000).toString().padStart(3, "0");
 }
 
 export function createInboxMessageId(now = new Date()): string {

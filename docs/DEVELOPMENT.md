@@ -134,6 +134,52 @@ Rule:
 - MCP-facing tool logic should not talk to Telegram APIs directly
 - all Telegram specifics should stay inside the transport or Telegram integration helpers
 
+### Mini App / WebApp
+
+Files:
+
+- [src/app/webapp/auth.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/app/webapp/auth.ts)
+- [src/app/webapp/assets.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/app/webapp/assets.ts)
+- [src/app/webapp/tmux.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/app/webapp/tmux.ts)
+- [src/app/http.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/app/http.ts)
+
+Responsibilities:
+
+- serve the Telegram Mini App from the same Node service
+- validate Telegram `initData` on the backend
+- resolve the active session from the bound Telegram user
+- expose read-mostly tmux viewport access
+- expose only a tiny fixed control set for tmux
+
+Rule:
+
+- do not add arbitrary text input unless explicitly intended
+- keep Mini App auth server-side only
+- prefer small local frontend code over adding a full frontend framework
+
+### tmux backend
+
+Files:
+
+- [src/shared/integrations/tmux/client.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/shared/integrations/tmux/client.ts)
+- [src/app/tmux-proxy.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/app/tmux-proxy.ts)
+- [tmux-proxy-go/main.go](/home/code4bones/Devs/coding/mcp/telegram_mcp/tmux-proxy-go/main.go)
+- [Dockerfile.tmux-proxy](/home/code4bones/Devs/coding/mcp/telegram_mcp/Dockerfile.tmux-proxy)
+
+Responsibilities:
+
+- abstract tmux operations behind one client
+- support both direct local tmux access and host-side HTTP proxy mode
+- keep the proxy minimal and dependency-free
+- keep the proxy HTTP contract stable so the host implementation can be swapped
+
+Rule:
+
+- all new tmux operations should go through the shared tmux client
+- do not scatter raw `tmux` shell calls around the codebase again
+- if the service is containerized but tmux stays on the host, use `TMUX_PROXY_URL`
+- prefer the Go proxy for host deployment; keep the Node proxy as a development/reference implementation
+
 ### Tool registration
 
 - [src/app/providers/mcp/server.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/app/providers/mcp/server.ts)
@@ -241,6 +287,25 @@ Invariant:
 - nudging is event-driven, not background polling
 - multiple close-together messages should coalesce into one wake-up
 - multi-agent separation depends on distinct `session_id` values; when `session_id` is omitted, tmux attributes are the preferred way to derive unique defaults
+
+### Mini App live view flow
+
+Flow:
+
+1. user opens `🖥 Live` from the Telegram session menu
+2. transport sends a launcher message with a WebApp button
+3. transport stores a short-lived launch record keyed by Telegram user
+4. Mini App bootstraps with Telegram `initData`
+5. backend validates the Telegram user and resolves the active paired session
+6. backend creates a short-lived WebApp session token
+7. backend deletes the temporary launcher message after successful bootstrap
+8. Mini App polls the visible tmux buffer and sends only fixed control actions
+
+Invariant:
+
+- the Mini App never trusts URL session parameters as the sole source of truth
+- WebApp control is restricted to `/`, `Backspace`, `Up`, `Down`, `Enter`
+- no arbitrary terminal text input should be introduced casually
 
 ## Session model
 

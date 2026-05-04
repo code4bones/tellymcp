@@ -43,7 +43,7 @@ Flow:
 
 Telegram is implemented as the first transport backend. Tool orchestration does not depend on Telegram-specific APIs directly.
 
-For maintainers and future extension work, see [DEVELOPMENT.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/DEVELOPMENT.md).
+For maintainers and future extension work, see [DEVELOPMENT.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/docs/DEVELOPMENT.md).
 
 ## Requirements
 
@@ -88,9 +88,13 @@ Important variables:
 - `WEBAPP_PUBLIC_URL=https://builder.undoo.ru/webapp` required for Telegram Mini App launcher
 - `WEBAPP_INITDATA_TTL_SECONDS=300`
 - `WEBAPP_SESSION_TTL_SECONDS=900`
+- `WEBAPP_VISIBLE_SCREENS=2`
 - `WEBAPP_POLL_INTERVAL_MS=2000`
 - `WEBAPP_ACTION_COOLDOWN_MS=150`
 - `TMUX_NUDGE_ENABLED`
+- `TMUX_PROXY_URL` optional, used when tmux stays on the host and the main service runs elsewhere
+- `TMUX_PROXY_TOKEN` optional bearer for the host tmux proxy
+- `TMUX_SOCKET_PATH` optional explicit tmux socket path
 - `TMUX_NUDGE_DEBOUNCE_SECONDS`
 - `TMUX_NUDGE_COOLDOWN_SECONDS`
 - `TMUX_NUDGE_MESSAGE`
@@ -129,10 +133,19 @@ If `WEBAPP_ENABLED=true` and `WEBAPP_PUBLIC_URL` is configured, the session menu
 The Mini App:
 
 - is served by this same Node service under `WEBAPP_BASE_PATH`
-- uses vanilla JS and polls only the visible tmux pane area
+- uses vanilla JS and polls the visible tmux pane area
 - validates Telegram `initData` server-side using the official hash check
 - requires the Telegram user from `initData` to match the bound session user
-- allows only `Up`, `Down`, and `Enter` control actions at this stage
+- resolves the active session from the bound Telegram user, so a session id in the URL is not required for normal use
+- deletes the temporary `Open Live View` launcher message after successful Mini App bootstrap
+- allows only a fixed control set:
+  - `/`
+  - `Backspace`
+  - `Up`
+  - `Down`
+  - `Enter`
+
+`WEBAPP_VISIBLE_SCREENS` controls how much content the live viewport captures relative to the visible tmux height. The default `2` means about two visible screens of content.
 
 ## Default session identity
 
@@ -193,6 +206,137 @@ After startup you should see readiness logs in the console. The HTTP service exp
 - MCP endpoint at `http://127.0.0.1:8787/mcp` by default
 - health check at `http://127.0.0.1:8787/healthz`
 
+If `MCP_HTTP_BEARER_TOKEN` is configured:
+
+- `/mcp` requires `Authorization: Bearer ...`
+- `/sessions` and `/prune` also require the same bearer when enabled
+- Telegram Mini App does not use this bearer directly; it has its own `initData` bootstrap and a short-lived WebApp session token
+
+If tmux stays on the host but the main service runs in Docker or elsewhere, run the lightweight host-side tmux proxy.
+
+Recommended host deployment is the Go binary built inside Docker and exported to the host:
+
+```bash
+./build-tmux-proxy.sh
+TMUX_PROXY_HOST=0.0.0.0 TMUX_PROXY_TOKEN=your-token ./artifacts/tmux-proxy-go
+```
+
+The Go proxy reads the same local `.env` file by default, so `TMUX_PROXY_HOST`, `TMUX_PROXY_PORT`, `TMUX_PROXY_TOKEN`, and `TMUX_SOCKET_PATH` can live in the shared project configuration.
+
+If you need a development fallback, the repository also keeps the tiny Node-based proxy:
+
+```bash
+npm run build
+TMUX_PROXY_HOST=0.0.0.0 TMUX_PROXY_TOKEN=your-token npm run start:tmux-proxy
+```
+
+Then point the main service at it:
+
+```env
+TMUX_PROXY_URL=http://host.docker.internal:8788
+TMUX_PROXY_TOKEN=your-token
+```
+
+The host-side proxy exposes only a tiny tmux HTTP surface for:
+
+- visible buffer capture
+- fixed control actions
+- wake-up line pasting
+
+## Docker deployment
+
+This repository includes a single-container deployment path without an internal nginx layer.
+
+Inside the container:
+
+- `node` runs the MCP HTTP service on `0.0.0.0:8787`
+- `redis-server` runs on `127.0.0.1:6379`
+- the application itself serves:
+  - `/mcp`
+  - `/webapp`
+  - `/healthz`
+  - `/sessions`
+  - `/prune`
+
+This means an external reverse proxy can forward directly to container port `8787`, while all app routing stays inside the Node service.
+
+Build the image fully inside Docker:
+
+```bash
+docker compose build
+```
+
+Run it:
+
+```bash
+docker compose up -d
+```
+
+Stop it:
+
+```bash
+docker compose down
+```
+
+The compose file:
+
+- builds the image from this repository
+- injects `.env`
+- overrides runtime networking so the app talks to local in-container Redis and listens on `0.0.0.0:8787`
+- publishes only `8787:8787`
+- adds `host.docker.internal` so the container can reach a host-side tmux proxy
+- persists Redis state in `./data/redis`
+
+After startup:
+
+- MCP is reachable at `http://<host>:8787/mcp`
+- Mini App static/API routes are reachable under `http://<host>:8787/webapp/`
+- health check is at `http://<host>:8787/healthz`
+
+Recommended external reverse proxy pattern:
+
+- external proxy forwards `/mcp` to `http://<container-host>:8787/mcp`
+- external proxy forwards `/webapp/` to `http://<container-host>:8787/webapp/`
+- or, if you prefer, the external proxy can forward a wider prefix directly to `http://<container-host>:8787`
+- no direct external access is needed to in-container Redis
+
+If tmux-driven features are required in Docker mode:
+
+1. Build and run the host-side tmux proxy on the host:
+
+```bash
+./build-tmux-proxy.sh
+TMUX_PROXY_HOST=0.0.0.0 TMUX_PROXY_TOKEN=your-token ./artifacts/tmux-proxy-go
+```
+
+2. Set in `.env` for the containerized service:
+
+```env
+TMUX_PROXY_URL=http://host.docker.internal:8788
+TMUX_PROXY_TOKEN=your-token
+```
+
+This keeps Redis inside the container, while tmux access remains on the host through a minimal HTTP bridge.
+
+Important:
+
+- pairing state
+- active session bindings
+- inbox messages
+- menu payload buffers
+- WebApp launch/session state
+
+are all stored in Redis. In the Docker deployment they survive restarts because `./data/redis` is mounted into the container and Redis AOF is enabled.
+
+Optional if the host tmux server uses a non-default socket:
+
+```bash
+TMUX_SOCKET_PATH=/tmp/tmux-1000/default \
+TMUX_PROXY_HOST=0.0.0.0 \
+TMUX_PROXY_TOKEN=your-token \
+./artifacts/tmux-proxy-go
+```
+
 ## MCP usage
 
 ### 1. Save session context
@@ -228,8 +372,6 @@ This returns:
 
 - saved context if it exists
 - whether the session is currently paired
-- stored legacy human-channel preference
-- whether Telegram inbox delivery is currently available
 - stored tmux targeting data if configured
 - Telegram binding metadata if pairing exists
 - a `status_message` describing whether pairing and tmux delivery are active
@@ -483,6 +625,12 @@ codex mcp add telegramHuman \
   --url http://127.0.0.1:8787/mcp \
   --bearer-token-env-var TELEGRAM_MCP_BEARER_TOKEN
 ```
+
+For externally exposed deployments:
+
+- prefer enabling `MCP_HTTP_BEARER_TOKEN`
+- keep `/sessions` and `/prune` disabled unless you actively need them
+- leave WebApp access to Telegram `initData` validation plus its short-lived session token flow
 
 Legacy stdio registration remains available:
 

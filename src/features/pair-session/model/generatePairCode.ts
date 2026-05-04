@@ -17,6 +17,8 @@ import type {
 } from "../../../entities/auth/model/types.js";
 
 export class PairSessionService {
+  private static readonly MAX_PAIR_CODE_ATTEMPTS = 20;
+
   public constructor(
     private readonly config: AppConfig,
     private readonly sessionStore: SessionStore,
@@ -33,7 +35,7 @@ export class PairSessionService {
     const ttlSeconds =
       input.expires_in_seconds ?? this.config.pairCodeTtlSeconds;
     const expiresAt = new Date(now.getTime() + ttlSeconds * 1000).toISOString();
-    const code = createPairCode();
+    let code: string | null = null;
 
     const existingSession = await this.sessionStore.getSession(
       resolved.sessionId,
@@ -92,15 +94,33 @@ export class PairSessionService {
       updatedAt: now.toISOString(),
     });
 
-    const record: PairCodeRecord = {
-      code,
-      sessionId: resolved.sessionId,
-      ...(resolved.sessionLabel ? { sessionLabel: resolved.sessionLabel } : {}),
-      createdAt: now.toISOString(),
-      expiresAt,
-    };
+    for (
+      let attempt = 0;
+      attempt < PairSessionService.MAX_PAIR_CODE_ATTEMPTS;
+      attempt += 1
+    ) {
+      const candidate = createPairCode();
+      const record: PairCodeRecord = {
+        code: candidate,
+        sessionId: resolved.sessionId,
+        ...(resolved.sessionLabel
+          ? { sessionLabel: resolved.sessionLabel }
+          : {}),
+        createdAt: now.toISOString(),
+        expiresAt,
+      };
+      const reserved = await this.bindingStore.createPairCode(record, ttlSeconds);
+      if (reserved) {
+        code = candidate;
+        break;
+      }
+    }
 
-    await this.bindingStore.createPairCode(record, ttlSeconds);
+    if (!code) {
+      throw new Error(
+        "Failed to reserve a unique 3-digit pairing code. Try again in a moment.",
+      );
+    }
 
     this.logger.info("Session pair code created", {
       sessionId: resolved.sessionId,

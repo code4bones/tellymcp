@@ -144,13 +144,15 @@ export class RedisStateStore
   public async createPairCode(
     record: PairCodeRecord,
     ttlSeconds: number,
-  ): Promise<void> {
-    await this.redis.set(
+  ): Promise<boolean> {
+    const result = await this.redis.set(
       pairCodeKey(record.code),
       JSON.stringify(record),
       "EX",
       ttlSeconds,
+      "NX",
     );
+    return result === "OK";
   }
 
   public async consumePairCode(code: string): Promise<PairCodeRecord | null> {

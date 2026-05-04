@@ -1,8 +1,9 @@
-.env
-dist
 node_modules
-*.jsonl
+dist
+.git
 .telegram-human-mcp
+*.log
+.env
+xvfb-test.png
 .codex
 .agents
-artifacts

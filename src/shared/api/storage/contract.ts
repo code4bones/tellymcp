@@ -21,7 +21,7 @@ export interface SessionStore {
 }
 
 export interface SessionBindingStore {
-  createPairCode(record: PairCodeRecord, ttlSeconds: number): Promise<void>;
+  createPairCode(record: PairCodeRecord, ttlSeconds: number): Promise<boolean>;
   consumePairCode(code: string): Promise<PairCodeRecord | null>;
   getBinding(sessionId: string): Promise<SessionBinding | null>;
   setBinding(binding: SessionBinding): Promise<void>;

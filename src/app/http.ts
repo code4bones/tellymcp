@@ -409,6 +409,7 @@ async function main(): Promise<void> {
 
         try {
           const content = await captureVisibleTmuxPane(
+            runtime.config.tmux,
             session.tmuxTarget,
             runtime.config.tmux.captureLines,
             runtime.config.webapp.visibleScreens,
@@ -493,6 +494,7 @@ async function main(): Promise<void> {
 
         try {
           await sendAllowedTmuxAction(
+            runtime.config.tmux,
             session.tmuxTarget,
             action as "up" | "down" | "enter" | "slash" | "delete",
           );

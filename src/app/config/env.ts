@@ -70,6 +70,9 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((value) => value !== "false"),
+  TMUX_PROXY_URL: z.string().url().optional(),
+  TMUX_PROXY_TOKEN: z.string().min(1).optional(),
+  TMUX_SOCKET_PATH: z.string().min(1).optional(),
   TMUX_NUDGE_DEBOUNCE_SECONDS: z.coerce.number().int().positive().default(10),
   TMUX_NUDGE_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(30),
   TMUX_NUDGE_MESSAGE: z.string().min(1).default("проверь inbox"),
@@ -129,6 +132,9 @@ export type AppConfig = {
   };
   tmux: {
     nudgeEnabled: boolean;
+    proxyUrl?: string;
+    proxyToken?: string;
+    socketPath?: string;
     nudgeDebounceSeconds: number;
     nudgeCooldownSeconds: number;
     nudgeMessage: string;
@@ -218,6 +224,9 @@ export function loadConfig(): AppConfig {
     },
     tmux: {
       nudgeEnabled: parsed.TMUX_NUDGE_ENABLED,
+      ...(parsed.TMUX_PROXY_URL ? { proxyUrl: parsed.TMUX_PROXY_URL } : {}),
+      ...(parsed.TMUX_PROXY_TOKEN ? { proxyToken: parsed.TMUX_PROXY_TOKEN } : {}),
+      ...(parsed.TMUX_SOCKET_PATH ? { socketPath: parsed.TMUX_SOCKET_PATH } : {}),
       nudgeDebounceSeconds: parsed.TMUX_NUDGE_DEBOUNCE_SECONDS,
       nudgeCooldownSeconds: parsed.TMUX_NUDGE_COOLDOWN_SECONDS,
       nudgeMessage: parsed.TMUX_NUDGE_MESSAGE,

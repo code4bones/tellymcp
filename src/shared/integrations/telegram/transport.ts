@@ -1,5 +1,3 @@
-import { execFile } from "node:child_process";
-
 import { Menu, MenuRange, type MenuFlavor } from "@grammyjs/menu";
 import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from "grammy";
 
@@ -30,6 +28,12 @@ import {
   formatTelegramNotification,
 } from "./messageFormat.js";
 import { createTelegramFetch } from "./proxyFetch.js";
+import {
+  captureTmuxPaneRange,
+  getTmuxWindowHeight,
+  isTmuxUnavailableError,
+  sendTmuxLiteralLine,
+} from "../tmux/client.js";
 
 type WaiterRecord = {
   requestId: string;
@@ -223,38 +227,6 @@ function renderMarkdownChunk(title: string, body: string): string {
   return `*${escapeMarkdownV2(title)}*\n\n\`\`\`\n${escapeMarkdownV2CodeBlock(body)}\n\`\`\``;
 }
 
-function execFileAsync(command: string, args: string[]): Promise<void> {
-  return new Promise((resolve, reject) => {
-    execFile(command, args, (error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-
-      resolve();
-    });
-  });
-}
-
-function execFileOutputAsync(
-  command: string,
-  args: string[],
-): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    execFile(command, args, (error, stdout, stderr) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-
-      resolve({
-        stdout,
-        stderr,
-      });
-    });
-  });
-}
-
 function shouldNudge(
   lastNudgeAt: string | undefined,
   cooldownSeconds: number,
@@ -270,16 +242,6 @@ function shouldNudge(
   }
 
   return nowMs - lastMs >= cooldownSeconds * 1000;
-}
-
-function isTmuxUnavailableError(error: unknown): boolean {
-  const message =
-    error instanceof Error ? (error.stack ?? error.message) : String(error);
-  return (
-    message.includes("error connecting to /tmp/tmux-") ||
-    message.includes("No such file or directory") ||
-    message.includes("ENOENT")
-  );
 }
 
 function slugifyFilenamePart(input: string): string {
@@ -308,32 +270,6 @@ function formatMenuTimestamp(timestamp: string | undefined): string | null {
   const minutes = String(date.getMinutes()).padStart(2, "0");
 
   return `${day}.${month}.${year} ${hours}:${minutes}`;
-}
-
-async function sendTmuxLiteralLine(
-  target: string,
-  text: string,
-): Promise<void> {
-  const normalized = text.replace(/\r?\n/g, " ").trim();
-  const bufferName = `telegram-mcp-${Date.now().toString(36)}`;
-  if (normalized.length > 0) {
-    try {
-      await execFileAsync("tmux", ["set-buffer", "-b", bufferName, normalized]);
-      await execFileAsync("tmux", [
-        "paste-buffer",
-        "-d",
-        "-b",
-        bufferName,
-        "-t",
-        target,
-      ]);
-    } finally {
-      await execFileAsync("tmux", ["delete-buffer", "-b", bufferName]).catch(
-        () => undefined,
-      );
-    }
-  }
-  await execFileAsync("tmux", ["send-keys", "-t", target, "Enter"]);
 }
 
 export class TelegramTransport implements HumanTransport {
@@ -1636,6 +1572,7 @@ export class TelegramTransport implements HumanTransport {
 
     await this.sendTypingForSession(sessionId);
     await sendTmuxLiteralLine(
+      this.config.tmux,
       session.tmuxTarget,
       this.config.tmux.nudgeMessage,
     );
@@ -2603,14 +2540,12 @@ export class TelegramTransport implements HumanTransport {
     }
 
     const paneStart = await this.resolveTmuxCaptureStart(target, scope);
-    const { stdout } = await execFileOutputAsync("tmux", [
-      "capture-pane",
-      "-p",
-      "-t",
+    const stdout = await captureTmuxPaneRange(
+      this.config.tmux,
       target,
-      "-S",
       paneStart,
-    ]);
+      false,
+    );
 
     const capturedAt = new Date().toISOString();
     const scopeDescription = this.describeCaptureScope(scope);
@@ -2661,15 +2596,8 @@ export class TelegramTransport implements HumanTransport {
       return `-${scope.lines}`;
     }
 
-    const { stdout } = await execFileOutputAsync("tmux", [
-      "display-message",
-      "-p",
-      "-t",
-      target,
-      "#{window_height}",
-    ]);
-    const height = Number.parseInt(stdout.trim(), 10);
-    if (Number.isNaN(height) || height <= 0) {
+    const height = await getTmuxWindowHeight(this.config.tmux, target);
+    if (typeof height !== "number" || height <= 0) {
       return `-${this.config.tmux.captureLines}`;
     }
 

@@ -55,6 +55,8 @@ export type WebAppSessionTokenRecord = {
 export type PendingWebAppLaunchRecord = {
   telegramUserId: number;
   sessionId: string;
+  telegramChatId?: number;
+  telegramMessageId?: number;
   expiresAtMs: number;
   createdAtMs: number;
 };
@@ -66,12 +68,22 @@ export class WebAppLaunchRegistry {
     telegramUserId: number,
     sessionId: string,
     ttlSeconds: number,
+    details?: {
+      telegramChatId?: number;
+      telegramMessageId?: number;
+    },
   ): PendingWebAppLaunchRecord {
     this.cleanupExpired();
     const nowMs = Date.now();
     const record: PendingWebAppLaunchRecord = {
       telegramUserId,
       sessionId,
+      ...(details?.telegramChatId !== undefined
+        ? { telegramChatId: details.telegramChatId }
+        : {}),
+      ...(details?.telegramMessageId !== undefined
+        ? { telegramMessageId: details.telegramMessageId }
+        : {}),
       expiresAtMs: nowMs + ttlSeconds * 1000,
       createdAtMs: nowMs,
     };

@@ -502,6 +502,13 @@ export class TelegramTransport implements HumanTransport {
     this.logger.info("Telegram transport stopped");
   }
 
+  public async deleteMessage(
+    telegramChatId: number,
+    telegramMessageId: number,
+  ): Promise<void> {
+    await this.bot.api.deleteMessage(telegramChatId, telegramMessageId);
+  }
+
   public async recoverPendingInboxNudges(): Promise<void> {
     if (!this.config.tmux.nudgeEnabled) {
       this.logger.debug(
@@ -798,15 +805,14 @@ export class TelegramTransport implements HumanTransport {
       kind: "pairing" | "menu" | "inbox" | "transport";
     },
     options: TelegramSendMessageOptions = {},
-  ): Promise<void> {
+  ): Promise<{ message_id: number } | void> {
     let attempt = 0;
 
     while (true) {
       attempt += 1;
 
       try {
-        await ctx.reply(text, options);
-        return;
+        return await ctx.reply(text, options);
       } catch (error) {
         if (!(error instanceof GrammyError) || error.error_code !== 429) {
           throw error;
@@ -2204,14 +2210,9 @@ export class TelegramTransport implements HumanTransport {
     const session = await this.sessionStore.getSession(activeSessionId);
     const baseUrl = this.config.webapp.publicUrl.replace(/\/+$/u, "");
     const url = new URL(`${baseUrl}/live/${encodeURIComponent(activeSessionId)}`);
-    this.webAppLaunchRegistry.set(
-      principal.telegramUserId,
-      activeSessionId,
-      this.config.webapp.initDataTtlSeconds,
-    );
 
     await ctx.answerCallbackQuery({ text: "Opening live view launcher." });
-    await this.replyText(
+    const sent = await this.replyText(
       ctx,
       [
         "🖥 Live View",
@@ -2225,6 +2226,17 @@ export class TelegramTransport implements HumanTransport {
           "Open Live View",
           url.toString(),
         ),
+      },
+    );
+    this.webAppLaunchRegistry.set(
+      principal.telegramUserId,
+      activeSessionId,
+      this.config.webapp.initDataTtlSeconds,
+      {
+        telegramChatId: principal.telegramChatId,
+        ...(sent && "message_id" in sent
+          ? { telegramMessageId: sent.message_id }
+          : {}),
       },
     );
   }

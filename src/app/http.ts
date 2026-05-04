@@ -281,11 +281,17 @@ async function main(): Promise<void> {
                 validated.user.id,
               )) ?? "";
           }
+          let launchRecord = null;
           if (!sessionId) {
             const launch = runtime.webAppLaunchRegistry.getByUserId(
               validated.user.id,
             );
+            launchRecord = launch;
             sessionId = launch?.sessionId ?? "";
+          } else {
+            launchRecord = runtime.webAppLaunchRegistry.getByUserId(
+              validated.user.id,
+            );
           }
 
           if (!sessionId) {
@@ -315,6 +321,28 @@ async function main(): Promise<void> {
             telegramUserId: validated.user.id,
             hasTmuxTarget: Boolean(session?.tmuxTarget),
           });
+          if (
+            launchRecord?.telegramChatId !== undefined &&
+            launchRecord?.telegramMessageId !== undefined
+          ) {
+            try {
+              await runtime.telegramTransport.deleteMessage(
+                launchRecord.telegramChatId,
+                launchRecord.telegramMessageId,
+              );
+            } catch (error) {
+              runtime.logger.warn("Telegram WebApp launcher message deletion failed", {
+                sessionId,
+                telegramUserId: validated.user.id,
+                telegramChatId: launchRecord.telegramChatId,
+                telegramMessageId: launchRecord.telegramMessageId,
+                error:
+                  error instanceof Error
+                    ? (error.stack ?? error.message)
+                    : String(error),
+              });
+            }
+          }
           runtime.webAppLaunchRegistry.deleteByUserId(validated.user.id);
 
           writeJson(res, 200, {

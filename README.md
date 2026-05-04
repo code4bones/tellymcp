@@ -7,12 +7,11 @@ Current tools:
 - `create_session_pair_code`
 - `clear_session_pairing`
 - `set_session_context`
-- `set_human_channel_mode`
 - `set_tmux_target`
 - `get_tmux_target`
-- `get_human_channel_mode`
 - `get_session_context`
 - `clear_session_context`
+- `rename_session`
 - `notify_telegram`
 - `get_telegram_inbox_count`
 - `get_telegram_inbox`
@@ -26,7 +25,7 @@ Flow:
 1. The MCP client creates or updates a session context.
 2. The MCP client creates a session pairing code.
 3. The human user links that session in Telegram with `/start <code>` or `/link <code>`.
-4. After pairing, Telegram shows an inline menu for inbox and session status.
+4. After pairing, Telegram shows an inline menu for session switching, inbox, buffer export, and developer actions. `/menu` opens the root switcher.
 5. The MCP client calls `ask_user_telegram` with the linked `session_id`.
 6. The server sends a redacted Telegram message and waits for the answer.
 7. The answer is returned as structured MCP tool output.
@@ -82,6 +81,15 @@ Important variables:
 - `MCP_HTTP_PORT`
 - `MCP_HTTP_PATH`
 - `MCP_HTTP_BEARER_TOKEN` optional
+- `MCP_HTTP_ENABLE_DEBUG_ROUTES=false` enables HTTP `/sessions`
+- `MCP_HTTP_ENABLE_PRUNE_ROUTE=false` enables HTTP `POST /prune`
+- `WEBAPP_ENABLED=false`
+- `WEBAPP_BASE_PATH=/webapp`
+- `WEBAPP_PUBLIC_URL=https://builder.undoo.ru/webapp` required for Telegram Mini App launcher
+- `WEBAPP_INITDATA_TTL_SECONDS=300`
+- `WEBAPP_SESSION_TTL_SECONDS=900`
+- `WEBAPP_POLL_INTERVAL_MS=2000`
+- `WEBAPP_ACTION_COOLDOWN_MS=150`
 - `TMUX_NUDGE_ENABLED`
 - `TMUX_NUDGE_DEBOUNCE_SECONDS`
 - `TMUX_NUDGE_COOLDOWN_SECONDS`
@@ -106,6 +114,25 @@ If Telegram access requires a proxy, the bot transport can use:
 - SOCKS5 proxy through `SOCKS5_PROXY`
 
 The chosen proxy mode is controlled by `PROXY_USE`.
+
+Debug/admin HTTP routes are disabled by default:
+
+- `/sessions` requires `MCP_HTTP_ENABLE_DEBUG_ROUTES=true`
+- `/prune` requires `MCP_HTTP_ENABLE_PRUNE_ROUTE=true`
+
+If exposed outside localhost, also set `MCP_HTTP_BEARER_TOKEN`.
+
+## Mini App
+
+If `WEBAPP_ENABLED=true` and `WEBAPP_PUBLIC_URL` is configured, the session menu exposes `🖥 Live`.
+
+The Mini App:
+
+- is served by this same Node service under `WEBAPP_BASE_PATH`
+- uses vanilla JS and polls only the visible tmux pane area
+- validates Telegram `initData` server-side using the official hash check
+- requires the Telegram user from `initData` to match the bound session user
+- allows only `Up`, `Down`, and `Enter` control actions at this stage
 
 ## Default session identity
 
@@ -201,70 +228,55 @@ This returns:
 
 - saved context if it exists
 - whether the session is currently paired
-- current human channel mode
-- whether proactive Telegram inbox polling is currently enabled
+- stored legacy human-channel preference
+- whether Telegram inbox delivery is currently available
 - stored tmux targeting data if configured
 - Telegram binding metadata if pairing exists
-- a `status_message` describing whether pairing is active, pending, or absent
+- a `status_message` describing whether pairing and tmux delivery are active
 
-### 2a. Switch between direct mode and Telegram mode
+### 2. Bind tmux context for Telegram delivery
 
-Use `set_human_channel_mode` when you want to explicitly tell the agent whether it should proactively watch Telegram for asynchronous guidance.
-
-When leaving the workstation:
-
-```json
-{
-  "session_id": "backend-refactor",
-  "mode": "telegram"
-}
-```
-
-When returning to direct interaction:
-
-```json
-{
-  "session_id": "backend-refactor",
-  "mode": "direct"
-}
-```
-
-Practical meaning:
-
-- `direct`:
-  - do not proactively poll Telegram inbox
-  - use Telegram only for explicit `ask_user_telegram` / `notify_telegram`
-- `telegram`:
-  - if a tmux target is configured, the long-running service debounces new non-reply Telegram messages and then nudges the agent pane
-  - after a tmux nudge, the agent should call `get_telegram_inbox` directly and process a batch
-  - `get_telegram_inbox_count` is still available for lightweight passive checks when no tmux nudge path is configured
-
-### 2b. Bind a tmux pane for Telegram mode
-
-If Codex is running inside tmux, save the current pane target before you leave the workstation. A reliable way is:
+If Codex is running inside tmux, capture the current tmux context before you leave the workstation. A reliable way is:
 
 ```bash
-tmux display-message -p '#{session_name} #{pane_id}'
+tmux display-message -p '#{session_name} #{window_name} #{window_index} #{pane_id} #{pane_index}'
 ```
 
-Then call `set_tmux_target`:
+The preferred path is to pass these attributes directly into `create_session_pair_code`, so pairing immediately creates a distinct session identity for this agent:
+
+```json
+{
+  "tmux_session_name": "dev",
+  "tmux_window_name": "test",
+  "tmux_window_index": 1,
+  "tmux_pane_id": "%7",
+  "tmux_pane_index": 0
+}
+```
+
+You can still call `set_tmux_target` later if you need to update or override the stored target:
 
 ```json
 {
   "session_id": "backend-refactor",
   "tmux_session_name": "work",
+  "tmux_window_name": "test",
+  "tmux_window_index": 1,
+  "tmux_pane_id": "%7",
+  "tmux_pane_index": 0,
   "tmux_target": "%7"
 }
 ```
 
-After that, when the session is in Telegram mode and the unsolicited inbox receives a new message, the service can run:
+After that, when the paired session receives an unsolicited inbox message, the service can run:
 
 ```bash
 tmux send-keys -t %7 "проверь inbox" C-m
 ```
 
-The service does not forward the Telegram message text into tmux. It only nudges the agent. The agent still reads actual message contents through `get_telegram_inbox_count`, `get_telegram_inbox`, and `delete_telegram_inbox_message`.
+The service does not forward the Telegram message text into tmux. It only nudges the agent. The agent still reads actual message contents through `get_telegram_inbox` and `delete_telegram_inbox_message`, or through `get_telegram_inbox_count` first in passive no-tmux mode.
 If several Telegram messages arrive close together, the nudge is debounced by `TMUX_NUDGE_DEBOUNCE_SECONDS` so the agent gets one wake-up for the batch instead of one wake-up per message.
+Ordinary Telegram messages are always stored in the inbox of the currently active session for that Telegram identity.
 
 ### 3. Pair a session
 
@@ -279,7 +291,21 @@ Call `create_session_pair_code` with a stable session id:
 
 The tool returns a short-lived code, a status message for the agent, and optionally a Telegram deep link.
 
-If you omit `session_id`, the server uses the derived default project session.
+If you omit `session_id`, the server derives one automatically.
+
+If multiple agents work from different tmux windows or panes, pass tmux attributes during pairing so the server derives distinct session identities automatically:
+
+```json
+{
+  "tmux_session_name": "dev",
+  "tmux_window_name": "test",
+  "tmux_window_index": 1,
+  "tmux_pane_id": "%7",
+  "tmux_pane_index": 0
+}
+```
+
+With tmux attributes present, they participate in the derived default `session_id` and `session_label`, which prevents multiple agents from collapsing into one Telegram session even if they share similar project structure. In practice this means `/menu` can later show both agents separately and let Telegram switch the active async context between them.
 
 ### 4. Link in Telegram
 
@@ -372,7 +398,14 @@ This sends a Telegram message without waiting for a reply.
 
 If the user writes to the bot without replying to an active question, the message is stored in the session inbox.
 
-First call `get_telegram_inbox_count`:
+If the paired session has a tmux target, the preferred path is event-driven:
+
+- Telegram message arrives
+- service stores it in inbox
+- service nudges tmux
+- agent wakes up and calls `get_telegram_inbox`
+
+If there is no tmux nudge path, use passive mode. First call `get_telegram_inbox_count`:
 
 ```json
 {
@@ -384,8 +417,7 @@ Only if `total > 0`, call `get_telegram_inbox`:
 
 ```json
 {
-  "session_id": "backend-refactor",
-  "limit": 20
+  "session_id": "backend-refactor"
 }
 ```
 
@@ -471,14 +503,12 @@ Rules:
 
 - prefer explicit `session_id` when multiple projects or sessions share one Telegram bot; otherwise the derived default session is acceptable
 - save or refresh session context before risky question flows when it helps reuse context
-- if the user wants asynchronous Telegram-first interaction, call `set_human_channel_mode` with `mode: "telegram"`
-- if the agent runs inside tmux, capture `#{session_name}` and `#{pane_id}` and store them with `set_tmux_target` before switching fully to Telegram mode
-- if the user is back at the workstation, call `set_human_channel_mode` with `mode: "direct"`
+- if the agent runs inside tmux, capture `#{session_name} #{window_name} #{window_index} #{pane_id} #{pane_index}` and pass them to `create_session_pair_code`; use `set_tmux_target` later only if you need to refresh or override the target
 - if the session is not linked yet, create a pair code first
-- if Telegram mode has a configured tmux target, treat a tmux nudge as the signal to check the inbox
-- if Telegram mode has no tmux target, periodically call `get_telegram_inbox_count`
+- if a paired session has a configured tmux target, treat a tmux nudge as the signal to check the inbox
+- if a paired session has no tmux target, periodically call `get_telegram_inbox_count`
 - call `get_telegram_inbox` only if the count is greater than zero
-- before the final answer in Telegram mode, check `get_telegram_inbox_count`
+- before the final answer in passive no-tmux mode, check `get_telegram_inbox_count`
 - after handling an inbox item, call `delete_telegram_inbox_message`
 - include concise task context
 - include affected files when relevant

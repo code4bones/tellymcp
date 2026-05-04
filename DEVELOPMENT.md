@@ -25,7 +25,7 @@ There are two human interaction patterns:
 2. asynchronous guidance:
    - the human sends an ordinary Telegram message
    - the server stores it in the per-session inbox
-   - in AFK mode, the server nudges the agent through `tmux`
+   - if `tmux_target` exists, the server nudges the agent through `tmux`
    - the agent reads the inbox batch through MCP tools
 
 ## High-level architecture
@@ -206,7 +206,7 @@ Flow:
 
 1. human sends ordinary Telegram message
 2. if it is not a pairing command and not a matched reply, it is stored in inbox
-3. if session is in Telegram mode and has `tmux_target`, the server schedules one debounced nudge
+3. if the session has `tmux_target`, the server schedules one debounced nudge
 4. agent wakes up and reads a batch through `get_telegram_inbox`
 5. agent deletes only messages that were actually handled
 
@@ -215,6 +215,7 @@ Invariant:
 - inbox messages are source-of-truth for async human input
 - `tmux` receives only a wake-up phrase, never the actual human message body
 - batch size is server policy from `.env`, not agent policy
+- do not reintroduce session-wide channel-mode flags as the runtime gate for inbox delivery
 
 ### tmux AFK flow
 
@@ -227,16 +228,19 @@ Files:
 Flow:
 
 1. Codex runs inside tmux
-2. agent or user stores `tmux_session_name` and `tmux_target`
-3. session enters `human_channel_mode = telegram`
-4. new non-reply Telegram messages get debounced
-5. transport pastes `TMUX_NUDGE_MESSAGE` into pane and presses Enter
-6. agent reads inbox batch
+2. agent or user captures full tmux attributes and ideally passes them into `create_session_pair_code`
+3. pairing stores a distinct session identity and, when available, the pane target
+4. `set_tmux_target` remains available as an explicit refresh or override path
+5. paired session has a configured `tmuxTarget`
+6. new non-reply Telegram messages get debounced
+7. transport pastes `TMUX_NUDGE_MESSAGE` into pane and presses Enter
+8. agent reads inbox batch
 
 Invariant:
 
 - nudging is event-driven, not background polling
 - multiple close-together messages should coalesce into one wake-up
+- multi-agent separation depends on distinct `session_id` values; when `session_id` is omitted, tmux attributes are the preferred way to derive unique defaults
 
 ## Session model
 
@@ -247,8 +251,11 @@ Session state is stored in:
 Current session fields include:
 
 - label/task/summary/files/decisions/risks
-- `humanMode`
 - `tmuxSessionName`
+- `tmuxWindowName`
+- `tmuxWindowIndex`
+- `tmuxPaneId`
+- `tmuxPaneIndex`
 - `tmuxTarget`
 - `lastTmuxNudgeAt`
 
@@ -414,7 +421,6 @@ If pairing fails:
 
 If async inbox does not wake the agent:
 
-- session `humanMode`
 - `tmuxTarget`
 - `TMUX_NUDGE_ENABLED`
 - debounce/cooldown settings

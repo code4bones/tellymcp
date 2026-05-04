@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { loadConfig, type AppConfig } from "../config/env.js";
+import { WebAppLaunchRegistry } from "../webapp/auth.js";
 import {
   createRedisClient,
   type RedisClient,
@@ -24,18 +25,28 @@ import { DeleteTelegramInboxMessageTool } from "../../features/inbox/model/delet
 import { SessionContextService } from "../../features/session-context/model/sessionContextService.js";
 import { SetSessionContextTool } from "../../features/session-context/model/setSessionContextTool.js";
 import { GetSessionContextTool } from "../../features/session-context/model/getSessionContextTool.js";
-import { GetHumanChannelModeTool } from "../../features/session-context/model/getHumanChannelModeTool.js";
 import { GetTmuxTargetTool } from "../../features/session-context/model/getTmuxTargetTool.js";
+import { RenameSessionTool } from "../../features/session-context/model/renameSessionTool.js";
 import { ClearSessionContextTool } from "../../features/session-context/model/clearSessionContextTool.js";
-import { SetHumanChannelModeTool } from "../../features/session-context/model/setHumanChannelModeTool.js";
 import { SetTmuxTargetTool } from "../../features/session-context/model/setTmuxTargetTool.js";
 import type { ToolModule } from "../../shared/api/tool-registry/types.js";
+import type {
+  MaintenanceStore,
+  SessionStore,
+  SessionBindingStore,
+  TelegramInboxStore,
+} from "../../shared/api/storage/contract.js";
 
 export type AppRuntime = {
   config: AppConfig;
   logger: Logger;
   redis: RedisClient;
   telegramTransport: TelegramTransport;
+  sessionStore: SessionStore;
+  bindingStore: SessionBindingStore;
+  inboxStore: TelegramInboxStore;
+  maintenanceStore: MaintenanceStore;
+  webAppLaunchRegistry: WebAppLaunchRegistry;
   createServer: () => McpServer;
   shutdown: () => Promise<void>;
 };
@@ -60,6 +71,17 @@ export async function createAppRuntime(): Promise<AppRuntime> {
       httpPort: config.mcp.httpPort,
       httpPath: config.mcp.httpPath,
       bearerAuthEnabled: Boolean(config.mcp.bearerToken),
+      enableDebugRoutes: config.mcp.enableDebugRoutes,
+      enablePruneRoute: config.mcp.enablePruneRoute,
+    },
+    webapp: {
+      enabled: config.webapp.enabled,
+      basePath: config.webapp.basePath,
+      publicUrlConfigured: Boolean(config.webapp.publicUrl),
+      initDataTtlSeconds: config.webapp.initDataTtlSeconds,
+      sessionTtlSeconds: config.webapp.sessionTtlSeconds,
+      pollIntervalMs: config.webapp.pollIntervalMs,
+      actionCooldownMs: config.webapp.actionCooldownMs,
     },
     tmux: {
       nudgeEnabled: config.tmux.nudgeEnabled,
@@ -77,6 +99,7 @@ export async function createAppRuntime(): Promise<AppRuntime> {
   });
 
   const stateStore = new RedisStateStore(redis);
+  const webAppLaunchRegistry = new WebAppLaunchRegistry();
   await stateStore.resetRuntimeState();
   logger.info("Runtime pending state reset");
 
@@ -86,10 +109,14 @@ export async function createAppRuntime(): Promise<AppRuntime> {
     stateStore,
     stateStore,
     stateStore,
+    stateStore,
+    webAppLaunchRegistry,
     logger,
   );
   await telegramTransport.start();
   logger.info("Telegram transport ready");
+  await telegramTransport.recoverPendingInboxNudges();
+  logger.info("Startup inbox nudge recovery completed");
 
   const pairSessionService = new PairSessionService(
     config,
@@ -99,7 +126,6 @@ export async function createAppRuntime(): Promise<AppRuntime> {
     projectIdentityResolver,
   );
   const sessionContextService = new SessionContextService(
-    config,
     stateStore,
     stateStore,
     logger,
@@ -134,8 +160,7 @@ export async function createAppRuntime(): Promise<AppRuntime> {
     new CreateSessionPairCodeTool(pairSessionService),
     new ClearSessionPairingTool(pairSessionService),
     new SetSessionContextTool(sessionContextService),
-    new SetHumanChannelModeTool(sessionContextService),
-    new GetHumanChannelModeTool(sessionContextService),
+    new RenameSessionTool(sessionContextService),
     new SetTmuxTargetTool(sessionContextService),
     new GetTmuxTargetTool(sessionContextService),
     new GetSessionContextTool(sessionContextService),
@@ -152,6 +177,11 @@ export async function createAppRuntime(): Promise<AppRuntime> {
     logger,
     redis,
     telegramTransport,
+    sessionStore: stateStore,
+    bindingStore: stateStore,
+    inboxStore: stateStore,
+    maintenanceStore: stateStore,
+    webAppLaunchRegistry,
     createServer: () => createMcpServer(createTools()),
     shutdown: async () => {
       logger.info("Shutdown started");

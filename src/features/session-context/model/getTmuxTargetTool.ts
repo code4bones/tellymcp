@@ -27,7 +27,7 @@ export class GetTmuxTargetTool implements ToolModule {
       {
         title: "Get tmux Target",
         description:
-          "Return the stored tmux pane target for a session, including the last time the service nudged that tmux pane.",
+          "Debug/setup tool. Return the stored tmux pane target for a session, including the last time the service nudged that tmux pane. Do not call this in the normal inbox-processing path after a tmux nudge.",
         inputSchema: getTmuxTargetInputSchema,
         outputSchema: getTmuxTargetOutputSchema,
       },

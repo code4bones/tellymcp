@@ -66,8 +66,10 @@ export class InboxService {
       has_more: total > messages.length,
       messages: messages.map((message) => ({
         message_id: message.id,
+        source: "telegram",
         telegram_chat_id: message.telegramChatId,
         telegram_user_id: message.telegramUserId,
+        telegram_message_id: message.sourceTelegramMessageId,
         text: message.text,
         received_at: message.receivedAt,
       })),

@@ -47,8 +47,10 @@ export const getTelegramInboxOutputSchema = z.object({
   messages: z.array(
     z.object({
       message_id: z.string(),
+      source: z.literal("telegram"),
       telegram_chat_id: z.number(),
       telegram_user_id: z.number(),
+      telegram_message_id: z.number().int().positive(),
       text: z.string(),
       received_at: z.string(),
     }),
@@ -79,6 +81,11 @@ export const createSessionPairCodeInputSchema = z.object({
   session_id: z.string().trim().min(1).optional(),
   session_label: z.string().trim().min(1).optional(),
   expires_in_seconds: z.number().int().positive().optional(),
+  tmux_session_name: z.string().trim().min(1).max(200).optional(),
+  tmux_window_name: z.string().trim().min(1).max(200).optional(),
+  tmux_window_index: z.number().int().nonnegative().optional(),
+  tmux_pane_id: z.string().trim().min(1).max(200).optional(),
+  tmux_pane_index: z.number().int().nonnegative().optional(),
 });
 
 export const createSessionPairCodeOutputSchema = z.object({
@@ -100,6 +107,18 @@ export const setSessionContextInputSchema = z.object({
   risks: z.array(z.string().trim().min(1)).optional(),
 });
 
+export const renameSessionInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  title: z.string().trim().min(1),
+});
+
+export const renameSessionOutputSchema = z.object({
+  renamed: z.boolean(),
+  session_id: z.string(),
+  session_label: z.string(),
+  updated_at: z.string(),
+});
+
 export const setSessionContextOutputSchema = z.object({
   saved: z.boolean(),
   session_id: z.string(),
@@ -115,8 +134,6 @@ export const getSessionContextOutputSchema = z.object({
   session_id: z.string(),
   exists: z.boolean(),
   has_binding: z.boolean(),
-  human_channel_mode: z.enum(["direct", "telegram"]),
-  telegram_polling_enabled: z.boolean(),
   status_message: z.string(),
   context: z
     .object({
@@ -126,7 +143,6 @@ export const getSessionContextOutputSchema = z.object({
       files: z.array(z.string()).optional(),
       decisions: z.array(z.string()).optional(),
       risks: z.array(z.string()).optional(),
-      human_channel_mode: z.enum(["direct", "telegram"]).optional(),
       updated_at: z.string().optional(),
     })
     .optional(),
@@ -141,6 +157,10 @@ export const getSessionContextOutputSchema = z.object({
     .object({
       configured: z.boolean(),
       tmux_session_name: z.string().optional(),
+      tmux_window_name: z.string().optional(),
+      tmux_window_index: z.number().optional(),
+      tmux_pane_id: z.string().optional(),
+      tmux_pane_index: z.number().optional(),
       tmux_target: z.string().optional(),
       last_nudge_at: z.string().optional(),
     })
@@ -166,39 +186,13 @@ export const clearSessionPairingOutputSchema = z.object({
   session_id: z.string(),
 });
 
-export const setHumanChannelModeInputSchema = z.object({
-  session_id: z.string().trim().min(1).optional(),
-  mode: z.enum(["direct", "telegram"]),
-});
-
-export const setHumanChannelModeOutputSchema = z.object({
-  session_id: z.string(),
-  human_channel_mode: z.enum(["direct", "telegram"]),
-  telegram_polling_enabled: z.boolean(),
-  tmux_target_configured: z.boolean(),
-  tmux_nudge_enabled: z.boolean(),
-  status_message: z.string(),
-  agent_instruction: z.string(),
-});
-
-export const getHumanChannelModeInputSchema = z.object({
-  session_id: z.string().trim().min(1).optional(),
-});
-
-export const getHumanChannelModeOutputSchema = z.object({
-  session_id: z.string(),
-  has_binding: z.boolean(),
-  human_channel_mode: z.enum(["direct", "telegram"]),
-  telegram_polling_enabled: z.boolean(),
-  tmux_target_configured: z.boolean(),
-  tmux_nudge_enabled: z.boolean(),
-  status_message: z.string(),
-  agent_instruction: z.string(),
-});
-
 export const setTmuxTargetInputSchema = z.object({
   session_id: z.string().trim().min(1).optional(),
   tmux_session_name: z.string().trim().min(1).max(200).optional(),
+  tmux_window_name: z.string().trim().min(1).max(200).optional(),
+  tmux_window_index: z.number().int().nonnegative().optional(),
+  tmux_pane_id: z.string().trim().min(1).max(200).optional(),
+  tmux_pane_index: z.number().int().nonnegative().optional(),
   tmux_target: z.string().trim().min(1).max(200),
 });
 
@@ -206,6 +200,10 @@ export const setTmuxTargetOutputSchema = z.object({
   session_id: z.string(),
   tmux_target: z.string(),
   tmux_session_name: z.string().optional(),
+  tmux_window_name: z.string().optional(),
+  tmux_window_index: z.number().optional(),
+  tmux_pane_id: z.string().optional(),
+  tmux_pane_index: z.number().optional(),
   status_message: z.string(),
 });
 
@@ -218,6 +216,10 @@ export const getTmuxTargetOutputSchema = z.object({
   configured: z.boolean(),
   tmux_target: z.string().optional(),
   tmux_session_name: z.string().optional(),
+  tmux_window_name: z.string().optional(),
+  tmux_window_index: z.number().optional(),
+  tmux_pane_id: z.string().optional(),
+  tmux_pane_index: z.number().optional(),
   last_nudge_at: z.string().optional(),
   status_message: z.string(),
 });

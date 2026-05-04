@@ -10,10 +10,26 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 import { createAppRuntime } from "./bootstrap/runtime.js";
+import {
+  type TelegramWebAppInitDataUnsafe,
+  WebAppSessionRegistry,
+  validateTelegramWebAppInitData,
+} from "./webapp/auth.js";
+import {
+  WEBAPP_APP_JS,
+  WEBAPP_STYLES_CSS,
+  renderWebAppHtml,
+} from "./webapp/assets.js";
+import {
+  captureVisibleTmuxPane,
+  isTmuxUnavailableError,
+  sendAllowedTmuxAction,
+} from "./webapp/tmux.js";
 
 type SessionEntry = {
   server: McpServer;
   transport: StreamableHTTPServerTransport;
+  close: () => Promise<void>;
 };
 
 function isInitializeRequest(body: unknown): boolean {
@@ -76,6 +92,36 @@ function writeText(
   res.end(message);
 }
 
+function writeHtml(
+  res: ServerResponse,
+  statusCode: number,
+  html: string,
+): void {
+  res.statusCode = statusCode;
+  res.setHeader("content-type", "text/html; charset=utf-8");
+  res.end(html);
+}
+
+function writeJavaScript(
+  res: ServerResponse,
+  statusCode: number,
+  source: string,
+): void {
+  res.statusCode = statusCode;
+  res.setHeader("content-type", "application/javascript; charset=utf-8");
+  res.end(source);
+}
+
+function writeCss(
+  res: ServerResponse,
+  statusCode: number,
+  source: string,
+): void {
+  res.statusCode = statusCode;
+  res.setHeader("content-type", "text/css; charset=utf-8");
+  res.end(source);
+}
+
 function isAuthorized(
   req: IncomingMessage,
   expectedBearerToken?: string,
@@ -88,13 +134,25 @@ function isAuthorized(
   return header === `Bearer ${expectedBearerToken}`;
 }
 
+function readBearerToken(req: IncomingMessage): string | null {
+  const header = readHeader(req, "authorization");
+  if (!header?.startsWith("Bearer ")) {
+    return null;
+  }
+
+  return header.slice("Bearer ".length).trim() || null;
+}
+
 async function main(): Promise<void> {
   const runtime = await createAppRuntime();
   const transports = new Map<string, SessionEntry>();
+  const webAppSessions = new WebAppSessionRegistry();
+  const webAppBasePath =
+    runtime.config.webapp.basePath.replace(/\/+$/u, "") || "/webapp";
+  const webAppLivePrefix = `${webAppBasePath}/live/`;
 
   const closeSessionEntry = async (entry: SessionEntry): Promise<void> => {
-    await entry.transport.close();
-    await entry.server.close();
+    await entry.close();
   };
 
   const nodeServer = createServer(async (req, res) => {
@@ -109,6 +167,432 @@ async function main(): Promise<void> {
         ok: true,
         service: "telegram-human-mcp",
         transport: "streamable-http",
+      });
+      return;
+    }
+
+    if (runtime.config.webapp.enabled) {
+      if (
+        requestUrl.pathname === webAppBasePath ||
+        requestUrl.pathname === `${webAppBasePath}/` ||
+        requestUrl.pathname.startsWith(webAppLivePrefix)
+      ) {
+        if (method !== "GET") {
+          writeText(res, 405, "Method not allowed");
+          return;
+        }
+
+        writeHtml(
+          res,
+          200,
+          renderWebAppHtml({
+            basePath: webAppBasePath,
+          }),
+        );
+        return;
+      }
+
+      if (requestUrl.pathname === `${webAppBasePath}/app.js`) {
+        if (method !== "GET") {
+          writeText(res, 405, "Method not allowed");
+          return;
+        }
+
+        writeJavaScript(res, 200, WEBAPP_APP_JS);
+        return;
+      }
+
+      if (requestUrl.pathname === `${webAppBasePath}/styles.css`) {
+        if (method !== "GET") {
+          writeText(res, 405, "Method not allowed");
+          return;
+        }
+
+        writeCss(res, 200, WEBAPP_STYLES_CSS);
+        return;
+      }
+
+      if (requestUrl.pathname === `${webAppBasePath}/api/bootstrap`) {
+        if (method !== "POST") {
+          writeText(res, 405, "Method not allowed");
+          return;
+        }
+
+        const body = await readJsonBody(req).catch(() => undefined);
+        let sessionId =
+          body &&
+          typeof body === "object" &&
+          typeof Reflect.get(body, "sessionId") === "string"
+            ? String(Reflect.get(body, "sessionId")).trim()
+            : "";
+        const initDataRaw =
+          body &&
+          typeof body === "object" &&
+          typeof Reflect.get(body, "initDataRaw") === "string"
+            ? String(Reflect.get(body, "initDataRaw"))
+            : "";
+        const initDataUnsafe =
+          body &&
+          typeof body === "object" &&
+          Reflect.get(body, "initDataUnsafe") &&
+          typeof Reflect.get(body, "initDataUnsafe") === "object"
+            ? (Reflect.get(
+                body,
+                "initDataUnsafe",
+              ) as TelegramWebAppInitDataUnsafe)
+            : null;
+
+        if (!initDataRaw || !initDataUnsafe) {
+          writeText(res, 400, "initDataRaw and initDataUnsafe are required");
+          return;
+        }
+
+        try {
+          const validated = validateTelegramWebAppInitData(
+            initDataRaw,
+            initDataUnsafe,
+            runtime.config.telegram.botToken,
+            runtime.config.webapp.initDataTtlSeconds,
+          );
+          runtime.logger.info("Telegram WebApp initData validation debug", {
+            sessionId: sessionId || null,
+            telegramUserId: validated.user.id,
+            providedHash: validated.validationDebug.providedHash,
+            officialRawMatches: validated.validationDebug.officialRaw.matches,
+            officialRawCheckString: validated.validationDebug.officialRaw.checkString,
+            officialRawComputedHash:
+              validated.validationDebug.officialRaw.computedHash,
+            userFieldsMatches:
+              validated.validationDebug.userFields?.matches ?? null,
+            userFieldsCheckString:
+              validated.validationDebug.userFields?.checkString ?? null,
+            userFieldsComputedHash:
+              validated.validationDebug.userFields?.computedHash ?? null,
+          });
+          if (!sessionId) {
+            sessionId =
+              (await runtime.bindingStore.getActiveSessionIdForTelegramUser(
+                validated.user.id,
+              )) ?? "";
+          }
+          if (!sessionId) {
+            const launch = runtime.webAppLaunchRegistry.getByUserId(
+              validated.user.id,
+            );
+            sessionId = launch?.sessionId ?? "";
+          }
+
+          if (!sessionId) {
+            writeText(
+              res,
+              400,
+              "sessionId is missing and no pending Telegram WebApp launch was found",
+            );
+            return;
+          }
+
+          const binding = await runtime.bindingStore.getBinding(sessionId);
+          if (!binding || binding.telegramUserId !== validated.user.id) {
+            writeText(res, 403, "This Telegram user is not bound to the requested session.");
+            return;
+          }
+
+          const session = await runtime.sessionStore.getSession(sessionId);
+          const record = webAppSessions.create(
+            sessionId,
+            validated.user.id,
+            runtime.config.webapp.sessionTtlSeconds,
+          );
+
+          runtime.logger.info("Telegram WebApp session bootstrapped", {
+            sessionId,
+            telegramUserId: validated.user.id,
+            hasTmuxTarget: Boolean(session?.tmuxTarget),
+          });
+          runtime.webAppLaunchRegistry.deleteByUserId(validated.user.id);
+
+          writeJson(res, 200, {
+            token: record.token,
+            session_id: sessionId,
+            session_label: session?.label ?? null,
+            tmux_target: Boolean(session?.tmuxTarget),
+            poll_interval_ms: runtime.config.webapp.pollIntervalMs,
+            expires_at: new Date(record.expiresAtMs).toISOString(),
+          });
+        } catch (error) {
+          runtime.logger.warn("Telegram WebApp bootstrap rejected", {
+            sessionId,
+            initDataLength: initDataRaw.length,
+            initDataPreview: initDataRaw.slice(0, 160),
+            hasUnsafeUser:
+              Boolean(initDataUnsafe?.user) &&
+              typeof initDataUnsafe?.user?.id === "number",
+            error:
+              error instanceof Error
+                ? (error.stack ?? error.message)
+                : String(error),
+          });
+          writeText(
+            res,
+            403,
+            error instanceof Error ? error.message : "WebApp bootstrap failed",
+          );
+        }
+        return;
+      }
+
+      if (requestUrl.pathname === `${webAppBasePath}/api/view`) {
+        if (method !== "GET") {
+          writeText(res, 405, "Method not allowed");
+          return;
+        }
+
+        const token = readBearerToken(req);
+        const webAppSession = token ? webAppSessions.get(token) : null;
+        if (!webAppSession) {
+          writeText(res, 401, "Unauthorized");
+          return;
+        }
+
+        const binding = await runtime.bindingStore.getBinding(
+          webAppSession.sessionId,
+        );
+        if (
+          !binding ||
+          binding.telegramUserId !== webAppSession.telegramUserId
+        ) {
+          writeText(res, 403, "Session binding is no longer valid");
+          return;
+        }
+
+        const session = await runtime.sessionStore.getSession(
+          webAppSession.sessionId,
+        );
+        if (!session?.tmuxTarget) {
+          writeText(res, 409, "tmux target is not configured for this session");
+          return;
+        }
+
+        try {
+          const content = await captureVisibleTmuxPane(
+            session.tmuxTarget,
+            runtime.config.tmux.captureLines,
+          );
+          writeJson(res, 200, {
+            session_id: session.sessionId,
+            session_label: session.label ?? null,
+            captured_at: new Date().toISOString(),
+            content,
+          });
+        } catch (error) {
+          runtime.logger.error("Telegram WebApp visible buffer capture failed", {
+            sessionId: webAppSession.sessionId,
+            error:
+              error instanceof Error
+                ? (error.stack ?? error.message)
+                : String(error),
+          });
+          writeText(
+            res,
+            isTmuxUnavailableError(error) ? 503 : 500,
+            isTmuxUnavailableError(error)
+              ? "tmux is unavailable"
+              : "Failed to capture visible tmux pane",
+          );
+        }
+        return;
+      }
+
+      if (requestUrl.pathname === `${webAppBasePath}/api/action`) {
+        if (method !== "POST") {
+          writeText(res, 405, "Method not allowed");
+          return;
+        }
+
+        const token = readBearerToken(req);
+        const webAppSession = token ? webAppSessions.get(token) : null;
+        if (!webAppSession) {
+          writeText(res, 401, "Unauthorized");
+          return;
+        }
+
+        const body = await readJsonBody(req).catch(() => undefined);
+        const action =
+          body &&
+          typeof body === "object" &&
+          typeof Reflect.get(body, "action") === "string"
+            ? String(Reflect.get(body, "action"))
+            : "";
+        if (!["up", "down", "enter", "slash"].includes(action)) {
+          writeText(res, 400, "Unsupported action");
+          return;
+        }
+
+        const nowMs = Date.now();
+        if (
+          nowMs - webAppSession.lastActionAtMs <
+          runtime.config.webapp.actionCooldownMs
+        ) {
+          writeText(res, 429, "Action cooldown");
+          return;
+        }
+
+        const binding = await runtime.bindingStore.getBinding(
+          webAppSession.sessionId,
+        );
+        if (
+          !binding ||
+          binding.telegramUserId !== webAppSession.telegramUserId
+        ) {
+          writeText(res, 403, "Session binding is no longer valid");
+          return;
+        }
+
+        const session = await runtime.sessionStore.getSession(
+          webAppSession.sessionId,
+        );
+        if (!session?.tmuxTarget) {
+          writeText(res, 409, "tmux target is not configured for this session");
+          return;
+        }
+
+        try {
+          await sendAllowedTmuxAction(
+            session.tmuxTarget,
+            action as "up" | "down" | "enter" | "slash",
+          );
+          webAppSessions.touchAction(webAppSession.token, nowMs);
+          runtime.logger.info("Telegram WebApp action sent to tmux", {
+            sessionId: webAppSession.sessionId,
+            telegramUserId: webAppSession.telegramUserId,
+            action,
+          });
+          writeJson(res, 200, {
+            ok: true,
+          });
+        } catch (error) {
+          runtime.logger.error("Telegram WebApp action failed", {
+            sessionId: webAppSession.sessionId,
+            telegramUserId: webAppSession.telegramUserId,
+            action,
+            error:
+              error instanceof Error
+                ? (error.stack ?? error.message)
+                : String(error),
+          });
+          writeText(
+            res,
+            isTmuxUnavailableError(error) ? 503 : 500,
+            isTmuxUnavailableError(error)
+              ? "tmux is unavailable"
+              : "Failed to send tmux action",
+          );
+        }
+        return;
+      }
+    }
+
+    if (requestUrl.pathname === "/sessions") {
+      if (!runtime.config.mcp.enableDebugRoutes) {
+        writeText(res, 404, "Not found");
+        return;
+      }
+
+      if (!isAuthorized(req, runtime.config.mcp.bearerToken)) {
+        runtime.logger.warn("Unauthorized sessions HTTP request rejected", {
+          method,
+          path: requestUrl.pathname,
+          remoteAddress: req.socket.remoteAddress,
+        });
+        writeText(res, 401, "Unauthorized");
+        return;
+      }
+
+      if (method !== "GET") {
+        writeText(res, 405, "Method not allowed");
+        return;
+      }
+
+      const sessions = await runtime.sessionStore.listSessions();
+      const payload = await Promise.all(
+        sessions
+          .sort((left, right) => left.sessionId.localeCompare(right.sessionId))
+          .map(async (session) => {
+            const binding = await runtime.bindingStore.getBinding(
+              session.sessionId,
+            );
+            const inboxCount = await runtime.inboxStore.countInboxMessages(
+              session.sessionId,
+            );
+
+            return {
+              session_id: session.sessionId,
+              session_label: session.label ?? null,
+              updated_at: session.updatedAt,
+              inbox_count: inboxCount,
+              binding: binding
+                ? {
+                    telegram_chat_id: binding.telegramChatId,
+                    telegram_user_id: binding.telegramUserId,
+                    linked_at: binding.linkedAt,
+                  }
+                : null,
+              tmux: {
+                tmux_session_name: session.tmuxSessionName ?? null,
+                tmux_window_name: session.tmuxWindowName ?? null,
+                tmux_window_index:
+                  typeof session.tmuxWindowIndex === "number"
+                    ? session.tmuxWindowIndex
+                    : null,
+                tmux_pane_id: session.tmuxPaneId ?? null,
+                tmux_pane_index:
+                  typeof session.tmuxPaneIndex === "number"
+                    ? session.tmuxPaneIndex
+                    : null,
+                tmux_target: session.tmuxTarget ?? null,
+                last_nudge_at: session.lastTmuxNudgeAt ?? null,
+              },
+            };
+          }),
+      );
+
+      writeJson(res, 200, {
+        total: payload.length,
+        sessions: payload,
+      });
+      return;
+    }
+
+    if (requestUrl.pathname === "/prune") {
+      if (!runtime.config.mcp.enablePruneRoute) {
+        writeText(res, 404, "Not found");
+        return;
+      }
+
+      if (!isAuthorized(req, runtime.config.mcp.bearerToken)) {
+        runtime.logger.warn("Unauthorized prune HTTP request rejected", {
+          method,
+          path: requestUrl.pathname,
+          remoteAddress: req.socket.remoteAddress,
+        });
+        writeText(res, 401, "Unauthorized");
+        return;
+      }
+
+      if (method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return;
+      }
+
+      const result = await runtime.maintenanceStore.pruneAll();
+      runtime.logger.warn("MCP service state pruned through HTTP endpoint", {
+        deletedKeys: result.deletedKeys,
+        remoteAddress: req.socket.remoteAddress,
+      });
+
+      writeJson(res, 200, {
+        ok: true,
+        deleted_keys: result.deletedKeys,
       });
       return;
     }
@@ -174,9 +658,12 @@ async function main(): Promise<void> {
         }
 
         const entryRef: { current: SessionEntry | null } = { current: null };
+        let knownSessionId: string | undefined;
+        let closePromise: Promise<void> | null = null;
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (createdSessionId) => {
+            knownSessionId = createdSessionId;
             if (entryRef.current) {
               transports.set(createdSessionId, entryRef.current);
               runtime.logger.info("MCP HTTP session initialized", {
@@ -186,20 +673,43 @@ async function main(): Promise<void> {
           },
         });
         const server = runtime.createServer();
-        entryRef.current = { server, transport };
-        transport.onclose = () => {
-          const closedSessionId = transport.sessionId;
-          if (closedSessionId) {
-            transports.delete(closedSessionId);
-            runtime.logger.info("MCP HTTP session closed", {
-              sessionId: closedSessionId,
-            });
+        const closeEntry = async (
+          initiator: "app" | "transport",
+        ): Promise<void> => {
+          if (closePromise) {
+            return closePromise;
           }
-          void server.close();
+
+          closePromise = (async () => {
+            if (knownSessionId) {
+              transports.delete(knownSessionId);
+              runtime.logger.info("MCP HTTP session closed", {
+                sessionId: knownSessionId,
+                initiator,
+              });
+            }
+
+            if (initiator === "app") {
+              transport.onclose = () => {};
+              await transport.close();
+            }
+
+            await server.close();
+          })();
+
+          return closePromise;
+        };
+        entryRef.current = {
+          server,
+          transport,
+          close: () => closeEntry("app"),
+        };
+        transport.onclose = () => {
+          void closeEntry("transport");
         };
         transport.onerror = (error) => {
           runtime.logger.error("MCP HTTP transport error", {
-            sessionId: transport.sessionId,
+            sessionId: knownSessionId,
             error: error.stack ?? error.message,
           });
         };

@@ -1,4 +1,3 @@
-import type { AppConfig } from "../../../app/config/env.js";
 import type {
   SessionBindingStore,
   SessionStore,
@@ -11,85 +10,18 @@ import type {
   ClearSessionContextOutput,
   GetTmuxTargetInput,
   GetTmuxTargetOutput,
-  GetHumanChannelModeInput,
-  GetHumanChannelModeOutput,
   GetSessionContextInput,
   GetSessionContextOutput,
-  HumanChannelMode,
   SetSessionContextInput,
   SetSessionContextOutput,
-  SetHumanChannelModeInput,
-  SetHumanChannelModeOutput,
+  RenameSessionInput,
+  RenameSessionOutput,
   SetTmuxTargetInput,
   SetTmuxTargetOutput,
 } from "../../../entities/session/model/types.js";
 
-function buildHumanModeStatus(
-  config: AppConfig,
-  mode: HumanChannelMode,
-  hasBinding: boolean,
-  hasTmuxTarget: boolean,
-): { statusMessage: string; telegramPollingEnabled: boolean } {
-  if (mode === "telegram") {
-    if (!hasBinding) {
-      return hasTmuxTarget && config.tmux.nudgeEnabled
-        ? {
-            statusMessage:
-              "Telegram mode is requested, but the session is not paired yet. Pair the session before relying on Telegram polling or tmux nudges.",
-            telegramPollingEnabled: false,
-          }
-        : {
-            statusMessage:
-              "Telegram mode is requested, but the session is not paired yet. Pair the session before relying on Telegram polling.",
-            telegramPollingEnabled: false,
-          };
-    }
-
-    if (hasTmuxTarget && config.tmux.nudgeEnabled) {
-      return {
-        statusMessage:
-          "Telegram mode is active. When a new non-reply Telegram message is stored in inbox, the service will nudge the configured tmux pane and the agent should then fetch inbox messages through MCP tools.",
-        telegramPollingEnabled: true,
-      };
-    }
-
-    if (hasTmuxTarget) {
-      return {
-        statusMessage:
-          "Telegram mode is active. A tmux target is configured, but tmux nudging is disabled in the service configuration. The agent should still poll Telegram inbox count at checkpoints.",
-        telegramPollingEnabled: true,
-      };
-    }
-
-    return {
-      statusMessage:
-        "Telegram mode is active. The agent should poll Telegram inbox count and only fetch inbox messages when the count is greater than zero.",
-      telegramPollingEnabled: true,
-    };
-  }
-
-  return {
-    statusMessage:
-      "Direct mode is active. The agent should not poll Telegram inbox unless explicitly instructed.",
-    telegramPollingEnabled: false,
-  };
-}
-
-function buildHumanModeAgentInstruction(
-  config: AppConfig,
-  mode: HumanChannelMode,
-  hasTmuxTarget: boolean,
-): string {
-  return mode === "telegram"
-    ? hasTmuxTarget && config.tmux.nudgeEnabled
-      ? "Telegram mode enabled for this session. The service will nudge the tmux pane when a new non-reply Telegram message is stored in inbox. When nudged, call get_telegram_inbox, process the returned batch carefully, delete only handled inbox messages, and continue to the next batch only if has_more is true and the current batch completed cleanly."
-      : "Telegram mode enabled for this session. Periodically call get_telegram_inbox_count at checkpoints, call get_telegram_inbox only if total > 0, and delete processed inbox messages. Prefer Telegram for asynchronous human interaction while this mode stays active."
-    : "Direct mode enabled for this session. Do not poll Telegram inbox proactively. Use Telegram only for explicit ask_user_telegram or notify_telegram actions.";
-}
-
 export class SessionContextService {
   public constructor(
-    private readonly config: AppConfig,
     private readonly sessionStore: SessionStore,
     private readonly bindingStore: SessionBindingStore,
     private readonly logger: Logger,
@@ -134,9 +66,18 @@ export class SessionContextService {
         : existing?.risks
           ? { risks: existing.risks }
           : {}),
-      ...(existing?.humanMode ? { humanMode: existing.humanMode } : {}),
       ...(existing?.tmuxSessionName
         ? { tmuxSessionName: existing.tmuxSessionName }
+        : {}),
+      ...(existing?.tmuxWindowName
+        ? { tmuxWindowName: existing.tmuxWindowName }
+        : {}),
+      ...(typeof existing?.tmuxWindowIndex === "number"
+        ? { tmuxWindowIndex: existing.tmuxWindowIndex }
+        : {}),
+      ...(existing?.tmuxPaneId ? { tmuxPaneId: existing.tmuxPaneId } : {}),
+      ...(typeof existing?.tmuxPaneIndex === "number"
+        ? { tmuxPaneIndex: existing.tmuxPaneIndex }
         : {}),
       ...(existing?.tmuxTarget ? { tmuxTarget: existing.tmuxTarget } : {}),
       ...(existing?.lastTmuxNudgeAt
@@ -164,19 +105,62 @@ export class SessionContextService {
     };
   }
 
+  public async renameSession(
+    input: RenameSessionInput,
+  ): Promise<RenameSessionOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const existing = await this.sessionStore.getSession(resolved.sessionId);
+    const updatedAt = new Date().toISOString();
+    const label = redactSecrets(input.title);
+
+    await this.sessionStore.setSession({
+      sessionId: resolved.sessionId,
+      label,
+      ...(existing?.task ? { task: existing.task } : {}),
+      ...(existing?.summary ? { summary: existing.summary } : {}),
+      ...(existing?.files ? { files: existing.files } : {}),
+      ...(existing?.decisions ? { decisions: existing.decisions } : {}),
+      ...(existing?.risks ? { risks: existing.risks } : {}),
+      ...(existing?.tmuxSessionName
+        ? { tmuxSessionName: existing.tmuxSessionName }
+        : {}),
+      ...(existing?.tmuxWindowName
+        ? { tmuxWindowName: existing.tmuxWindowName }
+        : {}),
+      ...(typeof existing?.tmuxWindowIndex === "number"
+        ? { tmuxWindowIndex: existing.tmuxWindowIndex }
+        : {}),
+      ...(existing?.tmuxPaneId ? { tmuxPaneId: existing.tmuxPaneId } : {}),
+      ...(typeof existing?.tmuxPaneIndex === "number"
+        ? { tmuxPaneIndex: existing.tmuxPaneIndex }
+        : {}),
+      ...(existing?.tmuxTarget ? { tmuxTarget: existing.tmuxTarget } : {}),
+      ...(existing?.lastTmuxNudgeAt
+        ? { lastTmuxNudgeAt: existing.lastTmuxNudgeAt }
+        : {}),
+      updatedAt,
+    });
+
+    this.logger.info("Session renamed", {
+      sessionId: resolved.sessionId,
+      sessionIdDerived: resolved.sessionIdDerived,
+      sessionLabel: label,
+    });
+
+    return {
+      renamed: true,
+      session_id: resolved.sessionId,
+      session_label: label,
+      updated_at: updatedAt,
+    };
+  }
+
   public async getContext(
     input: GetSessionContextInput,
   ): Promise<GetSessionContextOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
     const session = await this.sessionStore.getSession(resolved.sessionId);
     const binding = await this.bindingStore.getBinding(resolved.sessionId);
-    const humanMode = session?.humanMode ?? "direct";
-    const modeStatus = buildHumanModeStatus(
-      this.config,
-      humanMode,
-      Boolean(binding),
-      Boolean(session?.tmuxTarget),
-    );
 
     this.logger.debug("Session context requested", {
       sessionId: resolved.sessionId,
@@ -186,17 +170,17 @@ export class SessionContextService {
     });
 
     const statusMessage = binding
-      ? `${modeStatus.statusMessage} Telegram pairing is active for this session.`
+      ? session?.tmuxTarget
+        ? "Telegram pairing is active for this session. A tmux target is configured, so ordinary Telegram messages can wake the agent through tmux nudges."
+        : "Telegram pairing is active for this session. No tmux target is configured, so inbox handling requires passive MCP checks."
       : session
-        ? `${modeStatus.statusMessage} Session metadata exists, but Telegram pairing is not active.`
-        : `${modeStatus.statusMessage} Session metadata and Telegram pairing are both absent.`;
+        ? "Session metadata exists, but Telegram pairing is not active."
+        : "Session metadata and Telegram pairing are both absent.";
 
     return {
       session_id: resolved.sessionId,
       exists: Boolean(session),
       has_binding: Boolean(binding),
-      human_channel_mode: humanMode,
-      telegram_polling_enabled: modeStatus.telegramPollingEnabled,
       status_message: statusMessage,
       ...(session
         ? {
@@ -207,7 +191,6 @@ export class SessionContextService {
               ...(session.files ? { files: session.files } : {}),
               ...(session.decisions ? { decisions: session.decisions } : {}),
               ...(session.risks ? { risks: session.risks } : {}),
-              human_channel_mode: humanMode,
               updated_at: session.updatedAt,
             },
           }
@@ -227,6 +210,18 @@ export class SessionContextService {
               configured: Boolean(session.tmuxTarget),
               ...(session.tmuxSessionName
                 ? { tmux_session_name: session.tmuxSessionName }
+                : {}),
+              ...(session.tmuxWindowName
+                ? { tmux_window_name: session.tmuxWindowName }
+                : {}),
+              ...(typeof session.tmuxWindowIndex === "number"
+                ? { tmux_window_index: session.tmuxWindowIndex }
+                : {}),
+              ...(session.tmuxPaneId
+                ? { tmux_pane_id: session.tmuxPaneId }
+                : {}),
+              ...(typeof session.tmuxPaneIndex === "number"
+                ? { tmux_pane_index: session.tmuxPaneIndex }
                 : {}),
               ...(session.tmuxTarget
                 ? { tmux_target: session.tmuxTarget }
@@ -260,109 +255,6 @@ export class SessionContextService {
     };
   }
 
-  public async getHumanChannelMode(
-    input: GetHumanChannelModeInput,
-  ): Promise<GetHumanChannelModeOutput> {
-    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const session = await this.sessionStore.getSession(resolved.sessionId);
-    const binding = await this.bindingStore.getBinding(resolved.sessionId);
-    const humanMode = session?.humanMode ?? "direct";
-    const hasTmuxTarget = Boolean(session?.tmuxTarget);
-    const modeStatus = buildHumanModeStatus(
-      this.config,
-      humanMode,
-      Boolean(binding),
-      hasTmuxTarget,
-    );
-    const agentInstruction = buildHumanModeAgentInstruction(
-      this.config,
-      humanMode,
-      hasTmuxTarget,
-    );
-
-    this.logger.debug("Session human channel mode requested", {
-      sessionId: resolved.sessionId,
-      sessionIdDerived: resolved.sessionIdDerived,
-      humanChannelMode: humanMode,
-      hasBinding: Boolean(binding),
-      telegramPollingEnabled: modeStatus.telegramPollingEnabled,
-    });
-
-    return {
-      session_id: resolved.sessionId,
-      has_binding: Boolean(binding),
-      human_channel_mode: humanMode,
-      telegram_polling_enabled: modeStatus.telegramPollingEnabled,
-      tmux_target_configured: hasTmuxTarget,
-      tmux_nudge_enabled: this.config.tmux.nudgeEnabled,
-      status_message: modeStatus.statusMessage,
-      agent_instruction: agentInstruction,
-    };
-  }
-
-  public async setHumanChannelMode(
-    input: SetHumanChannelModeInput,
-  ): Promise<SetHumanChannelModeOutput> {
-    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const existing = await this.sessionStore.getSession(resolved.sessionId);
-    const binding = await this.bindingStore.getBinding(resolved.sessionId);
-    const updatedAt = new Date().toISOString();
-    const hasTmuxTarget = Boolean(existing?.tmuxTarget);
-
-    await this.sessionStore.setSession({
-      sessionId: resolved.sessionId,
-      ...(existing?.label
-        ? { label: existing.label }
-        : resolved.sessionLabel
-          ? { label: redactSecrets(resolved.sessionLabel) }
-          : {}),
-      ...(existing?.task ? { task: existing.task } : {}),
-      ...(existing?.summary ? { summary: existing.summary } : {}),
-      ...(existing?.files ? { files: existing.files } : {}),
-      ...(existing?.decisions ? { decisions: existing.decisions } : {}),
-      ...(existing?.risks ? { risks: existing.risks } : {}),
-      ...(existing?.tmuxSessionName
-        ? { tmuxSessionName: existing.tmuxSessionName }
-        : {}),
-      ...(existing?.tmuxTarget ? { tmuxTarget: existing.tmuxTarget } : {}),
-      ...(existing?.lastTmuxNudgeAt
-        ? { lastTmuxNudgeAt: existing.lastTmuxNudgeAt }
-        : {}),
-      humanMode: input.mode,
-      updatedAt,
-    });
-
-    const modeStatus = buildHumanModeStatus(
-      this.config,
-      input.mode,
-      Boolean(binding),
-      hasTmuxTarget,
-    );
-    const agentInstruction = buildHumanModeAgentInstruction(
-      this.config,
-      input.mode,
-      hasTmuxTarget,
-    );
-
-    this.logger.info("Session human channel mode updated", {
-      sessionId: resolved.sessionId,
-      sessionIdDerived: resolved.sessionIdDerived,
-      humanChannelMode: input.mode,
-      hasBinding: Boolean(binding),
-      telegramPollingEnabled: modeStatus.telegramPollingEnabled,
-    });
-
-    return {
-      session_id: resolved.sessionId,
-      human_channel_mode: input.mode,
-      telegram_polling_enabled: modeStatus.telegramPollingEnabled,
-      tmux_target_configured: hasTmuxTarget,
-      tmux_nudge_enabled: this.config.tmux.nudgeEnabled,
-      status_message: modeStatus.statusMessage,
-      agent_instruction: agentInstruction,
-    };
-  }
-
   public async setTmuxTarget(
     input: SetTmuxTargetInput,
   ): Promise<SetTmuxTargetOutput> {
@@ -373,6 +265,12 @@ export class SessionContextService {
     const sanitizedSessionName = input.tmux_session_name
       ? redactSecrets(input.tmux_session_name)
       : existing?.tmuxSessionName;
+    const sanitizedWindowName = input.tmux_window_name
+      ? redactSecrets(input.tmux_window_name)
+      : existing?.tmuxWindowName;
+    const sanitizedPaneId = input.tmux_pane_id
+      ? redactSecrets(input.tmux_pane_id)
+      : existing?.tmuxPaneId;
 
     await this.sessionStore.setSession({
       sessionId: resolved.sessionId,
@@ -386,10 +284,21 @@ export class SessionContextService {
       ...(existing?.files ? { files: existing.files } : {}),
       ...(existing?.decisions ? { decisions: existing.decisions } : {}),
       ...(existing?.risks ? { risks: existing.risks } : {}),
-      ...(existing?.humanMode ? { humanMode: existing.humanMode } : {}),
       ...(sanitizedSessionName
         ? { tmuxSessionName: sanitizedSessionName }
         : {}),
+      ...(sanitizedWindowName ? { tmuxWindowName: sanitizedWindowName } : {}),
+      ...(typeof input.tmux_window_index === "number"
+        ? { tmuxWindowIndex: input.tmux_window_index }
+        : typeof existing?.tmuxWindowIndex === "number"
+          ? { tmuxWindowIndex: existing.tmuxWindowIndex }
+          : {}),
+      ...(sanitizedPaneId ? { tmuxPaneId: sanitizedPaneId } : {}),
+      ...(typeof input.tmux_pane_index === "number"
+        ? { tmuxPaneIndex: input.tmux_pane_index }
+        : typeof existing?.tmuxPaneIndex === "number"
+          ? { tmuxPaneIndex: existing.tmuxPaneIndex }
+          : {}),
       tmuxTarget: sanitizedTarget,
       ...(existing?.lastTmuxNudgeAt
         ? { lastTmuxNudgeAt: existing.lastTmuxNudgeAt }
@@ -401,6 +310,10 @@ export class SessionContextService {
       sessionId: resolved.sessionId,
       sessionIdDerived: resolved.sessionIdDerived,
       tmuxSessionName: sanitizedSessionName,
+      tmuxWindowName: sanitizedWindowName,
+      tmuxWindowIndex: input.tmux_window_index,
+      tmuxPaneId: sanitizedPaneId,
+      tmuxPaneIndex: input.tmux_pane_index,
       tmuxTarget: sanitizedTarget,
     });
 
@@ -410,8 +323,18 @@ export class SessionContextService {
       ...(sanitizedSessionName
         ? { tmux_session_name: sanitizedSessionName }
         : {}),
+      ...(sanitizedWindowName
+        ? { tmux_window_name: sanitizedWindowName }
+        : {}),
+      ...(typeof input.tmux_window_index === "number"
+        ? { tmux_window_index: input.tmux_window_index }
+        : {}),
+      ...(sanitizedPaneId ? { tmux_pane_id: sanitizedPaneId } : {}),
+      ...(typeof input.tmux_pane_index === "number"
+        ? { tmux_pane_index: input.tmux_pane_index }
+        : {}),
       status_message:
-        "tmux target saved for this session. In Telegram mode, the service can nudge this tmux pane when a new non-reply Telegram message is stored in inbox.",
+        "tmux target saved for this session. For a paired session, the service can now nudge this tmux pane when a new non-reply Telegram message is stored in inbox.",
     };
   }
 
@@ -434,6 +357,16 @@ export class SessionContextService {
       ...(session?.tmuxTarget ? { tmux_target: session.tmuxTarget } : {}),
       ...(session?.tmuxSessionName
         ? { tmux_session_name: session.tmuxSessionName }
+        : {}),
+      ...(session?.tmuxWindowName
+        ? { tmux_window_name: session.tmuxWindowName }
+        : {}),
+      ...(typeof session?.tmuxWindowIndex === "number"
+        ? { tmux_window_index: session.tmuxWindowIndex }
+        : {}),
+      ...(session?.tmuxPaneId ? { tmux_pane_id: session.tmuxPaneId } : {}),
+      ...(typeof session?.tmuxPaneIndex === "number"
+        ? { tmux_pane_index: session.tmuxPaneIndex }
         : {}),
       ...(session?.lastTmuxNudgeAt
         ? { last_nudge_at: session.lastTmuxNudgeAt }

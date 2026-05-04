@@ -25,7 +25,7 @@ export class GetTelegramInboxTool implements ToolModule {
       {
         title: "Get Telegram Inbox",
         description:
-          "Read unsolicited Telegram messages that were stored in the inbox for a session.",
+          "Read unsolicited Telegram messages that were stored in the inbox for a session. Returned items include source and reply-thread metadata so follow-up notify_telegram and ask_user_telegram calls can stay in the same Telegram thread.",
         inputSchema: getTelegramInboxInputSchema,
         outputSchema: getTelegramInboxOutputSchema,
       },

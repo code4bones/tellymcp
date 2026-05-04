@@ -3,6 +3,7 @@ export type TelegramInboxMessage = {
   sessionId: string;
   telegramChatId: number;
   telegramUserId: number;
+  sourceTelegramMessageId: number;
   text: string;
   receivedAt: string;
 };
@@ -17,8 +18,10 @@ export type GetTelegramInboxOutput = {
   has_more: boolean;
   messages: Array<{
     message_id: string;
+    source: "telegram";
     telegram_chat_id: number;
     telegram_user_id: number;
+    telegram_message_id: number;
     text: string;
     received_at: string;
   }>;
@@ -46,9 +49,9 @@ export type DeleteTelegramInboxMessageOutput = {
 
 export type TelegramMenuPayloadRecord = {
   key: string;
-  kind: "inbox-message";
+  kind: "inbox-message" | "active-session";
   sessionId: string;
-  messageId: string;
+  messageId?: string | undefined;
   createdAt: string;
   expiresAt: string;
 };

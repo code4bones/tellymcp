@@ -54,6 +54,41 @@ export class PairSessionService {
         ? { decisions: existingSession.decisions }
         : {}),
       ...(existingSession?.risks ? { risks: existingSession.risks } : {}),
+      ...(input.tmux_session_name
+        ? { tmuxSessionName: input.tmux_session_name }
+        : existingSession?.tmuxSessionName
+          ? { tmuxSessionName: existingSession.tmuxSessionName }
+          : {}),
+      ...(input.tmux_window_name
+        ? { tmuxWindowName: input.tmux_window_name }
+        : existingSession?.tmuxWindowName
+          ? { tmuxWindowName: existingSession.tmuxWindowName }
+          : {}),
+      ...(typeof input.tmux_window_index === "number"
+        ? { tmuxWindowIndex: input.tmux_window_index }
+        : typeof existingSession?.tmuxWindowIndex === "number"
+          ? { tmuxWindowIndex: existingSession.tmuxWindowIndex }
+          : {}),
+      ...(input.tmux_pane_id
+        ? { tmuxPaneId: input.tmux_pane_id, tmuxTarget: input.tmux_pane_id }
+        : existingSession?.tmuxPaneId
+          ? {
+              tmuxPaneId: existingSession.tmuxPaneId,
+              ...(existingSession.tmuxTarget
+                ? { tmuxTarget: existingSession.tmuxTarget }
+                : {}),
+            }
+          : existingSession?.tmuxTarget
+            ? { tmuxTarget: existingSession.tmuxTarget }
+            : {}),
+      ...(typeof input.tmux_pane_index === "number"
+        ? { tmuxPaneIndex: input.tmux_pane_index }
+        : typeof existingSession?.tmuxPaneIndex === "number"
+          ? { tmuxPaneIndex: existingSession.tmuxPaneIndex }
+          : {}),
+      ...(existingSession?.lastTmuxNudgeAt
+        ? { lastTmuxNudgeAt: existingSession.lastTmuxNudgeAt }
+        : {}),
       updatedAt: now.toISOString(),
     });
 
@@ -72,6 +107,11 @@ export class PairSessionService {
       sessionLabel: resolved.sessionLabel,
       sessionIdDerived: resolved.sessionIdDerived,
       sessionLabelDerived: resolved.sessionLabelDerived,
+      tmuxSessionName: input.tmux_session_name,
+      tmuxWindowName: input.tmux_window_name,
+      tmuxWindowIndex: input.tmux_window_index,
+      tmuxPaneId: input.tmux_pane_id,
+      tmuxPaneIndex: input.tmux_pane_index,
       expiresAt,
       ttlSeconds,
     });

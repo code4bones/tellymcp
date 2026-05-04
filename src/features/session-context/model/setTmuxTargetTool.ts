@@ -27,7 +27,7 @@ export class SetTmuxTargetTool implements ToolModule {
       {
         title: "Set tmux Target",
         description:
-          "Store the tmux pane target for a session so the long-running MCP service can nudge the agent to check Telegram inbox when new messages arrive in Telegram mode.",
+          "Store the tmux pane target for a session so the long-running MCP service can nudge the agent to check Telegram inbox when new ordinary Telegram messages arrive.",
         inputSchema: setTmuxTargetInputSchema,
         outputSchema: setTmuxTargetOutputSchema,
       },

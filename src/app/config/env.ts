@@ -39,6 +39,32 @@ const envSchema = z.object({
   MCP_HTTP_PORT: z.coerce.number().int().positive().default(8787),
   MCP_HTTP_PATH: z.string().min(1).default("/mcp"),
   MCP_HTTP_BEARER_TOKEN: z.string().min(1).optional(),
+  MCP_HTTP_ENABLE_DEBUG_ROUTES: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
+  MCP_HTTP_ENABLE_PRUNE_ROUTE: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
+  WEBAPP_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
+  WEBAPP_BASE_PATH: z.string().min(1).default("/webapp"),
+  WEBAPP_PUBLIC_URL: z.string().url().optional(),
+  WEBAPP_INITDATA_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(300),
+  WEBAPP_SESSION_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(900),
+  WEBAPP_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
+  WEBAPP_ACTION_COOLDOWN_MS: z.coerce.number().int().nonnegative().default(150),
   TMUX_NUDGE_ENABLED: z
     .string()
     .optional()
@@ -46,6 +72,8 @@ const envSchema = z.object({
   TMUX_NUDGE_DEBOUNCE_SECONDS: z.coerce.number().int().positive().default(10),
   TMUX_NUDGE_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(30),
   TMUX_NUDGE_MESSAGE: z.string().min(1).default("проверь inbox"),
+  TMUX_CAPTURE_MODE: z.enum(["visible", "lines"]).default("visible"),
+  TMUX_CAPTURE_LINES: z.coerce.number().int().positive().default(300),
   PROXY_USE: z.enum(["http", "socks5"]).optional(),
   HTTP_PROXY: z.string().min(1).optional(),
   SOCKS5_PROXY: z.string().min(1).optional(),
@@ -85,12 +113,25 @@ export type AppConfig = {
     httpPort: number;
     httpPath: string;
     bearerToken?: string;
+    enableDebugRoutes: boolean;
+    enablePruneRoute: boolean;
+  };
+  webapp: {
+    enabled: boolean;
+    basePath: string;
+    publicUrl?: string;
+    initDataTtlSeconds: number;
+    sessionTtlSeconds: number;
+    pollIntervalMs: number;
+    actionCooldownMs: number;
   };
   tmux: {
     nudgeEnabled: boolean;
     nudgeDebounceSeconds: number;
     nudgeCooldownSeconds: number;
     nudgeMessage: string;
+    captureMode: "visible" | "lines";
+    captureLines: number;
   };
   project: {
     name?: string | undefined;
@@ -160,12 +201,25 @@ export function loadConfig(): AppConfig {
       ...(parsed.MCP_HTTP_BEARER_TOKEN
         ? { bearerToken: parsed.MCP_HTTP_BEARER_TOKEN }
         : {}),
+      enableDebugRoutes: parsed.MCP_HTTP_ENABLE_DEBUG_ROUTES,
+      enablePruneRoute: parsed.MCP_HTTP_ENABLE_PRUNE_ROUTE,
+    },
+    webapp: {
+      enabled: parsed.WEBAPP_ENABLED,
+      basePath: parsed.WEBAPP_BASE_PATH,
+      ...(parsed.WEBAPP_PUBLIC_URL ? { publicUrl: parsed.WEBAPP_PUBLIC_URL } : {}),
+      initDataTtlSeconds: parsed.WEBAPP_INITDATA_TTL_SECONDS,
+      sessionTtlSeconds: parsed.WEBAPP_SESSION_TTL_SECONDS,
+      pollIntervalMs: parsed.WEBAPP_POLL_INTERVAL_MS,
+      actionCooldownMs: parsed.WEBAPP_ACTION_COOLDOWN_MS,
     },
     tmux: {
       nudgeEnabled: parsed.TMUX_NUDGE_ENABLED,
       nudgeDebounceSeconds: parsed.TMUX_NUDGE_DEBOUNCE_SECONDS,
       nudgeCooldownSeconds: parsed.TMUX_NUDGE_COOLDOWN_SECONDS,
       nudgeMessage: parsed.TMUX_NUDGE_MESSAGE,
+      captureMode: parsed.TMUX_CAPTURE_MODE,
+      captureLines: parsed.TMUX_CAPTURE_LINES,
     },
     project: {
       ...(parsed.PROJECT_NAME ? { name: parsed.PROJECT_NAME } : {}),

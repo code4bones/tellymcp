@@ -49,20 +49,21 @@ Do not rely on:
 
 Prefer explicit structured context.
 
-## Inbox polling rules for agents using this MCP
+## Inbox handling rules for agents using this MCP
 
-Telegram inbox messages are not pushed into the agent automatically.
+Telegram inbox messages are stored server-side and are not pushed into the agent body automatically.
 
-If unsolicited user guidance may matter, the agent should poll for it explicitly.
+Preferred path:
 
-Only do this proactive polling when the session has been switched to Telegram mode via `set_human_channel_mode`.
+- if the session has a configured `tmux_target`, the service nudges the agent through tmux when a new ordinary Telegram message arrives
+- after that nudge, call `get_telegram_inbox` directly
+- process the returned batch one message at a time
+- call `delete_telegram_inbox_message` only for messages that were actually handled
 
-Use this workflow:
-- call `get_telegram_inbox_count` after meaningful milestones in long-running work
-- call `get_telegram_inbox_count` before risky changes, destructive actions, or final answers
+Passive fallback:
+
+- if no `tmux_target` exists, use `get_telegram_inbox_count` for lightweight checks
 - call `get_telegram_inbox` only if the count is greater than zero
-- if inbox messages contain actionable guidance, incorporate it before continuing
-- after processing a message, call `delete_telegram_inbox_message` so it is not reprocessed later
 
 Do not rely on a blocking wait tool for inbox handling in the main agent session.
 

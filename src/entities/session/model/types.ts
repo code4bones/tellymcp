@@ -1,5 +1,3 @@
-export type HumanChannelMode = "direct" | "telegram";
-
 export type SessionContext = {
   sessionId: string;
   label?: string | undefined;
@@ -8,8 +6,11 @@ export type SessionContext = {
   files?: string[] | undefined;
   decisions?: string[] | undefined;
   risks?: string[] | undefined;
-  humanMode?: HumanChannelMode | undefined;
   tmuxSessionName?: string | undefined;
+  tmuxWindowName?: string | undefined;
+  tmuxWindowIndex?: number | undefined;
+  tmuxPaneId?: string | undefined;
+  tmuxPaneIndex?: number | undefined;
   tmuxTarget?: string | undefined;
   lastTmuxNudgeAt?: string | undefined;
   updatedAt: string;
@@ -32,6 +33,18 @@ export type SetSessionContextOutput = {
   has_binding: boolean;
 };
 
+export type RenameSessionInput = {
+  session_id?: string | undefined;
+  title: string;
+};
+
+export type RenameSessionOutput = {
+  renamed: boolean;
+  session_id: string;
+  session_label: string;
+  updated_at: string;
+};
+
 export type GetSessionContextInput = {
   session_id?: string | undefined;
 };
@@ -40,8 +53,6 @@ export type GetSessionContextOutput = {
   session_id: string;
   exists: boolean;
   has_binding: boolean;
-  human_channel_mode: HumanChannelMode;
-  telegram_polling_enabled: boolean;
   status_message: string;
   context?: {
     session_label?: string | undefined;
@@ -50,7 +61,6 @@ export type GetSessionContextOutput = {
     files?: string[] | undefined;
     decisions?: string[] | undefined;
     risks?: string[] | undefined;
-    human_channel_mode?: HumanChannelMode | undefined;
     updated_at?: string | undefined;
   };
   binding?: {
@@ -61,6 +71,10 @@ export type GetSessionContextOutput = {
   tmux?: {
     configured: boolean;
     tmux_session_name?: string | undefined;
+    tmux_window_name?: string | undefined;
+    tmux_window_index?: number | undefined;
+    tmux_pane_id?: string | undefined;
+    tmux_pane_index?: number | undefined;
     tmux_target?: string | undefined;
     last_nudge_at?: string | undefined;
   };
@@ -76,39 +90,13 @@ export type ClearSessionContextOutput = {
   cleared_pairing: boolean;
 };
 
-export type SetHumanChannelModeInput = {
-  session_id?: string | undefined;
-  mode: HumanChannelMode;
-};
-
-export type SetHumanChannelModeOutput = {
-  session_id: string;
-  human_channel_mode: HumanChannelMode;
-  telegram_polling_enabled: boolean;
-  tmux_target_configured: boolean;
-  tmux_nudge_enabled: boolean;
-  status_message: string;
-  agent_instruction: string;
-};
-
-export type GetHumanChannelModeInput = {
-  session_id?: string | undefined;
-};
-
-export type GetHumanChannelModeOutput = {
-  session_id: string;
-  has_binding: boolean;
-  human_channel_mode: HumanChannelMode;
-  telegram_polling_enabled: boolean;
-  tmux_target_configured: boolean;
-  tmux_nudge_enabled: boolean;
-  status_message: string;
-  agent_instruction: string;
-};
-
 export type SetTmuxTargetInput = {
   session_id?: string | undefined;
   tmux_session_name?: string | undefined;
+  tmux_window_name?: string | undefined;
+  tmux_window_index?: number | undefined;
+  tmux_pane_id?: string | undefined;
+  tmux_pane_index?: number | undefined;
   tmux_target: string;
 };
 
@@ -116,6 +104,10 @@ export type SetTmuxTargetOutput = {
   session_id: string;
   tmux_target: string;
   tmux_session_name?: string | undefined;
+  tmux_window_name?: string | undefined;
+  tmux_window_index?: number | undefined;
+  tmux_pane_id?: string | undefined;
+  tmux_pane_index?: number | undefined;
   status_message: string;
 };
 
@@ -128,6 +120,10 @@ export type GetTmuxTargetOutput = {
   configured: boolean;
   tmux_target?: string | undefined;
   tmux_session_name?: string | undefined;
+  tmux_window_name?: string | undefined;
+  tmux_window_index?: number | undefined;
+  tmux_pane_id?: string | undefined;
+  tmux_pane_index?: number | undefined;
   last_nudge_at?: string | undefined;
   status_message: string;
 };

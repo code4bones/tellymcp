@@ -27,7 +27,7 @@ export class GetSessionContextTool implements ToolModule {
       {
         title: "Get Session Context",
         description:
-          "Read the currently saved context and Telegram binding status for a session.",
+          "Debug/setup tool. Read the saved context and Telegram binding status for a session. Do not call this in the normal inbox-processing path after a tmux nudge unless you are diagnosing state.",
         inputSchema: getSessionContextInputSchema,
         outputSchema: getSessionContextOutputSchema,
       },

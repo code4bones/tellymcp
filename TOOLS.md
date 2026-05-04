@@ -18,6 +18,11 @@ Input:
 - `session_id?`
 - `session_label?`
 - `expires_in_seconds?`
+- `tmux_session_name?`
+- `tmux_window_name?`
+- `tmux_window_index?`
+- `tmux_pane_id?`
+- `tmux_pane_index?`
 
 Output:
 
@@ -27,6 +32,13 @@ Output:
 - `status`
 - `status_message`
 - `telegram_link_hint?`
+
+Behavior:
+
+- if `session_id` is omitted, the server derives it automatically
+- if tmux attributes are provided during pairing, they become part of the derived default session identity
+- this is the recommended way to distinguish multiple agents working from different tmux sessions, windows, or panes, regardless of project layout
+- for multi-agent work, prefer collecting tmux attributes first and passing them directly into this tool, instead of relying on a later `set_tmux_target`
 
 ## `clear_session_pairing`
 
@@ -66,93 +78,56 @@ Output:
 - `updated_at`
 - `has_binding`
 
-## `set_human_channel_mode`
+## `rename_session`
 
 Purpose:
 
-- Explicitly switch the session between `direct` and `telegram` human interaction modes.
+- Rename the session title/label only.
 
-Recommended use:
+Rules:
 
-- switch to `telegram` before leaving the workstation
-- switch back to `direct` when working face-to-face with the agent again
-- use this tool as the explicit trigger that enables or disables proactive Telegram inbox polling behavior for the agent
+- this changes only the human-readable title
+- it does not change `session_id`
+- it does not change pairing, tmux target, inbox, or saved context
 
 Input:
 
 - `session_id?`
-- `mode`
+- `title`
 
 Output:
 
+- `renamed`
 - `session_id`
-- `human_channel_mode`
-- `telegram_polling_enabled`
-- `tmux_target_configured`
-- `tmux_nudge_enabled`
-- `status_message`
-- `agent_instruction`
-
-Behavior:
-
-- `mode: "telegram"` means Telegram becomes the preferred asynchronous human channel for this session
-- if a tmux target is configured and tmux nudging is enabled in the service config, the long-running service will debounce new non-reply Telegram messages and then nudge that tmux pane once for the batch
-- the nudge is only a wake-up signal; message contents still stay in the MCP inbox tools
-- `mode: "direct"` means the agent should stop proactive Telegram-first behavior and return to direct interaction
-
-## `get_human_channel_mode`
-
-Purpose:
-
-- Quickly check which human interaction mode is currently active for the session.
-
-Recommended use:
-
-- call this at the start of a task to decide whether proactive Telegram inbox polling is expected
-- use this instead of `get_session_context` when only the mode matters
-
-Input:
-
-- `session_id?`
-
-Output:
-
-- `session_id`
-- `has_binding`
-- `human_channel_mode`
-- `telegram_polling_enabled`
-- `tmux_target_configured`
-- `tmux_nudge_enabled`
-- `status_message`
-- `agent_instruction`
-
-Behavior:
-
-- `mode: "telegram"` means the agent should treat Telegram as the asynchronous human channel for this session
-- `mode: "direct"` means the agent should stop proactive Telegram inbox polling and assume direct interaction again
+- `session_label`
+- `updated_at`
 
 ## `set_tmux_target`
 
 Purpose:
 
-- Save the tmux pane target for a session so the long-running service can nudge the agent when new non-reply Telegram messages arrive in Telegram mode.
+- Save the tmux pane target for a session so the long-running service can nudge the agent when new non-reply Telegram messages arrive for that paired session.
 
 Recommended use:
 
 - run this while still at the workstation
-- use it before or immediately after switching to `set_human_channel_mode = telegram`
+- use it immediately after pairing only if you need to override or refresh the target
 - prefer a pane id such as `%7`
 
 How to obtain tmux attributes:
 
 ```bash
-tmux display-message -p '#{session_name} #{pane_id}'
+tmux display-message -p '#{session_name} #{window_name} #{window_index} #{pane_id} #{pane_index}'
 ```
 
 Input:
 
 - `session_id?`
 - `tmux_session_name?`
+- `tmux_window_name?`
+- `tmux_window_index?`
+- `tmux_pane_id?`
+- `tmux_pane_index?`
 - `tmux_target`
 
 Output:
@@ -160,6 +135,10 @@ Output:
 - `session_id`
 - `tmux_target`
 - `tmux_session_name?`
+- `tmux_window_name?`
+- `tmux_window_index?`
+- `tmux_pane_id?`
+- `tmux_pane_index?`
 - `status_message`
 
 ## `get_tmux_target`
@@ -167,6 +146,12 @@ Output:
 Purpose:
 
 - Check whether a tmux target is configured for the current session and when it was last nudged.
+
+Recommended use:
+
+- setup/debug only
+- use this when configuring tmux delivery or diagnosing why nudges do not happen
+- do not call this in the normal inbox-processing path after a tmux nudge
 
 Input:
 
@@ -187,6 +172,12 @@ Purpose:
 
 - Read saved session context and Telegram binding status.
 
+Recommended use:
+
+- setup/debug only
+- use this while pairing, diagnosing state, or inspecting saved metadata
+- do not call this in the normal inbox-processing path after a tmux nudge
+
 Input:
 
 - `session_id?`
@@ -196,8 +187,6 @@ Output:
 - `session_id`
 - `exists`
 - `has_binding`
-- `human_channel_mode`
-- `telegram_polling_enabled`
 - `status_message`
 - `context?`
 - `binding?`
@@ -284,6 +273,21 @@ Output:
 - `has_more`
 - `messages`
 
+Per-message fields:
+
+- `message_id`
+- `source = "telegram"`
+- `telegram_message_id`
+- `telegram_chat_id`
+- `telegram_user_id`
+- `text`
+- `received_at`
+
+Meaning:
+
+- when a task starts from one of these inbox items, treat it as a Telegram-originated task
+- use `notify_telegram` for progress updates and `ask_user_telegram` for clarifications during that task
+
 ## `delete_telegram_inbox_message`
 
 Purpose:
@@ -333,51 +337,40 @@ Output:
 
 The inbox may contain new user instructions sent from Telegram.
 
-Only enable proactive inbox polling after calling `set_human_channel_mode` with `mode: "telegram"`.
+If a paired session has a configured `tmux_target`, the preferred path is event-driven: Telegram stores the message, the service nudges tmux, and the agent then fetches `get_telegram_inbox`.
+
+If no tmux nudge path exists, use passive inbox checks with `get_telegram_inbox_count`.
 
 ## Telegram transition protocol
 
 When the user says they are leaving the workstation and wants to continue through Telegram:
 
-1. Ensure the session is paired.
-2. If running inside tmux, obtain tmux attributes:
+1. If running inside tmux, obtain full tmux attributes:
 
 ```bash
-tmux display-message -p '#{session_name} #{pane_id}'
+tmux display-message -p '#{session_name} #{window_name} #{window_index} #{pane_id} #{pane_index}'
 ```
 
-3. Call `set_tmux_target` with the returned values.
-4. Call `set_human_channel_mode` with `mode: "telegram"`.
+2. Call `create_session_pair_code` with these attributes so the session identity is derived distinctly for this agent.
+3. Complete pairing in Telegram.
+4. If needed, call `set_tmux_target` only to override or refresh the stored target later.
 5. Continue work normally.
 6. If the long-running service nudges the tmux pane with `проверь inbox`, treat that as the signal to fetch the next inbox batch.
 7. Read actual inbox content only through MCP tools.
 
 The service does not inject Telegram message text into tmux. It only sends the wake-up phrase. Telegram messages remain stored in Redis inbox until the agent explicitly reads and deletes them. Multiple close-together Telegram messages are debounced into a single tmux wake-up.
 
-Check the inbox at these checkpoints:
+## Telegram session switching
 
-1. Before starting a non-trivial task.
-2. After creating an implementation plan.
-3. Before making risky changes.
-4. Before running long commands.
-5. Before final response.
-6. After any failed test/build command.
-7. Between major phases of a fullstack task:
-   - after investigation
-   - after backend changes
-   - after database changes
-   - after frontend changes
-   - before final verification
-8. If Telegram mode is active and no tmux target is configured, periodically poll inbox count about every 30 seconds.
+The Telegram side supports an active-session context per Telegram identity.
 
-Do not poll the inbox in a tight loop.
+Rules:
 
-Recommended polling order:
-
-1. Call `get_telegram_inbox_count`.
-2. If `total > 0`, call `get_telegram_inbox`.
-3. Process messages.
-4. Call `delete_telegram_inbox_message` for handled items.
+- ordinary Telegram messages are stored in the inbox of the currently active session
+- `/menu` opens a menu with all sessions linked to the current Telegram identity
+- selecting a session makes it the new active session
+- the main menu also provides a session-switch entry point
+- the list contains every distinct `session_id` paired to this Telegram identity, so multi-agent setups depend on deriving different session ids during pairing
 
 If tmux nudging is configured, the preferred behavior is event-driven:
 
@@ -388,3 +381,16 @@ If tmux nudging is configured, the preferred behavior is event-driven:
 5. If the current message requires clarification or cannot be completed safely, stop batch progression, enter the `ask_user_telegram` branch, and leave the remaining inbox items pending.
 6. Call `delete_telegram_inbox_message` only for messages that were actually handled.
 7. If `has_more = true` and the current batch finished cleanly, call `get_telegram_inbox` again for the next batch.
+
+Do not add extra diagnostic calls in that path:
+
+- do not call `get_tmux_target` before `get_telegram_inbox`
+- do not call `get_session_context` before `get_telegram_inbox`
+- do not call `get_telegram_inbox_count` before `get_telegram_inbox` when the wake-up already came from tmux
+
+If no tmux target is configured, use passive inbox checks:
+
+1. Call `get_telegram_inbox_count`.
+2. If `total > 0`, call `get_telegram_inbox`.
+3. Process messages.
+4. Call `delete_telegram_inbox_message` for handled items.

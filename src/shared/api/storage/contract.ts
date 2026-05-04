@@ -15,6 +15,7 @@ import type { SessionContext } from "../../../entities/session/model/types.js";
 
 export interface SessionStore {
   getSession(sessionId: string): Promise<SessionContext | null>;
+  listSessions(): Promise<SessionContext[]>;
   setSession(session: SessionContext): Promise<void>;
   clearSession(sessionId: string): Promise<void>;
 }
@@ -27,6 +28,9 @@ export interface SessionBindingStore {
   clearBinding(sessionId: string): Promise<void>;
   getActiveSessionIdForPrincipal(
     principal: TelegramPrincipal,
+  ): Promise<string | null>;
+  getActiveSessionIdForTelegramUser(
+    telegramUserId: number,
   ): Promise<string | null>;
   setActiveSessionIdForPrincipal(
     principal: TelegramPrincipal,
@@ -70,4 +74,8 @@ export interface TelegramMenuPayloadStore {
     ttlSeconds: number,
   ): Promise<void>;
   getMenuPayload(key: string): Promise<TelegramMenuPayloadRecord | null>;
+}
+
+export interface MaintenanceStore {
+  pruneAll(): Promise<{ deletedKeys: number }>;
 }

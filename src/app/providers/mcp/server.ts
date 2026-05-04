@@ -8,11 +8,10 @@ import { NotifyTelegramTool } from "../../../features/notify/model/notifyTelegra
 import { ClearSessionPairingTool } from "../../../features/pair-session/model/clearSessionPairingTool.js";
 import { CreateSessionPairCodeTool } from "../../../features/pair-session/model/createSessionPairCodeTool.js";
 import { ClearSessionContextTool } from "../../../features/session-context/model/clearSessionContextTool.js";
-import { GetHumanChannelModeTool } from "../../../features/session-context/model/getHumanChannelModeTool.js";
 import { GetSessionContextTool } from "../../../features/session-context/model/getSessionContextTool.js";
 import { GetTmuxTargetTool } from "../../../features/session-context/model/getTmuxTargetTool.js";
+import { RenameSessionTool } from "../../../features/session-context/model/renameSessionTool.js";
 import { SetSessionContextTool } from "../../../features/session-context/model/setSessionContextTool.js";
-import { SetHumanChannelModeTool } from "../../../features/session-context/model/setHumanChannelModeTool.js";
 import { SetTmuxTargetTool } from "../../../features/session-context/model/setTmuxTargetTool.js";
 import type { ToolModule } from "../../../shared/api/tool-registry/types.js";
 import { registerTools } from "../../../shared/api/tool-registry/registry.js";
@@ -36,8 +35,7 @@ export type AppToolModules = {
   createSessionPairCodeTool: CreateSessionPairCodeTool;
   clearSessionPairingTool: ClearSessionPairingTool;
   setSessionContextTool: SetSessionContextTool;
-  setHumanChannelModeTool: SetHumanChannelModeTool;
-  getHumanChannelModeTool: GetHumanChannelModeTool;
+  renameSessionTool: RenameSessionTool;
   setTmuxTargetTool: SetTmuxTargetTool;
   getTmuxTargetTool: GetTmuxTargetTool;
   getSessionContextTool: GetSessionContextTool;

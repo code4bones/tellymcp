@@ -15,6 +15,7 @@ import type {
 } from "../../../entities/request/model/types.js";
 import type { SessionContext } from "../../../entities/session/model/types.js";
 import type {
+  MaintenanceStore,
   PendingRequestStore,
   SessionBindingStore,
   SessionStore,
@@ -48,6 +49,10 @@ function principalSessionsKey(principal: TelegramPrincipal): string {
 
 function principalActiveSessionKey(principal: TelegramPrincipal): string {
   return `${KEY_PREFIX}:principal:${principal.telegramChatId}:${principal.telegramUserId}:active-session`;
+}
+
+function principalActiveSessionMatchPattern(telegramUserId: number): string {
+  return `${KEY_PREFIX}:principal:*:${telegramUserId}:active-session`;
 }
 
 function inboxListKey(sessionId: string): string {
@@ -84,7 +89,8 @@ export class RedisStateStore
     SessionBindingStore,
     PendingRequestStore,
     TelegramInboxStore,
-    TelegramMenuPayloadStore
+    TelegramMenuPayloadStore,
+    MaintenanceStore
 {
   private readonly sessionAdapter: RedisAdapter<SessionContext>;
 
@@ -95,6 +101,36 @@ export class RedisStateStore
   public async getSession(sessionId: string): Promise<SessionContext | null> {
     const session = await this.sessionAdapter.read(sessionKey(sessionId));
     return session ?? null;
+  }
+
+  public async listSessions(): Promise<SessionContext[]> {
+    const sessions: SessionContext[] = [];
+    let cursor = "0";
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        `${KEY_PREFIX}:session:*`,
+        "COUNT",
+        100,
+      );
+      cursor = nextCursor;
+
+      if (keys.length === 0) {
+        continue;
+      }
+
+      const rows = await this.redis.mget(...keys);
+      for (const row of rows) {
+        const session = parseJson<SessionContext>(row);
+        if (session) {
+          sessions.push(session);
+        }
+      }
+    } while (cursor !== "0");
+
+    return sessions;
   }
 
   public async setSession(session: SessionContext): Promise<void> {
@@ -157,6 +193,36 @@ export class RedisStateStore
     principal: TelegramPrincipal,
   ): Promise<string | null> {
     return (await this.redis.get(principalActiveSessionKey(principal))) ?? null;
+  }
+
+  public async getActiveSessionIdForTelegramUser(
+    telegramUserId: number,
+  ): Promise<string | null> {
+    let cursor = "0";
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        principalActiveSessionMatchPattern(telegramUserId),
+        "COUNT",
+        50,
+      );
+      cursor = nextCursor;
+
+      if (keys.length === 0) {
+        continue;
+      }
+
+      for (const key of keys) {
+        const sessionId = await this.redis.get(key);
+        if (sessionId) {
+          return sessionId;
+        }
+      }
+    } while (cursor !== "0");
+
+    return null;
   }
 
   public async setActiveSessionIdForPrincipal(
@@ -323,6 +389,30 @@ export class RedisStateStore
   ): Promise<TelegramMenuPayloadRecord | null> {
     const raw = await this.redis.get(menuPayloadKey(key));
     return parseJson<TelegramMenuPayloadRecord>(raw);
+  }
+
+  public async pruneAll(): Promise<{ deletedKeys: number }> {
+    let cursor = "0";
+    let deletedKeys = 0;
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        `${KEY_PREFIX}:*`,
+        "COUNT",
+        200,
+      );
+      cursor = nextCursor;
+
+      if (keys.length === 0) {
+        continue;
+      }
+
+      deletedKeys += await this.redis.del(...keys);
+    } while (cursor !== "0");
+
+    return { deletedKeys };
   }
 
   private async detachSessionFromPrincipal(

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 
-export type AllowedTmuxAction = "up" | "down" | "enter" | "slash";
+export type AllowedTmuxAction = "up" | "down" | "enter" | "slash" | "delete";
 
 function execFileAsync(command: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -44,6 +44,7 @@ export function isTmuxUnavailableError(error: unknown): boolean {
 export async function captureVisibleTmuxPane(
   target: string,
   fallbackLines: number,
+  visibleScreens: number,
 ): Promise<string> {
   const { stdout: heightRaw } = await execFileOutputAsync("tmux", [
     "display-message",
@@ -53,17 +54,40 @@ export async function captureVisibleTmuxPane(
     "#{window_height}",
   ]);
   const height = Number.parseInt(heightRaw.trim(), 10);
-  const lines =
+  const baseLines =
     Number.isFinite(height) && height > 0 ? height : Math.max(1, fallbackLines);
+  const lines = Math.max(1, baseLines * Math.max(1, visibleScreens));
 
-  const { stdout } = await execFileOutputAsync("tmux", [
-    "capture-pane",
-    "-p",
-    "-t",
-    target,
-    "-S",
-    `-${lines}`,
-  ]);
+  let stdout = "";
+
+  try {
+    ({ stdout } = await execFileOutputAsync("tmux", [
+      "capture-pane",
+      "-p",
+      "-e",
+      "-a",
+      "-t",
+      target,
+      "-S",
+      `-${lines}`,
+    ]));
+  } catch (error) {
+    const message =
+      error instanceof Error ? (error.stack ?? error.message) : String(error);
+    if (!message.includes("no alternate screen")) {
+      throw error;
+    }
+
+    ({ stdout } = await execFileOutputAsync("tmux", [
+      "capture-pane",
+      "-p",
+      "-e",
+      "-t",
+      target,
+      "-S",
+      `-${lines}`,
+    ]));
+  }
 
   return stdout.replace(/\u0000/g, "");
 }
@@ -79,6 +103,8 @@ export async function sendAllowedTmuxAction(
         ? "Down"
         : action === "slash"
           ? "/"
+          : action === "delete"
+            ? "BSpace"
           : "Enter";
   await execFileAsync("tmux", ["send-keys", "-t", target, key]);
 }

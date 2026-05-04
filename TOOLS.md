@@ -39,6 +39,18 @@ Behavior:
 - if tmux attributes are provided during pairing, they become part of the derived default session identity
 - this is the recommended way to distinguish multiple agents working from different tmux sessions, windows, or panes, regardless of project layout
 - for multi-agent work, prefer collecting tmux attributes first and passing them directly into this tool, instead of relying on a later `set_tmux_target`
+- if tmux attributes are not provided here, the Telegram session can still pair successfully, but tmux nudges, Mini App controls, and other tmux-driven features will remain unavailable until `set_tmux_target` is called later
+
+Required agent practice:
+
+1. If running inside tmux, collect tmux attributes first:
+
+```bash
+tmux display-message -p '#{session_name} #{window_name} #{window_index} #{pane_id} #{pane_index}'
+```
+
+2. Pass them directly into `create_session_pair_code`.
+3. Use `set_tmux_target` later only as a repair, refresh, or override path.
 
 ## `clear_session_pairing`
 
@@ -111,7 +123,8 @@ Purpose:
 Recommended use:
 
 - run this while still at the workstation
-- use it immediately after pairing only if you need to override or refresh the target
+- do not treat this as the normal first pairing step
+- use it immediately after pairing only if you need to repair, override, or refresh the target
 - prefer a pane id such as `%7`
 
 How to obtain tmux attributes:

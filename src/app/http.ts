@@ -143,6 +143,12 @@ function readBearerToken(req: IncomingMessage): string | null {
   return header.slice("Bearer ".length).trim() || null;
 }
 
+function isDuplicateSseStreamError(error: unknown): boolean {
+  const message =
+    error instanceof Error ? (error.stack ?? error.message) : String(error);
+  return message.includes("Only one SSE stream is allowed per session");
+}
+
 async function main(): Promise<void> {
   const runtime = await createAppRuntime();
   const transports = new Map<string, SessionEntry>();
@@ -377,6 +383,7 @@ async function main(): Promise<void> {
           const content = await captureVisibleTmuxPane(
             session.tmuxTarget,
             runtime.config.tmux.captureLines,
+            runtime.config.webapp.visibleScreens,
           );
           writeJson(res, 200, {
             session_id: session.sessionId,
@@ -423,7 +430,7 @@ async function main(): Promise<void> {
           typeof Reflect.get(body, "action") === "string"
             ? String(Reflect.get(body, "action"))
             : "";
-        if (!["up", "down", "enter", "slash"].includes(action)) {
+        if (!["up", "down", "enter", "slash", "delete"].includes(action)) {
           writeText(res, 400, "Unsupported action");
           return;
         }
@@ -459,7 +466,7 @@ async function main(): Promise<void> {
         try {
           await sendAllowedTmuxAction(
             session.tmuxTarget,
-            action as "up" | "down" | "enter" | "slash",
+            action as "up" | "down" | "enter" | "slash" | "delete",
           );
           webAppSessions.touchAction(webAppSession.token, nowMs);
           runtime.logger.info("Telegram WebApp action sent to tmux", {
@@ -659,6 +666,7 @@ async function main(): Promise<void> {
 
         const entryRef: { current: SessionEntry | null } = { current: null };
         let knownSessionId: string | undefined;
+        let closing = false;
         let closePromise: Promise<void> | null = null;
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
@@ -676,11 +684,17 @@ async function main(): Promise<void> {
         const closeEntry = async (
           initiator: "app" | "transport",
         ): Promise<void> => {
+          if (closing) {
+            return closePromise ?? Promise.resolve();
+          }
+
+          closing = true;
           if (closePromise) {
             return closePromise;
           }
 
           closePromise = (async () => {
+            transport.onclose = () => {};
             if (knownSessionId) {
               transports.delete(knownSessionId);
               runtime.logger.info("MCP HTTP session closed", {
@@ -690,7 +704,6 @@ async function main(): Promise<void> {
             }
 
             if (initiator === "app") {
-              transport.onclose = () => {};
               await transport.close();
             }
 
@@ -731,7 +744,27 @@ async function main(): Promise<void> {
           return;
         }
 
-        await entry.transport.handleRequest(req, res, parsedBody);
+        try {
+          await entry.transport.handleRequest(req, res, parsedBody);
+        } catch (error) {
+          if (method === "GET" && isDuplicateSseStreamError(error)) {
+            runtime.logger.warn("Duplicate MCP SSE stream detected, closing stale session", {
+              sessionId,
+            });
+            await closeSessionEntry(entry);
+            transports.delete(sessionId);
+            if (!res.headersSent) {
+              writeText(
+                res,
+                409,
+                "Duplicate SSE stream for MCP session. Reconnect and initialize a fresh session.",
+              );
+            }
+            return;
+          }
+
+          throw error;
+        }
         return;
       }
 

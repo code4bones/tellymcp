@@ -67,6 +67,31 @@ Passive fallback:
 
 Do not rely on a blocking wait tool for inbox handling in the main agent session.
 
+## Pairing rules for agents
+
+If the agent runs inside `tmux`, pairing should include tmux attributes immediately.
+
+Correct pairing flow:
+
+1. Run:
+```bash
+tmux display-message -p '#{session_name} #{window_name} #{window_index} #{pane_id} #{pane_index}'
+```
+2. Call `create_session_pair_code` and pass these tmux fields.
+3. Complete Telegram linking with `/start CODE`.
+
+Why this matters:
+
+- pairing without tmux attributes creates a valid Telegram binding
+- but `tmux_target` remains unset
+- then inbox nudges and Mini App control cannot work for that session
+
+Use `set_tmux_target` only if:
+
+- tmux target was missed during pairing
+- tmux pane changed later
+- stored target must be refreshed or overridden
+
 ## Required tools
 
 Implement at least:

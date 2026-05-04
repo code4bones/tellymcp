@@ -927,6 +927,13 @@ export class TelegramTransport implements HumanTransport {
       fingerprint: async (ctx) => this.buildMainMenuFingerprint(ctx),
       ...this.createMenuOptions((ctx) => this.showMainMenu(ctx)),
     })
+      .text("🖥 Live", async (ctx) => {
+        await this.showLiveViewLauncher(ctx);
+      })
+      .text("📄 Buffer", async (ctx) => {
+        await ctx.answerCallbackQuery({ text: "Opening buffer menu." });
+        await this.showBufferMenu(ctx);
+      })
       .text(
         async (ctx) => this.buildInboxButtonLabel(ctx),
         async (ctx) => {
@@ -942,24 +949,17 @@ export class TelegramTransport implements HumanTransport {
       .text("ℹ Info", async (ctx) => {
         await this.showActiveSessionInfo(ctx);
       })
-      .text("📄 Buffer", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Opening buffer menu." });
-        await this.showBufferMenu(ctx);
-      })
-      .text("🖥 Live", async (ctx) => {
-        await this.showLiveViewLauncher(ctx);
-      })
       .text("✏ Rename", async (ctx) => {
         await this.beginRenameActiveSession(ctx);
       })
-      .text("🗑 Unpair", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Confirm unpair." });
-        await this.showUnpairConfirmMenu(ctx);
-      })
-      .row()
       .text("🔄 Refresh", async (ctx) => {
         await ctx.answerCallbackQuery({ text: "Session menu refreshed." });
         await this.showMainMenu(ctx);
+      })
+      .row()
+      .text("🗑 Unpair", async (ctx) => {
+        await ctx.answerCallbackQuery({ text: "Confirm unpair." });
+        await this.showUnpairConfirmMenu(ctx);
       })
       .text("⬅ Back", async (ctx) => {
         await ctx.answerCallbackQuery({ text: "Back to sessions." });

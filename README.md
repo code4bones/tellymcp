@@ -254,6 +254,12 @@ The preferred path is to pass these attributes directly into `create_session_pai
 }
 ```
 
+Important:
+
+- if you pair without tmux attributes, Telegram linking still succeeds
+- but `tmux_target` stays empty
+- in that state tmux nudges and Mini App controls will not work until `set_tmux_target` is called later
+
 You can still call `set_tmux_target` later if you need to update or override the stored target:
 
 ```json

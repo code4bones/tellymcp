@@ -1,0 +1,73 @@
+import type {
+  PairCodeRecord,
+  SessionBinding,
+  TelegramPrincipal,
+} from "../../../entities/auth/model/types.js";
+import type {
+  TelegramInboxMessage,
+  TelegramMenuPayloadRecord,
+} from "../../../entities/inbox/model/types.js";
+import type {
+  PendingRequestRecord,
+  PendingResolution,
+} from "../../../entities/request/model/types.js";
+import type { SessionContext } from "../../../entities/session/model/types.js";
+
+export interface SessionStore {
+  getSession(sessionId: string): Promise<SessionContext | null>;
+  setSession(session: SessionContext): Promise<void>;
+  clearSession(sessionId: string): Promise<void>;
+}
+
+export interface SessionBindingStore {
+  createPairCode(record: PairCodeRecord, ttlSeconds: number): Promise<void>;
+  consumePairCode(code: string): Promise<PairCodeRecord | null>;
+  getBinding(sessionId: string): Promise<SessionBinding | null>;
+  setBinding(binding: SessionBinding): Promise<void>;
+  clearBinding(sessionId: string): Promise<void>;
+  getActiveSessionIdForPrincipal(
+    principal: TelegramPrincipal,
+  ): Promise<string | null>;
+  setActiveSessionIdForPrincipal(
+    principal: TelegramPrincipal,
+    sessionId: string,
+  ): Promise<void>;
+  listBoundSessionIdsForPrincipal(
+    principal: TelegramPrincipal,
+  ): Promise<string[]>;
+}
+
+export interface PendingRequestStore {
+  resetRuntimeState(): Promise<void>;
+  getActive(): Promise<PendingRequestRecord | null>;
+  createPending(request: PendingRequestRecord): Promise<void>;
+  updatePending(request: PendingRequestRecord): Promise<void>;
+  resolvePending(
+    requestId: string,
+    resolution: PendingResolution,
+  ): Promise<void>;
+  enqueue(request: PendingRequestRecord): Promise<void>;
+  dequeueNext(): Promise<PendingRequestRecord | null>;
+}
+
+export interface TelegramInboxStore {
+  createInboxMessage(message: TelegramInboxMessage): Promise<void>;
+  listInboxMessages(
+    sessionId: string,
+    limit: number,
+  ): Promise<TelegramInboxMessage[]>;
+  countInboxMessages(sessionId: string): Promise<number>;
+  getInboxMessage(
+    sessionId: string,
+    messageId: string,
+  ): Promise<TelegramInboxMessage | null>;
+  deleteInboxMessage(sessionId: string, messageId: string): Promise<boolean>;
+}
+
+export interface TelegramMenuPayloadStore {
+  createMenuPayload(
+    record: TelegramMenuPayloadRecord,
+    ttlSeconds: number,
+  ): Promise<void>;
+  getMenuPayload(key: string): Promise<TelegramMenuPayloadRecord | null>;
+}

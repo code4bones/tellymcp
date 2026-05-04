@@ -1,0 +1,178 @@
+import { existsSync } from "node:fs";
+
+import * as z from "zod/v4";
+
+import type { QueueMode } from "../../shared/types/common.js";
+
+const envSchema = z.object({
+  TELEGRAM_BOT_TOKEN: z.string().min(1),
+  TELEGRAM_BOT_USERNAME: z.string().min(1).optional(),
+  TELEGRAM_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
+  TELEGRAM_DEFAULT_TIMEOUT_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(900),
+  TELEGRAM_MAX_CONTEXT_CHARS: z.coerce.number().int().positive().default(3000),
+  TELEGRAM_MAX_QUESTION_CHARS: z.coerce.number().int().positive().default(1000),
+  TELEGRAM_MAX_MESSAGE_CHARS: z.coerce.number().int().positive().default(3900),
+  TELEGRAM_INBOX_BATCH_SIZE: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(100)
+    .default(20),
+  TELEGRAM_MENU_PAYLOAD_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(86400),
+  REDIS_HOST: z.string().min(1),
+  REDIS_PORT: z.coerce.number().int().positive(),
+  REDIS_DB: z.coerce.number().int().nonnegative(),
+  REDIS_USERNAME: z.string().min(1).optional(),
+  REDIS_PASSWORD: z.string().min(1).optional(),
+  MODE: z.enum(["queue", "reject"]).default("queue"),
+  PAIR_CODE_TTL_SECONDS: z.coerce.number().int().positive().default(600),
+  PROJECT_NAME: z.string().min(1).optional(),
+  MCP_HTTP_HOST: z.string().min(1).default("127.0.0.1"),
+  MCP_HTTP_PORT: z.coerce.number().int().positive().default(8787),
+  MCP_HTTP_PATH: z.string().min(1).default("/mcp"),
+  MCP_HTTP_BEARER_TOKEN: z.string().min(1).optional(),
+  TMUX_NUDGE_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value !== "false"),
+  TMUX_NUDGE_DEBOUNCE_SECONDS: z.coerce.number().int().positive().default(10),
+  TMUX_NUDGE_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(30),
+  TMUX_NUDGE_MESSAGE: z.string().min(1).default("проверь inbox"),
+  PROXY_USE: z.enum(["http", "socks5"]).optional(),
+  HTTP_PROXY: z.string().min(1).optional(),
+  SOCKS5_PROXY: z.string().min(1).optional(),
+  LOG_LEVEL: z
+    .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
+    .default("info"),
+  LOG_FILE_PATH: z.string().min(1).default(".telegram-human-mcp/log.jsonl"),
+});
+
+export type AppConfig = {
+  telegram: {
+    botToken: string;
+    botUsername?: string;
+    pollIntervalMs: number;
+    defaultTimeoutSeconds: number;
+    maxContextChars: number;
+    maxQuestionChars: number;
+    maxMessageChars: number;
+    inboxBatchSize: number;
+    menuPayloadTtlSeconds: number;
+    proxy?: {
+      type: "http" | "socks5";
+      url: string;
+    };
+  };
+  redis: {
+    host: string;
+    port: number;
+    db: number;
+    username?: string;
+    password?: string;
+  };
+  mode: QueueMode;
+  pairCodeTtlSeconds: number;
+  mcp: {
+    httpHost: string;
+    httpPort: number;
+    httpPath: string;
+    bearerToken?: string;
+  };
+  tmux: {
+    nudgeEnabled: boolean;
+    nudgeDebounceSeconds: number;
+    nudgeCooldownSeconds: number;
+    nudgeMessage: string;
+  };
+  project: {
+    name?: string | undefined;
+  };
+  logging: {
+    level: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
+    filePath: string;
+  };
+};
+
+export function loadConfig(): AppConfig {
+  if (existsSync(".env")) {
+    process.loadEnvFile(".env");
+  }
+
+  const parsed = envSchema.parse(process.env);
+
+  const telegramProxy =
+    parsed.PROXY_USE === "http"
+      ? parsed.HTTP_PROXY
+        ? {
+            type: "http" as const,
+            url: parsed.HTTP_PROXY,
+          }
+        : (() => {
+            throw new Error("PROXY_USE=http requires HTTP_PROXY");
+          })()
+      : parsed.PROXY_USE === "socks5"
+        ? parsed.SOCKS5_PROXY
+          ? {
+              type: "socks5" as const,
+              url: parsed.SOCKS5_PROXY,
+            }
+          : (() => {
+              throw new Error("PROXY_USE=socks5 requires SOCKS5_PROXY");
+            })()
+        : undefined;
+
+  return {
+    telegram: {
+      botToken: parsed.TELEGRAM_BOT_TOKEN,
+      ...(parsed.TELEGRAM_BOT_USERNAME
+        ? { botUsername: parsed.TELEGRAM_BOT_USERNAME }
+        : {}),
+      pollIntervalMs: parsed.TELEGRAM_POLL_INTERVAL_MS,
+      defaultTimeoutSeconds: parsed.TELEGRAM_DEFAULT_TIMEOUT_SECONDS,
+      maxContextChars: parsed.TELEGRAM_MAX_CONTEXT_CHARS,
+      maxQuestionChars: parsed.TELEGRAM_MAX_QUESTION_CHARS,
+      maxMessageChars: parsed.TELEGRAM_MAX_MESSAGE_CHARS,
+      inboxBatchSize: parsed.TELEGRAM_INBOX_BATCH_SIZE,
+      menuPayloadTtlSeconds: parsed.TELEGRAM_MENU_PAYLOAD_TTL_SECONDS,
+      ...(telegramProxy ? { proxy: telegramProxy } : {}),
+    },
+    redis: {
+      host: parsed.REDIS_HOST,
+      port: parsed.REDIS_PORT,
+      db: parsed.REDIS_DB,
+      ...(parsed.REDIS_USERNAME ? { username: parsed.REDIS_USERNAME } : {}),
+      ...(parsed.REDIS_PASSWORD ? { password: parsed.REDIS_PASSWORD } : {}),
+    },
+    mode: parsed.MODE,
+    pairCodeTtlSeconds: parsed.PAIR_CODE_TTL_SECONDS,
+    mcp: {
+      httpHost: parsed.MCP_HTTP_HOST,
+      httpPort: parsed.MCP_HTTP_PORT,
+      httpPath: parsed.MCP_HTTP_PATH,
+      ...(parsed.MCP_HTTP_BEARER_TOKEN
+        ? { bearerToken: parsed.MCP_HTTP_BEARER_TOKEN }
+        : {}),
+    },
+    tmux: {
+      nudgeEnabled: parsed.TMUX_NUDGE_ENABLED,
+      nudgeDebounceSeconds: parsed.TMUX_NUDGE_DEBOUNCE_SECONDS,
+      nudgeCooldownSeconds: parsed.TMUX_NUDGE_COOLDOWN_SECONDS,
+      nudgeMessage: parsed.TMUX_NUDGE_MESSAGE,
+    },
+    project: {
+      ...(parsed.PROJECT_NAME ? { name: parsed.PROJECT_NAME } : {}),
+    },
+    logging: {
+      level: parsed.LOG_LEVEL,
+      filePath: parsed.LOG_FILE_PATH,
+    },
+  };
+}

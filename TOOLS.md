@@ -35,6 +35,7 @@ Output:
 
 Behavior:
 
+- generated pairing codes are short numeric 3-digit one-time codes
 - if `session_id` is omitted, the server derives it automatically
 - if tmux attributes are provided during pairing, they become part of the derived default session identity
 - this is the recommended way to distinguish multiple agents working from different tmux sessions, windows, or panes, regardless of project layout
@@ -300,6 +301,9 @@ Meaning:
 
 - when a task starts from one of these inbox items, treat it as a Telegram-originated task
 - use `notify_telegram` for progress updates and `ask_user_telegram` for clarifications during that task
+- process the batch one message at a time
+- move to the next inbox item only if the current one did not create a blocker
+- if the current message leads to a clarification wait or another blocking condition, stop batch processing there and leave the remaining inbox items pending
 
 ## `delete_telegram_inbox_message`
 
@@ -317,6 +321,18 @@ Output:
 - `deleted`
 - `session_id`
 - `message_id`
+
+## Operational notes
+
+Telegram UI summary:
+
+- `/menu` is the only top-level Telegram command for session navigation
+- root menu shows one session button per row
+- root menu also shows tmux bridge status
+- session menu uses `Live`, `Content`, `Inbox`, `Info`, `Rename`, `Unpair`, `Refresh`, `Back`
+- `Tools` contains `Broadcast` and `Prune all`
+
+Current remaining operational gaps are tracked in [docs/TODO.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/docs/TODO.md).
 
 ## `ask_user_telegram`
 

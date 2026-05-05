@@ -165,6 +165,7 @@ Files:
 - [src/app/tmux-proxy.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/app/tmux-proxy.ts)
 - [tmux-proxy-go/main.go](/home/code4bones/Devs/coding/mcp/telegram_mcp/tmux-proxy-go/main.go)
 - [Dockerfile.tmux-proxy](/home/code4bones/Devs/coding/mcp/telegram_mcp/Dockerfile.tmux-proxy)
+- [docs/tmux-proxy.service](/home/code4bones/Devs/coding/mcp/telegram_mcp/docs/tmux-proxy.service)
 
 Responsibilities:
 

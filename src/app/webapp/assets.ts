@@ -11,6 +11,7 @@ export const WEBAPP_STYLES_CSS = `
   --text: #edf1f7;
   --muted: #98a2b3;
   --accent: #57c1ff;
+  --success: #4cd964;
   --danger: #ff7474;
   --border: #2b3242;
   --shadow: rgba(0, 0, 0, 0.28);
@@ -102,6 +103,10 @@ body {
   font-weight: 600;
 }
 
+.ok {
+  color: var(--success);
+}
+
 .terminal {
   margin: 0;
   padding: 18px 14px calc(66px + env(safe-area-inset-bottom, 0px)) 14px;
@@ -174,8 +179,10 @@ const elements = {
 };
 
 function setStatus(text, isError = false) {
-  elements.status.textContent = text;
+  const sessionName = elements.session.textContent || "Live View";
+  elements.status.textContent = text + " - " + sessionName;
   elements.status.classList.toggle("error", isError);
+  elements.status.classList.toggle("ok", !isError);
 }
 
 function setUpdated(text) {
@@ -660,8 +667,8 @@ export function renderWebAppHtml(input: RenderWebAppHtmlInput): string {
       <pre class="terminal" data-role="terminal">Waiting for tmux buffer…</pre>
       <div class="statusbar">
         <div class="status-left">
-          <span class="session-label" data-role="session">Live View</span>
-          <span data-role="status">Loading…</span>
+          <span data-role="status">Loading… - Live View</span>
+          <span class="session-label" data-role="session" hidden>Live View</span>
         </div>
         <div class="status-right">
           <span data-role="updated">Updated: never</span>

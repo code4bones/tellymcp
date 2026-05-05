@@ -23,9 +23,9 @@ Current tools:
 Flow:
 
 1. The MCP client creates or updates a session context.
-2. The MCP client creates a session pairing code.
+2. The MCP client creates a short one-time 3-digit session pairing code.
 3. The human user links that session in Telegram with `/start <code>` or `/link <code>`.
-4. After pairing, Telegram shows an inline menu for session switching, inbox, buffer export, and developer actions. `/menu` opens the root switcher.
+4. After pairing, Telegram shows an inline menu for session switching, inbox, content export, live tmux view, and maintenance actions. `/menu` opens the root switcher.
 5. The MCP client calls `ask_user_telegram` with the linked `session_id`.
 6. The server sends a redacted Telegram message and waits for the answer.
 7. The answer is returned as structured MCP tool output.
@@ -147,6 +147,40 @@ The Mini App:
 
 `WEBAPP_VISIBLE_SCREENS` controls how much content the live viewport captures relative to the visible tmux height. The default `2` means about two visible screens of content.
 
+## Telegram UI
+
+The Telegram bot exposes one root entrypoint:
+
+- `/menu`
+
+Current root menu behavior:
+
+- shows the current active session
+- shows the last worked session and update time
+- shows tmux bridge status
+- lists paired sessions as one button per row
+- keeps `Refresh` and `Tools` on the final row
+
+Current session menu behavior:
+
+- title is `Session: <name>`
+- primary actions are `Live`, `Content`, and `Inbox`
+- maintenance actions are `Info`, `Rename`, `Unpair`, `Refresh`, `Back`
+
+Current content menu behavior:
+
+- `Visible`
+- `Full`
+- `Last 300`
+- `Last 1000`
+
+`Tools` currently contains:
+
+- `Broadcast`
+- `Prune all`
+
+`Broadcast` uses a one-shot prompt. After a successful broadcast, only that prompt is deleted. Cancel returns to `Tools` without destroying the existing menu message.
+
 ## Default session identity
 
 If a tool call omits `session_id`, the server derives a stable default session automatically.
@@ -222,6 +256,18 @@ TMUX_PROXY_HOST=0.0.0.0 TMUX_PROXY_TOKEN=your-token ./artifacts/tmux-proxy-go
 ```
 
 The Go proxy reads the same local `.env` file by default, so `TMUX_PROXY_HOST`, `TMUX_PROXY_PORT`, `TMUX_PROXY_TOKEN`, and `TMUX_SOCKET_PATH` can live in the shared project configuration.
+
+`build-tmux-proxy.sh` accepts an optional target platform:
+
+```bash
+./build-tmux-proxy.sh linux/amd64
+./build-tmux-proxy.sh darwin/arm64
+./build-tmux-proxy.sh darwin/amd64
+```
+
+Default target is `linux/amd64`. For non-default targets, the script exports into `./artifacts/<os>-<arch>/` unless you pass an explicit output directory as the second argument.
+
+For a Linux host, a minimal `systemd` example is included at [docs/tmux-proxy.service](/home/code4bones/Devs/coding/mcp/telegram_mcp/docs/tmux-proxy.service).
 
 If you need a development fallback, the repository also keeps the tiny Node-based proxy:
 

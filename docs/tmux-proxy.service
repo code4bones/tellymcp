@@ -1,0 +1,14 @@
+[Unit]
+Description=Telegram Human TMUX Proxy
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/telegram-human-mcp
+EnvironmentFile=/opt/telegram-human-mcp/.env
+ExecStart=/opt/telegram-human-mcp/artifacts/tmux-proxy-go
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

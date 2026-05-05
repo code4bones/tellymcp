@@ -71,12 +71,21 @@ type PendingRenameRecord = {
 
 type PendingBroadcastRecord = {
   initiatedAt: string;
+  promptMessageId?: number;
+  menuMessageId?: number;
+};
+
+type TmuxProxyStatusCacheEntry = {
+  checkedAtMs: number;
+  statusLine: string;
 };
 
 type TmuxCaptureScope =
   | { mode: "visible" }
   | { mode: "lines"; lines: number }
   | { mode: "full" };
+
+const TMUX_PROXY_STATUS_CACHE_MS = 5000;
 
 function parsePairingCode(text: string): string | null {
   const match = text
@@ -103,6 +112,24 @@ function buildPrincipalKey(principal: {
   telegramUserId: number;
 }): string {
   return `${principal.telegramChatId}:${principal.telegramUserId}`;
+}
+
+function formatTmuxBridgeError(
+  config: AppConfig,
+  error: unknown,
+  fallback: string,
+): string {
+  if (isTmuxUnavailableError(error)) {
+    return config.tmux.proxyUrl
+      ? "TMUX bridge is unavailable right now."
+      : "tmux is unavailable right now."
+  }
+
+  if (config.tmux.proxyUrl && error instanceof Error) {
+    return `TMUX bridge error: ${error.message}`;
+  }
+
+  return fallback;
 }
 
 function splitLongTelegramText(text: string, maxChars: number): string[] {
@@ -211,6 +238,13 @@ function escapeMarkdownV2CodeBlock(text: string): string {
   return text.replace(/\\/g, "\\\\").replace(/`/g, "\\`");
 }
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 function splitTitleAndBody(text: string): { title: string; body: string } {
   const normalized = text.trim();
   const [firstLine = "", ...rest] = normalized.split("\n");
@@ -286,6 +320,7 @@ export class TelegramTransport implements HumanTransport {
   private readonly tmuxNudgeDebounceTimers = new Map<string, NodeJS.Timeout>();
   private readonly pendingRenames = new Map<string, PendingRenameRecord>();
   private readonly pendingBroadcasts = new Map<string, PendingBroadcastRecord>();
+  private tmuxProxyStatusCache?: TmuxProxyStatusCacheEntry;
   private started = false;
   private pollingTask: Promise<void> | undefined;
 
@@ -351,11 +386,14 @@ export class TelegramTransport implements HumanTransport {
     this.bot.use(this.mainMenu);
     this.bot.catch((error) => {
       this.logger.error("Telegram polling error", {
-        error:
-          error.error instanceof Error
-            ? error.error.message
-            : String(error.error),
+      error:
+            error.error instanceof Error
+              ? error.error.message
+              : String(error.error),
       });
+    });
+    this.bot.callbackQuery("broadcast-cancel", async (ctx) => {
+      await this.cancelPendingBroadcast(ctx);
     });
     this.bot.on("message:text", async (ctx) => {
       await this.handleMessage(ctx);
@@ -872,8 +910,8 @@ export class TelegramTransport implements HumanTransport {
       .text("🖥 Live", async (ctx) => {
         await this.showLiveViewLauncher(ctx);
       })
-      .text("📄 Buffer", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Opening buffer menu." });
+      .text("📄 Content", async (ctx) => {
+        await ctx.answerCallbackQuery({ text: "Opening content menu." });
         await this.showBufferMenu(ctx);
       })
       .text(
@@ -894,14 +932,14 @@ export class TelegramTransport implements HumanTransport {
       .text("✏ Rename", async (ctx) => {
         await this.beginRenameActiveSession(ctx);
       })
-      .text("🔄 Refresh", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Session menu refreshed." });
-        await this.showMainMenu(ctx);
-      })
-      .row()
       .text("🗑 Unpair", async (ctx) => {
         await ctx.answerCallbackQuery({ text: "Confirm unpair." });
         await this.showUnpairConfirmMenu(ctx);
+      })
+      .row()
+      .text("🔄 Refresh", async (ctx) => {
+        await ctx.answerCallbackQuery({ text: "Session menu refreshed." });
+        await this.showMainMenu(ctx);
       })
       .text("⬅ Back", async (ctx) => {
         await ctx.answerCallbackQuery({ text: "Back to sessions." });
@@ -917,6 +955,9 @@ export class TelegramTransport implements HumanTransport {
       .text("👁 Visible", async (ctx) => {
         await this.sendActiveSessionBuffer(ctx, { mode: "visible" });
       })
+      .text("🧾 Full", async (ctx) => {
+        await this.sendActiveSessionBuffer(ctx, { mode: "full" });
+      })
       .row()
       .text("📄 Last 300", async (ctx) => {
         await this.sendActiveSessionBuffer(ctx, {
@@ -929,10 +970,6 @@ export class TelegramTransport implements HumanTransport {
           mode: "lines",
           lines: 1000,
         });
-      })
-      .row()
-      .text("🧾 Full", async (ctx) => {
-        await this.sendActiveSessionBuffer(ctx, { mode: "full" });
       })
       .row()
       .text("⬅ Back", async (ctx) => {
@@ -1097,7 +1134,6 @@ export class TelegramTransport implements HumanTransport {
           return range;
         }
 
-        let buttonsInRow = 0;
         for (const sessionId of sessionIds) {
           const session = await this.sessionStore.getSession(sessionId);
           const inboxCount = await this.inboxStore.countInboxMessages(sessionId);
@@ -1117,14 +1153,6 @@ export class TelegramTransport implements HumanTransport {
             },
           );
 
-          buttonsInRow += 1;
-          if (buttonsInRow >= 2) {
-            range.row();
-            buttonsInRow = 0;
-          }
-        }
-
-        if (buttonsInRow > 0) {
           range.row();
         }
 
@@ -1670,14 +1698,53 @@ export class TelegramTransport implements HumanTransport {
     const session = await this.sessionStore.getSession(activeSessionId);
     const inboxCount =
       await this.inboxStore.countInboxMessages(activeSessionId);
+    const sessionName = session?.label ?? activeSessionId;
     return [
-      "🎛 Session menu",
+      `🎛 Session: ${sessionName}`,
       "",
-      `📌 Active session: ${session?.label ?? activeSessionId}`,
       `📥 Inbox messages: ${inboxCount}`,
-      "",
-      "Use Inbox to inspect messages, Info to view session details, Buffer to export the tmux pane, Live to open the Mini App viewer, Unpair to detach it from Telegram, Refresh to reload this session, or Back to return to the sessions list.",
     ].join("\n");
+  }
+
+  private async getTmuxProxyStatusLine(): Promise<string> {
+    if (!this.config.tmux.proxyUrl) {
+      return "🖧 TMUX mode: direct";
+    }
+
+    const now = Date.now();
+    if (
+      this.tmuxProxyStatusCache &&
+      now - this.tmuxProxyStatusCache.checkedAtMs < TMUX_PROXY_STATUS_CACHE_MS
+    ) {
+      return this.tmuxProxyStatusCache.statusLine;
+    }
+
+    let statusLine = "🖧 TMUX bridge error: unknown";
+    try {
+      const url = new URL(
+        "/healthz",
+        this.config.tmux.proxyUrl.endsWith("/")
+          ? this.config.tmux.proxyUrl
+          : `${this.config.tmux.proxyUrl}/`,
+      );
+      const response = await fetch(url);
+      if (response.ok) {
+        statusLine = "🟢 TMUX bridge running";
+      } else {
+        statusLine = `🔴 TMUX bridge error: HTTP ${response.status}`;
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      statusLine = `🔴 TMUX bridge error: ${message}`;
+    }
+
+    this.tmuxProxyStatusCache = {
+      checkedAtMs: now,
+      statusLine,
+    };
+
+    return statusLine;
   }
 
   private async buildMainMenuFingerprint(
@@ -1883,9 +1950,13 @@ export class TelegramTransport implements HumanTransport {
         ? "Inbox message deleted."
         : "Inbox message already absent.",
     });
-    await ctx.editMessageText(
-      deleted ? "Inbox message deleted." : "Inbox message was already removed.",
-    );
+    await ctx.deleteMessage().catch(async () => {
+      await ctx.editMessageText(
+        deleted
+          ? "Inbox message deleted."
+          : "Inbox message was already removed.",
+      );
+    });
   }
 
   private async handleSessionSelection(
@@ -1999,9 +2070,10 @@ export class TelegramTransport implements HumanTransport {
     introText?: string,
   ): Promise<void> {
     const text = await this.buildSessionsMenuText(ctx);
-    await this.renderMenuScreen(
+    const intro = introText ? escapeHtml(introText) : null;
+    await this.renderMenuHtmlScreen(
       ctx,
-      introText ? `${introText}\n\n${text}` : text,
+      intro ? `${intro}\n\n${text}` : text,
       { kind: "menu" },
       this.sessionsMenu,
     );
@@ -2090,6 +2162,56 @@ export class TelegramTransport implements HumanTransport {
       text,
       meta,
       {
+        reply_markup: menu,
+      },
+    );
+  }
+
+  private async renderMenuMarkdownScreen(
+    ctx: TelegramMenuContext,
+    text: string,
+    meta: Omit<SendMessageMeta, "kind"> & { kind: "menu" },
+    menu: Menu<TelegramMenuContext>,
+  ): Promise<void> {
+    if (ctx.callbackQuery?.message) {
+      await this.editText(ctx, text, meta, {
+        parse_mode: "MarkdownV2",
+        reply_markup: menu,
+      });
+      return;
+    }
+
+    await this.replyText(
+      ctx,
+      text,
+      meta,
+      {
+        parse_mode: "MarkdownV2",
+        reply_markup: menu,
+      },
+    );
+  }
+
+  private async renderMenuHtmlScreen(
+    ctx: TelegramMenuContext,
+    text: string,
+    meta: Omit<SendMessageMeta, "kind"> & { kind: "menu" },
+    menu: Menu<TelegramMenuContext>,
+  ): Promise<void> {
+    if (ctx.callbackQuery?.message) {
+      await this.editText(ctx, text, meta, {
+        parse_mode: "HTML",
+        reply_markup: menu,
+      });
+      return;
+    }
+
+    await this.replyText(
+      ctx,
+      text,
+      meta,
+      {
+        parse_mode: "HTML",
         reply_markup: menu,
       },
     );
@@ -2261,7 +2383,11 @@ export class TelegramTransport implements HumanTransport {
         this.logger.warn("tmux buffer capture skipped because tmux is unavailable", payload);
         await this.replyText(
           ctx,
-          "Unable to capture tmux buffer because tmux is unavailable.",
+          formatTmuxBridgeError(
+            this.config,
+            error,
+            "Unable to capture tmux buffer right now.",
+          ),
           { kind: "menu", sessionId },
         );
         return;
@@ -2270,7 +2396,11 @@ export class TelegramTransport implements HumanTransport {
       this.logger.error("tmux buffer capture failed", payload);
       await this.replyText(
         ctx,
-        "Failed to capture the tmux buffer for this session.",
+        formatTmuxBridgeError(
+          this.config,
+          error,
+          "Failed to capture the tmux buffer for this session.",
+        ),
         { kind: "menu", sessionId },
       );
     }
@@ -2323,27 +2453,31 @@ export class TelegramTransport implements HumanTransport {
     const lines = ["🗂 Choose active session", ""];
     if (lastWorkedSession) {
       lines.push(
-        `🕘 Last worked session: ${lastWorkedSession.label ?? lastWorkedSession.sessionId}`,
+        `🕘 Last worked: <i>${escapeHtml(
+          lastWorkedSession.label ?? lastWorkedSession.sessionId,
+        )}</i>`,
       );
       const formattedUpdatedAt = formatMenuTimestamp(
         lastWorkedSession.updatedAt,
       );
       if (formattedUpdatedAt) {
-        lines.push(`⏱ Updated: ${formattedUpdatedAt}`);
+        lines.push(`⏱ Updated: <i>${escapeHtml(formattedUpdatedAt)}</i>`);
       }
       lines.push("");
     }
 
     if (activeSessionId) {
       const activeSession = await this.sessionStore.getSession(activeSessionId);
-      lines.push(`📌 Current active: ${activeSession?.label ?? activeSessionId}`);
+      lines.push(
+        `📌 Current active: <b>${escapeHtml(
+          activeSession?.label ?? activeSessionId,
+        )}</b>`,
+      );
       lines.push("");
     }
 
+    lines.push(`<i>${escapeHtml(await this.getTmuxProxyStatusLine())}</i>`);
     lines.push("");
-    lines.push(
-      "The selected session becomes active for ordinary Telegram messages and for inbox processing.",
-    );
     return lines.join("\n");
   }
 
@@ -2391,7 +2525,7 @@ export class TelegramTransport implements HumanTransport {
     const session = await this.sessionStore.getSession(activeSessionId);
 
     return [
-      "📄 Buffer Export",
+      "📄 Content",
       "",
       `📌 Active session: ${session?.label ?? activeSessionId}`,
       `🖥 tmux target: ${session?.tmuxTarget ?? "not set"}`,
@@ -2763,14 +2897,11 @@ export class TelegramTransport implements HumanTransport {
 
     const principalKey = buildPrincipalKey(principal);
     this.pendingRenames.delete(principalKey);
-    this.pendingBroadcasts.set(principalKey, {
-      initiatedAt: new Date().toISOString(),
-    });
 
     await ctx.answerCallbackQuery({
       text: `Broadcast to ${sessionIds.length} sessions.`,
     });
-    await this.replyText(
+    const sent = await this.replyText(
       ctx,
       [
         "📣 Broadcast",
@@ -2780,7 +2911,86 @@ export class TelegramTransport implements HumanTransport {
         "Commands like /menu or /help will cancel broadcast mode.",
       ].join("\n"),
       { kind: "menu" },
+      {
+        reply_markup: new InlineKeyboard().text(
+          "Cancel",
+          "broadcast-cancel",
+        ),
+      },
     );
+
+    this.pendingBroadcasts.set(principalKey, {
+      initiatedAt: new Date().toISOString(),
+      ...(sent ? { promptMessageId: sent.message_id } : {}),
+      ...(ctx.callbackQuery?.message?.message_id
+        ? { menuMessageId: ctx.callbackQuery.message.message_id }
+        : {}),
+    });
+  }
+
+  private async deletePendingBroadcastArtifacts(
+    ctx: TelegramMenuContext,
+    pending: PendingBroadcastRecord,
+    options: {
+      deleteMenuMessage: boolean;
+    },
+  ): Promise<void> {
+    const chatId = ctx.chat?.id;
+    if (!chatId) {
+      return;
+    }
+
+    for (const messageId of [
+      pending.promptMessageId,
+      ...(options.deleteMenuMessage ? [pending.menuMessageId] : []),
+    ]) {
+      if (!messageId) {
+        continue;
+      }
+
+      try {
+        await this.deleteMessage(chatId, messageId);
+      } catch (error) {
+        this.logger.warn("Failed to delete pending broadcast menu artifact", {
+          chatId,
+          messageId,
+          error:
+            error instanceof Error
+              ? (error.stack ?? error.message)
+              : String(error),
+        });
+      }
+    }
+  }
+
+  private async cancelPendingBroadcast(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal) {
+      await ctx.answerCallbackQuery({
+        text: "Telegram identity is unavailable.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const principalKey = buildPrincipalKey(principal);
+    const pending = this.pendingBroadcasts.get(principalKey);
+    if (!pending) {
+      await ctx.answerCallbackQuery({
+        text: "Broadcast mode is not active.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    this.pendingBroadcasts.delete(principalKey);
+    await this.deletePendingBroadcastArtifacts(ctx, pending, {
+      deleteMenuMessage: false,
+    });
+    await ctx.answerCallbackQuery({ text: "Broadcast cancelled." });
+    await this.showDeveloperMenu(ctx);
   }
 
   private async pruneAllSessions(ctx: TelegramMenuContext): Promise<void> {
@@ -2879,6 +3089,9 @@ export class TelegramTransport implements HumanTransport {
 
     if (text.startsWith("/")) {
       this.pendingBroadcasts.delete(principalKey);
+      await this.deletePendingBroadcastArtifacts(ctx, pending, {
+        deleteMenuMessage: false,
+      });
       return false;
     }
 
@@ -2887,6 +3100,9 @@ export class TelegramTransport implements HumanTransport {
     const broadcastText = text.trim();
     if (sessionIds.length === 0) {
       this.pendingBroadcasts.delete(principalKey);
+      await this.deletePendingBroadcastArtifacts(ctx, pending, {
+        deleteMenuMessage: false,
+      });
       await this.replyText(
         ctx,
         "Broadcast cancelled because no linked sessions were found.",
@@ -2937,6 +3153,9 @@ export class TelegramTransport implements HumanTransport {
     }
 
     this.pendingBroadcasts.delete(principalKey);
+    await this.deletePendingBroadcastArtifacts(ctx, pending, {
+      deleteMenuMessage: false,
+    });
     this.logger.info("Telegram broadcast completed", {
       chatId: principal.telegramChatId,
       userId: principal.telegramUserId,
@@ -2945,11 +3164,6 @@ export class TelegramTransport implements HumanTransport {
       initiatedAt: pending.initiatedAt,
       text: redactSecrets(broadcastText),
     });
-
-    await this.showDeveloperMenu(
-      ctx,
-      `Broadcast delivered to ${storedCount} sessions.`,
-    );
     return true;
   }
 }

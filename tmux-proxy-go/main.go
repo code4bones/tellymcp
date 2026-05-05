@@ -57,12 +57,24 @@ type sendLineRequest struct {
 func main() {
 	loadDotEnv(".env")
 
+	if _, err := exec.LookPath("tmux"); err != nil {
+		log.Fatalf("tmux is not installed or not available in PATH: %v", err)
+	}
+
 	cfg := config{
 		Host:       envOrDefault("TMUX_PROXY_HOST", "127.0.0.1"),
 		Port:       envOrDefault("TMUX_PROXY_PORT", "8788"),
 		Token:      strings.TrimSpace(os.Getenv("TMUX_PROXY_TOKEN")),
 		SocketPath: strings.TrimSpace(os.Getenv("TMUX_SOCKET_PATH")),
 	}
+
+	log.Printf(
+		"tmux proxy startup host=%s port=%s socketPath=%q tokenConfigured=%t",
+		cfg.Host,
+		cfg.Port,
+		cfg.SocketPath,
+		cfg.Token != "",
+	)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {

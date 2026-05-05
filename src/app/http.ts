@@ -32,6 +32,22 @@ type SessionEntry = {
   close: () => Promise<void>;
 };
 
+function formatTmuxHttpError(
+  proxyUrl: string | undefined,
+  error: unknown,
+  fallback: string,
+): string {
+  if (isTmuxUnavailableError(error)) {
+    return proxyUrl ? "TMUX bridge is unavailable" : "tmux is unavailable";
+  }
+
+  if (proxyUrl && error instanceof Error) {
+    return `TMUX bridge error: ${error.message}`;
+  }
+
+  return fallback;
+}
+
 function isInitializeRequest(body: unknown): boolean {
   if (!body || typeof body !== "object") {
     return false;
@@ -431,9 +447,11 @@ async function main(): Promise<void> {
           writeText(
             res,
             isTmuxUnavailableError(error) ? 503 : 500,
-            isTmuxUnavailableError(error)
-              ? "tmux is unavailable"
-              : "Failed to capture visible tmux pane",
+            formatTmuxHttpError(
+              runtime.config.tmux.proxyUrl,
+              error,
+              "Failed to capture visible tmux pane",
+            ),
           );
         }
         return;
@@ -520,9 +538,11 @@ async function main(): Promise<void> {
           writeText(
             res,
             isTmuxUnavailableError(error) ? 503 : 500,
-            isTmuxUnavailableError(error)
-              ? "tmux is unavailable"
-              : "Failed to send tmux action",
+            formatTmuxHttpError(
+              runtime.config.tmux.proxyUrl,
+              error,
+              "Failed to send tmux action",
+            ),
           );
         }
         return;

@@ -42,6 +42,7 @@ export type BrowserReloadOutput = {
 
 export type BrowserLocatorInput = {
   session_id?: string | undefined;
+  ai_tag?: string | undefined;
   selector?: string | undefined;
   text?: string | undefined;
   exact?: boolean | undefined;
@@ -53,6 +54,7 @@ export type BrowserClickInput = BrowserLocatorInput;
 export type BrowserClickOutput = {
   session_id: string;
   clicked: boolean;
+  ai_tag?: string | undefined;
   selector?: string | undefined;
   text?: string | undefined;
   url: string;
@@ -66,6 +68,7 @@ export type BrowserFillInput = BrowserLocatorInput & {
 export type BrowserFillOutput = {
   session_id: string;
   filled: boolean;
+  ai_tag?: string | undefined;
   selector?: string | undefined;
   text?: string | undefined;
   value_length: number;
@@ -81,6 +84,7 @@ export type BrowserPressOutput = {
   session_id: string;
   pressed: boolean;
   key: string;
+  ai_tag?: string | undefined;
   selector?: string | undefined;
   text?: string | undefined;
   url: string;
@@ -95,9 +99,27 @@ export type BrowserWaitForOutput = {
   session_id: string;
   waited: boolean;
   state: "attached" | "detached" | "visible" | "hidden";
+  ai_tag?: string | undefined;
   selector?: string | undefined;
   text?: string | undefined;
   url: string;
+  title?: string | undefined;
+};
+
+export type BrowserWaitForUrlInput = {
+  session_id?: string | undefined;
+  url?: string | undefined;
+  url_contains?: string | undefined;
+  timeout_ms?: number | undefined;
+};
+
+export type BrowserWaitForUrlOutput = {
+  session_id: string;
+  waited: boolean;
+  matched: "url" | "url_contains";
+  url?: string | undefined;
+  url_contains?: string | undefined;
+  current_url: string;
   title?: string | undefined;
 };
 
@@ -143,6 +165,18 @@ export type BrowserNetworkFailuresOutput = {
     resource_type?: string | undefined;
     timestamp: string;
   }>;
+};
+
+export type BrowserClearLogsInput = {
+  session_id?: string | undefined;
+};
+
+export type BrowserClearLogsOutput = {
+  session_id: string;
+  cleared: boolean;
+  console_messages_cleared: number;
+  page_errors_cleared: number;
+  network_failures_cleared: number;
 };
 
 export type BrowserDomInput = {

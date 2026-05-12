@@ -19,13 +19,16 @@ import { BrowserClickTool } from "../../../features/browser/model/browserClickTo
 import { BrowserFillTool } from "../../../features/browser/model/browserFillTool.js";
 import { BrowserPressTool } from "../../../features/browser/model/browserPressTool.js";
 import { BrowserWaitForTool } from "../../../features/browser/model/browserWaitForTool.js";
+import { BrowserWaitForUrlTool } from "../../../features/browser/model/browserWaitForUrlTool.js";
 import { BrowserConsoleTool } from "../../../features/browser/model/browserConsoleTool.js";
 import { BrowserErrorsTool } from "../../../features/browser/model/browserErrorsTool.js";
 import { BrowserNetworkFailuresTool } from "../../../features/browser/model/browserNetworkFailuresTool.js";
+import { BrowserClearLogsTool } from "../../../features/browser/model/browserClearLogsTool.js";
 import { BrowserDomTool } from "../../../features/browser/model/browserDomTool.js";
 import { BrowserComputedStyleTool } from "../../../features/browser/model/browserComputedStyleTool.js";
 import { BrowserScreenshotTool } from "../../../features/browser/model/browserScreenshotTool.js";
 import { BrowserCloseTool } from "../../../features/browser/model/browserCloseTool.js";
+import { SendPartnerNoteTool } from "../../../features/collaboration/model/sendPartnerNoteTool.js";
 import type { ToolModule } from "../../../shared/api/tool-registry/types.js";
 import { registerTools } from "../../../shared/api/tool-registry/registry.js";
 
@@ -59,11 +62,14 @@ export type AppToolModules = {
   browserFillTool: BrowserFillTool;
   browserPressTool: BrowserPressTool;
   browserWaitForTool: BrowserWaitForTool;
+  browserWaitForUrlTool: BrowserWaitForUrlTool;
   browserConsoleTool: BrowserConsoleTool;
   browserErrorsTool: BrowserErrorsTool;
   browserNetworkFailuresTool: BrowserNetworkFailuresTool;
+  browserClearLogsTool: BrowserClearLogsTool;
   browserDomTool: BrowserDomTool;
   browserComputedStyleTool: BrowserComputedStyleTool;
   browserScreenshotTool: BrowserScreenshotTool;
   browserCloseTool: BrowserCloseTool;
+  sendPartnerNoteTool: SendPartnerNoteTool;
 };

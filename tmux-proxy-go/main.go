@@ -69,10 +69,23 @@ type xchangeWriteRequest struct {
 	ContentBase64   string `json:"contentBase64"`
 }
 
+type xchangeWriteRelativeRequest struct {
+	WorkspaceDir    string `json:"workspaceDir"`
+	ExchangeDirName string `json:"exchangeDirName"`
+	RelativePath    string `json:"relativePath"`
+	ContentBase64   string `json:"contentBase64"`
+	Append          bool   `json:"append"`
+}
+
 type xchangeDeleteRequest struct {
 	WorkspaceDir    string `json:"workspaceDir"`
 	ExchangeDirName string `json:"exchangeDirName"`
 	FilePath        string `json:"filePath"`
+}
+
+type workspaceReadRequest struct {
+	WorkspaceDir string `json:"workspaceDir"`
+	FilePath     string `json:"filePath"`
 }
 
 func main() {
@@ -321,6 +334,28 @@ func routeRequest(w http.ResponseWriter, r *http.Request, cfg config) (string, s
 		writeJSON(w, http.StatusOK, map[string]any{"path": outputPath})
 		return "", fmt.Sprintf("xchange-write path=%s", outputPath), nil
 
+	case "/xchange/write-relative":
+		var req xchangeWriteRelativeRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeText(w, http.StatusBadRequest, "Invalid JSON body")
+			return "", "", nil
+		}
+		if strings.TrimSpace(req.WorkspaceDir) == "" ||
+			strings.TrimSpace(req.ExchangeDirName) == "" ||
+			strings.TrimSpace(req.RelativePath) == "" ||
+			strings.TrimSpace(req.ContentBase64) == "" {
+			writeText(w, http.StatusBadRequest, "workspaceDir, exchangeDirName, relativePath, and contentBase64 are required")
+			return "", "", nil
+		}
+
+		outputPath, err := writeXchangeRelativeFile(req.WorkspaceDir, req.ExchangeDirName, req.RelativePath, req.ContentBase64, req.Append)
+		if err != nil {
+			return "", fmt.Sprintf("xchange-write-relative path=%s", strings.TrimSpace(req.RelativePath)), err
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{"path": outputPath})
+		return "", fmt.Sprintf("xchange-write-relative path=%s", outputPath), nil
+
 	case "/xchange/list":
 		var req xchangeEnsureRequest
 		if err := decodeJSON(r, &req); err != nil {
@@ -359,6 +394,25 @@ func routeRequest(w http.ResponseWriter, r *http.Request, cfg config) (string, s
 
 		writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 		return "", fmt.Sprintf("xchange-delete path=%s", strings.TrimSpace(req.FilePath)), nil
+
+	case "/workspace/read":
+		var req workspaceReadRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeText(w, http.StatusBadRequest, "Invalid JSON body")
+			return "", "", nil
+		}
+		if strings.TrimSpace(req.WorkspaceDir) == "" || strings.TrimSpace(req.FilePath) == "" {
+			writeText(w, http.StatusBadRequest, "workspaceDir and filePath are required")
+			return "", "", nil
+		}
+
+		contentBase64, err := readWorkspaceFile(req.WorkspaceDir, req.FilePath)
+		if err != nil {
+			return "", fmt.Sprintf("workspace-read path=%s", strings.TrimSpace(req.FilePath)), err
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{"contentBase64": contentBase64})
+		return "", fmt.Sprintf("workspace-read path=%s", strings.TrimSpace(req.FilePath)), nil
 
 	default:
 		writeText(w, http.StatusNotFound, "Not found")
@@ -495,6 +549,27 @@ func sanitizeFileName(fileName string) string {
 	return normalized
 }
 
+func sanitizeRelativeXchangePath(relativePath string) (string, error) {
+	parts := strings.FieldsFunc(relativePath, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" || trimmed == "." || trimmed == ".." {
+			continue
+		}
+		filtered = append(filtered, trimmed)
+	}
+
+	normalized := strings.Join(filtered, "/")
+	if normalized == "" {
+		return "", fmt.Errorf("relativePath is required")
+	}
+
+	return normalized, nil
+}
+
 func allocateAvailableFilePath(dir string, fileName string) (string, error) {
 	safeFileName := sanitizeFileName(fileName)
 	extension := filepath.Ext(safeFileName)
@@ -527,6 +602,43 @@ func ensureXchangeDir(workspaceDir string, exchangeDirName string) (string, erro
 	return resolvedDir, nil
 }
 
+func resolvePathInsideWorkspace(workspaceDir string, filePath string) (string, error) {
+	resolvedWorkspaceDir := filepath.Clean(strings.TrimSpace(workspaceDir))
+	resolvedFilePath := strings.TrimSpace(filePath)
+	if !filepath.IsAbs(resolvedFilePath) {
+		resolvedFilePath = filepath.Join(resolvedWorkspaceDir, resolvedFilePath)
+	}
+	resolvedFilePath = filepath.Clean(resolvedFilePath)
+	relative, err := filepath.Rel(resolvedWorkspaceDir, resolvedFilePath)
+	if err != nil {
+		return "", err
+	}
+	if strings.HasPrefix(relative, "..") || relative == "." {
+		return "", fmt.Errorf("filePath is outside the workspace directory")
+	}
+
+	return resolvedFilePath, nil
+}
+
+func resolvePathInsideXchange(dir string, relativePath string) (string, error) {
+	safeRelativePath, err := sanitizeRelativeXchangePath(relativePath)
+	if err != nil {
+		return "", err
+	}
+
+	resolvedDir := filepath.Clean(dir)
+	resolvedPath := filepath.Clean(filepath.Join(resolvedDir, safeRelativePath))
+	relative, err := filepath.Rel(resolvedDir, resolvedPath)
+	if err != nil {
+		return "", err
+	}
+	if strings.HasPrefix(relative, "..") || relative == "." {
+		return "", fmt.Errorf("relativePath is outside the exchange directory")
+	}
+
+	return resolvedPath, nil
+}
+
 func writeXchangeFile(workspaceDir string, exchangeDirName string, fileName string, contentBase64 string) (string, error) {
 	dir, err := ensureXchangeDir(workspaceDir, exchangeDirName)
 	if err != nil {
@@ -546,6 +658,43 @@ func writeXchangeFile(workspaceDir string, exchangeDirName string, fileName stri
 		return "", err
 	}
 
+	return outputPath, nil
+}
+
+func writeXchangeRelativeFile(workspaceDir string, exchangeDirName string, relativePath string, contentBase64 string, appendMode bool) (string, error) {
+	dir, err := ensureXchangeDir(workspaceDir, exchangeDirName)
+	if err != nil {
+		return "", err
+	}
+
+	content, err := base64.StdEncoding.DecodeString(contentBase64)
+	if err != nil {
+		return "", err
+	}
+
+	outputPath, err := resolvePathInsideXchange(dir, relativePath)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return "", err
+	}
+
+	if appendMode {
+		file, err := os.OpenFile(outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			return "", err
+		}
+		defer file.Close()
+		if _, err := file.Write(content); err != nil {
+			return "", err
+		}
+		return outputPath, nil
+	}
+
+	if err := os.WriteFile(outputPath, content, 0o644); err != nil {
+		return "", err
+	}
 	return outputPath, nil
 }
 
@@ -596,6 +745,20 @@ func deleteXchangeFile(workspaceDir string, exchangeDirName string, filePath str
 	}
 
 	return nil
+}
+
+func readWorkspaceFile(workspaceDir string, filePath string) (string, error) {
+	resolvedFilePath, err := resolvePathInsideWorkspace(workspaceDir, filePath)
+	if err != nil {
+		return "", err
+	}
+
+	content, err := os.ReadFile(resolvedFilePath)
+	if err != nil {
+		return "", err
+	}
+
+	return base64.StdEncoding.EncodeToString(content), nil
 }
 
 func resolvedSocketPath(cfg config, requestSocketPath string) string {

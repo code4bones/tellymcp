@@ -36,13 +36,21 @@ import { BrowserClickTool } from "../../features/browser/model/browserClickTool.
 import { BrowserFillTool } from "../../features/browser/model/browserFillTool.js";
 import { BrowserPressTool } from "../../features/browser/model/browserPressTool.js";
 import { BrowserWaitForTool } from "../../features/browser/model/browserWaitForTool.js";
+import { BrowserWaitForUrlTool } from "../../features/browser/model/browserWaitForUrlTool.js";
 import { BrowserConsoleTool } from "../../features/browser/model/browserConsoleTool.js";
 import { BrowserErrorsTool } from "../../features/browser/model/browserErrorsTool.js";
 import { BrowserNetworkFailuresTool } from "../../features/browser/model/browserNetworkFailuresTool.js";
+import { BrowserClearLogsTool } from "../../features/browser/model/browserClearLogsTool.js";
 import { BrowserDomTool } from "../../features/browser/model/browserDomTool.js";
 import { BrowserComputedStyleTool } from "../../features/browser/model/browserComputedStyleTool.js";
 import { BrowserScreenshotTool } from "../../features/browser/model/browserScreenshotTool.js";
 import { BrowserCloseTool } from "../../features/browser/model/browserCloseTool.js";
+import { CollaborationService } from "../../features/collaboration/model/collaborationService.js";
+import type { CollaborationBackend } from "../../features/collaboration/model/backend.js";
+import { LocalCollaborationBackend } from "../../features/collaboration/model/localCollaborationBackend.js";
+import { SendPartnerNoteTool } from "../../features/collaboration/model/sendPartnerNoteTool.js";
+import { GatewayCollaborationBackend } from "../../features/distributed-client/model/gatewayCollaborationBackend.js";
+import { GatewayHttpService } from "../../features/distributed-gateway/model/gatewayHttpService.js";
 import type { ToolModule } from "../../shared/api/tool-registry/types.js";
 import type {
   MaintenanceStore,
@@ -63,6 +71,7 @@ export type AppRuntime = {
   xchangeFileMetaStore: TelegramXchangeFileMetaStore;
   maintenanceStore: MaintenanceStore;
   webAppLaunchRegistry: WebAppLaunchRegistry;
+  gatewayHttpService: GatewayHttpService;
   createServer: () => McpServer;
   shutdown: () => Promise<void>;
 };
@@ -89,6 +98,17 @@ export async function createAppRuntime(): Promise<AppRuntime> {
       bearerAuthEnabled: Boolean(config.mcp.bearerToken),
       enableDebugRoutes: config.mcp.enableDebugRoutes,
       enablePruneRoute: config.mcp.enablePruneRoute,
+    },
+    distributed: {
+      mode: config.distributed.mode,
+      gatewayPublicUrlConfigured: Boolean(config.distributed.gatewayPublicUrl),
+      gatewayBindHost: config.distributed.gatewayBindHost,
+      gatewayBindPort: config.distributed.gatewayBindPort,
+      gatewayAuthEnabled: Boolean(config.distributed.gatewayAuthToken),
+      gatewayDatabaseConfigured: Boolean(
+        config.distributed.gatewayDatabaseUrl,
+      ),
+      gatewayS3Configured: Boolean(config.distributed.gatewayS3Bucket),
     },
     webapp: {
       enabled: config.webapp.enabled,
@@ -181,6 +201,42 @@ export async function createAppRuntime(): Promise<AppRuntime> {
     logger,
     projectIdentityResolver,
   );
+  const collaborationBackend: CollaborationBackend =
+    config.distributed.mode === "client"
+      ? new LocalCollaborationBackend(
+          config,
+          stateStore,
+          stateStore,
+          stateStore,
+          telegramTransport,
+          logger,
+        )
+      : new LocalCollaborationBackend(
+          config,
+          stateStore,
+          stateStore,
+          stateStore,
+          telegramTransport,
+          logger,
+        );
+  if (config.distributed.mode !== "client") {
+    logger.warn("Distributed mode is enabled, but collaboration still uses local backend", {
+      mode: config.distributed.mode,
+    });
+  }
+  const collaborationService = new CollaborationService(
+    collaborationBackend,
+    logger,
+    projectIdentityResolver,
+  );
+  telegramTransport.setCollaborationService(collaborationService);
+  const gatewayHttpService = new GatewayHttpService(config);
+  if (config.distributed.mode === "gateway" || config.distributed.mode === "both") {
+    void new GatewayCollaborationBackend(
+      logger,
+      config.distributed.gatewayPublicUrl,
+    );
+  }
 
   const createTools = (): ToolModule[] => [
     new CreateSessionPairCodeTool(pairSessionService),
@@ -202,13 +258,16 @@ export async function createAppRuntime(): Promise<AppRuntime> {
     new BrowserFillTool(browserService),
     new BrowserPressTool(browserService),
     new BrowserWaitForTool(browserService),
+    new BrowserWaitForUrlTool(browserService),
     new BrowserConsoleTool(browserService),
     new BrowserErrorsTool(browserService),
     new BrowserNetworkFailuresTool(browserService),
+    new BrowserClearLogsTool(browserService),
     new BrowserDomTool(browserService),
     new BrowserComputedStyleTool(browserService),
     new BrowserScreenshotTool(browserService),
     new BrowserCloseTool(browserService),
+    new SendPartnerNoteTool(collaborationService),
   ];
 
   return {
@@ -222,6 +281,7 @@ export async function createAppRuntime(): Promise<AppRuntime> {
     xchangeFileMetaStore: stateStore,
     maintenanceStore: stateStore,
     webAppLaunchRegistry,
+    gatewayHttpService,
     createServer: () => createMcpServer(createTools()),
     shutdown: async () => {
       logger.info("Shutdown started");

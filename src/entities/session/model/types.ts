@@ -2,6 +2,7 @@ export type SessionContext = {
   sessionId: string;
   label?: string | undefined;
   cwd?: string | undefined;
+  linkedSessionId?: string | undefined;
   task?: string | undefined;
   summary?: string | undefined;
   files?: string[] | undefined;
@@ -58,6 +59,8 @@ export type GetSessionContextOutput = {
   context?: {
     session_label?: string | undefined;
     cwd?: string | undefined;
+    linked_session_id?: string | undefined;
+    linked_session_label?: string | undefined;
     task?: string | undefined;
     summary?: string | undefined;
     files?: string[] | undefined;

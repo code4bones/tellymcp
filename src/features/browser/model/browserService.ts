@@ -35,6 +35,10 @@ import type {
   BrowserPressOutput,
   BrowserWaitForInput,
   BrowserWaitForOutput,
+  BrowserWaitForUrlInput,
+  BrowserWaitForUrlOutput,
+  BrowserClearLogsInput,
+  BrowserClearLogsOutput,
   BrowserReloadInput,
   BrowserReloadOutput,
   BrowserScreenshotInput,
@@ -150,6 +154,10 @@ function formatConsoleLocation(message: ConsoleMessage): string | undefined {
   return `${location.url || "unknown"}:${location.lineNumber ?? 0}:${location.columnNumber ?? 0}`;
 }
 
+function escapeCssAttributeValue(value: string): string {
+  return value.replace(/\\/gu, "\\\\").replace(/"/gu, '\\"');
+}
+
 export class BrowserService {
   private playwrightModulePromise: Promise<PlaywrightModule> | undefined;
 
@@ -247,6 +255,7 @@ export class BrowserService {
     return {
       session_id: sessionId,
       clicked: true,
+      ...(input.ai_tag ? { ai_tag: input.ai_tag } : {}),
       ...(input.selector ? { selector: input.selector } : {}),
       ...(input.text ? { text: input.text } : {}),
       url: state.currentUrl,
@@ -269,6 +278,7 @@ export class BrowserService {
     return {
       session_id: sessionId,
       filled: true,
+      ...(input.ai_tag ? { ai_tag: input.ai_tag } : {}),
       ...(input.selector ? { selector: input.selector } : {}),
       ...(input.text ? { text: input.text } : {}),
       value_length: input.value.length,
@@ -298,6 +308,7 @@ export class BrowserService {
       session_id: sessionId,
       pressed: true,
       key: input.key,
+      ...(input.ai_tag ? { ai_tag: input.ai_tag } : {}),
       ...(input.selector ? { selector: input.selector } : {}),
       ...(input.text ? { text: input.text } : {}),
       url: state.currentUrl,
@@ -358,9 +369,50 @@ export class BrowserService {
       session_id: sessionId,
       waited: true,
       state: waitState,
+      ...(input.ai_tag ? { ai_tag: input.ai_tag } : {}),
       ...(input.selector ? { selector: input.selector } : {}),
       ...(input.text ? { text: input.text } : {}),
       url: state.currentUrl,
+      ...(state.title ? { title: state.title } : {}),
+    };
+  }
+
+  public async waitForUrl(
+    input: BrowserWaitForUrlInput,
+  ): Promise<BrowserWaitForUrlOutput> {
+    this.ensureEnabled();
+    const { sessionId, state } = await this.requireSessionState(input);
+    const timeout = this.resolveTimeoutMs(input.timeout_ms);
+
+    if (input.url?.trim()) {
+      await state.page.waitForURL(input.url.trim(), {
+        timeout,
+      });
+    } else if (input.url_contains?.trim()) {
+      const expected = input.url_contains.trim();
+      await state.page.waitForURL(
+        (value) => value.toString().includes(expected),
+        {
+          timeout,
+        },
+      );
+    } else {
+      throw new Error("Browser URL target is missing. Provide url or url_contains.");
+    }
+
+    state.currentUrl = state.page.url();
+    state.title = await state.page.title().catch(() => state.title);
+    state.lastUsedAt = new Date().toISOString();
+
+    return {
+      session_id: sessionId,
+      waited: true,
+      matched: input.url?.trim() ? "url" : "url_contains",
+      ...(input.url?.trim() ? { url: input.url.trim() } : {}),
+      ...(input.url_contains?.trim()
+        ? { url_contains: input.url_contains.trim() }
+        : {}),
+      current_url: state.currentUrl,
       ...(state.title ? { title: state.title } : {}),
     };
   }
@@ -405,6 +457,29 @@ export class BrowserService {
           : {}),
         timestamp: failure.timestamp,
       })),
+    };
+  }
+
+  public async clearLogs(
+    input: BrowserClearLogsInput,
+  ): Promise<BrowserClearLogsOutput> {
+    this.ensureEnabled();
+    const { sessionId, state } = await this.requireSessionState(input);
+    const consoleMessagesCleared = state.consoleMessages.length;
+    const pageErrorsCleared = state.pageErrors.length;
+    const networkFailuresCleared = state.networkFailures.length;
+
+    state.consoleMessages = [];
+    state.pageErrors = [];
+    state.networkFailures = [];
+    state.lastUsedAt = new Date().toISOString();
+
+    return {
+      session_id: sessionId,
+      cleared: true,
+      console_messages_cleared: consoleMessagesCleared,
+      page_errors_cleared: pageErrorsCleared,
+      network_failures_cleared: networkFailuresCleared,
     };
   }
 
@@ -787,6 +862,7 @@ export class BrowserService {
       | BrowserReloadInput
       | BrowserConsoleInput
       | BrowserClickInput
+      | BrowserClearLogsInput
       | BrowserErrorsInput
       | BrowserFillInput
       | BrowserNetworkFailuresInput
@@ -794,6 +870,7 @@ export class BrowserService {
       | BrowserDomInput
       | BrowserComputedStyleInput
       | BrowserWaitForInput
+      | BrowserWaitForUrlInput
       | BrowserScreenshotInput,
   ): Promise<{
     sessionId: string;
@@ -832,6 +909,13 @@ export class BrowserService {
     page: Page,
     input: BrowserLocatorInput,
   ): Locator {
+    if (input.ai_tag?.trim()) {
+      const aiTag = escapeCssAttributeValue(input.ai_tag.trim());
+      return page
+        .locator(`[data-drive-tag="${aiTag}"], [ai-tag="${aiTag}"]`)
+        .first();
+    }
+
     if (input.selector?.trim()) {
       return page.locator(input.selector.trim()).first();
     }
@@ -843,7 +927,7 @@ export class BrowserService {
     }
 
     throw new Error(
-      "Browser target is missing. Provide selector or text.",
+      "Browser target is missing. Provide ai_tag, selector, or text.",
     );
   }
 

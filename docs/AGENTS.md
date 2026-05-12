@@ -98,6 +98,103 @@ Use `set_tmux_target` only if:
 - tmux pane changed later
 - stored target must be refreshed or overridden
 
+## Linked partner collaboration
+
+If the current session is linked to a partner session in Telegram, use:
+
+```text
+send_partner_note
+```
+
+Do not treat partner collaboration as ordinary human inbox traffic.
+
+Use structured note kinds:
+
+- `question`
+- `reply`
+- `share`
+- `request`
+- `handoff`
+
+Typical examples:
+
+- "Tell frontend what changed in the API" -> `share`
+- "Ask backend what APIs it exposes" -> `question`
+- "Send the current error to your teammate" -> `question` or `request`
+- "Answer the partner question" -> `reply`
+
+How to find the partner safely:
+
+1. Call `get_session_context`.
+2. Check `context.linked_session_id`.
+3. If it is missing, stop and report that the session is not linked yet.
+4. Do not guess the partner from labels or memory.
+5. Only then call `send_partner_note`.
+
+Do not blindly retry `send_partner_note` if the first attempt failed because no partner was linked.
+
+How to react on the receiving side:
+
+- a partner collaboration wake-up is not the same as a Telegram inbox wake-up
+- if the tmux wake-up mentions:
+  - `SHARE_INDEX.md`
+  - `partner note`
+  - `partner notes`
+  then do not start with `get_telegram_inbox`
+- instead:
+  1. open `.mcp-xchange/SHARE_INDEX.md`
+  2. find the newest collaboration note
+  3. open that note
+  4. read any referenced artifacts
+
+Use `get_telegram_inbox` for ordinary human Telegram traffic, not for partner note delivery.
+
+After reading a partner note, do not stop at passive interpretation.
+
+Required behavior:
+
+- `question`
+  - inspect your workspace if needed
+  - answer with a `reply`
+- `reply`
+  - apply the answer and continue your task
+- `share`
+  - update your understanding and continue if relevant
+- `request`
+  - treat it as real work to execute, not just an FYI
+  - start the requested task unless blocked
+- `handoff`
+  - consume the handoff and continue from it
+
+Default rule:
+
+- if the partner note asks you to do something concrete, start doing it
+- do not merely summarize the note unless the human explicitly asked only for a summary
+
+When useful, include:
+
+- API summaries
+- what changed
+- current errors
+- sample payloads
+- relevant git context from the current workspace
+
+If artifacts are needed, pass them through `artifacts` so the service copies them into the partner `.mcp-xchange/shares/files/...`.
+
+Do not send raw source files to the partner as artifacts.
+
+Prefer:
+
+- API summaries
+- endpoint signatures
+- OpenAPI/spec files
+- sample payloads
+- logs
+- screenshots
+- Markdown notes
+
+If the partner only needs to know what an API looks like, summarize the contract in the note instead of copying implementation files.
+
 ## Required tools
 
 Implement at least:

@@ -61,10 +61,11 @@ export type DeleteTelegramInboxMessageOutput = {
 
 export type TelegramMenuPayloadRecord = {
   key: string;
-  kind: "inbox-message" | "active-session" | "file-entry";
+  kind: "inbox-message" | "active-session" | "file-entry" | "link-target";
   sessionId: string;
   messageId?: string | undefined;
   filePath?: string | undefined;
+  targetSessionId?: string | undefined;
   createdAt: string;
   expiresAt: string;
 };

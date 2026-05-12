@@ -1,4 +1,12 @@
-import { access, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  appendFile,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
@@ -95,6 +103,20 @@ function sanitizeFileName(fileName: string): string {
   return normalized || "file.bin";
 }
 
+function sanitizeRelativeXchangePath(relativePath: string): string {
+  const normalized = relativePath
+    .split(/[\/\\]+/u)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0 && segment !== "." && segment !== "..")
+    .join("/");
+
+  if (!normalized) {
+    throw new Error("relativePath is required");
+  }
+
+  return normalized;
+}
+
 async function allocateAvailableFilePath(
   dir: string,
   fileName: string,
@@ -164,6 +186,57 @@ function resolveXchangeDirFromBody(body: unknown): string | null {
   }
 
   return path.resolve(workspaceDir, exchangeDirName);
+}
+
+function resolveWorkspaceDirFromBody(body: unknown): string | null {
+  const workspaceDir =
+    body &&
+    typeof body === "object" &&
+    typeof Reflect.get(body, "workspaceDir") === "string"
+      ? String(Reflect.get(body, "workspaceDir")).trim()
+      : "";
+
+  return workspaceDir ? path.resolve(workspaceDir) : null;
+}
+
+function resolvePathInsideWorkspace(
+  workspaceDir: string,
+  filePath: string,
+): string {
+  const resolvedWorkspaceDir = path.resolve(workspaceDir);
+  const resolvedFilePath = path.isAbsolute(filePath)
+    ? path.resolve(filePath)
+    : path.resolve(resolvedWorkspaceDir, filePath);
+  const relative = path.relative(resolvedWorkspaceDir, resolvedFilePath);
+
+  if (
+    relative.startsWith("..") ||
+    path.isAbsolute(relative) ||
+    relative.trim() === ""
+  ) {
+    throw new Error("filePath is outside the workspace directory");
+  }
+
+  return resolvedFilePath;
+}
+
+function resolvePathInsideXchange(
+  exchangeDir: string,
+  relativePath: string,
+): string {
+  const safeRelativePath = sanitizeRelativeXchangePath(relativePath);
+  const resolvedPath = path.resolve(exchangeDir, safeRelativePath);
+  const relative = path.relative(exchangeDir, resolvedPath);
+
+  if (
+    relative.startsWith("..") ||
+    path.isAbsolute(relative) ||
+    relative.trim() === ""
+  ) {
+    throw new Error("relativePath is outside the exchange directory");
+  }
+
+  return resolvedPath;
 }
 
 async function main(): Promise<void> {
@@ -371,6 +444,49 @@ async function main(): Promise<void> {
         return;
       }
 
+      if (url.pathname === "/xchange/write-relative") {
+        const resolvedDir = resolveXchangeDirFromBody(body);
+        const relativePath =
+          body &&
+          typeof body === "object" &&
+          typeof Reflect.get(body, "relativePath") === "string"
+            ? String(Reflect.get(body, "relativePath")).trim()
+            : "";
+        const contentBase64 =
+          body &&
+          typeof body === "object" &&
+          typeof Reflect.get(body, "contentBase64") === "string"
+            ? String(Reflect.get(body, "contentBase64"))
+            : "";
+        const append =
+          body &&
+          typeof body === "object" &&
+          Reflect.get(body, "append") === true;
+
+        if (!resolvedDir || !relativePath || !contentBase64) {
+          writeText(
+            res,
+            400,
+            "workspaceDir, exchangeDirName, relativePath, and contentBase64 are required",
+          );
+          return;
+        }
+
+        await mkdir(resolvedDir, { recursive: true });
+        const outputPath = resolvePathInsideXchange(resolvedDir, relativePath);
+        await mkdir(path.dirname(outputPath), { recursive: true });
+        const content = Buffer.from(contentBase64, "base64");
+
+        if (append) {
+          await appendFile(outputPath, content);
+        } else {
+          await writeFile(outputPath, content);
+        }
+
+        writeJson(res, 200, { path: outputPath });
+        return;
+      }
+
       if (url.pathname === "/xchange/list") {
         const resolvedDir = resolveXchangeDirFromBody(body);
         if (!resolvedDir) {
@@ -418,6 +534,28 @@ async function main(): Promise<void> {
 
         await rm(resolvedFilePath, { force: true });
         writeJson(res, 200, { deleted: true });
+        return;
+      }
+
+      if (url.pathname === "/workspace/read") {
+        const workspaceDir = resolveWorkspaceDirFromBody(body);
+        const filePath =
+          body &&
+          typeof body === "object" &&
+          typeof Reflect.get(body, "filePath") === "string"
+            ? String(Reflect.get(body, "filePath")).trim()
+            : "";
+
+        if (!workspaceDir || !filePath) {
+          writeText(res, 400, "workspaceDir and filePath are required");
+          return;
+        }
+
+        const resolvedFilePath = resolvePathInsideWorkspace(workspaceDir, filePath);
+        const content = await readFile(resolvedFilePath);
+        writeJson(res, 200, {
+          contentBase64: Buffer.from(content).toString("base64"),
+        });
         return;
       }
 

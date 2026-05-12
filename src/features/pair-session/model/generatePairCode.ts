@@ -54,6 +54,9 @@ export class PairSessionService {
         : existingSession?.cwd
           ? { cwd: existingSession.cwd }
           : {}),
+      ...(existingSession?.linkedSessionId
+        ? { linkedSessionId: existingSession.linkedSessionId }
+        : {}),
       ...(existingSession?.task ? { task: existingSession.task } : {}),
       ...(existingSession?.summary ? { summary: existingSession.summary } : {}),
       ...(existingSession?.files ? { files: existingSession.files } : {}),

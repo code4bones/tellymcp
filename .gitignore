@@ -7,3 +7,6 @@ node_modules
 .agents
 artifacts
 data
+tmux-proxy-go/telegram-human-tmux-proxy
+.mcp-xchange
+.telegram-human-mcp

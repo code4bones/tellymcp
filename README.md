@@ -23,13 +23,16 @@ Current tools:
 - `browser_fill`
 - `browser_press`
 - `browser_wait_for`
+- `browser_wait_for_url`
 - `browser_console`
 - `browser_errors`
 - `browser_network_failures`
+- `browser_clear_logs`
 - `browser_dom`
 - `browser_computed_style`
 - `browser_screenshot`
 - `browser_close`
+- `send_partner_note`
 
 ## What it does
 
@@ -98,6 +101,16 @@ Important variables:
 - `MCP_HTTP_BEARER_TOKEN` optional
 - `MCP_HTTP_ENABLE_DEBUG_ROUTES=false` enables HTTP `/sessions`
 - `MCP_HTTP_ENABLE_PRUNE_ROUTE=false` enables HTTP `POST /prune`
+- `DISTRIBUTED_MODE=client|gateway|both`
+- `GATEWAY_PUBLIC_URL` optional future relay URL for client mode
+- `GATEWAY_BIND_HOST`
+- `GATEWAY_BIND_PORT`
+- `GATEWAY_AUTH_TOKEN`
+- `GATEWAY_DATABASE_URL`
+- `GATEWAY_S3_ENDPOINT`
+- `GATEWAY_S3_BUCKET`
+- `GATEWAY_S3_ACCESS_KEY`
+- `GATEWAY_S3_SECRET_KEY`
 - `WEBAPP_ENABLED=false`
 - `WEBAPP_BASE_PATH=/webapp`
 - `WEBAPP_PUBLIC_URL=https://builder.undoo.ru/webapp` required for Telegram Mini App launcher
@@ -150,6 +163,27 @@ Debug/admin HTTP routes are disabled by default:
 - `/prune` requires `MCP_HTTP_ENABLE_PRUNE_ROUTE=true`
 
 If exposed outside localhost, also set `MCP_HTTP_BEARER_TOKEN`.
+
+## Distributed modes
+
+The service now has a role-oriented distributed scaffold:
+
+- `DISTRIBUTED_MODE=client`
+  - current default
+  - full local Telegram/MCP/tmux/browser flow
+  - collaboration currently uses the local linked-session backend
+- `DISTRIBUTED_MODE=gateway`
+  - enables `/gateway/*` HTTP surface
+  - intended future relay role for multi-developer / multi-bot setups
+- `DISTRIBUTED_MODE=both`
+  - exposes both local service behavior and gateway HTTP surface in one process
+
+Current implementation status:
+
+- gateway routes are scaffolded
+- `GET /gateway/healthz` works
+- relay delivery through Postgres/S3 is not implemented yet
+- current collaboration delivery still uses the local linked-session backend
 
 ## Mini App
 
@@ -207,13 +241,23 @@ Current browser tools:
 - `browser_fill`
 - `browser_press`
 - `browser_wait_for`
+- `browser_wait_for_url`
 - `browser_console`
 - `browser_errors`
 - `browser_network_failures`
+- `browser_clear_logs`
 - `browser_dom`
 - `browser_computed_style`
 - `browser_screenshot`
 - `browser_close`
+
+Browser target convention:
+
+- browser interaction tools support `ai_tag` in addition to `selector` and `text`
+- frontend code may annotate elements with:
+  - `data-drive-tag="save-button"`
+  - or `ai-tag="save-button"`
+- recommended convention is `data-drive-tag="..."` with an explicit value
 
 If `BROWSER_ADDRESS` is configured, `browser_open` may use either:
 
@@ -245,7 +289,9 @@ Current session menu behavior:
 
 - title is `Session: <name>`
 - primary actions are `Live`, `Content`, `Browser`, `Files`, and `Inbox`
-- maintenance actions are `Info`, `Rename`, `Unpair`, `Refresh`, `Back`
+- collaboration/maintenance actions are `Info`, `Rename`, `Link` or `Unlink`, `Unpair`, `Refresh`, `Back`
+- when a partner session is linked, the menu also shows a short teammate hint in the session text
+- when a partner is linked, the session menu also exposes `Partner`
 
 Current browser menu behavior:
 
@@ -256,6 +302,84 @@ File separation rules:
 
 - `Files` shows only files uploaded from Telegram
 - `Browser -> Screenshots` shows only files created by `browser_screenshot`
+
+Partner link behavior:
+
+- `Link` opens a list of other sessions visible to the same Telegram identity
+- choosing one creates a mutual partner link between the two sessions
+- once linked, the button becomes `Unlink`
+- this link is intended for backend/frontend or similar agent collaboration
+- linked agents should use `send_partner_note` for structured collaboration
+
+Partner menu behavior:
+
+- `Partner` opens a linked-session collaboration menu
+- available actions are:
+  - `Ask`
+  - `Share`
+  - `Reply`
+  - `Handoff`
+  - `Unlink`
+- the Telegram prompt format is:
+  - first line = short summary
+  - optional blank line
+  - remaining text = full message body
+- partner wake-up semantics:
+  - `TMUX_PARTNER_NUDGE_MESSAGE` is for collaboration notes, not for human Telegram inbox
+  - the receiving agent should read `.mcp-xchange/SHARE_INDEX.md` and the newest note first
+
+Linked-session collaboration contract:
+
+- `send_partner_note` writes one note per event into the partner workspace
+- collaborative notes live under `.mcp-xchange/shares/`
+- copied artifacts live under `.mcp-xchange/shares/files/<share_id>/`
+- `.mcp-xchange/SHARE_INDEX.md` acts as the append-only index of partner-facing notes
+- supported note kinds are:
+  - `share`
+  - `question`
+  - `reply`
+  - `request`
+  - `handoff`
+- useful partner-facing content usually includes:
+  - API summaries
+  - what changed
+  - current errors
+  - sample payloads
+  - relevant git changes from the agent workspace
+- do not send raw implementation source files as partner artifacts; prefer summaries, specs, payload examples, logs, screenshots, and Markdown notes
+- recommended mapping:
+  - `question` for "what APIs do you expose?", "what's new?", "send the error details"
+  - `reply` for direct answers, usually with `in_reply_to`
+  - `share` for one-way status updates
+  - `request` for explicit teammate actions
+  - `handoff` for transferring results or artifacts
+- before sending a partner note, the agent should call `get_session_context` and verify that `linked_session_id` exists
+
+Recommended share-note structure:
+
+```md
+---
+share_id: 2026-05-12T22-10-00Z-frontend-question-api
+kind: question
+from_session_id: frontend-session
+to_session_id: backend-session
+created_at: 2026-05-12T22:10:00Z
+requires_reply: true
+in_reply_to: null
+artifacts: []
+---
+
+# Summary
+Need an up-to-date backend API summary.
+
+# Message
+- what endpoints exist
+- what auth is required
+- what changed recently
+
+# Expected Reply
+Short Markdown summary plus spec or sample payload files when available.
+```
 
 Current content menu behavior:
 

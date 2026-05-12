@@ -1,5 +1,13 @@
 import { execFile } from "node:child_process";
-import { access, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  appendFile,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 
 export type TmuxRuntimeConfig = {
@@ -28,6 +36,54 @@ function sanitizeFileName(fileName: string): string {
     .trim();
 
   return normalized || "file.bin";
+}
+
+function sanitizeRelativeXchangePath(relativePath: string): string {
+  const normalized = relativePath
+    .split(/[\/\\]+/u)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0 && segment !== "." && segment !== "..")
+    .join("/");
+
+  if (!normalized) {
+    throw new Error("Relative exchange path is required.");
+  }
+
+  return normalized;
+}
+
+function resolvePathInsideRoot(rootDir: string, relativePath: string): string {
+  const safeRelativePath = sanitizeRelativeXchangePath(relativePath);
+  const resolvedPath = path.resolve(rootDir, safeRelativePath);
+  const relative = path.relative(rootDir, resolvedPath);
+
+  if (
+    relative.startsWith("..") ||
+    path.isAbsolute(relative) ||
+    relative.trim() === ""
+  ) {
+    throw new Error("Resolved path is outside the exchange directory.");
+  }
+
+  return resolvedPath;
+}
+
+function resolvePathInsideWorkspace(workspaceDir: string, filePath: string): string {
+  const resolvedWorkspaceDir = path.resolve(workspaceDir);
+  const resolvedFilePath = path.isAbsolute(filePath)
+    ? path.resolve(filePath)
+    : path.resolve(resolvedWorkspaceDir, filePath);
+  const relative = path.relative(resolvedWorkspaceDir, resolvedFilePath);
+
+  if (
+    relative.startsWith("..") ||
+    path.isAbsolute(relative) ||
+    relative.trim() === ""
+  ) {
+    throw new Error("File path is outside the workspace directory.");
+  }
+
+  return resolvedFilePath;
 }
 
 async function allocateAvailableFilePath(
@@ -177,6 +233,44 @@ export async function writeXchangeFile(
   return outputPath;
 }
 
+export async function writeXchangeRelativeFile(
+  config: TmuxRuntimeConfig,
+  workspaceDir: string,
+  exchangeDirName: string,
+  relativePath: string,
+  content: Uint8Array,
+  options?: {
+    append?: boolean;
+  },
+): Promise<string> {
+  if (config.proxyUrl) {
+    const response = await proxyJsonRequest<{ path: string }>(
+      config,
+      "/xchange/write-relative",
+      {
+        workspaceDir,
+        exchangeDirName,
+        relativePath,
+        contentBase64: Buffer.from(content).toString("base64"),
+        append: options?.append === true,
+      },
+    );
+    return response.path;
+  }
+
+  const dir = await ensureXchangeDir(config, workspaceDir, exchangeDirName);
+  const outputPath = resolvePathInsideRoot(dir, relativePath);
+  await mkdir(path.dirname(outputPath), { recursive: true });
+
+  if (options?.append) {
+    await appendFile(outputPath, content);
+  } else {
+    await writeFile(outputPath, content);
+  }
+
+  return outputPath;
+}
+
 export async function listXchangeFiles(
   config: TmuxRuntimeConfig,
   workspaceDir: string,
@@ -234,6 +328,27 @@ export async function deleteXchangeFile(
 
   await rm(resolvedFilePath, { force: true });
   return true;
+}
+
+export async function readWorkspaceFile(
+  config: TmuxRuntimeConfig,
+  workspaceDir: string,
+  filePath: string,
+): Promise<Uint8Array> {
+  if (config.proxyUrl) {
+    const response = await proxyJsonRequest<{ contentBase64: string }>(
+      config,
+      "/workspace/read",
+      {
+        workspaceDir,
+        filePath,
+      },
+    );
+    return Buffer.from(response.contentBase64, "base64");
+  }
+
+  const resolvedFilePath = resolvePathInsideWorkspace(workspaceDir, filePath);
+  return readFile(resolvedFilePath);
 }
 
 export function isTmuxUnavailableError(error: unknown): boolean {

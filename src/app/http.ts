@@ -193,6 +193,16 @@ async function main(): Promise<void> {
       return;
     }
 
+    if (
+      await runtime.gatewayHttpService.handleRequest(
+        req,
+        res,
+        requestUrl.pathname,
+      )
+    ) {
+      return;
+    }
+
     if (runtime.config.webapp.enabled) {
       if (
         requestUrl.pathname === webAppBasePath ||
@@ -771,6 +781,16 @@ async function main(): Promise<void> {
           void closeEntry("transport");
         };
         transport.onerror = (error) => {
+          if (isDuplicateSseStreamError(error)) {
+            runtime.logger.warn(
+              "Duplicate MCP SSE stream reported by transport",
+              {
+                sessionId: knownSessionId,
+              },
+            );
+            return;
+          }
+
           runtime.logger.error("MCP HTTP transport error", {
             sessionId: knownSessionId,
             error: error.stack ?? error.message,

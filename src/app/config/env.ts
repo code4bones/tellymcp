@@ -47,6 +47,16 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((value) => value === "true"),
+  DISTRIBUTED_MODE: z.enum(["client", "gateway", "both"]).default("client"),
+  GATEWAY_PUBLIC_URL: z.string().url().optional(),
+  GATEWAY_BIND_HOST: z.string().min(1).default("127.0.0.1"),
+  GATEWAY_BIND_PORT: z.coerce.number().int().positive().default(8790),
+  GATEWAY_AUTH_TOKEN: z.string().min(1).optional(),
+  GATEWAY_DATABASE_URL: z.string().min(1).optional(),
+  GATEWAY_S3_ENDPOINT: z.string().min(1).optional(),
+  GATEWAY_S3_BUCKET: z.string().min(1).optional(),
+  GATEWAY_S3_ACCESS_KEY: z.string().min(1).optional(),
+  GATEWAY_S3_SECRET_KEY: z.string().min(1).optional(),
   WEBAPP_ENABLED: z
     .string()
     .optional()
@@ -77,6 +87,10 @@ const envSchema = z.object({
   TMUX_NUDGE_DEBOUNCE_SECONDS: z.coerce.number().int().positive().default(10),
   TMUX_NUDGE_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(30),
   TMUX_NUDGE_MESSAGE: z.string().min(1).default("проверь inbox"),
+  TMUX_PARTNER_NUDGE_MESSAGE: z
+    .string()
+    .min(1)
+    .default("не inbox: прочитай SHARE_INDEX.md и partner note"),
   TMUX_CAPTURE_MODE: z.enum(["visible", "lines"]).default("visible"),
   TMUX_CAPTURE_LINES: z.coerce.number().int().positive().default(300),
   BROWSER_ENABLED: z
@@ -142,6 +156,18 @@ export type AppConfig = {
     enableDebugRoutes: boolean;
     enablePruneRoute: boolean;
   };
+  distributed: {
+    mode: "client" | "gateway" | "both";
+    gatewayPublicUrl?: string;
+    gatewayBindHost: string;
+    gatewayBindPort: number;
+    gatewayAuthToken?: string;
+    gatewayDatabaseUrl?: string;
+    gatewayS3Endpoint?: string;
+    gatewayS3Bucket?: string;
+    gatewayS3AccessKey?: string;
+    gatewayS3SecretKey?: string;
+  };
   webapp: {
     enabled: boolean;
     basePath: string;
@@ -163,6 +189,7 @@ export type AppConfig = {
     nudgeDebounceSeconds: number;
     nudgeCooldownSeconds: number;
     nudgeMessage: string;
+    partnerNudgeMessage: string;
     captureMode: "visible" | "lines";
     captureLines: number;
   };
@@ -249,6 +276,32 @@ export function loadConfig(): AppConfig {
       enableDebugRoutes: parsed.MCP_HTTP_ENABLE_DEBUG_ROUTES,
       enablePruneRoute: parsed.MCP_HTTP_ENABLE_PRUNE_ROUTE,
     },
+    distributed: {
+      mode: parsed.DISTRIBUTED_MODE,
+      ...(parsed.GATEWAY_PUBLIC_URL
+        ? { gatewayPublicUrl: parsed.GATEWAY_PUBLIC_URL }
+        : {}),
+      gatewayBindHost: parsed.GATEWAY_BIND_HOST,
+      gatewayBindPort: parsed.GATEWAY_BIND_PORT,
+      ...(parsed.GATEWAY_AUTH_TOKEN
+        ? { gatewayAuthToken: parsed.GATEWAY_AUTH_TOKEN }
+        : {}),
+      ...(parsed.GATEWAY_DATABASE_URL
+        ? { gatewayDatabaseUrl: parsed.GATEWAY_DATABASE_URL }
+        : {}),
+      ...(parsed.GATEWAY_S3_ENDPOINT
+        ? { gatewayS3Endpoint: parsed.GATEWAY_S3_ENDPOINT }
+        : {}),
+      ...(parsed.GATEWAY_S3_BUCKET
+        ? { gatewayS3Bucket: parsed.GATEWAY_S3_BUCKET }
+        : {}),
+      ...(parsed.GATEWAY_S3_ACCESS_KEY
+        ? { gatewayS3AccessKey: parsed.GATEWAY_S3_ACCESS_KEY }
+        : {}),
+      ...(parsed.GATEWAY_S3_SECRET_KEY
+        ? { gatewayS3SecretKey: parsed.GATEWAY_S3_SECRET_KEY }
+        : {}),
+    },
     webapp: {
       enabled: parsed.WEBAPP_ENABLED,
       basePath: parsed.WEBAPP_BASE_PATH,
@@ -270,6 +323,7 @@ export function loadConfig(): AppConfig {
       nudgeDebounceSeconds: parsed.TMUX_NUDGE_DEBOUNCE_SECONDS,
       nudgeCooldownSeconds: parsed.TMUX_NUDGE_COOLDOWN_SECONDS,
       nudgeMessage: parsed.TMUX_NUDGE_MESSAGE,
+      partnerNudgeMessage: parsed.TMUX_PARTNER_NUDGE_MESSAGE,
       captureMode: parsed.TMUX_CAPTURE_MODE,
       captureLines: parsed.TMUX_CAPTURE_LINES,
     },

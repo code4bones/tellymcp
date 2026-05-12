@@ -46,6 +46,9 @@ export class SessionContextService {
             ? { label: existing.label }
             : {}),
       ...(existing?.cwd ? { cwd: existing.cwd } : {}),
+      ...(existing?.linkedSessionId
+        ? { linkedSessionId: existing.linkedSessionId }
+        : {}),
       ...(input.task
         ? { task: redactSecrets(input.task) }
         : existing?.task
@@ -118,6 +121,9 @@ export class SessionContextService {
       sessionId: resolved.sessionId,
       label,
       ...(existing?.cwd ? { cwd: existing.cwd } : {}),
+      ...(existing?.linkedSessionId
+        ? { linkedSessionId: existing.linkedSessionId }
+        : {}),
       ...(existing?.task ? { task: existing.task } : {}),
       ...(existing?.summary ? { summary: existing.summary } : {}),
       ...(existing?.files ? { files: existing.files } : {}),
@@ -163,6 +169,9 @@ export class SessionContextService {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
     const session = await this.sessionStore.getSession(resolved.sessionId);
     const binding = await this.bindingStore.getBinding(resolved.sessionId);
+    const linkedSession = session?.linkedSessionId
+      ? await this.sessionStore.getSession(session.linkedSessionId)
+      : null;
 
     this.logger.debug("Session context requested", {
       sessionId: resolved.sessionId,
@@ -189,6 +198,12 @@ export class SessionContextService {
             context: {
               ...(session.label ? { session_label: session.label } : {}),
               ...(session.cwd ? { cwd: session.cwd } : {}),
+              ...(session.linkedSessionId
+                ? { linked_session_id: session.linkedSessionId }
+                : {}),
+              ...(linkedSession?.label
+                ? { linked_session_label: linkedSession.label }
+                : {}),
               ...(session.task ? { task: session.task } : {}),
               ...(session.summary ? { summary: session.summary } : {}),
               ...(session.files ? { files: session.files } : {}),
@@ -283,6 +298,9 @@ export class SessionContextService {
           ? { label: redactSecrets(resolved.sessionLabel) }
           : {}),
       ...(existing?.cwd ? { cwd: existing.cwd } : {}),
+      ...(existing?.linkedSessionId
+        ? { linkedSessionId: existing.linkedSessionId }
+        : {}),
       ...(existing?.task ? { task: existing.task } : {}),
       ...(existing?.summary ? { summary: existing.summary } : {}),
       ...(existing?.files ? { files: existing.files } : {}),

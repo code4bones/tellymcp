@@ -10,13 +10,19 @@ Browser tools:
 - `browser_fill`
 - `browser_press`
 - `browser_wait_for`
+- `browser_wait_for_url`
 - `browser_console`
 - `browser_errors`
 - `browser_network_failures`
+- `browser_clear_logs`
 - `browser_dom`
 - `browser_computed_style`
 - `browser_screenshot`
 - `browser_close`
+
+Collaboration tools:
+
+- `send_partner_note`
 
 ## `create_session_pair_code`
 
@@ -264,6 +270,193 @@ Output:
 - `session_id`
 - `cleared_pairing`
 
+## `send_partner_note`
+
+Purpose:
+
+- Send a structured collaboration note to the linked partner session.
+- Write a note file into the partner workspace under `.mcp-xchange/shares/`.
+- Append a line to the partner `.mcp-xchange/SHARE_INDEX.md`.
+- Optionally copy listed artifacts from the current workspace into the partner `.mcp-xchange/shares/files/<share_id>/`.
+- Create an inbox message for the partner agent and trigger the normal tmux nudge path.
+
+Input:
+
+- `session_id?`
+- `kind`
+  - `share`
+  - `question`
+  - `reply`
+  - `request`
+  - `handoff`
+- `summary`
+- `message`
+- `expected_reply?`
+- `requires_reply?`
+- `in_reply_to?`
+- `artifacts?`
+
+Output:
+
+- `session_id`
+- `partner_session_id`
+- `kind`
+- `share_id`
+- `note_path`
+- `share_index_path`
+- `copied_artifacts`
+- `inbox_message_id`
+- `requires_reply`
+
+Required agent practice:
+
+- use this tool whenever the current session is linked to a partner and you need to communicate project-relevant information
+- prefer structured note kinds over ad-hoc Telegram chat wording
+- if the user asks things like:
+  - "ask backend what APIs it has"
+  - "tell frontend what changed"
+  - "send the error to your teammate"
+  - "tell the other agent what's new"
+  then the correct path is `send_partner_note`
+
+How to find the partner correctly:
+
+- do not guess the partner session from labels, menu text, or memory
+- first call `get_session_context`
+- inspect:
+  - `context.linked_session_id`
+  - `context.linked_session_label`
+- only if `linked_session_id` exists should you call `send_partner_note`
+- if `linked_session_id` is missing:
+  - do not retry blindly
+  - tell the user the session is not linked yet
+  - ask them to link sessions through Telegram `Link`
+
+Minimal safe sequence:
+
+1. Call `get_session_context`.
+2. Verify that `linked_session_id` is present.
+3. Decide the correct note kind: `question`, `reply`, `share`, `request`, or `handoff`.
+4. Call `send_partner_note`.
+
+How the receiving agent must react:
+
+- partner collaboration wake-ups are not ordinary Telegram inbox wake-ups
+- if the tmux nudge says things like:
+  - `прочитай SHARE_INDEX.md`
+  - `partner note`
+  - `partner notes`
+  then do not start with `get_telegram_inbox`
+- instead:
+  1. open `.mcp-xchange/SHARE_INDEX.md`
+  2. find the newest partner note
+  3. open that note file
+  4. read any copied artifacts referenced there
+- only use `get_telegram_inbox` for the normal Telegram human-message path
+- do not confuse partner collaboration notes with human Telegram inbox traffic
+
+What to do after reading the note:
+
+- do not stop at summarizing the note back to the user
+- choose behavior from `kind`
+
+Required behavior by note kind:
+
+- `question`
+  - answer the partner's question
+  - if needed, inspect your workspace first
+  - then send a `reply`
+- `reply`
+  - use the answer in your current work
+  - continue execution
+- `share`
+  - update your assumptions/context
+  - continue execution if the update affects your task
+- `request`
+  - treat it as an actionable task from the partner
+  - start doing the requested work unless it is clearly impossible or blocked
+  - when done, respond with `reply` or `handoff`
+- `handoff`
+  - treat it as material to consume and continue from
+  - if the handoff asks for a concrete follow-up, start that work
+
+Default rule:
+
+- if the partner note contains a concrete ask, task, or follow-up, begin executing it
+- do not merely report "I read the note" unless the user explicitly asked only for inspection
+
+Recommended mapping:
+
+- `question`
+  - ask for API summaries
+  - ask "what's new?"
+  - ask for error details
+- `reply`
+  - answer a previous `question`
+  - set `in_reply_to`
+- `share`
+  - communicate what changed without asking for action
+- `request`
+  - ask the partner to do or verify something
+- `handoff`
+  - transfer a result, contract, artifact, or completion note
+
+Note contract:
+
+- the service writes one note per message to:
+  - `.mcp-xchange/shares/<share_id>.md`
+- the partner index is append-only:
+  - `.mcp-xchange/SHARE_INDEX.md`
+- artifacts are copied into:
+  - `.mcp-xchange/shares/files/<share_id>/...`
+
+What the source agent should include:
+
+- `summary`
+  - one-line high-signal description
+- `message`
+  - the actual explanation, question, request, or handoff content
+- `expected_reply`
+  - when you need a concrete answer back
+- `artifacts`
+  - paths to files from the current workspace that should be copied to the partner
+
+Artifact rule:
+
+- do not attach raw source files to partner notes
+- this includes files such as:
+  - `.ts`, `.tsx`, `.js`, `.jsx`
+  - `.go`, `.py`, `.java`, `.rs`, `.php`
+  - `.html`, `.css`, `.scss`, `.vue`, `.svelte`
+  - shell scripts and similar source-like files
+- instead send:
+  - API summaries
+  - endpoint signatures
+  - OpenAPI/spec files
+  - sample payloads
+  - logs
+  - screenshots
+  - Markdown notes
+
+If a source file seems necessary, summarize the relevant contract in the note instead of copying the full implementation file.
+
+What to communicate:
+
+- API summaries and endpoint changes
+- what changed since the last handoff
+- current errors and how to reproduce them
+- payload examples and specs
+- relevant git context from the current workspace
+  - changed files
+  - branch-specific behavior
+  - important diffs or migration notes
+
+If you mention git changes:
+
+- summarize them in `message`
+- attach the concrete files only when the partner really needs them
+- do not assume the partner can infer your branch state without the note
+
 ## `notify_telegram`
 
 Purpose:
@@ -441,6 +634,7 @@ Purpose:
 Input:
 
 - `session_id?`
+- `ai_tag?`
 - `selector?`
 - `text?`
 - `exact?`
@@ -450,6 +644,7 @@ Output:
 
 - `session_id`
 - `clicked`
+- `ai_tag?`
 - `selector?`
 - `text?`
 - `url`
@@ -464,6 +659,7 @@ Purpose:
 Input:
 
 - `session_id?`
+- `ai_tag?`
 - `selector?`
 - `text?`
 - `exact?`
@@ -474,6 +670,7 @@ Output:
 
 - `session_id`
 - `filled`
+- `ai_tag?`
 - `selector?`
 - `text?`
 - `value_length`
@@ -489,6 +686,7 @@ Purpose:
 Input:
 
 - `session_id?`
+- `ai_tag?`
 - `selector?`
 - `text?`
 - `exact?`
@@ -500,6 +698,7 @@ Output:
 - `session_id`
 - `pressed`
 - `key`
+- `ai_tag?`
 - `selector?`
 - `text?`
 - `url`
@@ -514,6 +713,7 @@ Purpose:
 Input:
 
 - `session_id?`
+- `ai_tag?`
 - `selector?`
 - `text?`
 - `exact?`
@@ -525,6 +725,7 @@ Output:
 - `session_id`
 - `waited`
 - `state`
+- `ai_tag?`
 - `selector?`
 - `text?`
 - `url`
@@ -532,6 +733,11 @@ Output:
 
 Browser target rules for `browser_click`, `browser_fill`, `browser_press`, `browser_wait_for`:
 
+- prefer `ai_tag` first when the frontend provides it
+- supported markup:
+  - `data-drive-tag="save-button"`
+  - `ai-tag="save-button"`
+- recommended usage is an attribute with a value, not a bare presence-only attribute
 - prefer `selector` when you have a stable target:
   - `#id`
   - `.class`
@@ -539,6 +745,29 @@ Browser target rules for `browser_click`, `browser_fill`, `browser_press`, `brow
   - `div[data-testid="save"]`
 - use `text` only when there is no reliable selector
 - do not mix ambiguous hashed CSS classes with fuzzy text guessing when a stable selector exists
+
+## `browser_wait_for_url`
+
+Purpose:
+
+- wait until the current session page navigates to an exact URL or to a URL containing a fragment
+
+Input:
+
+- `session_id?`
+- `url?`
+- `url_contains?`
+- `timeout_ms?`
+
+Output:
+
+- `session_id`
+- `waited`
+- `matched`
+- `url?`
+- `url_contains?`
+- `current_url`
+- `title?`
 
 ## `browser_errors`
 
@@ -573,6 +802,24 @@ Output:
 - `session_id`
 - `total`
 - `failures`
+
+## `browser_clear_logs`
+
+Purpose:
+
+- clear accumulated browser console, runtime error, and network failure buffers for the current session
+
+Input:
+
+- `session_id?`
+
+Output:
+
+- `session_id`
+- `cleared`
+- `console_messages_cleared`
+- `page_errors_cleared`
+- `network_failures_cleared`
 
 ## `browser_dom`
 
@@ -676,9 +923,34 @@ Telegram UI summary:
 - `/menu` is the only top-level Telegram command for session navigation
 - root menu shows one session button per row
 - root menu also shows tmux bridge status
-- session menu uses `Live`, `Content`, `Browser`, `Files`, `Inbox`, `Info`, `Rename`, `Unpair`, `Refresh`, `Back`
+- session menu uses `Live`, `Content`, `Browser`, `Files`, `Inbox`, `Info`, `Partner`, `Rename`, `Link` or `Unlink`, `Unpair`, `Refresh`, `Back`
 - `Files` lists Telegram-uploaded files only
 - `Browser -> Screenshots` lists screenshots created by `browser_screenshot`
+- `Link` creates a mutual partner relationship between two sessions visible to the same Telegram identity
+- `Partner` is a Telegram UI wrapper over `send_partner_note`
+- partner-note prompt format is:
+  - first line = summary
+  - optional blank line
+  - remaining text = full message body
+- partner-note wake-up means:
+  - read `.mcp-xchange/SHARE_INDEX.md`
+  - then read the newest partner note
+  - not `get_telegram_inbox`
+
+Distributed mode scaffold:
+
+- `DISTRIBUTED_MODE=client|gateway|both`
+- current collaboration delivery still uses the local linked-session backend
+- `/gateway/healthz` is available when mode is `gateway` or `both`
+- remote relay delivery through shared DB/S3 is planned but not implemented yet
+- once linked, agents should use `.mcp-xchange/SHARE_INDEX.md` plus separate files in `.mcp-xchange/shares/` for collaboration
+- recommended collaboration note kinds are:
+  - `share`
+  - `question`
+  - `reply`
+  - `request`
+  - `handoff`
+- useful collaboration content includes API summaries, what changed, current errors, sample payloads, and relevant git changes from the agent workspace
 - `Tools` contains `Broadcast` and `Prune all`
 
 Current remaining operational gaps are tracked in [docs/TODO.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/docs/TODO.md).

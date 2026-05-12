@@ -1,5 +1,13 @@
 import * as z from "zod/v4";
 
+const partnerNoteKindSchema = z.enum([
+  "share",
+  "question",
+  "reply",
+  "request",
+  "handoff",
+]);
+
 export const askUserTelegramInputSchema = z.object({
   question: z.string().trim().min(1),
   task: z.string().trim().min(1).optional(),
@@ -260,6 +268,7 @@ export const browserReloadOutputSchema = z.object({
 
 const browserLocatorInputShape = {
   session_id: z.string().trim().min(1).optional(),
+  ai_tag: z.string().trim().min(1).optional(),
   selector: z.string().trim().min(1).optional(),
   text: z.string().trim().min(1).optional(),
   exact: z.boolean().optional(),
@@ -268,14 +277,15 @@ const browserLocatorInputShape = {
 
 export const browserClickInputSchema = z
   .object(browserLocatorInputShape)
-  .refine((input) => Boolean(input.selector || input.text), {
-    message: "Provide selector or text.",
-    path: ["selector"],
+  .refine((input) => Boolean(input.ai_tag || input.selector || input.text), {
+    message: "Provide ai_tag, selector, or text.",
+    path: ["ai_tag"],
   });
 
 export const browserClickOutputSchema = z.object({
   session_id: z.string(),
   clicked: z.boolean(),
+  ai_tag: z.string().optional(),
   selector: z.string().optional(),
   text: z.string().optional(),
   url: z.string().url(),
@@ -287,14 +297,15 @@ export const browserFillInputSchema = z
     ...browserLocatorInputShape,
     value: z.string(),
   })
-  .refine((input) => Boolean(input.selector || input.text), {
-    message: "Provide selector or text.",
-    path: ["selector"],
+  .refine((input) => Boolean(input.ai_tag || input.selector || input.text), {
+    message: "Provide ai_tag, selector, or text.",
+    path: ["ai_tag"],
   });
 
 export const browserFillOutputSchema = z.object({
   session_id: z.string(),
   filled: z.boolean(),
+  ai_tag: z.string().optional(),
   selector: z.string().optional(),
   text: z.string().optional(),
   value_length: z.number().int().nonnegative(),
@@ -311,6 +322,7 @@ export const browserPressOutputSchema = z.object({
   session_id: z.string(),
   pressed: z.boolean(),
   key: z.string(),
+  ai_tag: z.string().optional(),
   selector: z.string().optional(),
   text: z.string().optional(),
   url: z.string().url(),
@@ -322,18 +334,41 @@ export const browserWaitForInputSchema = z
     ...browserLocatorInputShape,
     state: z.enum(["attached", "detached", "visible", "hidden"]).optional(),
   })
-  .refine((input) => Boolean(input.selector || input.text), {
-    message: "Provide selector or text.",
-    path: ["selector"],
+  .refine((input) => Boolean(input.ai_tag || input.selector || input.text), {
+    message: "Provide ai_tag, selector, or text.",
+    path: ["ai_tag"],
   });
 
 export const browserWaitForOutputSchema = z.object({
   session_id: z.string(),
   waited: z.boolean(),
   state: z.enum(["attached", "detached", "visible", "hidden"]),
+  ai_tag: z.string().optional(),
   selector: z.string().optional(),
   text: z.string().optional(),
   url: z.string().url(),
+  title: z.string().optional(),
+});
+
+export const browserWaitForUrlInputSchema = z
+  .object({
+    session_id: z.string().trim().min(1).optional(),
+    url: z.string().trim().min(1).optional(),
+    url_contains: z.string().trim().min(1).optional(),
+    timeout_ms: z.number().int().positive().max(120000).optional(),
+  })
+  .refine((input) => Boolean(input.url || input.url_contains), {
+    message: "Provide url or url_contains.",
+    path: ["url"],
+  });
+
+export const browserWaitForUrlOutputSchema = z.object({
+  session_id: z.string(),
+  waited: z.boolean(),
+  matched: z.enum(["url", "url_contains"]),
+  url: z.string().optional(),
+  url_contains: z.string().optional(),
+  current_url: z.string().url(),
   title: z.string().optional(),
 });
 
@@ -390,6 +425,18 @@ export const browserNetworkFailuresOutputSchema = z.object({
       timestamp: z.string(),
     }),
   ),
+});
+
+export const browserClearLogsInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+});
+
+export const browserClearLogsOutputSchema = z.object({
+  session_id: z.string(),
+  cleared: z.boolean(),
+  console_messages_cleared: z.number().int().nonnegative(),
+  page_errors_cleared: z.number().int().nonnegative(),
+  network_failures_cleared: z.number().int().nonnegative(),
 });
 
 export const browserDomInputSchema = z.object({
@@ -461,4 +508,27 @@ export const browserCloseInputSchema = z.object({
 export const browserCloseOutputSchema = z.object({
   session_id: z.string(),
   closed: z.boolean(),
+});
+
+export const sendPartnerNoteInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  kind: partnerNoteKindSchema,
+  summary: z.string().trim().min(1),
+  message: z.string().trim().min(1),
+  expected_reply: z.string().trim().min(1).optional(),
+  requires_reply: z.boolean().optional(),
+  in_reply_to: z.string().trim().min(1).optional(),
+  artifacts: z.array(z.string().trim().min(1)).optional(),
+});
+
+export const sendPartnerNoteOutputSchema = z.object({
+  session_id: z.string(),
+  partner_session_id: z.string(),
+  kind: partnerNoteKindSchema,
+  share_id: z.string(),
+  note_path: z.string(),
+  share_index_path: z.string(),
+  copied_artifacts: z.array(z.string()),
+  inbox_message_id: z.string(),
+  requires_reply: z.boolean(),
 });

@@ -6,6 +6,7 @@ import type {
 import type {
   TelegramInboxMessage,
   TelegramMenuPayloadRecord,
+  TelegramXchangeFileMeta,
 } from "../../../entities/inbox/model/types.js";
 import type {
   PendingRequestRecord,
@@ -74,6 +75,15 @@ export interface TelegramMenuPayloadStore {
     ttlSeconds: number,
   ): Promise<void>;
   getMenuPayload(key: string): Promise<TelegramMenuPayloadRecord | null>;
+}
+
+export interface TelegramXchangeFileMetaStore {
+  setXchangeFileMeta(meta: TelegramXchangeFileMeta): Promise<void>;
+  getXchangeFileMeta(
+    sessionId: string,
+    filePath: string,
+  ): Promise<TelegramXchangeFileMeta | null>;
+  deleteXchangeFileMeta(sessionId: string, filePath: string): Promise<boolean>;
 }
 
 export interface MaintenanceStore {

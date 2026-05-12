@@ -71,6 +71,9 @@ export class InboxService {
         telegram_user_id: message.telegramUserId,
         telegram_message_id: message.sourceTelegramMessageId,
         text: message.text,
+        ...(message.attachments?.length
+          ? { attachments: message.attachments }
+          : {}),
         received_at: message.receivedAt,
       })),
     };

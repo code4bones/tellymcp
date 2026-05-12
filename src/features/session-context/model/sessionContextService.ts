@@ -45,6 +45,7 @@ export class SessionContextService {
           : existing?.label
             ? { label: existing.label }
             : {}),
+      ...(existing?.cwd ? { cwd: existing.cwd } : {}),
       ...(input.task
         ? { task: redactSecrets(input.task) }
         : existing?.task
@@ -116,6 +117,7 @@ export class SessionContextService {
     await this.sessionStore.setSession({
       sessionId: resolved.sessionId,
       label,
+      ...(existing?.cwd ? { cwd: existing.cwd } : {}),
       ...(existing?.task ? { task: existing.task } : {}),
       ...(existing?.summary ? { summary: existing.summary } : {}),
       ...(existing?.files ? { files: existing.files } : {}),
@@ -186,6 +188,7 @@ export class SessionContextService {
         ? {
             context: {
               ...(session.label ? { session_label: session.label } : {}),
+              ...(session.cwd ? { cwd: session.cwd } : {}),
               ...(session.task ? { task: session.task } : {}),
               ...(session.summary ? { summary: session.summary } : {}),
               ...(session.files ? { files: session.files } : {}),
@@ -279,6 +282,7 @@ export class SessionContextService {
         : resolved.sessionLabel
           ? { label: redactSecrets(resolved.sessionLabel) }
           : {}),
+      ...(existing?.cwd ? { cwd: existing.cwd } : {}),
       ...(existing?.task ? { task: existing.task } : {}),
       ...(existing?.summary ? { summary: existing.summary } : {}),
       ...(existing?.files ? { files: existing.files } : {}),

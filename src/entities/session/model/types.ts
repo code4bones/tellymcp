@@ -1,6 +1,7 @@
 export type SessionContext = {
   sessionId: string;
   label?: string | undefined;
+  cwd?: string | undefined;
   task?: string | undefined;
   summary?: string | undefined;
   files?: string[] | undefined;
@@ -56,6 +57,7 @@ export type GetSessionContextOutput = {
   status_message: string;
   context?: {
     session_label?: string | undefined;
+    cwd?: string | undefined;
     task?: string | undefined;
     summary?: string | undefined;
     files?: string[] | undefined;

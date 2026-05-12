@@ -17,6 +17,19 @@ Current tools:
 - `get_telegram_inbox`
 - `delete_telegram_inbox_message`
 - `ask_user_telegram`
+- `browser_open`
+- `browser_reload`
+- `browser_click`
+- `browser_fill`
+- `browser_press`
+- `browser_wait_for`
+- `browser_console`
+- `browser_errors`
+- `browser_network_failures`
+- `browser_dom`
+- `browser_computed_style`
+- `browser_screenshot`
+- `browser_close`
 
 ## What it does
 
@@ -24,12 +37,14 @@ Flow:
 
 1. The MCP client creates or updates a session context.
 2. The MCP client creates a short one-time 3-digit session pairing code.
+   It should also pass the agent `cwd` when available.
 3. The human user links that session in Telegram with `/start <code>` or `/link <code>`.
 4. After pairing, Telegram shows an inline menu for session switching, inbox, content export, live tmux view, and maintenance actions. `/menu` opens the root switcher.
 5. The MCP client calls `ask_user_telegram` with the linked `session_id`.
 6. The server sends a redacted Telegram message and waits for the answer.
 7. The answer is returned as structured MCP tool output.
 8. Unsolicited Telegram messages are stored in a per-session inbox for later polling by the agent.
+9. If the Telegram message contains a photo or document, the file is downloaded into `.mcp-xchange/` and exposed to the agent through the inbox item.
 
 ## Architecture
 
@@ -100,6 +115,16 @@ Important variables:
 - `TMUX_NUDGE_MESSAGE`
 - `LOG_LEVEL`
 - `LOG_FILE_PATH`
+- `BROWSER_ENABLED=true`
+- `BROWSER_HEADLESS=false` for local dev visibility, `true` for Docker/headless usage
+- `BROWSER_DEVTOOLS=false`
+- `BROWSER_ADDRESS=http://localhost:5173` optional default base URL for the dev server
+- `BROWSER_TIMEOUT_MS=20000`
+- `BROWSER_MAX_EVENTS=200`
+- `BROWSER_WAIT_UNTIL=load`
+- `BROWSER_EXECUTABLE_PATH` optional explicit browser binary path
+- `BROWSER_CHANNEL=chrome|chromium|msedge` optional system browser channel
+- `BROWSER_SLOW_MO_MS=0`
 
 Logs are written in two places at the same time:
 
@@ -147,6 +172,61 @@ The Mini App:
 
 `WEBAPP_VISIBLE_SCREENS` controls how much content the live viewport captures relative to the visible tmux height. The default `2` means about two visible screens of content.
 
+## Browser feedback
+
+The service can also launch an internal Playwright runtime and keep one isolated browser context per `session_id`.
+
+Current browser model:
+
+- one shared browser process
+- one isolated `BrowserContext + Page` per MCP session
+- events are captured per session:
+  - console messages
+  - page runtime errors
+  - failed or HTTP-error network requests
+- screenshots are written into the same `.mcp-xchange` flow as Telegram file exchange
+
+Recommended local dev settings:
+
+- `BROWSER_ENABLED=true`
+- `BROWSER_HEADLESS=false`
+- `BROWSER_ADDRESS=http://localhost:5173`
+- start your SPA dev server on `0.0.0.0:5173`
+- open it through `browser_open`
+
+Recommended Docker settings:
+
+- `BROWSER_HEADLESS=true`
+- target the host dev server through `http://host.docker.internal:3000`
+
+Current browser tools:
+
+- `browser_open`
+- `browser_reload`
+- `browser_click`
+- `browser_fill`
+- `browser_press`
+- `browser_wait_for`
+- `browser_console`
+- `browser_errors`
+- `browser_network_failures`
+- `browser_dom`
+- `browser_computed_style`
+- `browser_screenshot`
+- `browser_close`
+
+If `BROWSER_ADDRESS` is configured, `browser_open` may use either:
+
+- a full URL like `http://localhost:5173/settings`
+- or a relative path like `/settings`
+
+`browser_screenshot` returns:
+
+- `file_path` full path to the written screenshot file
+- `workspace_dir` the resolved workspace root for that session
+- `exchange_dir` the resolved `.mcp-xchange` directory used for the write
+- `telegram_message_id` when `send_to_telegram=true`
+
 ## Telegram UI
 
 The Telegram bot exposes one root entrypoint:
@@ -164,8 +244,18 @@ Current root menu behavior:
 Current session menu behavior:
 
 - title is `Session: <name>`
-- primary actions are `Live`, `Content`, and `Inbox`
+- primary actions are `Live`, `Content`, `Browser`, `Files`, and `Inbox`
 - maintenance actions are `Info`, `Rename`, `Unpair`, `Refresh`, `Back`
+
+Current browser menu behavior:
+
+- `Screenshots`
+- browser screenshots are separated from ordinary uploaded files
+
+File separation rules:
+
+- `Files` shows only files uploaded from Telegram
+- `Browser -> Screenshots` shows only files created by `browser_screenshot`
 
 Current content menu behavior:
 
@@ -180,6 +270,27 @@ Current content menu behavior:
 - `Prune all`
 
 `Broadcast` uses a one-shot prompt. After a successful broadcast, only that prompt is deleted. Cancel returns to `Tools` without destroying the existing menu message.
+
+## Telegram file exchange
+
+Ordinary Telegram messages may include:
+
+- text only
+- photo with optional caption
+- document with optional caption
+
+When a photo or document arrives for the active session:
+
+- the file is downloaded into `MCP_XCHANGE_DIR`, default `.mcp-xchange`, under the paired agent workspace
+- files are written directly into that exchange directory with safe generated names
+- the upload itself does not wake the agent
+- the file appears in the `Files` menu for that session
+- `Передать агенту` creates the inbox item that tells the agent to read that file
+
+Runtime note:
+
+- in local mode, the main service writes these files directly
+- in Docker mode with `TMUX_PROXY_URL`, the host bridge creates the exchange directory and writes the files on the host side
 
 ## Default session identity
 
@@ -430,7 +541,7 @@ If Codex is running inside tmux, capture the current tmux context before you lea
 tmux display-message -p '#{session_name} #{window_name} #{window_index} #{pane_id} #{pane_index}'
 ```
 
-The preferred path is to pass these attributes directly into `create_session_pair_code`, so pairing immediately creates a distinct session identity for this agent:
+The preferred path is to pass these attributes, together with the agent workspace `cwd`, directly into `create_session_pair_code`, so pairing immediately creates a distinct session identity for this agent and gives the server the correct `.mcp-xchange` root:
 
 ```json
 {
@@ -473,6 +584,13 @@ If several Telegram messages arrive close together, the nudge is debounced by `T
 Ordinary Telegram messages are always stored in the inbox of the currently active session for that Telegram identity.
 
 ### 3. Pair a session
+
+If the user asks to register or link the current agent in Telegram, the agent should first collect:
+
+- current `cwd`
+- tmux attributes when running inside tmux
+
+Only after that should it call `create_session_pair_code`.
 
 Call `create_session_pair_code` with a stable session id:
 

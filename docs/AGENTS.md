@@ -69,19 +69,25 @@ Do not rely on a blocking wait tool for inbox handling in the main agent session
 
 ## Pairing rules for agents
 
+If the user asks to register, link, pair, or connect the current agent/session to Telegram, do not jump straight to `create_session_pair_code`.
+
+First collect the current agent attributes.
+
 If the agent runs inside `tmux`, pairing should include tmux attributes immediately.
 
 Correct pairing flow:
 
-1. Run:
+1. Determine the current agent `cwd`.
+2. Run:
 ```bash
 tmux display-message -p '#{session_name} #{window_name} #{window_index} #{pane_id} #{pane_index}'
 ```
-2. Call `create_session_pair_code` and pass these tmux fields.
-3. Complete Telegram linking with `/start CODE`.
+3. Call `create_session_pair_code` and pass these tmux fields together with the agent `cwd`.
+4. Complete Telegram linking with `/start CODE`.
 
 Why this matters:
 
+- without `cwd`, `.mcp-xchange` file exchange may not know the correct workspace root
 - pairing without tmux attributes creates a valid Telegram binding
 - but `tmux_target` remains unset
 - then inbox nudges and Mini App control cannot work for that session

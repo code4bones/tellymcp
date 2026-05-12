@@ -52,6 +52,7 @@ export const getTelegramInboxOutputSchema = z.object({
       telegram_user_id: z.number(),
       telegram_message_id: z.number().int().positive(),
       text: z.string(),
+      attachments: z.array(z.string()).optional(),
       received_at: z.string(),
     }),
   ),
@@ -80,6 +81,7 @@ export const deleteTelegramInboxMessageOutputSchema = z.object({
 export const createSessionPairCodeInputSchema = z.object({
   session_id: z.string().trim().min(1).optional(),
   session_label: z.string().trim().min(1).optional(),
+  cwd: z.string().trim().min(1).optional(),
   expires_in_seconds: z.number().int().positive().optional(),
   tmux_session_name: z.string().trim().min(1).max(200).optional(),
   tmux_window_name: z.string().trim().min(1).max(200).optional(),
@@ -138,6 +140,7 @@ export const getSessionContextOutputSchema = z.object({
   context: z
     .object({
       session_label: z.string().optional(),
+      cwd: z.string().optional(),
       task: z.string().optional(),
       summary: z.string().optional(),
       files: z.array(z.string()).optional(),
@@ -222,4 +225,240 @@ export const getTmuxTargetOutputSchema = z.object({
   tmux_pane_index: z.number().optional(),
   last_nudge_at: z.string().optional(),
   status_message: z.string(),
+});
+
+export const browserOpenInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  url: z.string().trim().min(1),
+  wait_until: z
+    .enum(["load", "domcontentloaded", "networkidle", "commit"])
+    .optional(),
+  reset_context: z.boolean().optional(),
+});
+
+export const browserOpenOutputSchema = z.object({
+  session_id: z.string(),
+  opened: z.boolean(),
+  created_context: z.boolean(),
+  url: z.string().url(),
+  title: z.string().optional(),
+});
+
+export const browserReloadInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  wait_until: z
+    .enum(["load", "domcontentloaded", "networkidle", "commit"])
+    .optional(),
+});
+
+export const browserReloadOutputSchema = z.object({
+  session_id: z.string(),
+  reloaded: z.boolean(),
+  url: z.string().url(),
+  title: z.string().optional(),
+});
+
+const browserLocatorInputShape = {
+  session_id: z.string().trim().min(1).optional(),
+  selector: z.string().trim().min(1).optional(),
+  text: z.string().trim().min(1).optional(),
+  exact: z.boolean().optional(),
+  timeout_ms: z.number().int().positive().max(120000).optional(),
+};
+
+export const browserClickInputSchema = z
+  .object(browserLocatorInputShape)
+  .refine((input) => Boolean(input.selector || input.text), {
+    message: "Provide selector or text.",
+    path: ["selector"],
+  });
+
+export const browserClickOutputSchema = z.object({
+  session_id: z.string(),
+  clicked: z.boolean(),
+  selector: z.string().optional(),
+  text: z.string().optional(),
+  url: z.string().url(),
+  title: z.string().optional(),
+});
+
+export const browserFillInputSchema = z
+  .object({
+    ...browserLocatorInputShape,
+    value: z.string(),
+  })
+  .refine((input) => Boolean(input.selector || input.text), {
+    message: "Provide selector or text.",
+    path: ["selector"],
+  });
+
+export const browserFillOutputSchema = z.object({
+  session_id: z.string(),
+  filled: z.boolean(),
+  selector: z.string().optional(),
+  text: z.string().optional(),
+  value_length: z.number().int().nonnegative(),
+  url: z.string().url(),
+  title: z.string().optional(),
+});
+
+export const browserPressInputSchema = z.object({
+  ...browserLocatorInputShape,
+  key: z.string().trim().min(1),
+});
+
+export const browserPressOutputSchema = z.object({
+  session_id: z.string(),
+  pressed: z.boolean(),
+  key: z.string(),
+  selector: z.string().optional(),
+  text: z.string().optional(),
+  url: z.string().url(),
+  title: z.string().optional(),
+});
+
+export const browserWaitForInputSchema = z
+  .object({
+    ...browserLocatorInputShape,
+    state: z.enum(["attached", "detached", "visible", "hidden"]).optional(),
+  })
+  .refine((input) => Boolean(input.selector || input.text), {
+    message: "Provide selector or text.",
+    path: ["selector"],
+  });
+
+export const browserWaitForOutputSchema = z.object({
+  session_id: z.string(),
+  waited: z.boolean(),
+  state: z.enum(["attached", "detached", "visible", "hidden"]),
+  selector: z.string().optional(),
+  text: z.string().optional(),
+  url: z.string().url(),
+  title: z.string().optional(),
+});
+
+export const browserConsoleInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  limit: z.number().int().positive().max(500).optional(),
+});
+
+export const browserConsoleOutputSchema = z.object({
+  session_id: z.string(),
+  total: z.number().int().nonnegative(),
+  messages: z.array(
+    z.object({
+      type: z.string(),
+      text: z.string(),
+      location: z.string().optional(),
+      timestamp: z.string(),
+    }),
+  ),
+});
+
+export const browserErrorsInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  limit: z.number().int().positive().max(500).optional(),
+});
+
+export const browserErrorsOutputSchema = z.object({
+  session_id: z.string(),
+  total: z.number().int().nonnegative(),
+  errors: z.array(
+    z.object({
+      message: z.string(),
+      stack: z.string().optional(),
+      timestamp: z.string(),
+    }),
+  ),
+});
+
+export const browserNetworkFailuresInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  limit: z.number().int().positive().max(500).optional(),
+});
+
+export const browserNetworkFailuresOutputSchema = z.object({
+  session_id: z.string(),
+  total: z.number().int().nonnegative(),
+  failures: z.array(
+    z.object({
+      url: z.string().url(),
+      method: z.string(),
+      status: z.number().int().optional(),
+      error_text: z.string().optional(),
+      resource_type: z.string().optional(),
+      timestamp: z.string(),
+    }),
+  ),
+});
+
+export const browserDomInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  selector: z.string().trim().min(1).optional(),
+  include_html: z.boolean().optional(),
+  include_text: z.boolean().optional(),
+});
+
+export const browserDomOutputSchema = z.object({
+  session_id: z.string(),
+  selector: z.string(),
+  found: z.boolean(),
+  url: z.string().url().optional(),
+  title: z.string().optional(),
+  outer_html: z.string().optional(),
+  text_content: z.string().optional(),
+  visible: z.boolean().optional(),
+  attributes: z.record(z.string(), z.string()).optional(),
+});
+
+export const browserComputedStyleInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  selector: z.string().trim().min(1),
+  properties: z.array(z.string().trim().min(1)).optional(),
+});
+
+export const browserComputedStyleOutputSchema = z.object({
+  session_id: z.string(),
+  selector: z.string(),
+  found: z.boolean(),
+  url: z.string().url().optional(),
+  title: z.string().optional(),
+  visible: z.boolean().optional(),
+  styles: z.record(z.string(), z.string()).optional(),
+  box: z
+    .object({
+      x: z.number(),
+      y: z.number(),
+      width: z.number(),
+      height: z.number(),
+    })
+    .optional(),
+});
+
+export const browserScreenshotInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  selector: z.string().trim().min(1).optional(),
+  full_page: z.boolean().optional(),
+  file_name: z.string().trim().min(1).optional(),
+  send_to_telegram: z.boolean().optional(),
+  caption: z.string().trim().min(1).optional(),
+});
+
+export const browserScreenshotOutputSchema = z.object({
+  session_id: z.string(),
+  file_path: z.string(),
+  workspace_dir: z.string(),
+  exchange_dir: z.string(),
+  telegram_message_id: z.number().int().positive().optional(),
+  url: z.string().url().optional(),
+  title: z.string().optional(),
+});
+
+export const browserCloseInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+});
+
+export const browserCloseOutputSchema = z.object({
+  session_id: z.string(),
+  closed: z.boolean(),
 });

@@ -25,6 +25,7 @@ export type ProjectIdentity = {
 export type SessionDefaultsInput = {
   session_id?: string | undefined;
   session_label?: string | undefined;
+  cwd?: string | undefined;
   tmux_session_name?: string | undefined;
   tmux_window_name?: string | undefined;
   tmux_window_index?: number | undefined;
@@ -92,6 +93,11 @@ function readPackageName(
 function normalizeOptionalString(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function resolveInputCwd(value: string | undefined): string | undefined {
+  const trimmed = normalizeOptionalString(value);
+  return trimmed ? resolve(trimmed) : undefined;
 }
 
 function buildTmuxContextParts(input: SessionDefaultsInput): {
@@ -174,15 +180,24 @@ export class ProjectIdentityResolver {
   public resolveSessionDefaults(
     input: SessionDefaultsInput,
   ): ResolvedSessionDefaults {
+    const inputCwd = resolveInputCwd(input.cwd);
     const tmuxContext = buildTmuxContextParts(input);
+    const titleBase = inputCwd ? basename(inputCwd) || "Project" : this.identity.resolvedTitle;
+    const fingerprintBase =
+      inputCwd ||
+      this.identity.gitRoot ||
+      this.identity.packageJsonPath ||
+      this.identity.cwd;
     const derivedSessionId = tmuxContext.slugSuffix
-      ? `${slugify(this.identity.resolvedTitle) || "session"}-${tmuxContext.slugSuffix}-${shortHash(
-          `${this.identity.gitRoot || this.identity.packageJsonPath || this.identity.cwd}|${tmuxContext.fingerprintSource || tmuxContext.slugSuffix}`,
+      ? `${slugify(titleBase) || "session"}-${tmuxContext.slugSuffix}-${shortHash(
+          `${fingerprintBase}|${tmuxContext.fingerprintSource || tmuxContext.slugSuffix}`,
         )}`.slice(0, 64)
-      : this.identity.resolvedSessionId;
+      : inputCwd
+        ? `${slugify(titleBase) || "session"}-${shortHash(fingerprintBase)}`
+        : this.identity.resolvedSessionId;
     const derivedSessionLabel = tmuxContext.labelSuffix
-      ? `${this.identity.resolvedTitle} [${tmuxContext.labelSuffix}]`
-      : this.identity.resolvedTitle;
+      ? `${titleBase} [${tmuxContext.labelSuffix}]`
+      : titleBase;
 
     return {
       sessionId: input.session_id?.trim() || derivedSessionId,

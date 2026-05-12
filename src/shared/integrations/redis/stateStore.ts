@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { RedisAdapter } from "@grammyjs/storage-redis";
 
 import type {
@@ -8,6 +10,7 @@ import type {
 import type {
   TelegramInboxMessage,
   TelegramMenuPayloadRecord,
+  TelegramXchangeFileMeta,
 } from "../../../entities/inbox/model/types.js";
 import type {
   PendingRequestRecord,
@@ -20,6 +23,7 @@ import type {
   SessionBindingStore,
   SessionStore,
   TelegramInboxStore,
+  TelegramXchangeFileMetaStore,
   TelegramMenuPayloadStore,
 } from "../../api/storage/contract.js";
 import { redactSecrets } from "../../lib/redact-secrets/redactSecrets.js";
@@ -67,6 +71,11 @@ function menuPayloadKey(key: string): string {
   return `${KEY_PREFIX}:menu-payload:${key}`;
 }
 
+function xchangeFileMetaKey(sessionId: string, filePath: string): string {
+  const fingerprint = createHash("sha1").update(filePath).digest("hex");
+  return `${KEY_PREFIX}:xchange-file:${sessionId}:${fingerprint}`;
+}
+
 function activeRequestKey(): string {
   return `${KEY_PREFIX}:pending:active`;
 }
@@ -89,6 +98,7 @@ export class RedisStateStore
     SessionBindingStore,
     PendingRequestStore,
     TelegramInboxStore,
+    TelegramXchangeFileMetaStore,
     TelegramMenuPayloadStore,
     MaintenanceStore
 {
@@ -391,6 +401,31 @@ export class RedisStateStore
   ): Promise<TelegramMenuPayloadRecord | null> {
     const raw = await this.redis.get(menuPayloadKey(key));
     return parseJson<TelegramMenuPayloadRecord>(raw);
+  }
+
+  public async setXchangeFileMeta(meta: TelegramXchangeFileMeta): Promise<void> {
+    await this.redis.set(
+      xchangeFileMetaKey(meta.sessionId, meta.filePath),
+      JSON.stringify(meta),
+    );
+  }
+
+  public async getXchangeFileMeta(
+    sessionId: string,
+    filePath: string,
+  ): Promise<TelegramXchangeFileMeta | null> {
+    const raw = await this.redis.get(xchangeFileMetaKey(sessionId, filePath));
+    return parseJson<TelegramXchangeFileMeta>(raw);
+  }
+
+  public async deleteXchangeFileMeta(
+    sessionId: string,
+    filePath: string,
+  ): Promise<boolean> {
+    const deletedCount = await this.redis.del(
+      xchangeFileMetaKey(sessionId, filePath),
+    );
+    return deletedCount > 0;
   }
 
   public async pruneAll(): Promise<{ deletedKeys: number }> {

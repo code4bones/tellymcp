@@ -5,7 +5,18 @@ export type TelegramInboxMessage = {
   telegramUserId: number;
   sourceTelegramMessageId: number;
   text: string;
+  attachments?: string[] | undefined;
   receivedAt: string;
+};
+
+export type TelegramXchangeFileMeta = {
+  sessionId: string;
+  filePath: string;
+  source: "telegram-upload" | "browser-screenshot";
+  sourceTelegramMessageId?: number | undefined;
+  uploadedAt: string;
+  originalName?: string | undefined;
+  caption?: string | undefined;
 };
 
 export type GetTelegramInboxInput = {
@@ -23,6 +34,7 @@ export type GetTelegramInboxOutput = {
     telegram_user_id: number;
     telegram_message_id: number;
     text: string;
+    attachments?: string[];
     received_at: string;
   }>;
 };
@@ -49,9 +61,10 @@ export type DeleteTelegramInboxMessageOutput = {
 
 export type TelegramMenuPayloadRecord = {
   key: string;
-  kind: "inbox-message" | "active-session";
+  kind: "inbox-message" | "active-session" | "file-entry";
   sessionId: string;
   messageId?: string | undefined;
+  filePath?: string | undefined;
   createdAt: string;
   expiresAt: string;
 };

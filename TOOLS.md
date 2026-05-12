@@ -2,6 +2,22 @@
 
 This MCP server currently exposes the following tools.
 
+Browser tools:
+
+- `browser_open`
+- `browser_reload`
+- `browser_click`
+- `browser_fill`
+- `browser_press`
+- `browser_wait_for`
+- `browser_console`
+- `browser_errors`
+- `browser_network_failures`
+- `browser_dom`
+- `browser_computed_style`
+- `browser_screenshot`
+- `browser_close`
+
 ## `create_session_pair_code`
 
 Purpose:
@@ -12,11 +28,13 @@ Typical use:
 
 - first-time session linking
 - re-linking after `clear_session_pairing`
+- any request like "register me in Telegram", "link this session to Telegram", "pair this agent", or similar
 
 Input:
 
 - `session_id?`
 - `session_label?`
+- `cwd?`
 - `expires_in_seconds?`
 - `tmux_session_name?`
 - `tmux_window_name?`
@@ -37,6 +55,7 @@ Behavior:
 
 - generated pairing codes are short numeric 3-digit one-time codes
 - if `session_id` is omitted, the server derives it automatically
+- if `cwd` is provided, the server uses it as the agent workspace root for default session identity and for `.mcp-xchange` file downloads
 - if tmux attributes are provided during pairing, they become part of the derived default session identity
 - this is the recommended way to distinguish multiple agents working from different tmux sessions, windows, or panes, regardless of project layout
 - for multi-agent work, prefer collecting tmux attributes first and passing them directly into this tool, instead of relying on a later `set_tmux_target`
@@ -44,14 +63,37 @@ Behavior:
 
 Required agent practice:
 
-1. If running inside tmux, collect tmux attributes first:
+This is mandatory for the agent:
+
+- when the user asks to register, link, pair, or connect the current agent/session to Telegram, do not call `create_session_pair_code` immediately from memory
+- first collect the current agent attributes
+- then call `create_session_pair_code` with them
+
+Required order:
+
+1. Determine the agent workspace `cwd`.
+2. If running inside tmux, collect tmux attributes:
 
 ```bash
 tmux display-message -p '#{session_name} #{window_name} #{window_index} #{pane_id} #{pane_index}'
 ```
 
-2. Pass them directly into `create_session_pair_code`.
-3. Use `set_tmux_target` later only as a repair, refresh, or override path.
+3. Call `create_session_pair_code` and pass:
+   - `cwd`
+   - tmux attributes when available
+4. Use `set_tmux_target` later only as a repair, refresh, or override path.
+
+Do not skip attribute collection just because pairing itself can succeed without them.
+
+If you skip `cwd`:
+
+- the derived session identity may be less specific than intended
+- Telegram file exchange into `.mcp-xchange` may not know the correct agent workspace
+
+If you skip tmux attributes:
+
+- pairing may still succeed
+- but tmux nudges and Mini App controls may not work until repaired later
 
 ## `clear_session_pairing`
 
@@ -295,6 +337,7 @@ Per-message fields:
 - `telegram_chat_id`
 - `telegram_user_id`
 - `text`
+- `attachments?`
 - `received_at`
 
 Meaning:
@@ -304,6 +347,10 @@ Meaning:
 - process the batch one message at a time
 - move to the next inbox item only if the current one did not create a blocker
 - if the current message leads to a clarification wait or another blocking condition, stop batch processing there and leave the remaining inbox items pending
+- if `attachments` is present, those are local paths inside `.mcp-xchange` that the agent can read from the workspace
+- file upload by itself does not create an inbox message anymore; the user may upload a file first and later use the Telegram `Files` menu to explicitly pass it to the agent
+- `Files` is for Telegram-uploaded files only
+- browser screenshots created by `browser_screenshot` are tracked separately and appear under Telegram `Browser -> Screenshots`
 
 ## `delete_telegram_inbox_message`
 
@@ -322,6 +369,306 @@ Output:
 - `session_id`
 - `message_id`
 
+## `browser_open`
+
+Purpose:
+
+- open or reuse a Playwright tab for the current session
+- keep browser state isolated per `session_id`
+
+Input:
+
+- `session_id?`
+- `url`
+- `wait_until?`
+- `reset_context?`
+
+Output:
+
+- `session_id`
+- `opened`
+- `created_context`
+- `url`
+- `title?`
+
+Notes:
+
+- each session gets its own isolated browser context and page
+- call this first before reading console, DOM, styles, or screenshots
+- `url` may be an absolute URL, or a relative path when `BROWSER_ADDRESS` is configured
+
+## `browser_console`
+
+Purpose:
+
+- read recent console output from the session browser tab
+
+Input:
+
+- `session_id?`
+- `limit?`
+
+Output:
+
+- `session_id`
+- `total`
+- `messages`
+
+## `browser_reload`
+
+Purpose:
+
+- reload the current session browser page after code changes or state drift
+
+Input:
+
+- `session_id?`
+- `wait_until?`
+
+Output:
+
+- `session_id`
+- `reloaded`
+- `url`
+- `title?`
+
+## `browser_click`
+
+Purpose:
+
+- click an element in the current session page
+
+Input:
+
+- `session_id?`
+- `selector?`
+- `text?`
+- `exact?`
+- `timeout_ms?`
+
+Output:
+
+- `session_id`
+- `clicked`
+- `selector?`
+- `text?`
+- `url`
+- `title?`
+
+## `browser_fill`
+
+Purpose:
+
+- fill an input or textarea in the current session page
+
+Input:
+
+- `session_id?`
+- `selector?`
+- `text?`
+- `exact?`
+- `timeout_ms?`
+- `value`
+
+Output:
+
+- `session_id`
+- `filled`
+- `selector?`
+- `text?`
+- `value_length`
+- `url`
+- `title?`
+
+## `browser_press`
+
+Purpose:
+
+- send a key press to the page or a targeted element
+
+Input:
+
+- `session_id?`
+- `selector?`
+- `text?`
+- `exact?`
+- `timeout_ms?`
+- `key`
+
+Output:
+
+- `session_id`
+- `pressed`
+- `key`
+- `selector?`
+- `text?`
+- `url`
+- `title?`
+
+## `browser_wait_for`
+
+Purpose:
+
+- wait until an element in the current session page reaches a requested state
+
+Input:
+
+- `session_id?`
+- `selector?`
+- `text?`
+- `exact?`
+- `timeout_ms?`
+- `state?`
+
+Output:
+
+- `session_id`
+- `waited`
+- `state`
+- `selector?`
+- `text?`
+- `url`
+- `title?`
+
+Browser target rules for `browser_click`, `browser_fill`, `browser_press`, `browser_wait_for`:
+
+- prefer `selector` when you have a stable target:
+  - `#id`
+  - `.class`
+  - `button[type="submit"]`
+  - `div[data-testid="save"]`
+- use `text` only when there is no reliable selector
+- do not mix ambiguous hashed CSS classes with fuzzy text guessing when a stable selector exists
+
+## `browser_errors`
+
+Purpose:
+
+- read recent page runtime errors from the session browser tab
+
+Input:
+
+- `session_id?`
+- `limit?`
+
+Output:
+
+- `session_id`
+- `total`
+- `errors`
+
+## `browser_network_failures`
+
+Purpose:
+
+- read recent failed or HTTP-error requests from the session browser tab
+
+Input:
+
+- `session_id?`
+- `limit?`
+
+Output:
+
+- `session_id`
+- `total`
+- `failures`
+
+## `browser_dom`
+
+Purpose:
+
+- inspect a DOM element in the session browser tab
+
+Input:
+
+- `session_id?`
+- `selector?`
+- `include_html?`
+- `include_text?`
+
+Output:
+
+- `session_id`
+- `selector`
+- `found`
+- `url?`
+- `title?`
+- `outer_html?`
+- `text_content?`
+- `visible?`
+- `attributes?`
+
+## `browser_computed_style`
+
+Purpose:
+
+- inspect computed styles and box metrics for a DOM element in the session browser tab
+
+Input:
+
+- `session_id?`
+- `selector`
+- `properties?`
+
+Output:
+
+- `session_id`
+- `selector`
+- `found`
+- `url?`
+- `title?`
+- `visible?`
+- `styles?`
+- `box?`
+
+## `browser_screenshot`
+
+Purpose:
+
+- capture a screenshot from the session browser tab
+
+Input:
+
+- `session_id?`
+- `selector?`
+- `full_page?`
+- `file_name?`
+- `send_to_telegram?`
+- `caption?`
+
+Output:
+
+- `session_id`
+- `file_path`
+- `workspace_dir`
+- `exchange_dir`
+- `telegram_message_id?`
+- `url?`
+- `title?`
+
+Notes:
+
+- screenshots are written into `.mcp-xchange`
+- they are tracked separately from Telegram-uploaded files
+- they appear under Telegram `Browser -> Screenshots`
+- if `send_to_telegram=true`, the saved screenshot is also sent into the bound Telegram chat for that session
+
+## `browser_close`
+
+Purpose:
+
+- close the isolated browser context for the current session
+
+Input:
+
+- `session_id?`
+
+Output:
+
+- `session_id`
+- `closed`
+
 ## Operational notes
 
 Telegram UI summary:
@@ -329,7 +676,9 @@ Telegram UI summary:
 - `/menu` is the only top-level Telegram command for session navigation
 - root menu shows one session button per row
 - root menu also shows tmux bridge status
-- session menu uses `Live`, `Content`, `Inbox`, `Info`, `Rename`, `Unpair`, `Refresh`, `Back`
+- session menu uses `Live`, `Content`, `Browser`, `Files`, `Inbox`, `Info`, `Rename`, `Unpair`, `Refresh`, `Back`
+- `Files` lists Telegram-uploaded files only
+- `Browser -> Screenshots` lists screenshots created by `browser_screenshot`
 - `Tools` contains `Broadcast` and `Prune all`
 
 Current remaining operational gaps are tracked in [docs/TODO.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/docs/TODO.md).

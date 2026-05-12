@@ -275,7 +275,7 @@ Files:
 Flow:
 
 1. Codex runs inside tmux
-2. agent or user captures full tmux attributes and ideally passes them into `create_session_pair_code`
+2. agent or user captures full tmux attributes and the agent workspace `cwd`, and ideally passes them into `create_session_pair_code`
 3. pairing stores a distinct session identity and, when available, the pane target
 4. `set_tmux_target` remains available as an explicit refresh or override path
 5. paired session has a configured `tmuxTarget`

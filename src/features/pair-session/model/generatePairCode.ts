@@ -49,6 +49,11 @@ export class PairSessionService {
           : existingSession?.label
             ? { label: existingSession.label }
             : {}),
+      ...(input.cwd
+        ? { cwd: input.cwd.trim() }
+        : existingSession?.cwd
+          ? { cwd: existingSession.cwd }
+          : {}),
       ...(existingSession?.task ? { task: existingSession.task } : {}),
       ...(existingSession?.summary ? { summary: existingSession.summary } : {}),
       ...(existingSession?.files ? { files: existingSession.files } : {}),
@@ -127,6 +132,7 @@ export class PairSessionService {
       sessionLabel: resolved.sessionLabel,
       sessionIdDerived: resolved.sessionIdDerived,
       sessionLabelDerived: resolved.sessionLabelDerived,
+      cwd: input.cwd?.trim(),
       tmuxSessionName: input.tmux_session_name,
       tmuxWindowName: input.tmux_window_name,
       tmuxWindowIndex: input.tmux_window_index,

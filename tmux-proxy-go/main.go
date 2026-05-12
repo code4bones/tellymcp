@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -52,6 +55,24 @@ type sendActionRequest struct {
 type sendLineRequest struct {
 	baseRequest
 	Text string `json:"text"`
+}
+
+type xchangeEnsureRequest struct {
+	WorkspaceDir    string `json:"workspaceDir"`
+	ExchangeDirName string `json:"exchangeDirName"`
+}
+
+type xchangeWriteRequest struct {
+	WorkspaceDir    string `json:"workspaceDir"`
+	ExchangeDirName string `json:"exchangeDirName"`
+	FileName        string `json:"fileName"`
+	ContentBase64   string `json:"contentBase64"`
+}
+
+type xchangeDeleteRequest struct {
+	WorkspaceDir    string `json:"workspaceDir"`
+	ExchangeDirName string `json:"exchangeDirName"`
+	FilePath        string `json:"filePath"`
 }
 
 func main() {
@@ -259,6 +280,86 @@ func routeRequest(w http.ResponseWriter, r *http.Request, cfg config) (string, s
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return req.Target, fmt.Sprintf("send-line chars=%d", len(strings.TrimSpace(req.Text))), nil
 
+	case "/xchange/ensure":
+		var req xchangeEnsureRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeText(w, http.StatusBadRequest, "Invalid JSON body")
+			return "", "", nil
+		}
+		if strings.TrimSpace(req.WorkspaceDir) == "" || strings.TrimSpace(req.ExchangeDirName) == "" {
+			writeText(w, http.StatusBadRequest, "workspaceDir and exchangeDirName are required")
+			return "", "", nil
+		}
+
+		dir, err := ensureXchangeDir(req.WorkspaceDir, req.ExchangeDirName)
+		if err != nil {
+			return "", fmt.Sprintf("xchange-ensure workspace=%s", strings.TrimSpace(req.WorkspaceDir)), err
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{"dir": dir})
+		return "", fmt.Sprintf("xchange-ensure dir=%s", dir), nil
+
+	case "/xchange/write":
+		var req xchangeWriteRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeText(w, http.StatusBadRequest, "Invalid JSON body")
+			return "", "", nil
+		}
+		if strings.TrimSpace(req.WorkspaceDir) == "" ||
+			strings.TrimSpace(req.ExchangeDirName) == "" ||
+			strings.TrimSpace(req.FileName) == "" ||
+			strings.TrimSpace(req.ContentBase64) == "" {
+			writeText(w, http.StatusBadRequest, "workspaceDir, exchangeDirName, fileName, and contentBase64 are required")
+			return "", "", nil
+		}
+
+		outputPath, err := writeXchangeFile(req.WorkspaceDir, req.ExchangeDirName, req.FileName, req.ContentBase64)
+		if err != nil {
+			return "", fmt.Sprintf("xchange-write file=%s", strings.TrimSpace(req.FileName)), err
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{"path": outputPath})
+		return "", fmt.Sprintf("xchange-write path=%s", outputPath), nil
+
+	case "/xchange/list":
+		var req xchangeEnsureRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeText(w, http.StatusBadRequest, "Invalid JSON body")
+			return "", "", nil
+		}
+		if strings.TrimSpace(req.WorkspaceDir) == "" || strings.TrimSpace(req.ExchangeDirName) == "" {
+			writeText(w, http.StatusBadRequest, "workspaceDir and exchangeDirName are required")
+			return "", "", nil
+		}
+
+		files, err := listXchangeFiles(req.WorkspaceDir, req.ExchangeDirName)
+		if err != nil {
+			return "", fmt.Sprintf("xchange-list workspace=%s", strings.TrimSpace(req.WorkspaceDir)), err
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{"files": files})
+		return "", fmt.Sprintf("xchange-list count=%d", len(files)), nil
+
+	case "/xchange/delete":
+		var req xchangeDeleteRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeText(w, http.StatusBadRequest, "Invalid JSON body")
+			return "", "", nil
+		}
+		if strings.TrimSpace(req.WorkspaceDir) == "" ||
+			strings.TrimSpace(req.ExchangeDirName) == "" ||
+			strings.TrimSpace(req.FilePath) == "" {
+			writeText(w, http.StatusBadRequest, "workspaceDir, exchangeDirName, and filePath are required")
+			return "", "", nil
+		}
+
+		if err := deleteXchangeFile(req.WorkspaceDir, req.ExchangeDirName, req.FilePath); err != nil {
+			return "", fmt.Sprintf("xchange-delete path=%s", strings.TrimSpace(req.FilePath)), err
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+		return "", fmt.Sprintf("xchange-delete path=%s", strings.TrimSpace(req.FilePath)), nil
+
 	default:
 		writeText(w, http.StatusNotFound, "Not found")
 		return "", "", nil
@@ -365,6 +466,136 @@ func isAllowedAction(action string) bool {
 	default:
 		return false
 	}
+}
+
+func sanitizeFileName(fileName string) string {
+	baseName := strings.TrimSpace(filepath.Base(fileName))
+	if baseName == "" {
+		return "file.bin"
+	}
+
+	var builder strings.Builder
+	for _, ch := range baseName {
+		switch {
+		case ch == '/' || ch == '\\':
+			builder.WriteByte('-')
+		case ch >= 0 && ch <= 31:
+			builder.WriteByte('-')
+		case strings.ContainsRune(`<>:"|?*`, ch):
+			builder.WriteByte('-')
+		default:
+			builder.WriteRune(ch)
+		}
+	}
+
+	normalized := strings.Join(strings.Fields(strings.TrimSpace(builder.String())), " ")
+	if normalized == "" {
+		return "file.bin"
+	}
+	return normalized
+}
+
+func allocateAvailableFilePath(dir string, fileName string) (string, error) {
+	safeFileName := sanitizeFileName(fileName)
+	extension := filepath.Ext(safeFileName)
+	baseName := strings.TrimSuffix(safeFileName, extension)
+
+	for attempt := 0; attempt < 1000; attempt += 1 {
+		candidateName := safeFileName
+		if attempt > 0 {
+			candidateName = fmt.Sprintf("%s--%d%s", baseName, attempt, extension)
+		}
+
+		candidatePath := filepath.Join(dir, candidateName)
+		_, err := os.Stat(candidatePath)
+		if errors.Is(err, os.ErrNotExist) {
+			return candidatePath, nil
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+
+	return "", fmt.Errorf("could not allocate a unique file name in exchange directory")
+}
+
+func ensureXchangeDir(workspaceDir string, exchangeDirName string) (string, error) {
+	resolvedDir := filepath.Clean(filepath.Join(strings.TrimSpace(workspaceDir), strings.TrimSpace(exchangeDirName)))
+	if err := os.MkdirAll(resolvedDir, 0o755); err != nil {
+		return "", err
+	}
+	return resolvedDir, nil
+}
+
+func writeXchangeFile(workspaceDir string, exchangeDirName string, fileName string, contentBase64 string) (string, error) {
+	dir, err := ensureXchangeDir(workspaceDir, exchangeDirName)
+	if err != nil {
+		return "", err
+	}
+
+	content, err := base64.StdEncoding.DecodeString(contentBase64)
+	if err != nil {
+		return "", err
+	}
+
+	outputPath, err := allocateAvailableFilePath(dir, fileName)
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(outputPath, content, 0o644); err != nil {
+		return "", err
+	}
+
+	return outputPath, nil
+}
+
+func listXchangeFiles(workspaceDir string, exchangeDirName string) ([]string, error) {
+	dir, err := ensureXchangeDir(workspaceDir, exchangeDirName)
+	if err != nil {
+		return nil, err
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	files := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		files = append(files, filepath.Join(dir, entry.Name()))
+	}
+
+	sort.Slice(files, func(i, j int) bool {
+		return files[i] > files[j]
+	})
+
+	return files, nil
+}
+
+func deleteXchangeFile(workspaceDir string, exchangeDirName string, filePath string) error {
+	dir, err := ensureXchangeDir(workspaceDir, exchangeDirName)
+	if err != nil {
+		return err
+	}
+
+	resolvedDir := filepath.Clean(dir)
+	resolvedFilePath := filepath.Clean(filePath)
+	relative, err := filepath.Rel(resolvedDir, resolvedFilePath)
+	if err != nil {
+		return err
+	}
+	if strings.HasPrefix(relative, "..") || relative == "." {
+		return fmt.Errorf("filePath is outside the exchange directory")
+	}
+
+	if err := os.Remove(resolvedFilePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	return nil
 }
 
 func resolvedSocketPath(cfg config, requestSocketPath string) string {

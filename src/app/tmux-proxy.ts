@@ -1,5 +1,7 @@
+import { access, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import path from "node:path";
 
 import {
   captureTmuxPaneRange,
@@ -79,6 +81,89 @@ function readTarget(body: unknown): string {
 
 function isAllowedAction(value: string): value is AllowedTmuxAction {
   return ["up", "down", "enter", "slash", "delete"].includes(value);
+}
+
+function sanitizeFileName(fileName: string): string {
+  const baseName = path.basename(fileName).trim();
+  const normalized = baseName
+    .replace(/[\/\\]/g, "-")
+    .replace(/[\x00-\x1f]/g, "-")
+    .replace(/[<>:"|?*]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return normalized || "file.bin";
+}
+
+async function allocateAvailableFilePath(
+  dir: string,
+  fileName: string,
+): Promise<string> {
+  const safeFileName = sanitizeFileName(fileName);
+  const extension = path.extname(safeFileName);
+  const baseName = path.basename(safeFileName, extension);
+
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    const candidateName =
+      attempt === 0
+        ? safeFileName
+        : `${baseName}--${attempt}${extension}`;
+    const candidatePath = path.join(dir, candidateName);
+
+    try {
+      await access(candidatePath);
+    } catch {
+      return candidatePath;
+    }
+  }
+
+  throw new Error("Could not allocate a unique file name in exchange directory.");
+}
+
+async function ensureXchangeDirOnHost(
+  body: unknown,
+): Promise<{ dir: string } | null> {
+  const workspaceDir =
+    body &&
+    typeof body === "object" &&
+    typeof Reflect.get(body, "workspaceDir") === "string"
+      ? String(Reflect.get(body, "workspaceDir")).trim()
+      : "";
+  const exchangeDirName =
+    body &&
+    typeof body === "object" &&
+    typeof Reflect.get(body, "exchangeDirName") === "string"
+      ? String(Reflect.get(body, "exchangeDirName")).trim()
+      : "";
+
+  if (!workspaceDir || !exchangeDirName) {
+    return null;
+  }
+
+  const resolvedDir = path.resolve(workspaceDir, exchangeDirName);
+  await mkdir(resolvedDir, { recursive: true });
+  return { dir: resolvedDir };
+}
+
+function resolveXchangeDirFromBody(body: unknown): string | null {
+  const workspaceDir =
+    body &&
+    typeof body === "object" &&
+    typeof Reflect.get(body, "workspaceDir") === "string"
+      ? String(Reflect.get(body, "workspaceDir")).trim()
+      : "";
+  const exchangeDirName =
+    body &&
+    typeof body === "object" &&
+    typeof Reflect.get(body, "exchangeDirName") === "string"
+      ? String(Reflect.get(body, "exchangeDirName")).trim()
+      : "";
+
+  if (!workspaceDir || !exchangeDirName) {
+    return null;
+  }
+
+  return path.resolve(workspaceDir, exchangeDirName);
 }
 
 async function main(): Promise<void> {
@@ -222,6 +307,117 @@ async function main(): Promise<void> {
 
         await sendTmuxLiteralLine(config, target, text);
         writeJson(res, 200, { ok: true });
+        return;
+      }
+
+      if (url.pathname === "/xchange/ensure") {
+        const ensured = await ensureXchangeDirOnHost(body);
+        if (!ensured) {
+          writeText(res, 400, "workspaceDir and exchangeDirName are required");
+          return;
+        }
+
+        writeJson(res, 200, ensured);
+        return;
+      }
+
+      if (url.pathname === "/xchange/write") {
+        const workspaceDir =
+          body &&
+          typeof body === "object" &&
+          typeof Reflect.get(body, "workspaceDir") === "string"
+            ? String(Reflect.get(body, "workspaceDir")).trim()
+            : "";
+        const exchangeDirName =
+          body &&
+          typeof body === "object" &&
+          typeof Reflect.get(body, "exchangeDirName") === "string"
+            ? String(Reflect.get(body, "exchangeDirName")).trim()
+            : "";
+        const fileName =
+          body &&
+          typeof body === "object" &&
+          typeof Reflect.get(body, "fileName") === "string"
+            ? String(Reflect.get(body, "fileName")).trim()
+            : "";
+        const contentBase64 =
+          body &&
+          typeof body === "object" &&
+          typeof Reflect.get(body, "contentBase64") === "string"
+            ? String(Reflect.get(body, "contentBase64"))
+            : "";
+
+        if (!workspaceDir || !exchangeDirName || !fileName || !contentBase64) {
+          writeText(
+            res,
+            400,
+            "workspaceDir, exchangeDirName, fileName, and contentBase64 are required",
+          );
+          return;
+        }
+
+        const ensured = await ensureXchangeDirOnHost(body);
+        if (!ensured) {
+          writeText(res, 400, "workspaceDir and exchangeDirName are required");
+          return;
+        }
+
+        const outputPath = await allocateAvailableFilePath(
+          ensured.dir,
+          fileName,
+        );
+        await writeFile(outputPath, Buffer.from(contentBase64, "base64"));
+        writeJson(res, 200, { path: outputPath });
+        return;
+      }
+
+      if (url.pathname === "/xchange/list") {
+        const resolvedDir = resolveXchangeDirFromBody(body);
+        if (!resolvedDir) {
+          writeText(res, 400, "workspaceDir and exchangeDirName are required");
+          return;
+        }
+
+        await mkdir(resolvedDir, { recursive: true });
+        const entries = await readdir(resolvedDir, { withFileTypes: true });
+        const files = entries
+          .filter((entry) => entry.isFile())
+          .map((entry) => path.join(resolvedDir, entry.name))
+          .sort((left, right) => right.localeCompare(left));
+        writeJson(res, 200, { files });
+        return;
+      }
+
+      if (url.pathname === "/xchange/delete") {
+        const resolvedDir = resolveXchangeDirFromBody(body);
+        const filePath =
+          body &&
+          typeof body === "object" &&
+          typeof Reflect.get(body, "filePath") === "string"
+            ? String(Reflect.get(body, "filePath")).trim()
+            : "";
+        if (!resolvedDir || !filePath) {
+          writeText(
+            res,
+            400,
+            "workspaceDir, exchangeDirName, and filePath are required",
+          );
+          return;
+        }
+
+        const resolvedFilePath = path.resolve(filePath);
+        const relative = path.relative(resolvedDir, resolvedFilePath);
+        if (
+          relative.startsWith("..") ||
+          path.isAbsolute(relative) ||
+          relative.trim() === ""
+        ) {
+          writeText(res, 400, "filePath is outside the exchange directory");
+          return;
+        }
+
+        await rm(resolvedFilePath, { force: true });
+        writeJson(res, 200, { deleted: true });
         return;
       }
 

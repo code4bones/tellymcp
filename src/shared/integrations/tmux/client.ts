@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { access, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 export type TmuxRuntimeConfig = {
   proxyUrl?: string;
@@ -15,6 +17,43 @@ export type AllowedTmuxAction =
 
 const ENTER_AFTER_PASTE_DELAY_MS = 75;
 const SUBMIT_LINE_KEY = "C-m";
+
+function sanitizeFileName(fileName: string): string {
+  const baseName = path.basename(fileName).trim();
+  const normalized = baseName
+    .replace(/[\/\\]/g, "-")
+    .replace(/[\x00-\x1f]/g, "-")
+    .replace(/[<>:"|?*]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return normalized || "file.bin";
+}
+
+async function allocateAvailableFilePath(
+  dir: string,
+  fileName: string,
+): Promise<string> {
+  const safeFileName = sanitizeFileName(fileName);
+  const extension = path.extname(safeFileName);
+  const baseName = path.basename(safeFileName, extension);
+
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    const candidateName =
+      attempt === 0
+        ? safeFileName
+        : `${baseName}--${attempt}${extension}`;
+    const candidatePath = path.join(dir, candidateName);
+
+    try {
+      await access(candidatePath);
+    } catch {
+      return candidatePath;
+    }
+  }
+
+  throw new Error("Could not allocate a unique file name in exchange directory.");
+}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -87,6 +126,114 @@ async function proxyJsonRequest<T>(
   }
 
   return (await response.json()) as T;
+}
+
+export async function ensureXchangeDir(
+  config: TmuxRuntimeConfig,
+  workspaceDir: string,
+  exchangeDirName: string,
+): Promise<string> {
+  if (config.proxyUrl) {
+    const response = await proxyJsonRequest<{ dir: string }>(
+      config,
+      "/xchange/ensure",
+      {
+        workspaceDir,
+        exchangeDirName,
+      },
+    );
+    return response.dir;
+  }
+
+  const resolvedDir = path.resolve(workspaceDir, exchangeDirName);
+  await mkdir(resolvedDir, { recursive: true });
+  return resolvedDir;
+}
+
+export async function writeXchangeFile(
+  config: TmuxRuntimeConfig,
+  workspaceDir: string,
+  exchangeDirName: string,
+  fileName: string,
+  content: Uint8Array,
+): Promise<string> {
+  if (config.proxyUrl) {
+    const response = await proxyJsonRequest<{ path: string }>(
+      config,
+      "/xchange/write",
+      {
+        workspaceDir,
+        exchangeDirName,
+        fileName,
+        contentBase64: Buffer.from(content).toString("base64"),
+      },
+    );
+    return response.path;
+  }
+
+  const dir = await ensureXchangeDir(config, workspaceDir, exchangeDirName);
+  const outputPath = await allocateAvailableFilePath(dir, fileName);
+  await writeFile(outputPath, content);
+  return outputPath;
+}
+
+export async function listXchangeFiles(
+  config: TmuxRuntimeConfig,
+  workspaceDir: string,
+  exchangeDirName: string,
+): Promise<string[]> {
+  if (config.proxyUrl) {
+    const response = await proxyJsonRequest<{ files: string[] }>(
+      config,
+      "/xchange/list",
+      {
+        workspaceDir,
+        exchangeDirName,
+      },
+    );
+    return response.files;
+  }
+
+  const dir = await ensureXchangeDir(config, workspaceDir, exchangeDirName);
+  const entries = await readdir(dir, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.join(dir, entry.name))
+    .sort((left, right) => right.localeCompare(left));
+}
+
+export async function deleteXchangeFile(
+  config: TmuxRuntimeConfig,
+  workspaceDir: string,
+  exchangeDirName: string,
+  filePath: string,
+): Promise<boolean> {
+  if (config.proxyUrl) {
+    const response = await proxyJsonRequest<{ deleted: boolean }>(
+      config,
+      "/xchange/delete",
+      {
+        workspaceDir,
+        exchangeDirName,
+        filePath,
+      },
+    );
+    return response.deleted;
+  }
+
+  const dir = await ensureXchangeDir(config, workspaceDir, exchangeDirName);
+  const resolvedFilePath = path.resolve(filePath);
+  const relative = path.relative(dir, resolvedFilePath);
+  if (
+    relative.startsWith("..") ||
+    path.isAbsolute(relative) ||
+    relative.trim() === ""
+  ) {
+    throw new Error("File path is outside the exchange directory.");
+  }
+
+  await rm(resolvedFilePath, { force: true });
+  return true;
 }
 
 export function isTmuxUnavailableError(error: unknown): boolean {

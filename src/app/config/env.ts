@@ -66,6 +66,7 @@ const envSchema = z.object({
   WEBAPP_VISIBLE_SCREENS: z.coerce.number().int().positive().default(2),
   WEBAPP_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
   WEBAPP_ACTION_COOLDOWN_MS: z.coerce.number().int().nonnegative().default(150),
+  MCP_XCHANGE_DIR: z.string().min(1).default(".mcp-xchange"),
   TMUX_NUDGE_ENABLED: z
     .string()
     .optional()
@@ -78,6 +79,27 @@ const envSchema = z.object({
   TMUX_NUDGE_MESSAGE: z.string().min(1).default("проверь inbox"),
   TMUX_CAPTURE_MODE: z.enum(["visible", "lines"]).default("visible"),
   TMUX_CAPTURE_LINES: z.coerce.number().int().positive().default(300),
+  BROWSER_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value !== "false"),
+  BROWSER_HEADLESS: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
+  BROWSER_DEVTOOLS: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
+  BROWSER_ADDRESS: z.string().url().optional(),
+  BROWSER_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
+  BROWSER_MAX_EVENTS: z.coerce.number().int().positive().default(200),
+  BROWSER_WAIT_UNTIL: z
+    .enum(["load", "domcontentloaded", "networkidle", "commit"])
+    .default("load"),
+  BROWSER_EXECUTABLE_PATH: z.string().min(1).optional(),
+  BROWSER_CHANNEL: z.enum(["chrome", "chromium", "msedge"]).optional(),
+  BROWSER_SLOW_MO_MS: z.coerce.number().int().nonnegative().default(0),
   PROXY_USE: z.enum(["http", "socks5"]).optional(),
   HTTP_PROXY: z.string().min(1).optional(),
   SOCKS5_PROXY: z.string().min(1).optional(),
@@ -130,6 +152,9 @@ export type AppConfig = {
     pollIntervalMs: number;
     actionCooldownMs: number;
   };
+  exchange: {
+    dir: string;
+  };
   tmux: {
     nudgeEnabled: boolean;
     proxyUrl?: string;
@@ -140,6 +165,18 @@ export type AppConfig = {
     nudgeMessage: string;
     captureMode: "visible" | "lines";
     captureLines: number;
+  };
+  browser: {
+    enabled: boolean;
+    headless: boolean;
+    devtools: boolean;
+    address?: string;
+    timeoutMs: number;
+    maxEvents: number;
+    waitUntil: "load" | "domcontentloaded" | "networkidle" | "commit";
+    executablePath?: string;
+    channel?: "chrome" | "chromium" | "msedge";
+    slowMoMs: number;
   };
   project: {
     name?: string | undefined;
@@ -222,6 +259,9 @@ export function loadConfig(): AppConfig {
       pollIntervalMs: parsed.WEBAPP_POLL_INTERVAL_MS,
       actionCooldownMs: parsed.WEBAPP_ACTION_COOLDOWN_MS,
     },
+    exchange: {
+      dir: parsed.MCP_XCHANGE_DIR,
+    },
     tmux: {
       nudgeEnabled: parsed.TMUX_NUDGE_ENABLED,
       ...(parsed.TMUX_PROXY_URL ? { proxyUrl: parsed.TMUX_PROXY_URL } : {}),
@@ -232,6 +272,20 @@ export function loadConfig(): AppConfig {
       nudgeMessage: parsed.TMUX_NUDGE_MESSAGE,
       captureMode: parsed.TMUX_CAPTURE_MODE,
       captureLines: parsed.TMUX_CAPTURE_LINES,
+    },
+    browser: {
+      enabled: parsed.BROWSER_ENABLED,
+      headless: parsed.BROWSER_HEADLESS,
+      devtools: parsed.BROWSER_DEVTOOLS,
+      ...(parsed.BROWSER_ADDRESS ? { address: parsed.BROWSER_ADDRESS } : {}),
+      timeoutMs: parsed.BROWSER_TIMEOUT_MS,
+      maxEvents: parsed.BROWSER_MAX_EVENTS,
+      waitUntil: parsed.BROWSER_WAIT_UNTIL,
+      ...(parsed.BROWSER_EXECUTABLE_PATH
+        ? { executablePath: parsed.BROWSER_EXECUTABLE_PATH }
+        : {}),
+      ...(parsed.BROWSER_CHANNEL ? { channel: parsed.BROWSER_CHANNEL } : {}),
+      slowMoMs: parsed.BROWSER_SLOW_MO_MS,
     },
     project: {
       ...(parsed.PROJECT_NAME ? { name: parsed.PROJECT_NAME } : {}),

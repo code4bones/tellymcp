@@ -1,6 +1,7 @@
 export type CreateSessionPairCodeInput = {
   session_id?: string | undefined;
   session_label?: string | undefined;
+  cwd?: string | undefined;
   expires_in_seconds?: number | undefined;
   tmux_session_name?: string | undefined;
   tmux_window_name?: string | undefined;

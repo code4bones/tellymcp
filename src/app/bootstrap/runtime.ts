@@ -29,12 +29,27 @@ import { GetTmuxTargetTool } from "../../features/session-context/model/getTmuxT
 import { RenameSessionTool } from "../../features/session-context/model/renameSessionTool.js";
 import { ClearSessionContextTool } from "../../features/session-context/model/clearSessionContextTool.js";
 import { SetTmuxTargetTool } from "../../features/session-context/model/setTmuxTargetTool.js";
+import { BrowserService } from "../../features/browser/model/browserService.js";
+import { BrowserOpenTool } from "../../features/browser/model/browserOpenTool.js";
+import { BrowserReloadTool } from "../../features/browser/model/browserReloadTool.js";
+import { BrowserClickTool } from "../../features/browser/model/browserClickTool.js";
+import { BrowserFillTool } from "../../features/browser/model/browserFillTool.js";
+import { BrowserPressTool } from "../../features/browser/model/browserPressTool.js";
+import { BrowserWaitForTool } from "../../features/browser/model/browserWaitForTool.js";
+import { BrowserConsoleTool } from "../../features/browser/model/browserConsoleTool.js";
+import { BrowserErrorsTool } from "../../features/browser/model/browserErrorsTool.js";
+import { BrowserNetworkFailuresTool } from "../../features/browser/model/browserNetworkFailuresTool.js";
+import { BrowserDomTool } from "../../features/browser/model/browserDomTool.js";
+import { BrowserComputedStyleTool } from "../../features/browser/model/browserComputedStyleTool.js";
+import { BrowserScreenshotTool } from "../../features/browser/model/browserScreenshotTool.js";
+import { BrowserCloseTool } from "../../features/browser/model/browserCloseTool.js";
 import type { ToolModule } from "../../shared/api/tool-registry/types.js";
 import type {
   MaintenanceStore,
   SessionStore,
   SessionBindingStore,
   TelegramInboxStore,
+  TelegramXchangeFileMetaStore,
 } from "../../shared/api/storage/contract.js";
 
 export type AppRuntime = {
@@ -45,6 +60,7 @@ export type AppRuntime = {
   sessionStore: SessionStore;
   bindingStore: SessionBindingStore;
   inboxStore: TelegramInboxStore;
+  xchangeFileMetaStore: TelegramXchangeFileMetaStore;
   maintenanceStore: MaintenanceStore;
   webAppLaunchRegistry: WebAppLaunchRegistry;
   createServer: () => McpServer;
@@ -110,6 +126,7 @@ export async function createAppRuntime(): Promise<AppRuntime> {
     stateStore,
     stateStore,
     stateStore,
+    stateStore,
     webAppLaunchRegistry,
     logger,
   );
@@ -155,6 +172,15 @@ export async function createAppRuntime(): Promise<AppRuntime> {
     logger,
     projectIdentityResolver,
   );
+  const browserService = new BrowserService(
+    config,
+    stateStore,
+    stateStore,
+    stateStore,
+    telegramTransport,
+    logger,
+    projectIdentityResolver,
+  );
 
   const createTools = (): ToolModule[] => [
     new CreateSessionPairCodeTool(pairSessionService),
@@ -170,6 +196,19 @@ export async function createAppRuntime(): Promise<AppRuntime> {
     new GetTelegramInboxTool(inboxService),
     new DeleteTelegramInboxMessageTool(inboxService),
     new AskUserTelegramTool(orchestrator),
+    new BrowserOpenTool(browserService),
+    new BrowserReloadTool(browserService),
+    new BrowserClickTool(browserService),
+    new BrowserFillTool(browserService),
+    new BrowserPressTool(browserService),
+    new BrowserWaitForTool(browserService),
+    new BrowserConsoleTool(browserService),
+    new BrowserErrorsTool(browserService),
+    new BrowserNetworkFailuresTool(browserService),
+    new BrowserDomTool(browserService),
+    new BrowserComputedStyleTool(browserService),
+    new BrowserScreenshotTool(browserService),
+    new BrowserCloseTool(browserService),
   ];
 
   return {
@@ -180,11 +219,13 @@ export async function createAppRuntime(): Promise<AppRuntime> {
     sessionStore: stateStore,
     bindingStore: stateStore,
     inboxStore: stateStore,
+    xchangeFileMetaStore: stateStore,
     maintenanceStore: stateStore,
     webAppLaunchRegistry,
     createServer: () => createMcpServer(createTools()),
     shutdown: async () => {
       logger.info("Shutdown started");
+      await browserService.shutdown();
       await telegramTransport.stop();
       redis.disconnect();
       logger.info("Shutdown completed");

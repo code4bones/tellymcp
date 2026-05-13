@@ -34,43 +34,74 @@ The code follows a backend-oriented FSD style.
 
 Main layers:
 
-- `src/app`
+- `src/services/features/telegram-mcp/src/app`
   - bootstrapping
   - config loading
   - Redis client setup
-  - MCP HTTP or stdio entrypoints
+  - MCP HTTP/WebApp server assembly
 
-- `src/entities`
+- `src/services/features/telegram-mcp/src/entities`
   - shared domain types and schemas
   - request, session, auth, inbox models
 
-- `src/features`
+- `src/services/features/telegram-mcp/src/features`
   - tool-facing use cases
   - each tool or closely related tool set lives here
 
-- `src/processes`
+- `src/services/features/telegram-mcp/src/processes`
   - multi-step orchestration
   - currently the main example is human approval flow
 
-- `src/shared`
+- `src/services/features/telegram-mcp/src/shared`
   - storage contracts
   - transport contracts
   - integrations
   - logger, ids, redaction, project identity
 
-## Current runtime entrypoints
+## Current runtime services
 
-- [src/app/http.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/app/http.ts)
-  - long-running MCP Streamable HTTP service
-  - recommended runtime for development and actual use
+- [runtime.service.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/services/features/telegram-mcp/runtime.service.ts)
+  - core runtime state
+  - config, Redis, Telegram transport, shared runtime dependencies
 
-- [src/app/stdio.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/app/stdio.ts)
-  - legacy stdio mode
-  - still useful for local debugging and compatibility
+- [pair.service.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/services/features/telegram-mcp/pair.service.ts)
+  - pair-code and pairing lifecycle
+
+- [session-context.service.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/services/features/telegram-mcp/session-context.service.ts)
+  - session metadata and tmux target management
+
+- [notify.service.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/services/features/telegram-mcp/notify.service.ts)
+  - outbound Telegram notifications
+
+- [inbox.service.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/services/features/telegram-mcp/inbox.service.ts)
+  - inbox read/count/delete service
+
+- [approval.service.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/services/features/telegram-mcp/approval.service.ts)
+  - human approval and ask-user orchestration
+
+- [browser.service.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/services/features/telegram-mcp/browser.service.ts)
+  - Playwright browser service
+
+- [collaboration.service.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/services/features/telegram-mcp/collaboration.service.ts)
+  - linked-session collaboration service
+
+- [mcp-server.service.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/services/features/telegram-mcp/mcp-server.service.ts)
+  - MCP tool composition
+  - per-session MCP server factory
+
+- [mcp-http.service.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/services/features/telegram-mcp/mcp-http.service.ts)
+  - MCP/WebApp HTTP handling service
+  - served through `moleculer-web` aliases in the `api` gateway
 
 Shared runtime assembly lives in:
 
-- [src/app/bootstrap/runtime.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/app/bootstrap/runtime.ts)
+- [src/services/features/telegram-mcp/src/app/bootstrap/runtime.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/services/features/telegram-mcp/src/app/bootstrap/runtime.ts)
+
+Important:
+
+- `stdio` mode is removed
+- `telegram_mcp` no longer opens its own standalone HTTP listener
+- `${ROOT_PREFIX}/mcp`, `${ROOT_PREFIX}/webapp`, and `${ROOT_PREFIX}/healthz` are routed by the core `api` gateway through Moleculer action aliases
 
 ## Core runtime components
 

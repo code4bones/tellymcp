@@ -3,6 +3,12 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "baseUrl": ".",
+    "paths": {
+      "lib/*": ["src/lib/*"],
+      "@src/*": ["src/*"],
+      "@core/*": ["src/services/features/core/*"]
+    },
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,
@@ -15,6 +21,10 @@
     "lib": ["ES2022"],
     "types": ["node"]
   },
-  "include": ["src/**/*.ts"],
+  "include": [
+    "src/index.ts",
+    "src/moleculer.config.ts",
+    "src/services/features/telegram-mcp/**/*.ts"
+  ],
   "exclude": ["dist", "node_modules"]
 }

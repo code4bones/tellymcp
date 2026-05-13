@@ -127,7 +127,6 @@ Important variables:
 - `TMUX_NUDGE_COOLDOWN_SECONDS`
 - `TMUX_NUDGE_MESSAGE`
 - `LOG_LEVEL`
-- `LOG_FILE_PATH`
 - `BROWSER_ENABLED=true`
 - `BROWSER_HEADLESS=false` for local dev visibility, `true` for Docker/headless usage
 - `BROWSER_DEVTOOLS=false`
@@ -142,13 +141,7 @@ Important variables:
 Logs are written in two places at the same time:
 
 - pretty console output to `stderr`
-- JSONL file at `LOG_FILE_PATH`
-
-Default file path:
-
-```text
-.telegram-human-mcp/log.jsonl
-```
+- JSONL file at `.telegram-human-mcp/log.jsonl`
 
 If Telegram access requires a proxy, the bot transport can use:
 
@@ -434,13 +427,13 @@ This means you can call session-oriented tools without explicitly passing `sessi
 ## Install
 
 ```bash
-npm install
+yarn install
 ```
 
 ## Build
 
 ```bash
-npm run build
+yarn build
 ```
 
 ## Run
@@ -448,26 +441,14 @@ npm run build
 Development:
 
 ```bash
-npm run dev:service
-```
-
-Legacy stdio development:
-
-```bash
-npm run dev
+yarn dev:gw
 ```
 
 Production build:
 
 ```bash
-npm run build
-npm start
-```
-
-Legacy stdio mode is still available:
-
-```bash
-npm run dev:stdio
+yarn build
+yarn start:gw
 ```
 
 After startup you should see readiness logs in the console. The HTTP service exposes:
@@ -480,6 +461,9 @@ If `MCP_HTTP_BEARER_TOKEN` is configured:
 - `/mcp` requires `Authorization: Bearer ...`
 - `/sessions` and `/prune` also require the same bearer when enabled
 - Telegram Mini App does not use this bearer directly; it has its own `initData` bootstrap and a short-lived WebApp session token
+
+`yarn dev:gw:telegram` is still available, but it only starts the `telegram_mcp` feature node.
+It does not expose HTTP by itself anymore. `/mcp`, `/webapp`, and `/healthz` are now served only through the Moleculer API gateway aliases in the full `dev:gw` / `start:gw` runtime, or through a separate gateway node in the same namespace.
 
 If tmux stays on the host but the main service runs in Docker or elsewhere, run the lightweight host-side tmux proxy.
 
@@ -896,13 +880,13 @@ Recommended long-running service flow:
 1. Start the service:
 
 ```bash
-npm run dev:service
+yarn dev:gw
 ```
 
 2. Register the already-running MCP endpoint in Codex:
 
 ```bash
-codex mcp add telegramHuman --url http://127.0.0.1:8787/mcp
+codex mcp add telegramHuman --url http://127.0.0.1:8080/api/mcp
 ```
 
 If you enable bearer auth with `MCP_HTTP_BEARER_TOKEN`, register it like this:
@@ -910,7 +894,7 @@ If you enable bearer auth with `MCP_HTTP_BEARER_TOKEN`, register it like this:
 ```bash
 export TELEGRAM_MCP_BEARER_TOKEN="your-token"
 codex mcp add telegramHuman \
-  --url http://127.0.0.1:8787/mcp \
+  --url http://127.0.0.1:8080/api/mcp \
   --bearer-token-env-var TELEGRAM_MCP_BEARER_TOKEN
 ```
 
@@ -920,18 +904,20 @@ For externally exposed deployments:
 - keep `/sessions` and `/prune` disabled unless you actively need them
 - leave WebApp access to Telegram `initData` validation plus its short-lived session token flow
 
-Legacy stdio registration remains available:
+This project no longer uses stdio mode. MCP access is exposed only through the HTTP endpoint.
 
-```bash
-chmod +x /home/code4bones/Devs/coding/mcp/telegram_mcp/run-mcp.sh
-codex mcp add telegramHuman -- /home/code4bones/Devs/coding/mcp/telegram_mcp/run-mcp.sh
-```
+Current Moleculer feature services:
 
-Then verify inside Codex with:
-
-```text
-/mcp
-```
+- `telegramMcp.runtime`
+- `telegramMcp.pair`
+- `telegramMcp.sessionContext`
+- `telegramMcp.notify`
+- `telegramMcp.inbox`
+- `telegramMcp.approval`
+- `telegramMcp.browser`
+- `telegramMcp.collaboration`
+- `telegramMcp.mcpServer`
+- `telegramMcp.http`
 
 ## Example AGENTS.md snippet
 

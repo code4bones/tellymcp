@@ -1,17 +1,32 @@
 # TODO
 
-The core stack is working:
+Current state:
 
-- Telegram pairing and multi-session routing
-- inbox + tmux nudge flow
-- Mini App live view and limited tmux controls
-- tmux host bridge through the Go proxy
-- Docker deployment with Redis persistence
+- Moleculer migration for `telegram_mcp` is done.
+- MCP works through `${ROOT_PREFIX}/mcp`.
+- Mini App `Live` works through `${ROOT_PREFIX}/webapp`.
+- local agent pairing, browser flow, and local partner collaboration are working.
+- GraphQL subscriptions are working again after the `graphql-ws` downgrade fix.
 
-Remaining non-blocking work:
+Plan for tomorrow:
 
-- [ ] Add `get_runtime_status` MCP tool for operational visibility.
-- [ ] Add deeper runtime diagnostics for queue transitions and stale pending request recovery.
-- [ ] Add explicit late-reply handling diagnostics after timeout.
-- [ ] Add concurrency verification with multiple MCP clients and reconnect scenarios.
-- [ ] Do one final full-stack smoke pass after the last UI and Docker changes.
+- [ ] Run a full local collaboration smoke pass:
+  - `Link`
+  - `Ask / Share / Reply / Handoff`
+  - `SHARE_INDEX.md`
+  - partner wake-up and note reading flow
+- [ ] Run a full local browser smoke pass:
+  - `open`
+  - `reload`
+  - `click/fill/press/wait`
+  - screenshot save
+  - screenshot send to Telegram
+- [ ] Remove or reduce temporary `telegram_mcp` debug logs added during the gateway/webapp migration.
+- [ ] Do a short documentation pass for the final local architecture:
+  - Moleculer services layout
+  - `${ROOT_PREFIX}` routes
+  - local collaboration workflow
+  - browser workflow
+- [ ] Start the distributed gateway track:
+  - define the first real `client | gateway | both` flow
+  - pick the first metadata model for remote note relay

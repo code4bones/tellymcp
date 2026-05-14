@@ -232,8 +232,8 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
     {
       name: "GatewayDeliveryPoll",
       cronTime: POLL_CRON_TIME,
-      onTick(this: { call: (action: string, params?: unknown) => Promise<unknown> }) {
-        void this.call(`${TELEGRAM_MCP_GATEWAY_DELIVERY_SERVICE_NAME}.pollTick`);
+      onTick(this: RuntimeCarrier) {
+        void this.runPollIteration?.();
       },
     },
   ],

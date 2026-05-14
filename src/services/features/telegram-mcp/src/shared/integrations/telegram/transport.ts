@@ -856,6 +856,23 @@ export class TelegramTransport implements HumanTransport {
     });
   }
 
+  private async ensureOpenedProjectIsActive(input: {
+    principal: { telegramChatId: number; telegramUserId: number };
+    sessionId: string;
+    projectUuid: string;
+    projectName: string;
+  }): Promise<void> {
+    const session = await this.sessionStore.getSession(input.sessionId);
+    if (
+      session?.activeProjectUuid === input.projectUuid &&
+      session.activeProjectName === input.projectName
+    ) {
+      return;
+    }
+
+    await this.activateProjectForSession(input);
+  }
+
   private async buildProjectsFingerprint(
     ctx: TelegramMenuContext,
   ): Promise<string> {
@@ -1552,9 +1569,9 @@ export class TelegramTransport implements HumanTransport {
         const range = new MenuRange<TelegramMenuContext>();
         const { session, projects } = await this.loadProjectsContext(ctx);
         if (!session || !projects) {
-          range.text("Gateway unavailable", async (innerCtx) => {
+          range.text("Gateway недоступен", async (innerCtx) => {
             await innerCtx.answerCallbackQuery({
-              text: "Projects require gateway mode.",
+              text: "Проекты доступны только через gateway.",
               show_alert: true,
             });
           });
@@ -1563,9 +1580,9 @@ export class TelegramTransport implements HumanTransport {
 
         if (projects.length === 0) {
           range
-            .text("🫥 No projects", async (innerCtx) => {
+            .text("🫥 Нет проектов", async (innerCtx) => {
               await innerCtx.answerCallbackQuery({
-                text: "No projects yet. Create or join one.",
+                text: "Проектов пока нет. Создай или войди в существующий.",
               });
             })
             .row();
@@ -1594,14 +1611,14 @@ export class TelegramTransport implements HumanTransport {
 
         return range;
       })
-      .text("➕ Create", async (ctx) => {
+      .text("➕ Создать", async (ctx) => {
         await this.beginProjectMode(ctx, "create");
       })
-      .text("🔑 Join", async (ctx) => {
+      .text("🔑 Войти", async (ctx) => {
         await this.beginProjectMode(ctx, "join");
       })
-      .text("⬅ Back", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Back to session menu." });
+      .text("⬅ Назад", async (ctx) => {
+        await ctx.answerCallbackQuery({ text: "Назад к меню сессии." });
         await this.showMainMenu(ctx);
       });
   }
@@ -3673,7 +3690,7 @@ export class TelegramTransport implements HumanTransport {
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Telegram identity is unavailable.",
+        text: "Идентификатор Telegram недоступен.",
         show_alert: true,
       });
       return;
@@ -3683,7 +3700,7 @@ export class TelegramTransport implements HumanTransport {
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
       await ctx.answerCallbackQuery({
-        text: "No active session selected.",
+        text: "Активная сессия не выбрана.",
         show_alert: true,
       });
       return;
@@ -3698,7 +3715,7 @@ export class TelegramTransport implements HumanTransport {
       return;
     }
 
-    await ctx.answerCallbackQuery({ text: "Opening partner menu." });
+    await ctx.answerCallbackQuery({ text: "Открываю меню напарника." });
     await this.showPartnerMenu(ctx);
   }
 
@@ -3707,13 +3724,13 @@ export class TelegramTransport implements HumanTransport {
   ): Promise<void> {
     if (!this.config.distributed.gatewayPublicUrl) {
       await ctx.answerCallbackQuery({
-        text: "Projects require gateway mode.",
+        text: "Проекты доступны только через gateway.",
         show_alert: true,
       });
       return;
     }
 
-    await ctx.answerCallbackQuery({ text: "Opening projects." });
+    await ctx.answerCallbackQuery({ text: "Открываю проекты." });
     await this.showProjectsMenu(ctx);
   }
 
@@ -5041,25 +5058,25 @@ export class TelegramTransport implements HumanTransport {
     const { session, projects } = await this.loadProjectsContext(ctx);
     if (!this.config.distributed.gatewayPublicUrl) {
       return [
-        "📦 Projects",
+        "📦 Проекты",
         "",
-        "Gateway is not configured for this deployment.",
-        "Local single-bot collaboration continues to use Link and Partner menus.",
+        "Gateway не настроен для этого запуска.",
+        "Для локальной работы в одном боте продолжай использовать Link и Partner.",
       ].join("\n");
     }
 
     if (!session || !projects) {
-      return "Projects are unavailable for the current session.";
+      return "Проекты недоступны для текущей сессии.";
     }
 
     return [
-      "📦 Projects",
+      "📦 Проекты",
       "",
-      `📌 Active session: ${session.label ?? session.sessionId}`,
-      `📦 Current project: ${session.activeProjectName ?? "not selected"}`,
-      `🗂 Available projects: ${projects.length}`,
+      `📌 Активная сессия: ${session.label ?? session.sessionId}`,
+      `📦 Открытый проект: ${session.activeProjectName ?? "не выбран"}`,
+      `🗂 Доступно проектов: ${projects.length}`,
       "",
-      "Create a project, join by invite token, or select an existing project for this session.",
+      "Открой проект, создай новый или войди по invite-коду.",
     ].join("\n");
   }
 
@@ -5967,7 +5984,7 @@ export class TelegramTransport implements HumanTransport {
     });
 
     await ctx.answerCallbackQuery({
-      text: mode === "create" ? "Create project." : "Join project.",
+      text: mode === "create" ? "Создание проекта." : "Вход в проект.",
     });
   }
 
@@ -5977,7 +5994,7 @@ export class TelegramTransport implements HumanTransport {
     const payloadKey = readMenuPayloadKey(ctx);
     if (!payloadKey) {
       await ctx.answerCallbackQuery({
-        text: "Project payload is missing.",
+        text: "Данные проекта не найдены.",
         show_alert: true,
       });
       return;
@@ -5991,7 +6008,7 @@ export class TelegramTransport implements HumanTransport {
       !payload.projectUuid
     ) {
       await ctx.answerCallbackQuery({
-        text: "Project payload is invalid or expired.",
+        text: "Данные проекта устарели или некорректны.",
         show_alert: true,
       });
       return;
@@ -6012,14 +6029,20 @@ export class TelegramTransport implements HumanTransport {
     );
     if (!project) {
       await ctx.answerCallbackQuery({
-        text: "Project not found.",
+        text: "Проект не найден.",
         show_alert: true,
       });
       return;
     }
 
-    await ctx.answerCallbackQuery({ text: "Opening project." });
-    await this.showProjectDetail(ctx, project);
+    await this.ensureOpenedProjectIsActive({
+      principal,
+      sessionId: project.sessionId,
+      projectUuid: project.projectUuid,
+      projectName: project.projectName,
+    });
+    await ctx.answerCallbackQuery({ text: "Открываю участников проекта." });
+    await this.showProjectMembers(ctx, project);
   }
 
   private async leaveActiveProject(
@@ -6079,42 +6102,7 @@ export class TelegramTransport implements HumanTransport {
       inviteToken: string;
     },
   ): Promise<void> {
-    const session = await this.sessionStore.getSession(input.sessionId);
-    const isActive = session?.activeProjectUuid === input.projectUuid;
-    const text = [
-      "📦 Проект",
-      "",
-      `Название: ${input.projectName}`,
-      `UUID: ${input.projectUuid}`,
-      `Invite: <i>${escapeHtml(input.inviteToken)}</i>`,
-      `Статус: ${isActive ? "текущий" : "доступен"}`,
-      "",
-      "Выбери действие для проекта.",
-    ].join("\n");
-
-    const keyboard = new InlineKeyboard()
-      .text("✅ Сделать текущим", `project-set:${input.projectUuid}`)
-      .text("👥 Участники", `project-members:${input.projectUuid}`)
-      .row()
-      .text("🚪 Выйти", `project-leave:${input.projectUuid}`)
-      .text("⬅ Назад", "project-back");
-
-    if (ctx.callbackQuery?.message) {
-      await this.editText(
-        ctx,
-        text,
-        { kind: "menu", sessionId: input.sessionId },
-        { parse_mode: "HTML", reply_markup: keyboard },
-      );
-      return;
-    }
-
-    await this.replyText(
-      ctx,
-      text,
-      { kind: "menu", sessionId: input.sessionId },
-      { parse_mode: "HTML", reply_markup: keyboard },
-    );
+    await this.showProjectMembers(ctx, input);
   }
 
   private async showProjectMembers(
@@ -6134,12 +6122,13 @@ export class TelegramTransport implements HumanTransport {
       throw new Error("Telegram identity is unavailable.");
     }
 
-    const session = await this.sessionStore.getSession(input.sessionId);
-    await this.ensureProjectSessionRegistered({
+    await this.ensureOpenedProjectIsActive({
       principal,
       sessionId: input.sessionId,
       projectUuid: input.projectUuid,
+      projectName: input.projectName,
     });
+    const session = await this.sessionStore.getSession(input.sessionId);
     const sessions = await this.listGatewayProjectSessions(principal, input.projectUuid);
     const activeSessionId = session?.sessionId ?? null;
     const selectableMembers = sessions.filter(
@@ -6154,6 +6143,7 @@ export class TelegramTransport implements HumanTransport {
       "",
       `Проект: ${input.projectName}`,
       `UUID: ${input.projectUuid}`,
+      `Invite: <i>${escapeHtml(input.inviteToken)}</i>`,
       "",
       `Ваш клиент: ${currentMember?.client_label ?? currentMember?.bot_username ?? "текущий бот"}`,
       `Других сессий: ${selectableMembers.length}`,
@@ -6192,7 +6182,8 @@ export class TelegramTransport implements HumanTransport {
     }
 
     keyboard
-      .text("⬅ К проекту", `project-detail:${input.projectUuid}`);
+      .text("🚪 Выйти", `project-leave:${input.projectUuid}`)
+      .text("⬅ К проектам", "project-back");
 
     const text = lines.join("\n");
     if (ctx.callbackQuery?.message) {
@@ -6224,6 +6215,16 @@ export class TelegramTransport implements HumanTransport {
       targetSessionLabel: string;
     },
   ): Promise<void> {
+    const principal = this.getPrincipalFromContext(ctx);
+    if (principal) {
+      await this.ensureOpenedProjectIsActive({
+        principal,
+        sessionId: input.sessionId,
+        projectUuid: input.projectUuid,
+        projectName: input.projectName,
+      });
+    }
+
     const text = [
       "🤝 Сессия проекта",
       "",
@@ -6280,6 +6281,16 @@ export class TelegramTransport implements HumanTransport {
       targetSessionLabel: string;
     },
   ): Promise<void> {
+    const principal = this.getPrincipalFromContext(ctx);
+    if (principal) {
+      await this.ensureOpenedProjectIsActive({
+        principal,
+        sessionId: input.sessionId,
+        projectUuid: input.projectUuid,
+        projectName: input.projectName,
+      });
+    }
+
     const files = await this.listActiveSessionFiles(input.sessionId);
     const lines = [
       "📎 Выбор файла",
@@ -6462,8 +6473,8 @@ export class TelegramTransport implements HumanTransport {
       projectUuid: payload.projectUuid,
       projectName: payload.projectName,
     });
-    await ctx.answerCallbackQuery({ text: "Текущий проект обновлён." });
-    await this.showProjectDetail(ctx, payload);
+    await ctx.answerCallbackQuery({ text: "Открываю участников проекта." });
+    await this.showProjectMembers(ctx, payload);
   }
 
   private async handleProjectDetailCallback(
@@ -6498,8 +6509,14 @@ export class TelegramTransport implements HumanTransport {
       return;
     }
 
-    await ctx.answerCallbackQuery({ text: "Открываю проект." });
-    await this.showProjectDetail(ctx, payload);
+    await this.ensureOpenedProjectIsActive({
+      principal,
+      sessionId,
+      projectUuid: payload.projectUuid,
+      projectName: payload.projectName,
+    });
+    await ctx.answerCallbackQuery({ text: "Открываю участников проекта." });
+    await this.showProjectMembers(ctx, payload);
   }
 
   private async handleProjectMemberOpenCallback(
@@ -7104,7 +7121,7 @@ export class TelegramTransport implements HumanTransport {
       });
       await this.replyText(
         ctx,
-        `Project created: ${projectName}\nInvite token: ${created.invite_token}`,
+        `Проект создан: ${projectName}\nInvite: ${created.invite_token}`,
         { kind: "menu", sessionId: pending.sessionId },
       );
     } else {
@@ -7126,13 +7143,13 @@ export class TelegramTransport implements HumanTransport {
       });
       await this.replyText(
         ctx,
-        `Joined project: ${projectName}`,
+        `Вход в проект выполнен: ${projectName}`,
         { kind: "menu", sessionId: pending.sessionId },
       );
     }
 
     this.pendingProjects.delete(principalKey);
-    await this.showProjectsMenu(ctx, `Current project: ${projectName}`);
+    await this.showProjectsMenu(ctx, `Открыт проект: ${projectName}`);
     return true;
   }
 }

@@ -12,11 +12,20 @@ export type TelegramInboxMessage = {
 export type TelegramXchangeFileMeta = {
   sessionId: string;
   filePath: string;
-  source: "telegram-upload" | "browser-screenshot";
+  relativePath?: string | undefined;
+  source: "telegram-upload" | "browser-screenshot" | "partner-artifact";
   sourceTelegramMessageId?: number | undefined;
   uploadedAt: string;
   originalName?: string | undefined;
   caption?: string | undefined;
+  storageRef?: string | undefined;
+  bucketName?: string | undefined;
+  objectName?: string | undefined;
+  vfsNodeId?: number | undefined;
+  vfsPublicUrl?: string | undefined;
+  vfsParentId?: number | undefined;
+  mimeType?: string | undefined;
+  sizeBytes?: number | undefined;
 };
 
 export type GetTelegramInboxInput = {

@@ -142,6 +142,21 @@ const routes: ApiRouteSchema[] = [
 		logging: false,
 	},
 	{
+		path: `${rootPrefix}/gateway`,
+		authorization: false,
+		authentication: false,
+		bodyParsers: {
+			json: false,
+			urlencoded: false,
+		},
+		aliases: {
+			"GET /:resourcePath(.*)": createTelegramMcpAliasHandler(`${rootPrefix}/gateway`),
+			"POST /:resourcePath(.*)": createTelegramMcpAliasHandler(`${rootPrefix}/gateway`),
+		},
+		mappingPolicy: "restrict",
+		logging: false,
+	},
+	{
 		path: "/mgr/assets",
 		use: useSessionMiddleware,
 		authorization: false,
@@ -152,7 +167,7 @@ const routes: ApiRouteSchema[] = [
 			urlencoded: false,
 		},
 		aliases: {
-			"GET /*assetPath": "api.openWorkbenchAsset",
+			"GET /:assetPath(.*)": "api.openWorkbenchAsset",
 		},
 		mappingPolicy: "restrict",
 		logging: true,
@@ -169,7 +184,7 @@ const routes: ApiRouteSchema[] = [
 		},
 		aliases: {
 			"GET /": "api.openWorkbench",
-			"GET /*spaPath": "api.openWorkbench",
+			"GET /:spaPath(.*)": "api.openWorkbench",
 		},
 		mappingPolicy: "restrict",
 		logging: true,
@@ -185,7 +200,7 @@ const routes: ApiRouteSchema[] = [
 			urlencoded: false,
 		},
 		aliases: {
-			"GET /*assetPath": "api.openGraphqlAsset",
+			"GET /:assetPath(.*)": "api.openGraphqlAsset",
 		},
 		mappingPolicy: "restrict",
 		logging: true,
@@ -201,7 +216,7 @@ const routes: ApiRouteSchema[] = [
 			urlencoded: false,
 		},
 		aliases: {
-			"GET /:publicUrl/*assetPath": "minio.tileAsset",
+			"GET /:publicUrl/:assetPath(.*)": "minio.tileAsset",
 		},
 		mappingPolicy: "restrict",
 		logging: true,

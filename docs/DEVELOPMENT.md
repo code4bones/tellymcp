@@ -64,6 +64,10 @@ Main layers:
   - core runtime state
   - config, Redis, Telegram transport, shared runtime dependencies
 
+- [ensuredb.service.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/services/features/telegram-mcp/ensuredb.service.ts)
+  - gateway database bootstrap
+  - ensures schema `mcp` (or `DB_SCHEME`) and the first relay tables
+
 - [pair.service.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/services/features/telegram-mcp/pair.service.ts)
   - pair-code and pairing lifecycle
 
@@ -102,6 +106,33 @@ Important:
 - `stdio` mode is removed
 - `telegram_mcp` no longer opens its own standalone HTTP listener
 - `${ROOT_PREFIX}/mcp`, `${ROOT_PREFIX}/webapp`, and `${ROOT_PREFIX}/healthz` are routed by the core `api` gateway through Moleculer action aliases
+
+## Gateway DB bootstrap
+
+`telegramMcp.ensuredb` is the first persistence-oriented service for the distributed gateway layer.
+
+It uses:
+
+- `mixins: [DBMixin]`
+- `this.db` as the shared Knex instance from the backend core
+
+Current startup behavior:
+
+- ensures schema `mcp` or `DB_SCHEME`
+- ensures these tables exist:
+  - `gateway_clients`
+  - `gateway_projects`
+  - `gateway_project_members`
+  - `gateway_sessions`
+  - `gateway_session_links`
+  - `gateway_messages`
+  - `gateway_message_artifacts`
+  - `gateway_deliveries`
+
+Current rule:
+
+- gateway DB bootstrap belongs in `ensuredb.service.ts`
+- future project/session/message repositories should depend on this service instead of repeating DDL checks ad hoc
 
 ## Core runtime components
 

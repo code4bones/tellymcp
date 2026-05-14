@@ -190,7 +190,14 @@ const getSessionMiddleware = async () => {
 	}
 };
 
+export function isInternalCall(ctx) {
+	return ctx?.meta?.internal_call === true;
+}
+
 export function requreSession(ctx) {
+	if (isInternalCall(ctx)) {
+		return;
+	}
 	if (!ctx.meta.$session?.token) {
 		return Promise.reject(new Errors.SessionNotFoundError());
 	}
@@ -248,6 +255,9 @@ export async function syncSessionFromRedis(ctx) {
 }
 
 export async function requireActiveToken(ctx) {
+	if (isInternalCall(ctx)) {
+		return;
+	}
 	if (!ctx.meta.$session?.token) {
 		return Promise.reject(new Errors.TokenNotFoundError());
 	}
@@ -267,6 +277,9 @@ export async function requireActiveToken(ctx) {
 }
 
 export async function refreshToken(ctx: GQLContext) {
+	if (isInternalCall(ctx)) {
+		return;
+	}
 	if (!ctx.meta.$session?.token)
 		return Promise.reject(
 			new Errors.TokenNotFoundError("Refresh token not available. Please login again.")
@@ -356,14 +369,6 @@ export const onBeforeCall =
 		ctx.meta.$cookies = (req as any).cookies;
 		ctx.meta.$response = res;
 		ctx.meta.$request = req;
-
-		const paramsRecord = (ctx.params || {}) as Record<string, unknown>;
-		for (const key of ["assetPath", "spaPath"]) {
-			const value = paramsRecord[key];
-			if (Array.isArray(value)) {
-				paramsRecord[key] = value.join("/");
-			}
-		}
 
 		if ((req as any).session) {
 			ctx.meta.$session = (req as any).session;

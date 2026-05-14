@@ -8,6 +8,7 @@ import { createLogger, type Logger } from "../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../shared/lib/project-identity/projectIdentity";
 import { RedisStateStore } from "../../shared/integrations/redis/stateStore";
 import { TelegramTransport } from "../../shared/integrations/telegram/transport";
+import { MinioExchangeStore } from "../../shared/integrations/object-storage/minioExchangeStore";
 import { GatewayHttpService } from "../../features/distributed-gateway/model/gatewayHttpService";
 import type {
   MaintenanceStore,
@@ -28,13 +29,20 @@ export type AppRuntime = {
   inboxStore: TelegramInboxStore;
   xchangeFileMetaStore: TelegramXchangeFileMetaStore;
   maintenanceStore: MaintenanceStore;
+  objectStore: MinioExchangeStore;
   projectIdentityResolver: ProjectIdentityResolver;
   webAppLaunchRegistry: WebAppLaunchRegistry;
   gatewayHttpService: GatewayHttpService;
   shutdown: () => Promise<void>;
 };
 
-export async function createAppRuntime(): Promise<AppRuntime> {
+export async function createAppRuntime(input: {
+  callBroker: <T>(
+    actionName: string,
+    params?: unknown,
+    options?: { meta?: Record<string, unknown> },
+  ) => Promise<T>;
+}): Promise<AppRuntime> {
   const config = loadConfig();
   const logger = createLogger(config);
   const projectIdentityResolver = new ProjectIdentityResolver(config, logger);
@@ -93,6 +101,14 @@ export async function createAppRuntime(): Promise<AppRuntime> {
 
   const stateStore = new RedisStateStore(redis);
   const webAppLaunchRegistry = new WebAppLaunchRegistry();
+  const objectStore = new MinioExchangeStore(
+    input.callBroker,
+    stateStore,
+    config.tmux,
+    config.exchange.dir,
+    config.mcp.vfsScope,
+    logger,
+  );
   await stateStore.resetRuntimeState();
   logger.info("Runtime pending state reset");
 
@@ -104,6 +120,7 @@ export async function createAppRuntime(): Promise<AppRuntime> {
     stateStore,
     stateStore,
     stateStore,
+    objectStore,
     webAppLaunchRegistry,
     logger,
   );
@@ -112,7 +129,7 @@ export async function createAppRuntime(): Promise<AppRuntime> {
   await telegramTransport.recoverPendingInboxNudges();
   logger.info("Startup inbox nudge recovery completed");
 
-  const gatewayHttpService = new GatewayHttpService(config);
+  const gatewayHttpService = new GatewayHttpService(config, input.callBroker);
 
   return {
     config,
@@ -125,6 +142,7 @@ export async function createAppRuntime(): Promise<AppRuntime> {
     inboxStore: stateStore,
     xchangeFileMetaStore: stateStore,
     maintenanceStore: stateStore,
+    objectStore,
     projectIdentityResolver,
     webAppLaunchRegistry,
     gatewayHttpService,

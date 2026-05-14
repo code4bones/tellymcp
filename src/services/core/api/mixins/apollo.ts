@@ -145,7 +145,6 @@ const Apollo = ApolloService({
 						return s?.user;
 					})
 					.catch(() => null);
-
 				return { Welcome: "Connected", user };
 			},
 		},

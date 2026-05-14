@@ -218,6 +218,9 @@ export class SessionContextService {
             binding: {
               telegram_chat_id: binding.telegramChatId,
               telegram_user_id: binding.telegramUserId,
+              ...(binding.telegramUsername
+                ? { telegram_username: binding.telegramUsername }
+                : {}),
               linked_at: binding.linkedAt,
             },
           }

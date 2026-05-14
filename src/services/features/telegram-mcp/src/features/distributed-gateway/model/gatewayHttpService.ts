@@ -1,6 +1,14 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type { AppConfig } from "../../../app/config/env";
+import {
+  sendPartnerNoteInputSchema,
+  sendPartnerNoteOutputSchema,
+} from "../../../entities/request/model/schema";
+import type {
+  SendPartnerNoteInput,
+  SendPartnerNoteOutput,
+} from "../../../entities/collaboration/model/types";
 
 function readHeader(
   req: IncomingMessage,
@@ -31,7 +39,24 @@ function writeText(
 }
 
 export class GatewayHttpService {
-  public constructor(private readonly config: AppConfig) {}
+  public constructor(
+    private readonly config: AppConfig,
+    private readonly callBroker: <T>(
+      actionName: string,
+      params?: unknown,
+      options?: { meta?: Record<string, unknown> },
+    ) => Promise<T>,
+  ) {}
+
+  private partnerNoteRelayHandler:
+    | ((input: SendPartnerNoteInput) => Promise<SendPartnerNoteOutput>)
+    | null = null;
+
+  public setPartnerNoteRelayHandler(
+    handler: (input: SendPartnerNoteInput) => Promise<SendPartnerNoteOutput>,
+  ): void {
+    this.partnerNoteRelayHandler = handler;
+  }
 
   public isEnabled(): boolean {
     return (
@@ -42,6 +67,43 @@ export class GatewayHttpService {
 
   public matches(pathname: string): boolean {
     return pathname === "/gateway/healthz" || pathname.startsWith("/gateway/");
+  }
+
+  private async readJsonBody(req: IncomingMessage): Promise<unknown> {
+    const knownBody = (req as IncomingMessage & { body?: unknown }).body;
+    if (knownBody !== undefined) {
+      return knownBody;
+    }
+
+    const knownParams = (
+      req as IncomingMessage & { $params?: Record<string, unknown> }
+    ).$params;
+    if (
+      knownParams &&
+      typeof knownParams === "object" &&
+      ("kind" in knownParams ||
+        "summary" in knownParams ||
+        "message" in knownParams ||
+        "session_id" in knownParams)
+    ) {
+      return knownParams;
+    }
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+    }
+
+    if (chunks.length === 0) {
+      return undefined;
+    }
+
+    const raw = Buffer.concat(chunks).toString("utf8").trim();
+    if (!raw) {
+      return undefined;
+    }
+
+    return JSON.parse(raw) as unknown;
   }
 
   public async handleRequest(
@@ -58,10 +120,129 @@ export class GatewayHttpService {
         ok: true,
         service: "telegram-human-mcp-gateway",
         mode: this.config.distributed.mode,
-        databaseConfigured: Boolean(this.config.distributed.gatewayDatabaseUrl),
+        databaseConfigured: Boolean(process.env.DB_HOST && process.env.DB_NAME),
         s3Configured: Boolean(this.config.distributed.gatewayS3Bucket),
       });
       return true;
+    }
+
+    if (pathname === "/gateway/partner-note") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      if (!this.partnerNoteRelayHandler) {
+        writeJson(res, 503, {
+          error: "Gateway partner relay handler is not configured.",
+        });
+        return true;
+      }
+
+      try {
+        const body = await this.readJsonBody(req);
+        const input = sendPartnerNoteInputSchema.parse(body);
+        const output = await this.partnerNoteRelayHandler(input);
+        writeJson(res, 200, sendPartnerNoteOutputSchema.parse(output));
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/client/register") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const result = await this.callBroker(
+          "telegramMcp.gateway.registerClient",
+          body,
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, result);
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/projects/create") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const result = await this.callBroker(
+          "telegramMcp.gateway.createProject",
+          body,
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, result);
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/projects/join") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const result = await this.callBroker(
+          "telegramMcp.gateway.joinProject",
+          body,
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, result);
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/sessions/register") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const result = await this.callBroker(
+          "telegramMcp.gateway.registerSession",
+          body,
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, result);
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
     }
 
     if (this.config.distributed.gatewayAuthToken) {

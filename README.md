@@ -47,7 +47,7 @@ Flow:
 6. The server sends a redacted Telegram message and waits for the answer.
 7. The answer is returned as structured MCP tool output.
 8. Unsolicited Telegram messages are stored in a per-session inbox for later polling by the agent.
-9. If the Telegram message contains a photo or document, the file is downloaded into `.mcp-xchange/` and exposed to the agent through the inbox item.
+9. If the Telegram message contains a photo or document, the file is written into the session `.mcp-xchange/`, uploaded into the existing core MinIO storage flow, and exposed to the agent through the inbox item.
 
 ## Architecture
 
@@ -102,7 +102,7 @@ Important variables:
 - `MCP_HTTP_ENABLE_DEBUG_ROUTES=false` enables HTTP `/sessions`
 - `MCP_HTTP_ENABLE_PRUNE_ROUTE=false` enables HTTP `POST /prune`
 - `DISTRIBUTED_MODE=client|gateway|both`
-- `GATEWAY_PUBLIC_URL` optional future relay URL for client mode
+- `GATEWAY_PUBLIC_URL` optional relay URL for client mode; if set, partner-note delivery goes through the gateway HTTP surface
 - `GATEWAY_BIND_HOST`
 - `GATEWAY_BIND_PORT`
 - `GATEWAY_AUTH_TOKEN`
@@ -173,10 +173,15 @@ The service now has a role-oriented distributed scaffold:
 
 Current implementation status:
 
-- gateway routes are scaffolded
 - `GET /gateway/healthz` works
-- relay delivery through Postgres/S3 is not implemented yet
-- current collaboration delivery still uses the local linked-session backend
+- `POST /gateway/client/register` works
+- `POST /gateway/projects/create` works
+- `POST /gateway/projects/join` works
+- `POST /gateway/sessions/register` works
+- `POST /gateway/partner-note` works
+- if `GATEWAY_PUBLIC_URL` is configured, partner-note delivery goes through the gateway HTTP surface
+- in `DISTRIBUTED_MODE=both`, this also covers same-bot local delivery transparently
+- remote relay persistence/polling through shared DB is still not implemented yet
 
 ## Mini App
 
@@ -212,6 +217,7 @@ Current browser model:
   - page runtime errors
   - failed or HTTP-error network requests
 - screenshots are written into the same `.mcp-xchange` flow as Telegram file exchange
+- exchange files now use MinIO as the durable backend and `.mcp-xchange` as the local agent-facing cache
 
 Recommended local dev settings:
 
@@ -294,7 +300,12 @@ Current browser menu behavior:
 File separation rules:
 
 - `Files` shows only files uploaded from Telegram
+- file detail actions are:
+  - `Передать агенту`
+  - `Передать партнёру`
+  - `Delete`
 - `Browser -> Screenshots` shows only files created by `browser_screenshot`
+- both menus are now backed by Redis file metadata plus MinIO object storage, not by raw directory listing alone
 
 Partner link behavior:
 
@@ -319,14 +330,15 @@ Partner menu behavior:
   - remaining text = full message body
 - partner wake-up semantics:
   - `TMUX_PARTNER_NUDGE_MESSAGE` is for collaboration notes, not for human Telegram inbox
-  - the receiving agent should read `.mcp-xchange/SHARE_INDEX.md` and the newest note first
+  - the receiving agent should read `.mcp-xchange/SHARED_INDEX.md` and the newest note first
 
 Linked-session collaboration contract:
 
 - `send_partner_note` writes one note per event into the partner workspace
 - collaborative notes live under `.mcp-xchange/shares/`
 - copied artifacts live under `.mcp-xchange/shares/files/<share_id>/`
-- `.mcp-xchange/SHARE_INDEX.md` acts as the append-only index of partner-facing notes
+- `.mcp-xchange/SHARED_INDEX.md` acts as the append-only index of partner-facing notes
+- `.mcp-xchange/LOCAL_INDEX.md` acts as the append-only index of local agent-facing handoffs
 - supported note kinds are:
   - `share`
   - `question`
@@ -399,6 +411,7 @@ Ordinary Telegram messages may include:
 When a photo or document arrives for the active session:
 
 - the file is downloaded into `MCP_XCHANGE_DIR`, default `.mcp-xchange`, under the paired agent workspace
+- the same file is uploaded through the existing core `minio` service and tracked in Redis file metadata
 - files are written directly into that exchange directory with safe generated names
 - the upload itself does not wake the agent
 - the file appears in the `Files` menu for that session

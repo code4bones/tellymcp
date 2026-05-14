@@ -62,6 +62,7 @@ Behavior:
 - generated pairing codes are short numeric 3-digit one-time codes
 - if `session_id` is omitted, the server derives it automatically
 - if `cwd` is provided, the server uses it as the agent workspace root for default session identity and for `.mcp-xchange` file downloads
+- `.mcp-xchange` is now the local workspace cache; durable exchange-file storage is backed by the existing core `minio` service
 - if tmux attributes are provided during pairing, they become part of the derived default session identity
 - this is the recommended way to distinguish multiple agents working from different tmux sessions, windows, or panes, regardless of project layout
 - for multi-agent work, prefer collecting tmux attributes first and passing them directly into this tool, instead of relying on a later `set_tmux_target`
@@ -276,7 +277,7 @@ Purpose:
 
 - Send a structured collaboration note to the linked partner session.
 - Write a note file into the partner workspace under `.mcp-xchange/shares/`.
-- Append a line to the partner `.mcp-xchange/SHARE_INDEX.md`.
+- Append a line to the partner `.mcp-xchange/SHARED_INDEX.md`.
 - Optionally copy listed artifacts from the current workspace into the partner `.mcp-xchange/shares/files/<share_id>/`.
 - Create an inbox message for the partner agent and trigger the normal tmux nudge path.
 
@@ -343,12 +344,12 @@ How the receiving agent must react:
 
 - partner collaboration wake-ups are not ordinary Telegram inbox wake-ups
 - if the tmux nudge says things like:
-  - `прочитай SHARE_INDEX.md`
+  - `прочитай SHARED_INDEX.md`
   - `partner note`
   - `partner notes`
   then do not start with `get_telegram_inbox`
 - instead:
-  1. open `.mcp-xchange/SHARE_INDEX.md`
+  1. open `.mcp-xchange/SHARED_INDEX.md`
   2. find the newest partner note
   3. open that note file
   4. read any copied artifacts referenced there
@@ -406,7 +407,7 @@ Note contract:
 - the service writes one note per message to:
   - `.mcp-xchange/shares/<share_id>.md`
 - the partner index is append-only:
-  - `.mcp-xchange/SHARE_INDEX.md`
+  - `.mcp-xchange/SHARED_INDEX.md`
 - artifacts are copied into:
   - `.mcp-xchange/shares/files/<share_id>/...`
 
@@ -541,9 +542,11 @@ Meaning:
 - move to the next inbox item only if the current one did not create a blocker
 - if the current message leads to a clarification wait or another blocking condition, stop batch processing there and leave the remaining inbox items pending
 - if `attachments` is present, those are local paths inside `.mcp-xchange` that the agent can read from the workspace
+- those paths are local cache paths; the same files are also stored through the core `minio` service and can be rehydrated after restart
 - file upload by itself does not create an inbox message anymore; the user may upload a file first and later use the Telegram `Files` menu to explicitly pass it to the agent
 - `Files` is for Telegram-uploaded files only
 - browser screenshots created by `browser_screenshot` are tracked separately and appear under Telegram `Browser -> Screenshots`
+- both menus are driven by Redis exchange-file metadata, while the file payload itself is stored durably in MinIO and materialized back into `.mcp-xchange` when needed
 
 ## `delete_telegram_inbox_message`
 
@@ -933,17 +936,19 @@ Telegram UI summary:
   - optional blank line
   - remaining text = full message body
 - partner-note wake-up means:
-  - read `.mcp-xchange/SHARE_INDEX.md`
+  - read `.mcp-xchange/SHARED_INDEX.md`
   - then read the newest partner note
   - not `get_telegram_inbox`
 
 Distributed mode scaffold:
 
 - `DISTRIBUTED_MODE=client|gateway|both`
-- current collaboration delivery still uses the local linked-session backend
 - `/gateway/healthz` is available when mode is `gateway` or `both`
-- remote relay delivery through shared DB/S3 is planned but not implemented yet
-- once linked, agents should use `.mcp-xchange/SHARE_INDEX.md` plus separate files in `.mcp-xchange/shares/` for collaboration
+- `/gateway/partner-note` is available when mode is `gateway` or `both`
+- if `GATEWAY_PUBLIC_URL` is configured, `send_partner_note` and Telegram `Передать партнёру` use the gateway HTTP surface instead of calling the local backend directly
+- in `DISTRIBUTED_MODE=both`, same-bot local delivery should still go through the gateway path transparently
+- remote relay persistence/polling through shared DB/S3 is planned but not implemented yet
+- once linked, agents should use `.mcp-xchange/SHARED_INDEX.md` plus separate files in `.mcp-xchange/shares/` for collaboration
 - recommended collaboration note kinds are:
   - `share`
   - `question`

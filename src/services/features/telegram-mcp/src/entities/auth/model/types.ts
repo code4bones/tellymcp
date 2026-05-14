@@ -40,6 +40,7 @@ export type SessionBinding = {
   sessionId: string;
   telegramChatId: number;
   telegramUserId: number;
+  telegramUsername?: string | undefined;
   linkedAt: string;
 };
 

@@ -36,7 +36,10 @@ const TelegramMcpRuntimeService: ServiceSchema = {
 
   async started(this: RuntimeCarrier) {
     this.logger.info("Starting telegram_mcp runtime service");
-    this.runtime = await createAppRuntime();
+    this.runtime = await createAppRuntime({
+      callBroker: (actionName, params, options) =>
+        this.broker.call(actionName, params, options),
+    });
     this.logger.info("telegram_mcp runtime service is ready");
   },
 

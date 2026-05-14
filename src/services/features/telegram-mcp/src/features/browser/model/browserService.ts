@@ -52,7 +52,7 @@ import type {
 } from "../../../shared/api/storage/contract";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
-import { writeXchangeFile } from "../../../shared/integrations/tmux/client";
+import { MinioExchangeStore } from "../../../shared/integrations/object-storage/minioExchangeStore";
 import { TelegramTransport } from "../../../shared/integrations/telegram/transport";
 
 type WaitUntilState = "load" | "domcontentloaded" | "networkidle" | "commit";
@@ -170,6 +170,7 @@ export class BrowserService {
     private readonly sessionStore: SessionStore,
     private readonly bindingStore: SessionBindingStore,
     private readonly xchangeFileMetaStore: TelegramXchangeFileMetaStore,
+    private readonly objectStore: MinioExchangeStore,
     private readonly telegramTransport: TelegramTransport,
     private readonly logger: Logger,
     private readonly projectIdentityResolver: ProjectIdentityResolver,
@@ -637,15 +638,17 @@ export class BrowserService {
           timeout: this.config.browser.timeoutMs,
         });
 
-    const workspaceDir = this.resolveWorkspaceDir(session);
+    const workspaceDir = this.objectStore.resolveWorkspaceDir(session);
     const exchangeDir = path.resolve(workspaceDir, this.config.exchange.dir);
-    const filePath = await writeXchangeFile(
-      this.config.tmux,
-      workspaceDir,
-      this.config.exchange.dir,
-      fileName,
-      pngBuffer,
-    );
+    const storedFile = await this.objectStore.storeFile({
+      session,
+      sessionId,
+      source: "browser-screenshot",
+      relativePath: fileName,
+      content: pngBuffer,
+      mimeType: "image/png",
+    });
+    const filePath = storedFile.filePath;
 
     state.lastUsedAt = new Date().toISOString();
     state.currentUrl = state.page.url();
@@ -656,13 +659,23 @@ export class BrowserService {
       filePath,
       selector: input.selector,
       fullPage: input.full_page === true,
+      storageRef: storedFile.storageRef,
     });
 
     await this.xchangeFileMetaStore.setXchangeFileMeta({
       sessionId,
       filePath,
+      relativePath: storedFile.relativePath,
       source: "browser-screenshot",
       uploadedAt: new Date().toISOString(),
+      storageRef: storedFile.storageRef,
+      bucketName: storedFile.bucketName,
+      objectName: storedFile.objectName,
+      vfsNodeId: storedFile.vfsNodeId,
+      vfsPublicUrl: storedFile.vfsPublicUrl,
+      vfsParentId: storedFile.vfsParentId,
+      mimeType: "image/png",
+      sizeBytes: storedFile.sizeBytes,
       ...(input.caption ? { caption: input.caption } : {}),
     });
 

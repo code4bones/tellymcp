@@ -410,6 +410,40 @@ export class RedisStateStore
     );
   }
 
+  public async listXchangeFileMetas(
+    sessionId: string,
+  ): Promise<TelegramXchangeFileMeta[]> {
+    const records: TelegramXchangeFileMeta[] = [];
+    let cursor = "0";
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        `${KEY_PREFIX}:xchange-file:${sessionId}:*`,
+        "COUNT",
+        200,
+      );
+      cursor = nextCursor;
+
+      if (keys.length === 0) {
+        continue;
+      }
+
+      const rows = await this.redis.mget(...keys);
+      for (const row of rows) {
+        const meta = parseJson<TelegramXchangeFileMeta>(row);
+        if (meta) {
+          records.push(meta);
+        }
+      }
+    } while (cursor !== "0");
+
+    return records.sort((left, right) =>
+      right.uploadedAt.localeCompare(left.uploadedAt),
+    );
+  }
+
   public async getXchangeFileMeta(
     sessionId: string,
     filePath: string,

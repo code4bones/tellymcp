@@ -7,6 +7,7 @@ import { DBMixin } from "@src/lib/mixins/db";
 import { Errors as MoleculerErrors } from "moleculer";
 import { randomUUID } from "crypto";
 import { getVfsUiConfig, resolveVfsCapabilities } from "@src/lib/vfsCapabilities";
+import { isInternalCall } from "../api/mixins/session";
 import config from "./mixins/s3/minio.config";
 import { formatMinioStorageRef, parseStorageRef } from "./mixins/s3/storage-ref";
 import { isDetachedWorkerProcess, subscribeVfsBridgeEvents } from "@src/lib/vfsEventBridge";
@@ -209,7 +210,7 @@ const vfsService: GQLSchema = {
 						public_url: randomUUID(),
 						hash,
 						name,
-						sub: ctx.meta.user.sub,
+						sub: ctx.meta.user?.sub || null,
 						scope: parentNode.scope,
 						visibility: "inherit",
 					})
@@ -219,7 +220,7 @@ const vfsService: GQLSchema = {
 						parent_id,
 						hash,
 						name,
-						sub: ctx.meta.user.sub,
+						sub: ctx.meta.user?.sub || null,
 						scope: parentNode.scope,
 						visibility: "inherit",
 					})
@@ -792,7 +793,7 @@ const vfsService: GQLSchema = {
 				return this.db("storage.nodes")
 					.update({
 						parent_id: destination_id,
-						sub: ctx.meta.user.sub,
+						sub: ctx.meta.user?.sub || null,
 					})
 					.where({ node_id })
 					.whereRaw(`parent_id is not null`)
@@ -1330,6 +1331,9 @@ const vfsService: GQLSchema = {
 			return this.hasRuleMatch(user, VFS_ADMIN_ACCESS);
 		},
 		requireCapability(ctx, capability: string) {
+			if (isInternalCall(ctx)) {
+				return;
+			}
 			if (this.isVfsAdmin(ctx.meta.user)) {
 				return;
 			}
@@ -1519,6 +1523,13 @@ const vfsService: GQLSchema = {
 					allowed: false,
 					node: null,
 					effectiveVisibility: "private",
+				};
+			}
+			if (isInternalCall(ctx)) {
+				return {
+					allowed: true,
+					node,
+					effectiveVisibility: await this.getEffectiveVisibility(node),
 				};
 			}
 			const user = ctx.meta?.user;

@@ -71,6 +71,7 @@ export type GetSessionContextOutput = {
   binding?: {
     telegram_chat_id: number;
     telegram_user_id: number;
+    telegram_username?: string | undefined;
     linked_at: string;
   };
   tmux?: {

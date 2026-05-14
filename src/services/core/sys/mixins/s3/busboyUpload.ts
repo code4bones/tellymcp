@@ -77,7 +77,14 @@ function formatFileSize(bytes) {
  * Основное middleware для обработки загрузки
  */
 function uploadMiddleware(ctx) {
+	if (Array.isArray(ctx.params?.files) && ctx.params.files.length > 0) {
+		return Promise.resolve(ctx);
+	}
+
 	const req = ctx.meta.$request;
+	if (!req?.headers) {
+		return Promise.resolve(ctx);
+	}
 
 	// Проверка типа контента
 	const contentType = req.headers["content-type"] || "";

@@ -57,6 +57,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
       runtime.stateStore,
       runtime.stateStore,
       runtime.stateStore,
+      runtime.objectStore,
       runtime.telegramTransport,
       runtime.logger,
       runtime.projectIdentityResolver,

@@ -79,6 +79,7 @@ export interface TelegramMenuPayloadStore {
 
 export interface TelegramXchangeFileMetaStore {
   setXchangeFileMeta(meta: TelegramXchangeFileMeta): Promise<void>;
+  listXchangeFileMetas(sessionId: string): Promise<TelegramXchangeFileMeta[]>;
   getXchangeFileMeta(
     sessionId: string,
     filePath: string,

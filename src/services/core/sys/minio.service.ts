@@ -26,7 +26,7 @@ import mime from "mime-types";
 import { MinIOClient } from "./mixins/s3/minio.client";
 import { Errors as MoleculerErrors } from "moleculer";
 import _ from "lodash";
-import { refreshToken, requreSession } from "../api/mixins/session";
+import { isInternalCall, refreshToken, requreSession } from "../api/mixins/session";
 import { formatMinioStorageRef, parseStorageRef } from "./mixins/s3/storage-ref";
 import { DBMixin } from "@src/lib/mixins/db";
 import { PubBuilder } from "@src/lib/pubsub";
@@ -3065,6 +3065,9 @@ const minioService: GQLSchema = {
 			return hasRole || hasGroup;
 		},
 		enforcePermission(ctx, permission) {
+			if (isInternalCall(ctx)) {
+				return;
+			}
 			const user = ctx.meta.user;
 			if (!user) {
 				throw new MoleculerErrors.MoleculerClientError("Unauthorized", 401, "UNAUTHORIZED");

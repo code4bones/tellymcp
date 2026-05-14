@@ -112,7 +112,7 @@ declare module "moleculer" {
     */
 }
 
-export type GQLSchema = ServiceSchema<ServiceSettingSchema, Service>;
+export type GQLSchema = ServiceSchema<ServiceSettingSchema>;
 
 export type Account = {
 	sub: string;

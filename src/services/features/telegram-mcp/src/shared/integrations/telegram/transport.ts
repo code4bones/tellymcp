@@ -7,7 +7,11 @@ import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from "gramm
 import type { AppConfig } from "../../../app/config/env";
 import type { WebAppLaunchRegistry } from "../../../app/webapp/auth";
 import type { CollaborationService } from "../../../features/collaboration/model/collaborationService";
-import type { PartnerNoteKind } from "../../../entities/collaboration/model/types";
+import type {
+  PartnerNoteKind,
+  SendPartnerNoteInput,
+  SendPartnerNoteOutput,
+} from "../../../entities/collaboration/model/types";
 import type { TelegramInboxMessage } from "../../../entities/inbox/model/types";
 import type {
   SessionStore,
@@ -33,16 +37,16 @@ import {
   formatTelegramMessage,
   formatTelegramNotification,
 } from "./messageFormat";
+import type { MinioExchangeStore } from "../object-storage/minioExchangeStore";
 import { createTelegramFetch } from "./proxyFetch";
 import {
   captureTmuxPaneRange,
   deleteXchangeFile,
-  ensureXchangeDir,
   getTmuxWindowHeight,
   isTmuxUnavailableError,
   listXchangeFiles,
   sendTmuxLiteralLine,
-  writeXchangeFile,
+  writeXchangeRelativeFile,
 } from "../tmux/client";
 
 type WaiterRecord = {
@@ -96,6 +100,14 @@ type PendingPartnerNoteRecord = {
   promptMessageId?: number;
 };
 
+type PendingFileHandoffRecord = {
+  sessionId: string;
+  filePath: string;
+  target: "agent" | "partner";
+  initiatedAt: string;
+  promptMessageId?: number;
+};
+
 type TmuxProxyStatusCacheEntry = {
   checkedAtMs: number;
   statusLine: string;
@@ -109,7 +121,24 @@ type TmuxCaptureScope =
 type TelegramAttachmentDescriptor = {
   fileId: string;
   preferredName: string;
+  mimeType?: string | undefined;
 };
+
+type StoredAttachmentRecord = {
+  filePath: string;
+  relativePath: string;
+  storageRef: string;
+  bucketName: string;
+  objectName: string;
+  vfsNodeId: number;
+  vfsPublicUrl: string;
+  vfsParentId: number;
+  sizeBytes: number;
+  mimeType?: string | undefined;
+};
+
+const PARTNER_INDEX_FILE_NAME = "SHARED_INDEX.md";
+const LOCAL_INDEX_FILE_NAME = "LOCAL_INDEX.md";
 
 const TMUX_PROXY_STATUS_CACHE_MS = 5000;
 
@@ -373,6 +402,66 @@ function formatMenuTimestamp(timestamp: string | undefined): string | null {
   return `${day}.${month}.${year} ${hours}:${minutes}`;
 }
 
+function normalizeGatewayBaseUrl(value: string): URL {
+  const url = new URL(value);
+  url.pathname = url.pathname.replace(/\/+$/u, "");
+
+  if (!url.pathname.endsWith("/gateway")) {
+    url.pathname = `${url.pathname}/gateway`.replace(/\/{2,}/gu, "/");
+  }
+
+  return url;
+}
+
+function buildLocalHandoffId(fileName: string, now: Date): string {
+  const timestamp = now.toISOString().replace(/[:.]/gu, "-");
+  return `${timestamp}-${slugifyFilenamePart(fileName) || "file-handoff"}`;
+}
+
+function buildLocalIndexLine(input: {
+  createdAt: string;
+  summary: string;
+  relativeNotePath: string;
+}): string {
+  return [
+    "-",
+    `[${input.createdAt}]`,
+    `local-handoff |`,
+    `${input.summary}`,
+    `| \`${input.relativeNotePath}\``,
+  ].join(" ");
+}
+
+function buildLocalNoteContent(input: {
+  handoffId: string;
+  createdAt: string;
+  sessionId: string;
+  sessionLabel?: string | undefined;
+  filePath: string;
+  description: string;
+}): string {
+  return [
+    "---",
+    `handoff_id: ${JSON.stringify(input.handoffId)}`,
+    `kind: "local-file"`,
+    `created_at: ${JSON.stringify(input.createdAt)}`,
+    `session_id: ${JSON.stringify(input.sessionId)}`,
+    `session_label: ${JSON.stringify(input.sessionLabel ?? input.sessionId)}`,
+    `artifacts:\n  - ${JSON.stringify(input.filePath)}`,
+    "---",
+    "",
+    "# Summary",
+    `Local file handoff: ${path.basename(input.filePath)}`,
+    "",
+    "# Message",
+    input.description.trim(),
+    "",
+    "# Artifacts",
+    `- ${input.filePath}`,
+    "",
+  ].join("\n");
+}
+
 export class TelegramTransport implements HumanTransport {
   private readonly telegramFetch: TelegramClientFetch;
   private readonly bot: Bot<TelegramMenuContext>;
@@ -396,6 +485,7 @@ export class TelegramTransport implements HumanTransport {
   private readonly pendingRenames = new Map<string, PendingRenameRecord>();
   private readonly pendingBroadcasts = new Map<string, PendingBroadcastRecord>();
   private readonly pendingPartnerNotes = new Map<string, PendingPartnerNoteRecord>();
+  private readonly pendingFileHandoffs = new Map<string, PendingFileHandoffRecord>();
   private tmuxProxyStatusCache?: TmuxProxyStatusCacheEntry;
   private started = false;
   private pollingTask: Promise<void> | undefined;
@@ -427,6 +517,7 @@ export class TelegramTransport implements HumanTransport {
     private readonly menuPayloadStore: TelegramMenuPayloadStore,
     private readonly xchangeFileMetaStore: TelegramXchangeFileMetaStore,
     private readonly maintenanceStore: MaintenanceStore,
+    private readonly objectStore: MinioExchangeStore,
     private readonly webAppLaunchRegistry: WebAppLaunchRegistry,
     private readonly logger: Logger,
   ) {
@@ -486,6 +577,9 @@ export class TelegramTransport implements HumanTransport {
     this.bot.callbackQuery("partner-note-cancel", async (ctx) => {
       await this.cancelPendingPartnerNote(ctx);
     });
+    this.bot.callbackQuery("file-handoff-cancel", async (ctx) => {
+      await this.cancelPendingFileHandoff(ctx);
+    });
     this.bot.on("message", async (ctx) => {
       await this.handleMessage(ctx);
     });
@@ -493,6 +587,41 @@ export class TelegramTransport implements HumanTransport {
 
   public setCollaborationService(service: CollaborationService): void {
     this.collaborationService = service;
+  }
+
+  private async sendPartnerNote(
+    input: SendPartnerNoteInput,
+  ): Promise<SendPartnerNoteOutput> {
+    if (this.collaborationService) {
+      return this.collaborationService.sendPartnerNote(input);
+    }
+
+    if (!this.config.distributed.gatewayPublicUrl) {
+      throw new Error("Partner collaboration service is not configured.");
+    }
+
+    const url = normalizeGatewayBaseUrl(this.config.distributed.gatewayPublicUrl);
+    url.pathname = `${url.pathname}/partner-note`.replace(/\/{2,}/gu, "/");
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(this.config.distributed.gatewayAuthToken
+          ? { authorization: `Bearer ${this.config.distributed.gatewayAuthToken}` }
+          : {}),
+      },
+      body: JSON.stringify(input),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(
+        `Gateway collaboration request failed with status ${response.status}: ${text || response.statusText}`,
+      );
+    }
+
+    return (await response.json()) as SendPartnerNoteOutput;
   }
 
   public async start(): Promise<void> {
@@ -1407,10 +1536,14 @@ export class TelegramTransport implements HumanTransport {
         }
 
         for (const filePath of filePaths) {
+          const meta = await this.xchangeFileMetaStore.getXchangeFileMeta(
+            sessionId,
+            filePath,
+          );
           range
             .text(
               {
-                text: this.formatFilePreviewLabel(filePath),
+                text: this.formatFilePreviewLabel(filePath, meta),
                 payload: async () =>
                   this.createFileMenuPayload(sessionId, filePath),
               },
@@ -1607,9 +1740,40 @@ export class TelegramTransport implements HumanTransport {
           payload: (ctx) => readMenuPayloadKey(ctx) ?? "missing",
         },
         async (ctx) => {
-          await this.handleFileSendToAgent(ctx);
+          await this.beginFileHandoffMode(ctx, "agent");
         },
       )
+      .text(
+        {
+          text: async (ctx) => {
+            const payloadKey = readMenuPayloadKey(ctx);
+            if (!payloadKey) {
+              return "🤝 Передать партнёру";
+            }
+
+            const payload = await this.menuPayloadStore.getMenuPayload(payloadKey);
+            if (!payload?.sessionId) {
+              return "🤝 Передать партнёру";
+            }
+
+            const session = await this.sessionStore.getSession(payload.sessionId);
+            if (!session?.linkedSessionId) {
+              return "🤝 Передать партнёру";
+            }
+
+            const linkedSession = await this.sessionStore.getSession(
+              session.linkedSessionId,
+            );
+
+            return `🤝 Передать ${linkedSession?.label ?? session.linkedSessionId}`;
+          },
+          payload: (ctx) => readMenuPayloadKey(ctx) ?? "missing",
+        },
+        async (ctx) => {
+          await this.beginFileHandoffMode(ctx, "partner");
+        },
+      )
+      .row()
       .text(
         {
           text: "🗑 Delete",
@@ -1685,6 +1849,10 @@ export class TelegramTransport implements HumanTransport {
       return;
     }
 
+    if (text && (await this.handlePendingFileHandoff(ctx, text))) {
+      return;
+    }
+
     if (text && isMenuEntryCommand(text)) {
       this.clearPendingInteractionsForContext(ctx);
       await this.showSessionsMenu(ctx);
@@ -1751,6 +1919,7 @@ export class TelegramTransport implements HumanTransport {
       sessionId: pairCode.sessionId,
       telegramChatId: chatId,
       telegramUserId: fromUserId,
+      ...(ctx.from?.username ? { telegramUsername: ctx.from.username } : {}),
       linkedAt: new Date().toISOString(),
     });
     await this.bindingStore.setActiveSessionIdForPrincipal(
@@ -1944,7 +2113,7 @@ export class TelegramTransport implements HumanTransport {
     }
 
     const session = await this.sessionStore.getSession(sessionId);
-    let attachments: string[] = [];
+    let attachments: StoredAttachmentRecord[] = [];
     try {
       attachments = await this.downloadIncomingAttachments(
         session,
@@ -1971,7 +2140,18 @@ export class TelegramTransport implements HumanTransport {
       );
       return;
     }
-    const normalizedText = this.buildInboxText(text, attachments);
+    const normalizedText = this.buildInboxText(
+      text,
+      attachments.map((attachment) => attachment.filePath),
+    );
+
+    await this.storeTelegramUploadMetas({
+      sessionId,
+      sourceTelegramMessageId: message.message_id,
+      uploadedAt: new Date(message.date * 1000).toISOString(),
+      attachments,
+      descriptors: attachmentDescriptors,
+    });
 
     const inboxMessage: TelegramInboxMessage = {
       id: createInboxMessageId(),
@@ -1980,7 +2160,9 @@ export class TelegramTransport implements HumanTransport {
       telegramUserId: fromUserId,
       sourceTelegramMessageId: message.message_id,
       text: normalizedText,
-      ...(attachments.length > 0 ? { attachments } : {}),
+      ...(attachments.length > 0
+        ? { attachments: attachments.map((attachment) => attachment.filePath) }
+        : {}),
       receivedAt: new Date(message.date * 1000).toISOString(),
     };
 
@@ -1993,6 +2175,7 @@ export class TelegramTransport implements HumanTransport {
       inboxMessageId: inboxMessage.id,
       text: redactSecrets(inboxMessage.text),
       attachmentCount: attachments.length,
+      attachments: attachments.map((attachment) => attachment.filePath),
     });
 
     try {
@@ -2058,25 +2241,14 @@ export class TelegramTransport implements HumanTransport {
       message.message_id,
       attachmentDescriptors,
     );
-
-    for (let index = 0; index < attachments.length; index += 1) {
-      const attachmentPath = attachments[index];
-      const descriptor = attachmentDescriptors[index];
-      if (!attachmentPath || !descriptor) {
-        continue;
-      }
-      await this.xchangeFileMetaStore.setXchangeFileMeta({
-        sessionId,
-        filePath: attachmentPath,
-        source: "telegram-upload",
-        sourceTelegramMessageId: message.message_id,
-        uploadedAt: new Date(message.date * 1000).toISOString(),
-        ...(!descriptor.preferredName.startsWith("photo-")
-          ? { originalName: descriptor.preferredName }
-          : {}),
-        ...(caption ? { caption } : {}),
-      });
-    }
+    await this.storeTelegramUploadMetas({
+      sessionId,
+      sourceTelegramMessageId: message.message_id,
+      uploadedAt: new Date(message.date * 1000).toISOString(),
+      attachments,
+      descriptors: attachmentDescriptors,
+      caption: caption || undefined,
+    });
 
     this.logger.info("Telegram files uploaded for session", {
       sessionId,
@@ -2084,7 +2256,7 @@ export class TelegramTransport implements HumanTransport {
       userId: fromUserId,
       messageId: message.message_id,
       attachmentCount: attachments.length,
-      attachments,
+      attachments: attachments.map((attachment) => attachment.filePath),
     });
 
     await this.replyText(
@@ -2666,6 +2838,13 @@ export class TelegramTransport implements HumanTransport {
   }
 
   private async listActiveSessionFiles(sessionId: string): Promise<string[]> {
+    const metas = await this.xchangeFileMetaStore.listXchangeFileMetas(sessionId);
+    if (metas.length > 0) {
+      return metas
+        .filter((meta) => meta.source === "telegram-upload")
+        .map((meta) => meta.filePath);
+    }
+
     const session = await this.sessionStore.getSession(sessionId);
     const workspaceDir = session?.cwd?.trim() || "";
     if (this.config.tmux.proxyUrl && !workspaceDir) {
@@ -2678,25 +2857,19 @@ export class TelegramTransport implements HumanTransport {
       resolvedWorkspaceDir,
       this.config.exchange.dir,
     );
-    const included: string[] = [];
-
-    for (const filePath of files) {
-      const meta = await this.xchangeFileMetaStore.getXchangeFileMeta(
-        sessionId,
-        filePath,
-      );
-      if (meta?.source === "browser-screenshot") {
-        continue;
-      }
-      included.push(filePath);
-    }
-
-    return included;
+    return files.sort((left, right) => right.localeCompare(left));
   }
 
   private async listActiveSessionScreenshots(
     sessionId: string,
   ): Promise<string[]> {
+    const metas = await this.xchangeFileMetaStore.listXchangeFileMetas(sessionId);
+    if (metas.length > 0) {
+      return metas
+        .filter((meta) => meta.source === "browser-screenshot")
+        .map((meta) => meta.filePath);
+    }
+
     const session = await this.sessionStore.getSession(sessionId);
     const workspaceDir = session?.cwd?.trim() || "";
     if (this.config.tmux.proxyUrl && !workspaceDir) {
@@ -2709,19 +2882,7 @@ export class TelegramTransport implements HumanTransport {
       resolvedWorkspaceDir,
       this.config.exchange.dir,
     );
-    const screenshots: string[] = [];
-
-    for (const filePath of files) {
-      const meta = await this.xchangeFileMetaStore.getXchangeFileMeta(
-        sessionId,
-        filePath,
-      );
-      if (meta?.source === "browser-screenshot") {
-        screenshots.push(filePath);
-      }
-    }
-
-    return screenshots;
+    return files.sort((left, right) => right.localeCompare(left));
   }
 
   private async handleInboxMessageOpen(
@@ -2812,7 +2973,10 @@ export class TelegramTransport implements HumanTransport {
     );
   }
 
-  private async handleFileSendToAgent(ctx: TelegramMenuContext): Promise<void> {
+  private async beginFileHandoffMode(
+    ctx: TelegramMenuContext,
+    target: "agent" | "partner",
+  ): Promise<void> {
     const payloadKey = readMenuPayloadKey(ctx);
     if (!payloadKey) {
       await ctx.answerCallbackQuery({
@@ -2840,42 +3004,55 @@ export class TelegramTransport implements HumanTransport {
       return;
     }
 
+    if (target === "partner") {
+      const session = await this.sessionStore.getSession(payload.sessionId);
+      if (!session?.linkedSessionId) {
+        await ctx.answerCallbackQuery({
+          text: "Link a partner session first.",
+          show_alert: true,
+        });
+        return;
+      }
+    }
+
     const meta = await this.xchangeFileMetaStore.getXchangeFileMeta(
       payload.sessionId,
       payload.filePath,
     );
+    const fileName =
+      meta?.originalName ||
+      (meta?.relativePath ? path.basename(meta.relativePath) : undefined) ||
+      path.basename(payload.filePath);
+    const principalKey = buildPrincipalKey(principal);
+    const title =
+      target === "agent" ? "📨 Передать агенту" : "🤝 Передать партнёру";
 
-    const inboxMessage: TelegramInboxMessage = {
-      id: createInboxMessageId(),
-      sessionId: payload.sessionId,
-      telegramChatId: principal.telegramChatId,
-      telegramUserId: principal.telegramUserId,
-      sourceTelegramMessageId: ctx.callbackQuery?.message?.message_id ?? 0,
-      text: [
-        "Пользователь передал файл для текущей задачи.",
-        `Файл: ${payload.filePath}`,
-        ...(meta?.caption ? ["", "Описание:", meta.caption] : []),
+    await ctx.answerCallbackQuery({
+      text: target === "agent" ? "Agent handoff." : "Partner handoff.",
+    });
+    const sent = await this.replyText(
+      ctx,
+      [
+        title,
+        "",
+        `Файл: ${fileName}`,
+        "",
+        "Send the next text message with additional description or instructions for this file.",
+        "This text will be attached to the handoff.",
       ].join("\n"),
-      attachments: [payload.filePath],
-      receivedAt: new Date().toISOString(),
-    };
+      { kind: "menu", sessionId: payload.sessionId },
+      {
+        reply_markup: new InlineKeyboard().text("Cancel", "file-handoff-cancel"),
+      },
+    );
 
-    await this.inboxStore.createInboxMessage(inboxMessage);
-    const session = await this.sessionStore.getSession(payload.sessionId);
-    try {
-      this.scheduleTmuxNudgeForInboxMessage(payload.sessionId, session);
-    } catch (error) {
-      this.logger.error("tmux nudge failed after file handoff", {
-        sessionId: payload.sessionId,
-        error:
-          error instanceof Error
-            ? (error.stack ?? error.message)
-            : String(error),
-      });
-    }
-
-    await ctx.answerCallbackQuery({ text: "Sent to agent." });
-    await this.showFilesMenu(ctx, "File sent to agent.");
+    this.pendingFileHandoffs.set(principalKey, {
+      sessionId: payload.sessionId,
+      filePath: payload.filePath,
+      target,
+      initiatedAt: new Date().toISOString(),
+      ...(sent && "message_id" in sent ? { promptMessageId: sent.message_id } : {}),
+    });
   }
 
   private async handleFileDelete(ctx: TelegramMenuContext): Promise<void> {
@@ -2897,35 +3074,32 @@ export class TelegramTransport implements HumanTransport {
       return;
     }
 
-    const session = await this.sessionStore.getSession(payload.sessionId);
-    const workspaceDir = session?.cwd?.trim() || "";
-    if (this.config.tmux.proxyUrl && !workspaceDir) {
-      await ctx.answerCallbackQuery({
-        text: "Session cwd is missing.",
-        show_alert: true,
-      });
-      return;
-    }
-
-    const resolvedWorkspaceDir = workspaceDir || process.cwd();
-    const deleted = await deleteXchangeFile(
-      this.config.tmux,
-      resolvedWorkspaceDir,
-      this.config.exchange.dir,
+    const meta = await this.xchangeFileMetaStore.getXchangeFileMeta(
+      payload.sessionId,
       payload.filePath,
     );
+    await this.objectStore.deleteStoredFile({
+      storageRef: meta?.storageRef,
+      vfsNodeId: meta?.vfsNodeId,
+    });
     await this.xchangeFileMetaStore.deleteXchangeFileMeta(
       payload.sessionId,
       payload.filePath,
     );
 
     await ctx.answerCallbackQuery({
-      text: deleted ? "File deleted." : "File already absent.",
+      text: meta ? "File deleted." : "File already absent.",
     });
     await this.showFilesMenu(
       ctx,
-      deleted ? "File deleted." : "File was already removed.",
+      meta ? "File deleted." : "File was already removed.",
     );
+  }
+
+  private async handleFileSendToPartner(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    await this.beginFileHandoffMode(ctx, "partner");
   }
 
   private async handleLinkButton(ctx: TelegramMenuContext): Promise<void> {
@@ -3102,10 +3276,15 @@ export class TelegramTransport implements HumanTransport {
       return;
     }
 
+    const ensured = await this.ensureStoredXchangeFile(
+      payload.sessionId,
+      payload.filePath,
+      "browser-screenshot",
+    );
     await this.sendDocumentToChat(
       chatId,
-      payload.filePath,
-      `Screenshot: ${path.basename(payload.filePath)}`,
+      ensured.filePath,
+      `Screenshot: ${path.basename(ensured.filePath)}`,
     );
 
     await ctx.answerCallbackQuery({ text: "Screenshot sent." });
@@ -3133,34 +3312,25 @@ export class TelegramTransport implements HumanTransport {
       return;
     }
 
-    const session = await this.sessionStore.getSession(payload.sessionId);
-    const workspaceDir = session?.cwd?.trim() || "";
-    if (this.config.tmux.proxyUrl && !workspaceDir) {
-      await ctx.answerCallbackQuery({
-        text: "Session cwd is missing.",
-        show_alert: true,
-      });
-      return;
-    }
-
-    const resolvedWorkspaceDir = workspaceDir || process.cwd();
-    const deleted = await deleteXchangeFile(
-      this.config.tmux,
-      resolvedWorkspaceDir,
-      this.config.exchange.dir,
+    const meta = await this.xchangeFileMetaStore.getXchangeFileMeta(
+      payload.sessionId,
       payload.filePath,
     );
+    await this.objectStore.deleteStoredFile({
+      storageRef: meta?.storageRef,
+      vfsNodeId: meta?.vfsNodeId,
+    });
     await this.xchangeFileMetaStore.deleteXchangeFileMeta(
       payload.sessionId,
       payload.filePath,
     );
 
     await ctx.answerCallbackQuery({
-      text: deleted ? "Screenshot deleted." : "Screenshot already absent.",
+      text: meta ? "Screenshot deleted." : "Screenshot already absent.",
     });
     await this.showScreenshotsMenu(
       ctx,
-      deleted ? "Screenshot deleted." : "Screenshot was already removed.",
+      meta ? "Screenshot deleted." : "Screenshot was already removed.",
     );
   }
 
@@ -3279,8 +3449,18 @@ export class TelegramTransport implements HumanTransport {
     return message.attachments?.length ? `📎 ${label}` : label;
   }
 
-  private formatFilePreviewLabel(filePath: string): string {
-    return path.basename(filePath);
+  private formatFilePreviewLabel(
+    filePath: string,
+    meta?: {
+      originalName?: string | undefined;
+      relativePath?: string | undefined;
+    } | null,
+  ): string {
+    return (
+      meta?.originalName ||
+      (meta?.relativePath ? path.basename(meta.relativePath) : undefined) ||
+      path.basename(filePath)
+    );
   }
 
   private formatSessionMenuLabel(input: {
@@ -3323,16 +3503,21 @@ export class TelegramTransport implements HumanTransport {
     filePath: string,
     meta?: {
       originalName?: string | undefined;
+      relativePath?: string | undefined;
       caption?: string | undefined;
       uploadedAt?: string | undefined;
     } | null,
   ): string {
+    const displayName =
+      meta?.originalName ||
+      (meta?.relativePath ? path.basename(meta.relativePath) : undefined) ||
+      path.basename(filePath);
+
     return [
       "Session file",
       "",
       `Session: ${sessionId}`,
-      `File: ${path.basename(filePath)}`,
-      ...(meta?.originalName ? [`Original name: ${meta.originalName}`] : []),
+      `File: ${displayName}`,
       ...(meta?.uploadedAt ? [`Uploaded: ${meta.uploadedAt}`] : []),
       `Path: ${filePath}`,
       ...(meta?.caption ? ["", "Description:", meta.caption] : []),
@@ -3383,6 +3568,7 @@ export class TelegramTransport implements HumanTransport {
         attachments.push({
           fileId: largestPhoto.file_id,
           preferredName: `photo-${message.message_id}.jpg`,
+          mimeType: "image/jpeg",
         });
       }
     }
@@ -3392,6 +3578,9 @@ export class TelegramTransport implements HumanTransport {
         fileId: message.document.file_id,
         preferredName:
           message.document.file_name || `document-${message.message_id}.bin`,
+        ...(message.document.mime_type
+          ? { mimeType: message.document.mime_type }
+          : {}),
       });
     }
 
@@ -3420,67 +3609,116 @@ export class TelegramTransport implements HumanTransport {
     return lines.join("\n");
   }
 
+  private async storeTelegramUploadMetas(input: {
+    sessionId: string;
+    sourceTelegramMessageId: number;
+    uploadedAt: string;
+    attachments: StoredAttachmentRecord[];
+    descriptors?: TelegramAttachmentDescriptor[] | undefined;
+    caption?: string | undefined;
+  }): Promise<void> {
+    for (let index = 0; index < input.attachments.length; index += 1) {
+      const attachment = input.attachments[index];
+      if (!attachment) {
+        continue;
+      }
+
+      const descriptor = input.descriptors?.[index];
+      await this.xchangeFileMetaStore.setXchangeFileMeta({
+        sessionId: input.sessionId,
+        filePath: attachment.filePath,
+        relativePath: attachment.relativePath,
+        source: "telegram-upload",
+        sourceTelegramMessageId: input.sourceTelegramMessageId,
+        uploadedAt: input.uploadedAt,
+        storageRef: attachment.storageRef,
+        bucketName: attachment.bucketName,
+        objectName: attachment.objectName,
+        vfsNodeId: attachment.vfsNodeId,
+        vfsPublicUrl: attachment.vfsPublicUrl,
+        vfsParentId: attachment.vfsParentId,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes,
+        ...(
+          descriptor && !descriptor.preferredName.startsWith("photo-")
+            ? { originalName: descriptor.preferredName }
+            : {}
+        ),
+        ...(input.caption ? { caption: input.caption } : {}),
+      });
+    }
+  }
+
+  private async ensureStoredXchangeFile(
+    sessionId: string,
+    filePath: string,
+    source: "telegram-upload" | "browser-screenshot",
+  ): Promise<{ session: Awaited<ReturnType<SessionStore["getSession"]>>; filePath: string }> {
+    const session = await this.sessionStore.getSession(sessionId);
+    const meta = await this.xchangeFileMetaStore.getXchangeFileMeta(
+      sessionId,
+      filePath,
+    );
+
+    if (!meta) {
+      return { session, filePath };
+    }
+
+    const materializedPath = await this.objectStore.ensureLocalFile({
+      sessionId,
+      session,
+      filePath,
+      relativePath: meta.relativePath,
+      storageRef: meta.storageRef,
+      source,
+    });
+
+    return {
+      session,
+      filePath: materializedPath,
+    };
+  }
+
   private async downloadIncomingAttachments(
     session: Awaited<ReturnType<SessionStore["getSession"]>>,
     sessionId: string,
     sourceTelegramMessageId: number,
     attachments: TelegramAttachmentDescriptor[],
-  ): Promise<string[]> {
+  ): Promise<StoredAttachmentRecord[]> {
     if (attachments.length === 0) {
       return [];
     }
 
-    const workspaceDir = session?.cwd?.trim() || "";
-    if (this.config.tmux.proxyUrl && !workspaceDir) {
-      throw new Error(
-        `Session ${sessionId} has no cwd configured for host bridge file exchange.`,
-      );
-    }
-
-    const resolvedWorkspaceDir = workspaceDir || process.cwd();
-    await ensureXchangeDir(
-      this.config.tmux,
-      resolvedWorkspaceDir,
-      this.config.exchange.dir,
-    );
-
-    const savedPaths: string[] = [];
+    const savedFiles: StoredAttachmentRecord[] = [];
     for (const attachment of attachments) {
-      const savedPath = await this.downloadTelegramFile(
+      const savedFile = await this.downloadTelegramFile(
+        session,
+        sessionId,
         attachment.fileId,
-        resolvedWorkspaceDir,
         sourceTelegramMessageId,
         attachment.preferredName,
+        attachment.mimeType,
       );
-      savedPaths.push(savedPath);
+      savedFiles.push(savedFile);
     }
 
-    return savedPaths;
+    return savedFiles;
   }
 
   private async downloadTelegramFile(
+    session: Awaited<ReturnType<SessionStore["getSession"]>>,
+    sessionId: string,
     fileId: string,
-    workspaceDir: string,
-    sourceTelegramMessageId: number,
+    _sourceTelegramMessageId: number,
     preferredName: string,
-  ): Promise<string> {
+    preferredMimeType?: string | undefined,
+  ): Promise<StoredAttachmentRecord> {
     const telegramFile = await this.bot.api.getFile(fileId);
     if (!telegramFile.file_path) {
       throw new Error("Telegram file path is missing");
     }
 
-    const sourceName =
-      path.basename(telegramFile.file_path) || preferredName || "file.bin";
-    const extension = path.extname(sourceName);
-    const baseName = path.basename(sourceName, extension);
-    const isGeneratedPhotoName = preferredName.startsWith("photo-");
-    const outputName = isGeneratedPhotoName
-      ? (() => {
-          const safeBaseName = this.slugifyPathPart(baseName || "file");
-          const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-          return `${timestamp}-m${sourceTelegramMessageId}-${safeBaseName}${extension || ".bin"}`;
-        })()
-      : preferredName;
+    const outputName = preferredName;
     const fileUrl = `https://api.telegram.org/file/bot${this.config.telegram.botToken}/${telegramFile.file_path}`;
     const response = await this.telegramFetch(fileUrl);
 
@@ -3491,13 +3729,17 @@ export class TelegramTransport implements HumanTransport {
     }
 
     const buffer = Buffer.from(await response.arrayBuffer());
-    return writeXchangeFile(
-      this.config.tmux,
-      workspaceDir,
-      this.config.exchange.dir,
-      outputName,
-      buffer,
-    );
+    return this.objectStore.storeFile({
+      session,
+      sessionId,
+      source: "telegram-upload",
+      relativePath: outputName,
+      content: buffer,
+      mimeType:
+        preferredMimeType ||
+        response.headers.get("content-type") ||
+        undefined,
+    });
   }
 
   private slugifyPathPart(input: string): string {
@@ -3843,6 +4085,7 @@ export class TelegramTransport implements HumanTransport {
     this.pendingRenames.delete(key);
     this.pendingBroadcasts.delete(key);
     this.pendingPartnerNotes.delete(key);
+    this.pendingFileHandoffs.delete(key);
   }
 
   private async sendActiveSessionBuffer(
@@ -5057,6 +5300,173 @@ export class TelegramTransport implements HumanTransport {
     await this.showPartnerMenu(ctx);
   }
 
+  private async deletePendingFileHandoffPrompt(
+    ctx: TelegramMenuContext,
+    pending: PendingFileHandoffRecord,
+  ): Promise<void> {
+    if (!pending.promptMessageId) {
+      return;
+    }
+
+    try {
+      await this.deleteMessage(ctx.chat!.id, pending.promptMessageId);
+    } catch (error) {
+      this.logger.warn("Failed to delete pending file handoff prompt", {
+        sessionId: pending.sessionId,
+        promptMessageId: pending.promptMessageId,
+        target: pending.target,
+        error:
+          error instanceof Error ? (error.stack ?? error.message) : String(error),
+      });
+    }
+  }
+
+  private async cancelPendingFileHandoff(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal) {
+      await ctx.answerCallbackQuery({
+        text: "Telegram identity is unavailable.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const principalKey = buildPrincipalKey(principal);
+    const pending = this.pendingFileHandoffs.get(principalKey);
+    if (!pending) {
+      await ctx.answerCallbackQuery({
+        text: "No pending file handoff prompt.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    this.pendingFileHandoffs.delete(principalKey);
+    await this.deletePendingFileHandoffPrompt(ctx, pending);
+    await ctx.answerCallbackQuery({ text: "File handoff cancelled." });
+    await this.showFilesMenu(ctx);
+  }
+
+  private async deliverFileToAgent(input: {
+    principal: { telegramChatId: number; telegramUserId: number };
+    sessionId: string;
+    filePath: string;
+    sourceTelegramMessageId: number;
+    description: string;
+  }): Promise<void> {
+    const meta = await this.xchangeFileMetaStore.getXchangeFileMeta(
+      input.sessionId,
+      input.filePath,
+    );
+    const session = await this.sessionStore.getSession(input.sessionId);
+    const fileName =
+      meta?.originalName ||
+      (meta?.relativePath ? path.basename(meta.relativePath) : undefined) ||
+      path.basename(input.filePath);
+    const now = new Date();
+    const createdAt = now.toISOString();
+    const handoffId = buildLocalHandoffId(fileName, now);
+    const relativeArtifactPath = `local/files/${handoffId}/${fileName}`;
+    const ensuredFilePath =
+      meta?.storageRef
+        ? await this.objectStore.ensureLocalFile({
+            sessionId: input.sessionId,
+            session,
+            filePath: input.filePath,
+            relativePath: relativeArtifactPath,
+            storageRef: meta.storageRef,
+            source: "partner-artifact",
+          })
+        : input.filePath;
+
+    const workspaceDir = this.objectStore.resolveWorkspaceDir(session);
+    const relativeNotePath = `local/${handoffId}.md`;
+    const noteContent = buildLocalNoteContent({
+      handoffId,
+      createdAt,
+      sessionId: input.sessionId,
+      ...(session?.label ? { sessionLabel: session.label } : {}),
+      filePath: ensuredFilePath,
+      description: input.description,
+    });
+    const notePath = await writeXchangeRelativeFile(
+      this.config.tmux,
+      workspaceDir,
+      this.config.exchange.dir,
+      relativeNotePath,
+      Buffer.from(noteContent, "utf8"),
+    );
+    await writeXchangeRelativeFile(
+      this.config.tmux,
+      workspaceDir,
+      this.config.exchange.dir,
+      LOCAL_INDEX_FILE_NAME,
+      Buffer.from(
+        `${buildLocalIndexLine({
+          createdAt,
+          summary: `Local file handoff: ${fileName}`,
+          relativeNotePath,
+        })}\n`,
+        "utf8",
+      ),
+      { append: true },
+    );
+
+    const inboxMessage: TelegramInboxMessage = {
+      id: createInboxMessageId(),
+      sessionId: input.sessionId,
+      telegramChatId: input.principal.telegramChatId,
+      telegramUserId: input.principal.telegramUserId,
+      sourceTelegramMessageId: input.sourceTelegramMessageId,
+      text: [
+        "Local file handoff received.",
+        `Summary: Local file handoff: ${fileName}`,
+        "",
+        `Immediate action: read ${LOCAL_INDEX_FILE_NAME} and then open the note below.`,
+        `Note: ${notePath}`,
+        "",
+        "Artifacts:",
+        `- ${ensuredFilePath}`,
+      ].join("\n"),
+      attachments: [notePath, ensuredFilePath],
+      receivedAt: createdAt,
+    };
+
+    await this.inboxStore.createInboxMessage(inboxMessage);
+  }
+
+  private async deliverFileToPartner(input: {
+    sessionId: string;
+    filePath: string;
+    description: string;
+  }): Promise<SendPartnerNoteOutput> {
+    const meta = await this.xchangeFileMetaStore.getXchangeFileMeta(
+      input.sessionId,
+      input.filePath,
+    );
+    const fileName =
+      meta?.originalName ||
+      (meta?.relativePath ? path.basename(meta.relativePath) : undefined) ||
+      path.basename(input.filePath);
+
+    return this.sendPartnerNote({
+      session_id: input.sessionId,
+      kind: "handoff",
+      summary: `File handoff: ${fileName}`,
+      message: [
+        "Partner sent a file for the current task.",
+        `File: ${fileName}`,
+        "",
+        "Description:",
+        input.description,
+        ...(meta?.caption ? ["", "Caption:", meta.caption] : []),
+      ].join("\n"),
+      artifacts: [input.filePath],
+    });
+  }
+
   private async handlePendingPartnerNote(
     ctx: TelegramMenuContext,
     text: string,
@@ -5078,19 +5488,8 @@ export class TelegramTransport implements HumanTransport {
       return false;
     }
 
-    if (!this.collaborationService) {
-      this.pendingPartnerNotes.delete(principalKey);
-      await this.deletePendingPartnerNotePrompt(ctx, pending);
-      await this.replyText(
-        ctx,
-        "Partner collaboration service is not configured.",
-        { kind: "menu", sessionId: pending.sessionId },
-      );
-      return true;
-    }
-
     const parsed = this.parsePartnerNoteText(text);
-    const output = await this.collaborationService.sendPartnerNote({
+    const output = await this.sendPartnerNote({
       session_id: pending.sessionId,
       kind: pending.kind,
       summary: parsed.summary,
@@ -5106,6 +5505,65 @@ export class TelegramTransport implements HumanTransport {
         `Kind: ${output.kind}`,
         `Note: ${output.note_path}`,
       ].join("\n"),
+      { kind: "menu", sessionId: pending.sessionId },
+    );
+    return true;
+  }
+
+  private async handlePendingFileHandoff(
+    ctx: TelegramMenuContext,
+    text: string,
+  ): Promise<boolean> {
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal) {
+      return false;
+    }
+
+    const principalKey = buildPrincipalKey(principal);
+    const pending = this.pendingFileHandoffs.get(principalKey);
+    if (!pending) {
+      return false;
+    }
+
+    if (text.startsWith("/")) {
+      this.pendingFileHandoffs.delete(principalKey);
+      await this.deletePendingFileHandoffPrompt(ctx, pending);
+      return false;
+    }
+
+    const description = text.trim();
+    if (!description) {
+      return true;
+    }
+
+    if (pending.target === "agent") {
+      await this.deliverFileToAgent({
+        principal,
+        sessionId: pending.sessionId,
+        filePath: pending.filePath,
+        sourceTelegramMessageId: ctx.message?.message_id ?? 0,
+        description,
+      });
+      this.pendingFileHandoffs.delete(principalKey);
+      await this.deletePendingFileHandoffPrompt(ctx, pending);
+      await this.replyText(
+        ctx,
+        "File sent to agent.",
+        { kind: "menu", sessionId: pending.sessionId },
+      );
+      return true;
+    }
+
+    const output = await this.deliverFileToPartner({
+      sessionId: pending.sessionId,
+      filePath: pending.filePath,
+      description,
+    });
+    this.pendingFileHandoffs.delete(principalKey);
+    await this.deletePendingFileHandoffPrompt(ctx, pending);
+    await this.replyText(
+      ctx,
+      `File sent to partner. Share: ${output.share_id}`,
       { kind: "menu", sessionId: pending.sessionId },
     );
     return true;

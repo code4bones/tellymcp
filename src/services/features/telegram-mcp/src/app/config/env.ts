@@ -47,6 +47,7 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((value) => value === "true"),
+  MCP_VFS_SCOPE: z.string().min(1).default("mcp"),
   DISTRIBUTED_MODE: z.enum(["client", "gateway", "both"]).default("client"),
   GATEWAY_PUBLIC_URL: z.string().url().optional(),
   GATEWAY_BIND_HOST: z.string().min(1).default("127.0.0.1"),
@@ -90,7 +91,7 @@ const envSchema = z.object({
   TMUX_PARTNER_NUDGE_MESSAGE: z
     .string()
     .min(1)
-    .default("не inbox: прочитай SHARE_INDEX.md и partner note"),
+    .default("не inbox: прочитай SHARED_INDEX.md и partner note"),
   TMUX_CAPTURE_MODE: z.enum(["visible", "lines"]).default("visible"),
   TMUX_CAPTURE_LINES: z.coerce.number().int().positive().default(300),
   BROWSER_ENABLED: z
@@ -151,6 +152,7 @@ export type AppConfig = {
     httpHost: string;
     httpPort: number;
     httpPath: string;
+    vfsScope: string;
     bearerToken?: string;
     enableDebugRoutes: boolean;
     enablePruneRoute: boolean;
@@ -268,6 +270,7 @@ export function loadConfig(): AppConfig {
       httpHost: parsed.MCP_HTTP_HOST,
       httpPort: parsed.MCP_HTTP_PORT,
       httpPath: parsed.MCP_HTTP_PATH,
+      vfsScope: parsed.MCP_VFS_SCOPE,
       ...(parsed.MCP_HTTP_BEARER_TOKEN
         ? { bearerToken: parsed.MCP_HTTP_BEARER_TOKEN }
         : {}),

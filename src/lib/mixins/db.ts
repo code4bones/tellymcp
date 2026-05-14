@@ -84,9 +84,9 @@ const filter = (q: Knex.QueryBuilder, flt: Knex.Filter[]) => {
 	return q;
 };
 
-const orderBy = (q: Knex.QueryBuilder, sort) => {
+const orderBy = (q: Knex.QueryBuilder, sort: Knex.Sort[]) => {
 	const orders = sort
-		.map(({ column, order, nulls }) => {
+		.map(({ column, order, nulls }: Knex.Sort) => {
 			return `"${column}" ${order} ${nulls || ""}`;
 		})
 		.join(",");
@@ -99,12 +99,12 @@ knex.QueryBuilder.extend("dataView", function (dataView: Knex.DataView): Promise
 	return paginate(this, dataView?.pagination);
 });
 
-const DBConfig: Knex.StaticConnectionConfig = {
-	host: process.env.DB_HOST,
-	port: Number(process.env.DB_PORT),
-	user: process.env.DB_USER,
-	password: process.env.DB_PASSWORD,
-	database: process.env.DB_NAME,
+const DBConfig: Knex.PgConnectionConfig = {
+	host: process.env.DB_HOST || "localhost",
+	port: Number(process.env.DB_PORT || 5432),
+	user: process.env.DB_USER || "",
+	password: process.env.DB_PASSWORD || "",
+	database: process.env.DB_NAME || "",
 };
 
 const DBMixin: GQLSchema = {
@@ -121,17 +121,23 @@ const DBMixin: GQLSchema = {
 				max: 64,
 				// acquireTimeoutMillis: 1000 * 60 * 60,
 				propagateCreateError: false,
-				afterCreate: (con, callback) => {
-					con.on("error", err => {
+				afterCreate: (
+					con: {
+						on: (event: string, handler: (...payload: any[]) => void) => void;
+						query: (sql: string, cb: (err: unknown) => void) => void;
+					},
+					callback: (err: unknown, connection: unknown) => void
+				) => {
+					con.on("error", (err: unknown) => {
 						console.error("[KNEX-ERROR]", err);
 					});
-					con.on("notice", function (msg) {
+					con.on("notice", function (msg: { name?: string; severity?: string; message?: string }) {
 						console.warn(`[DB] ${msg.name}/${msg.severity}:`, msg.message);
 						// console.warn(`[PG]`, msg.message);
 					});
-					con.query('SET time zone  "Europe/Moscow"', err => {
+					con.query('SET time zone  "Europe/Moscow"', (err: unknown) => {
 						if (err) console.error("QUERY", err);
-						callback(err, callback);
+						callback(err, con);
 					});
 				},
 			},

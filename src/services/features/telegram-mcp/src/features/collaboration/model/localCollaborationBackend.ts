@@ -12,10 +12,12 @@ import type {
   SessionBindingStore,
   SessionStore,
   TelegramInboxStore,
+  TelegramXchangeFileMetaStore,
 } from "../../../shared/api/storage/contract";
 import { createInboxMessageId } from "../../../shared/lib/ids/ids";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import type { ResolvedSessionDefaults } from "../../../shared/lib/project-identity/projectIdentity";
+import type { MinioExchangeStore } from "../../../shared/integrations/object-storage/minioExchangeStore";
 import {
   readWorkspaceFile,
   writeXchangeRelativeFile,
@@ -66,6 +68,8 @@ const SOURCE_ARTIFACT_EXTENSIONS = new Set([
   ".xml",
   ".zsh",
 ]);
+
+const PARTNER_INDEX_FILE_NAME = "SHARED_INDEX.md";
 
 function trimOptional(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -134,7 +138,7 @@ function buildPartnerInboxText(input: {
     `From: ${input.fromLabel}`,
     `Summary: ${input.summary}`,
     "",
-    "Immediate action: read SHARE_INDEX.md and then open the note below.",
+    `Immediate action: read ${PARTNER_INDEX_FILE_NAME} and then open the note below.`,
     `Note: ${input.notePath}`,
     ...(input.copiedArtifacts.length > 0
       ? ["", "Artifacts:", ...input.copiedArtifacts.map((item) => `- ${item}`)]
@@ -222,6 +226,8 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     private readonly sessionStore: SessionStore,
     private readonly bindingStore: SessionBindingStore,
     private readonly inboxStore: TelegramInboxStore,
+    private readonly xchangeFileMetaStore: TelegramXchangeFileMetaStore,
+    private readonly objectStore: MinioExchangeStore,
     private readonly telegramTransport: TelegramTransport,
     private readonly logger: Logger,
   ) {}
@@ -279,9 +285,11 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     const requiresReply = isReplyRequired(input.kind, input);
 
     const copiedArtifacts = await this.copyArtifactsToPartner(
+      sourceSession,
+      targetSession,
       sourceWorkspaceDir,
-      targetWorkspaceDir,
       shareId,
+      createdAt,
       input.artifacts ?? [],
     );
     const inReplyTo = trimOptional(input.in_reply_to);
@@ -309,11 +317,20 @@ export class LocalCollaborationBackend implements CollaborationBackend {
       relativeNotePath,
       this.textEncoder.encode(noteContent),
     );
+    await this.xchangeFileMetaStore.setXchangeFileMeta({
+      sessionId: targetSession.sessionId,
+      filePath: notePath,
+      relativePath: relativeNotePath,
+      source: "partner-artifact",
+      uploadedAt: createdAt,
+      mimeType: "text/markdown",
+      sizeBytes: this.textEncoder.encode(noteContent).byteLength,
+    });
     const shareIndexPath = await writeXchangeRelativeFile(
       this.config.tmux,
       targetWorkspaceDir,
       this.config.exchange.dir,
-      "SHARE_INDEX.md",
+      PARTNER_INDEX_FILE_NAME,
       this.textEncoder.encode(
         `${buildShareIndexLine({
           createdAt,
@@ -346,9 +363,7 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     };
 
     await this.inboxStore.createInboxMessage(inboxMessage);
-    await this.telegramTransport.nudgeSessionPartnerNote(
-      targetSession.sessionId,
-    );
+    // Temporary disabled while testing pure partner file delivery.
 
     this.logger.info("Partner note delivered through local backend", {
       sessionId: sourceSession.sessionId,
@@ -390,42 +405,131 @@ export class LocalCollaborationBackend implements CollaborationBackend {
   }
 
   private async copyArtifactsToPartner(
+    sourceSession: SessionContext,
+    targetSession: SessionContext,
     sourceWorkspaceDir: string,
-    targetWorkspaceDir: string,
     shareId: string,
+    uploadedAt: string,
     artifacts: string[],
   ): Promise<string[]> {
     const copied: string[] = [];
+    const usedArtifactNames = new Set<string>();
 
-    for (const [index, artifactPath] of artifacts.entries()) {
+    for (const artifactPath of artifacts) {
       if (isSourceArtifactPath(artifactPath)) {
         throw new Error(
           `Source file artifacts are not allowed for partner exchange: ${artifactPath}. Share summaries, API specs, logs, screenshots, or other derived artifacts instead.`,
         );
       }
 
-      const content = await readWorkspaceFile(
-        this.config.tmux,
-        sourceWorkspaceDir,
+      const sourceMeta = await this.xchangeFileMetaStore.getXchangeFileMeta(
+        sourceSession.sessionId,
         artifactPath,
       );
-      const artifactName = path.basename(artifactPath) || `artifact-${index + 1}`;
+      const preferredArtifactName =
+        sourceMeta?.originalName ||
+        (sourceMeta?.relativePath
+          ? path.basename(sourceMeta.relativePath)
+          : undefined) ||
+        path.basename(artifactPath) ||
+        "artifact.bin";
+      const artifactName = this.allocatePartnerArtifactName(
+        preferredArtifactName,
+        usedArtifactNames,
+      );
       const relativeArtifactPath = [
         "shares",
         "files",
         shareId,
-        `${String(index + 1).padStart(2, "0")}-${artifactName}`,
+        artifactName,
       ].join("/");
-      const copiedPath = await writeXchangeRelativeFile(
-        this.config.tmux,
-        targetWorkspaceDir,
-        this.config.exchange.dir,
-        relativeArtifactPath,
-        content,
-      );
-      copied.push(copiedPath);
+      let materializedArtifactPath: string;
+
+      if (sourceMeta?.storageRef) {
+        materializedArtifactPath = await this.objectStore.ensureLocalFile({
+          sessionId: targetSession.sessionId,
+          session: targetSession,
+          filePath: artifactPath,
+          relativePath: relativeArtifactPath,
+          storageRef: sourceMeta.storageRef,
+          source: "partner-artifact",
+        });
+      } else {
+        const ensuredArtifactPath = sourceMeta
+          ? await this.objectStore.ensureLocalFile({
+              sessionId: sourceSession.sessionId,
+              session: sourceSession,
+              filePath: artifactPath,
+              relativePath: sourceMeta.relativePath,
+              storageRef: sourceMeta.storageRef,
+              source: sourceMeta.source,
+            })
+          : artifactPath;
+        const content = await readWorkspaceFile(
+          this.config.tmux,
+          sourceWorkspaceDir,
+          ensuredArtifactPath,
+        );
+        const storedArtifact = await this.objectStore.storeFile({
+          session: targetSession,
+          sessionId: targetSession.sessionId,
+          source: "partner-artifact",
+          relativePath: relativeArtifactPath,
+          content,
+          ...(sourceMeta?.mimeType ? { mimeType: sourceMeta.mimeType } : {}),
+        });
+        materializedArtifactPath = await this.objectStore.ensureLocalFile({
+          sessionId: targetSession.sessionId,
+          session: targetSession,
+          filePath: storedArtifact.filePath,
+          relativePath: storedArtifact.relativePath,
+          storageRef: storedArtifact.storageRef,
+          source: "partner-artifact",
+        });
+      }
+      await this.xchangeFileMetaStore.setXchangeFileMeta({
+        sessionId: targetSession.sessionId,
+        filePath: materializedArtifactPath,
+        relativePath: relativeArtifactPath,
+        source: "partner-artifact",
+        uploadedAt,
+        ...(sourceMeta?.originalName
+          ? { originalName: sourceMeta.originalName }
+          : {}),
+        ...(sourceMeta?.caption ? { caption: sourceMeta.caption } : {}),
+        ...(sourceMeta?.storageRef ? { storageRef: sourceMeta.storageRef } : {}),
+        ...(sourceMeta?.bucketName ? { bucketName: sourceMeta.bucketName } : {}),
+        ...(sourceMeta?.objectName ? { objectName: sourceMeta.objectName } : {}),
+        ...(sourceMeta?.mimeType ? { mimeType: sourceMeta.mimeType } : {}),
+        ...(typeof sourceMeta?.sizeBytes === "number"
+          ? { sizeBytes: sourceMeta.sizeBytes }
+          : {}),
+      });
+      copied.push(materializedArtifactPath);
     }
 
     return copied;
+  }
+
+  private allocatePartnerArtifactName(
+    fileName: string,
+    usedArtifactNames: Set<string>,
+  ): string {
+    const baseName = path.basename(fileName).trim() || "artifact.bin";
+    const extension = path.extname(baseName);
+    const stem = path.basename(baseName, extension) || "artifact";
+
+    for (let attempt = 0; attempt < 1000; attempt += 1) {
+      const candidate =
+        attempt === 0 ? baseName : `${stem}--${attempt}${extension}`;
+      if (usedArtifactNames.has(candidate)) {
+        continue;
+      }
+
+      usedArtifactNames.add(candidate);
+      return candidate;
+    }
+
+    throw new Error("Could not allocate a unique partner artifact name.");
   }
 }

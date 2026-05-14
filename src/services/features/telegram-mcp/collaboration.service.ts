@@ -5,6 +5,7 @@ import {
   type TelegramMcpRuntimeServiceInstance,
 } from "./runtime.service";
 import { CollaborationService } from "./src/features/collaboration/model/collaborationService";
+import { GatewayCollaborationBackend } from "./src/features/distributed-client/model/gatewayCollaborationBackend";
 import { LocalCollaborationBackend } from "./src/features/collaboration/model/localCollaborationBackend";
 
 export const TELEGRAM_MCP_COLLABORATION_SERVICE_NAME =
@@ -57,24 +58,31 @@ const TelegramMcpCollaborationService: ServiceSchema = {
 
     const runtime = runtimeService.getRuntime();
 
-    if (runtime.config.distributed.mode !== "client") {
-      runtime.logger.warn(
-        "Distributed mode is enabled, but collaboration still uses local backend",
-        {
-          mode: runtime.config.distributed.mode,
-        },
-      );
-    }
-
     this.logger.info("Starting telegram_mcp collaboration service");
-    const backend = new LocalCollaborationBackend(
+    const localBackend = new LocalCollaborationBackend(
       runtime.config,
       runtime.stateStore,
       runtime.stateStore,
       runtime.stateStore,
+      runtime.stateStore,
+      runtime.objectStore,
       runtime.telegramTransport,
       runtime.logger,
     );
+    runtime.gatewayHttpService.setPartnerNoteRelayHandler(async (input) => {
+      const resolved = runtime.projectIdentityResolver.resolveSessionDefaults(input);
+      return localBackend.sendPartnerNote(input, resolved);
+    });
+
+    const backend =
+      runtime.config.distributed.gatewayPublicUrl
+        ? new GatewayCollaborationBackend(
+            runtime.logger,
+            runtime.config.distributed.gatewayPublicUrl,
+            runtime.config.distributed.gatewayAuthToken,
+          )
+        : localBackend;
+
     this.collaborationService = new CollaborationService(
       backend,
       runtime.logger,

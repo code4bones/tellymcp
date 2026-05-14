@@ -6724,6 +6724,11 @@ export class TelegramTransport implements HumanTransport {
       meta?.originalName ||
       (meta?.relativePath ? path.basename(meta.relativePath) : undefined) ||
       path.basename(input.filePath);
+    const handoffSummary =
+      input.description
+        .split(/\r?\n/u)
+        .map((line) => line.trim())
+        .find(Boolean) ?? `Локальная передача файла: ${fileName}`;
     const now = new Date();
     const createdAt = now.toISOString();
     const handoffId = buildLocalHandoffId(fileName, now);
@@ -6765,7 +6770,7 @@ export class TelegramTransport implements HumanTransport {
       Buffer.from(
         `${buildLocalIndexLine({
           createdAt,
-          summary: `Local file handoff: ${fileName}`,
+          summary: handoffSummary,
           relativeNotePath,
         })}\n`,
         "utf8",
@@ -6780,8 +6785,8 @@ export class TelegramTransport implements HumanTransport {
       telegramUserId: input.principal.telegramUserId,
       sourceTelegramMessageId: input.sourceTelegramMessageId,
       text: [
-        "Local file handoff received.",
-        `Summary: Local file handoff: ${fileName}`,
+        "Получен локальный handoff файла.",
+        `Кратко: ${handoffSummary}`,
         "",
         `Immediate action: read ${LOCAL_INDEX_FILE_NAME} and then open the note below.`,
         `Note: ${notePath}`,
@@ -6811,13 +6816,18 @@ export class TelegramTransport implements HumanTransport {
       meta?.originalName ||
       (meta?.relativePath ? path.basename(meta.relativePath) : undefined) ||
       path.basename(input.filePath);
+    const handoffSummary =
+      input.description
+        .split(/\r?\n/u)
+        .map((line) => line.trim())
+        .find(Boolean) ?? `Передача файла: ${fileName}`;
 
     return this.sendPartnerNote({
       session_id: input.sessionId,
       ...(input.targetSessionId ? { target_session_id: input.targetSessionId } : {}),
       ...(input.projectUuid ? { project_uuid: input.projectUuid } : {}),
       kind: "handoff",
-      summary: `File handoff: ${fileName}`,
+      summary: handoffSummary,
       message: [
         "Partner sent a file for the current task.",
         `File: ${fileName}`,
@@ -6989,6 +6999,11 @@ export class TelegramTransport implements HumanTransport {
         meta?.originalName ||
         (meta?.relativePath ? path.basename(meta.relativePath) : undefined) ||
         path.basename(pending.filePath);
+      const handoffSummary =
+        description
+          .split(/\r?\n/u)
+          .map((line) => line.trim())
+          .find(Boolean) ?? `Передача файла: ${fileName}`;
       await this.maintenanceStore.setOutgoingDeliveryNotice({
         deliveryUuid: output.inbox_message_id,
         sessionId: pending.sessionId,
@@ -6996,7 +7011,7 @@ export class TelegramTransport implements HumanTransport {
         telegramMessageId: sent.message_id,
         shareId: output.share_id,
         kind: output.kind,
-        summary: `Передача файла: ${fileName}`,
+        summary: handoffSummary,
         ...(pending.targetSessionLabel
           ? { targetLabel: pending.targetSessionLabel }
           : {}),

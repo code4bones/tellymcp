@@ -108,6 +108,22 @@ type PendingFileHandoffRecord = {
   promptMessageId?: number;
 };
 
+type PendingProjectRecord = {
+  sessionId: string;
+  mode: "create" | "join";
+  initiatedAt: string;
+  promptMessageId?: number;
+};
+
+type GatewayProjectRecord = {
+  project_uuid: string;
+  name: string;
+  invite_token: string;
+  role: string;
+  status: string;
+  joined_at?: string;
+};
+
 type TmuxProxyStatusCacheEntry = {
   checkedAtMs: number;
   statusLine: string;
@@ -469,6 +485,7 @@ export class TelegramTransport implements HumanTransport {
   private readonly inboxMenu: Menu<TelegramMenuContext>;
   private readonly filesMenu: Menu<TelegramMenuContext>;
   private readonly browserMenu: Menu<TelegramMenuContext>;
+  private readonly projectsMenu: Menu<TelegramMenuContext>;
   private readonly screenshotsMenu: Menu<TelegramMenuContext>;
   private readonly linkMenu: Menu<TelegramMenuContext>;
   private readonly partnerMenu: Menu<TelegramMenuContext>;
@@ -486,6 +503,7 @@ export class TelegramTransport implements HumanTransport {
   private readonly pendingBroadcasts = new Map<string, PendingBroadcastRecord>();
   private readonly pendingPartnerNotes = new Map<string, PendingPartnerNoteRecord>();
   private readonly pendingFileHandoffs = new Map<string, PendingFileHandoffRecord>();
+  private readonly pendingProjects = new Map<string, PendingProjectRecord>();
   private tmuxProxyStatusCache?: TmuxProxyStatusCacheEntry;
   private started = false;
   private pollingTask: Promise<void> | undefined;
@@ -535,6 +553,7 @@ export class TelegramTransport implements HumanTransport {
     this.inboxMenu = this.createInboxMenu();
     this.filesMenu = this.createFilesMenu();
     this.browserMenu = this.createBrowserMenu();
+    this.projectsMenu = this.createProjectsMenu();
     this.screenshotsMenu = this.createScreenshotsMenu();
     this.linkMenu = this.createLinkMenu();
     this.partnerMenu = this.createPartnerMenu();
@@ -550,6 +569,7 @@ export class TelegramTransport implements HumanTransport {
       this.inboxMenu,
       this.filesMenu,
       this.browserMenu,
+      this.projectsMenu,
       this.screenshotsMenu,
       this.linkMenu,
       this.partnerMenu,
@@ -622,6 +642,147 @@ export class TelegramTransport implements HumanTransport {
     }
 
     return (await response.json()) as SendPartnerNoteOutput;
+  }
+
+  private async callGatewayJson<T>(
+    endpointPath: string,
+    body: Record<string, unknown>,
+  ): Promise<T> {
+    if (!this.config.distributed.gatewayPublicUrl) {
+      throw new Error("Gateway is not configured.");
+    }
+
+    const url = new URL(this.config.distributed.gatewayPublicUrl);
+    url.pathname = url.pathname.replace(/\/+$/u, "");
+    if (!url.pathname.endsWith("/gateway")) {
+      url.pathname = `${url.pathname}/gateway`.replace(/\/{2,}/gu, "/");
+    }
+    url.pathname = `${url.pathname}${endpointPath}`.replace(/\/{2,}/gu, "/");
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(this.config.distributed.gatewayAuthToken
+          ? { authorization: `Bearer ${this.config.distributed.gatewayAuthToken}` }
+          : {}),
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(message || response.statusText);
+    }
+
+    return (await response.json()) as T;
+  }
+
+  private async ensureGatewayClientUuid(
+    principal: { telegramChatId: number; telegramUserId: number },
+  ): Promise<string> {
+    const existing = await this.maintenanceStore.getGatewayClientUuid();
+    if (existing) {
+      return existing;
+    }
+
+    const response = await this.callGatewayJson<{
+      client_uuid: string;
+    }>("/client/register", {
+      client_label:
+        this.config.project.name ||
+        this.config.telegram.botUsername ||
+        "telegram-mcp client",
+      bot_username: this.config.telegram.botUsername,
+      meta: {
+        telegram_chat_id: principal.telegramChatId,
+        telegram_user_id: principal.telegramUserId,
+      },
+    });
+
+    await this.maintenanceStore.setGatewayClientUuid(response.client_uuid);
+    return response.client_uuid;
+  }
+
+  private async listGatewayProjects(
+    principal: { telegramChatId: number; telegramUserId: number },
+  ): Promise<GatewayProjectRecord[]> {
+    const clientUuid = await this.ensureGatewayClientUuid(principal);
+    const response = await this.callGatewayJson<{
+      projects: GatewayProjectRecord[];
+    }>("/projects/list", {
+      client_uuid: clientUuid,
+    });
+    return response.projects;
+  }
+
+  private async loadProjectsContext(
+    ctx: TelegramMenuContext,
+  ): Promise<{
+    principal: { telegramChatId: number; telegramUserId: number } | null;
+    session: Awaited<ReturnType<SessionStore["getSession"]>> | null;
+    projects: GatewayProjectRecord[] | null;
+  }> {
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal || !this.config.distributed.gatewayPublicUrl) {
+      return { principal, session: null, projects: null };
+    }
+
+    const activeSessionId =
+      await this.bindingStore.getActiveSessionIdForPrincipal(principal);
+    if (!activeSessionId) {
+      return { principal, session: null, projects: null };
+    }
+
+    const session = await this.sessionStore.getSession(activeSessionId);
+    if (!session) {
+      return { principal, session: null, projects: null };
+    }
+
+    const projects = await this.listGatewayProjects(principal);
+    return { principal, session, projects };
+  }
+
+  private async activateProjectForSession(input: {
+    principal: { telegramChatId: number; telegramUserId: number };
+    sessionId: string;
+    projectUuid: string;
+    projectName: string;
+  }): Promise<void> {
+    const session = await this.sessionStore.getSession(input.sessionId);
+    if (!session) {
+      throw new Error("Active session not found.");
+    }
+
+    const clientUuid = await this.ensureGatewayClientUuid(input.principal);
+    await this.callGatewayJson("/sessions/register", {
+      client_uuid: clientUuid,
+      project_uuid: input.projectUuid,
+      local_session_id: session.sessionId,
+      label: session.label ?? session.sessionId,
+      cwd: session.cwd,
+      tmux_session_name: session.tmuxSessionName,
+      tmux_window_name: session.tmuxWindowName,
+      tmux_window_index: session.tmuxWindowIndex,
+      tmux_pane_id: session.tmuxPaneId,
+      tmux_pane_index: session.tmuxPaneIndex,
+      tmux_target: session.tmuxTarget,
+      status: "active",
+    });
+
+    await this.sessionStore.setSession({
+      ...session,
+      activeProjectUuid: input.projectUuid,
+      activeProjectName: input.projectName,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  private async buildProjectsFingerprint(
+    ctx: TelegramMenuContext,
+  ): Promise<string> {
+    const { session, projects } = await this.loadProjectsContext(ctx);
+    return `${session?.sessionId ?? "none"}:${session?.activeProjectUuid ?? "none"}:${projects?.map((item) => item.project_uuid).join(",") ?? "none"}`;
   }
 
   public async start(): Promise<void> {
@@ -1201,6 +1362,9 @@ export class TelegramTransport implements HumanTransport {
       .text("🤝 Partner", async (ctx) => {
         await this.showPartnerEntryPoint(ctx);
       })
+      .text("📦 Projects", async (ctx) => {
+        await this.showProjectsEntryPoint(ctx);
+      })
       .row()
       .text("✏ Rename", async (ctx) => {
         await this.beginRenameActiveSession(ctx);
@@ -1239,6 +1403,76 @@ export class TelegramTransport implements HumanTransport {
         },
       )
       .row()
+      .text("⬅ Back", async (ctx) => {
+        await ctx.answerCallbackQuery({ text: "Back to session menu." });
+        await this.showMainMenu(ctx);
+      });
+  }
+
+  private createProjectsMenu(): Menu<TelegramMenuContext> {
+    return new Menu<TelegramMenuContext>(
+      "telegram-projects-menu",
+      {
+        fingerprint: async (ctx) => this.buildProjectsFingerprint(ctx),
+        ...this.createMenuOptions((ctx) => this.showProjectsMenu(ctx)),
+      },
+    )
+      .dynamic(async (ctx) => {
+        const range = new MenuRange<TelegramMenuContext>();
+        const { session, projects } = await this.loadProjectsContext(ctx);
+        if (!session || !projects) {
+          range.text("Gateway unavailable", async (innerCtx) => {
+            await innerCtx.answerCallbackQuery({
+              text: "Projects require gateway mode.",
+              show_alert: true,
+            });
+          });
+          return range;
+        }
+
+        if (projects.length === 0) {
+          range
+            .text("🫥 No projects", async (innerCtx) => {
+              await innerCtx.answerCallbackQuery({
+                text: "No projects yet. Create or join one.",
+              });
+            })
+            .row();
+          return range;
+        }
+
+        for (const project of projects) {
+          const isActive = session.activeProjectUuid === project.project_uuid;
+          range
+            .text(
+              {
+                text: `${isActive ? "✅" : "📁"} ${project.name}`,
+                payload: async () =>
+                  this.createProjectMenuPayload(
+                    session.sessionId,
+                    project.project_uuid,
+                    project.name,
+                  ),
+              },
+              async (innerCtx) => {
+                await this.handleProjectSelect(innerCtx);
+              },
+            )
+            .row();
+        }
+
+        return range;
+      })
+      .text("➕ Create", async (ctx) => {
+        await this.beginProjectMode(ctx, "create");
+      })
+      .text("🔑 Join", async (ctx) => {
+        await this.beginProjectMode(ctx, "join");
+      })
+      .row()
+      .text("🚪 Leave", async (ctx) => {
+        await this.leaveActiveProject(ctx);
+      })
       .text("⬅ Back", async (ctx) => {
         await ctx.answerCallbackQuery({ text: "Back to session menu." });
         await this.showMainMenu(ctx);
@@ -1850,6 +2084,10 @@ export class TelegramTransport implements HumanTransport {
     }
 
     if (text && (await this.handlePendingFileHandoff(ctx, text))) {
+      return;
+    }
+
+    if (text && (await this.handlePendingProject(ctx, text))) {
       return;
     }
 
@@ -2494,6 +2732,9 @@ export class TelegramTransport implements HumanTransport {
     const inboxCount =
       await this.inboxStore.countInboxMessages(activeSessionId);
     const sessionName = escapeHtml(session?.label ?? activeSessionId);
+    const projectName = session?.activeProjectName
+      ? escapeHtml(session.activeProjectName)
+      : null;
     const linkedSession = session?.linkedSessionId
       ? await this.sessionStore.getSession(session.linkedSessionId)
       : null;
@@ -2501,6 +2742,7 @@ export class TelegramTransport implements HumanTransport {
       `🎛 Session: ${sessionName}`,
       "",
       `📥 Inbox messages: ${inboxCount}`,
+      ...(projectName ? [`📦 Project: <b>${projectName}</b>`] : []),
       ...(session?.linkedSessionId
         ? [
             `🤝 Partner: <b><i>${escapeHtml(
@@ -2826,6 +3068,31 @@ export class TelegramTransport implements HumanTransport {
         kind: "link-target",
         sessionId,
         targetSessionId,
+        createdAt: now.toISOString(),
+        expiresAt: new Date(
+          now.getTime() + this.config.telegram.menuPayloadTtlSeconds * 1000,
+        ).toISOString(),
+      },
+      this.config.telegram.menuPayloadTtlSeconds,
+    );
+
+    return key;
+  }
+
+  private async createProjectMenuPayload(
+    sessionId: string,
+    projectUuid: string,
+    title: string,
+  ): Promise<string> {
+    const key = createMenuPayloadKey();
+    const now = new Date();
+    await this.menuPayloadStore.createMenuPayload(
+      {
+        key,
+        kind: "project-entry",
+        sessionId,
+        projectUuid,
+        title,
         createdAt: now.toISOString(),
         expiresAt: new Date(
           now.getTime() + this.config.telegram.menuPayloadTtlSeconds * 1000,
@@ -3167,6 +3434,21 @@ export class TelegramTransport implements HumanTransport {
 
     await ctx.answerCallbackQuery({ text: "Opening partner menu." });
     await this.showPartnerMenu(ctx);
+  }
+
+  private async showProjectsEntryPoint(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    if (!this.config.distributed.gatewayPublicUrl) {
+      await ctx.answerCallbackQuery({
+        text: "Projects require gateway mode.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    await ctx.answerCallbackQuery({ text: "Opening projects." });
+    await this.showProjectsMenu(ctx);
   }
 
   private async handleLinkTargetSelect(
@@ -3860,6 +4142,19 @@ export class TelegramTransport implements HumanTransport {
     );
   }
 
+  private async showProjectsMenu(
+    ctx: TelegramMenuContext,
+    introText?: string,
+  ): Promise<void> {
+    const text = await this.buildProjectsMenuText(ctx);
+    await this.renderMenuScreen(
+      ctx,
+      introText ? `${introText}\n\n${text}` : text,
+      { kind: "menu" },
+      this.projectsMenu,
+    );
+  }
+
   private async showBufferMenu(
     ctx: TelegramMenuContext,
     introText?: string,
@@ -4086,6 +4381,7 @@ export class TelegramTransport implements HumanTransport {
     this.pendingBroadcasts.delete(key);
     this.pendingPartnerNotes.delete(key);
     this.pendingFileHandoffs.delete(key);
+    this.pendingProjects.delete(key);
   }
 
   private async sendActiveSessionBuffer(
@@ -4456,6 +4752,34 @@ export class TelegramTransport implements HumanTransport {
       "",
       "Ask for API details, share what changed, reply to a partner note, or hand off artifacts.",
       "Prompt format: first line is summary. Add a blank line and then the main message body if needed.",
+    ].join("\n");
+  }
+
+  private async buildProjectsMenuText(
+    ctx: TelegramMenuContext,
+  ): Promise<string> {
+    const { session, projects } = await this.loadProjectsContext(ctx);
+    if (!this.config.distributed.gatewayPublicUrl) {
+      return [
+        "📦 Projects",
+        "",
+        "Gateway is not configured for this deployment.",
+        "Local single-bot collaboration continues to use Link and Partner menus.",
+      ].join("\n");
+    }
+
+    if (!session || !projects) {
+      return "Projects are unavailable for the current session.";
+    }
+
+    return [
+      "📦 Projects",
+      "",
+      `📌 Active session: ${session.label ?? session.sessionId}`,
+      `📦 Current project: ${session.activeProjectName ?? "not selected"}`,
+      `🗂 Available projects: ${projects.length}`,
+      "",
+      "Create a project, join by invite token, or select an existing project for this session.",
     ].join("\n");
   }
 
@@ -5300,6 +5624,155 @@ export class TelegramTransport implements HumanTransport {
     await this.showPartnerMenu(ctx);
   }
 
+  private async beginProjectMode(
+    ctx: TelegramMenuContext,
+    mode: "create" | "join",
+  ): Promise<void> {
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal) {
+      await ctx.answerCallbackQuery({
+        text: "Telegram identity is unavailable.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const sessionId =
+      await this.bindingStore.getActiveSessionIdForPrincipal(principal);
+    if (!sessionId) {
+      await ctx.answerCallbackQuery({
+        text: "No active session selected.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const sent = await this.replyText(
+      ctx,
+      mode === "create"
+        ? [
+            "📦 Create project",
+            "",
+            "Send the next text message as the project name.",
+            "Commands like /menu or /help will cancel this mode.",
+          ].join("\n")
+        : [
+            "🔑 Join project",
+            "",
+            "Send the next text message as the project invite token.",
+            "Commands like /menu or /help will cancel this mode.",
+          ].join("\n"),
+      { kind: "menu", sessionId },
+    );
+
+    this.pendingProjects.set(buildPrincipalKey(principal), {
+      sessionId,
+      mode,
+      initiatedAt: new Date().toISOString(),
+      ...(sent ? { promptMessageId: sent.message_id } : {}),
+    });
+
+    await ctx.answerCallbackQuery({
+      text: mode === "create" ? "Create project." : "Join project.",
+    });
+  }
+
+  private async handleProjectSelect(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const payloadKey = readMenuPayloadKey(ctx);
+    if (!payloadKey) {
+      await ctx.answerCallbackQuery({
+        text: "Project payload is missing.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const payload = await this.menuPayloadStore.getMenuPayload(payloadKey);
+    if (
+      !payload ||
+      payload.kind !== "project-entry" ||
+      !payload.sessionId ||
+      !payload.projectUuid
+    ) {
+      await ctx.answerCallbackQuery({
+        text: "Project payload is invalid or expired.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal) {
+      await ctx.answerCallbackQuery({
+        text: "Telegram identity is unavailable.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    await this.activateProjectForSession({
+      principal,
+      sessionId: payload.sessionId,
+      projectUuid: payload.projectUuid,
+      projectName: payload.title ?? payload.projectUuid,
+    });
+    await ctx.answerCallbackQuery({ text: "Project selected." });
+    await this.showProjectsMenu(
+      ctx,
+      `Current project: ${payload.title ?? payload.projectUuid}`,
+    );
+  }
+
+  private async leaveActiveProject(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal) {
+      await ctx.answerCallbackQuery({
+        text: "Telegram identity is unavailable.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const sessionId =
+      await this.bindingStore.getActiveSessionIdForPrincipal(principal);
+    if (!sessionId) {
+      await ctx.answerCallbackQuery({
+        text: "No active session selected.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const session = await this.sessionStore.getSession(sessionId);
+    if (!session?.activeProjectUuid) {
+      await ctx.answerCallbackQuery({
+        text: "No active project.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const clientUuid = await this.ensureGatewayClientUuid(principal);
+    await this.callGatewayJson("/projects/leave", {
+      client_uuid: clientUuid,
+      project_uuid: session.activeProjectUuid,
+    });
+
+    await this.sessionStore.setSession({
+      ...session,
+      activeProjectUuid: undefined,
+      activeProjectName: undefined,
+      updatedAt: new Date().toISOString(),
+    });
+
+    await ctx.answerCallbackQuery({ text: "Project left." });
+    await this.showProjectsMenu(ctx, "Left current project.");
+  }
+
   private async deletePendingFileHandoffPrompt(
     ctx: TelegramMenuContext,
     pending: PendingFileHandoffRecord,
@@ -5566,6 +6039,86 @@ export class TelegramTransport implements HumanTransport {
       `File sent to partner. Share: ${output.share_id}`,
       { kind: "menu", sessionId: pending.sessionId },
     );
+    return true;
+  }
+
+  private async handlePendingProject(
+    ctx: TelegramMenuContext,
+    text: string,
+  ): Promise<boolean> {
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal) {
+      return false;
+    }
+
+    const principalKey = buildPrincipalKey(principal);
+    const pending = this.pendingProjects.get(principalKey);
+    if (!pending) {
+      return false;
+    }
+
+    if (text.startsWith("/")) {
+      this.pendingProjects.delete(principalKey);
+      return false;
+    }
+
+    const value = text.trim();
+    if (!value) {
+      return true;
+    }
+
+    const clientUuid = await this.ensureGatewayClientUuid(principal);
+    let projectName = "";
+    let projectUuid = "";
+
+    if (pending.mode === "create") {
+      const created = await this.callGatewayJson<{
+        project_uuid: string;
+        invite_token: string;
+        name: string;
+      }>("/projects/create", {
+        client_uuid: clientUuid,
+        name: value,
+      });
+      projectUuid = created.project_uuid;
+      projectName = created.name;
+      await this.activateProjectForSession({
+        principal,
+        sessionId: pending.sessionId,
+        projectUuid,
+        projectName,
+      });
+      await this.replyText(
+        ctx,
+        `Project created: ${projectName}\nInvite token: ${created.invite_token}`,
+        { kind: "menu", sessionId: pending.sessionId },
+      );
+    } else {
+      const joined = await this.callGatewayJson<{
+        project_uuid: string;
+        invite_token: string;
+        name: string;
+      }>("/projects/join", {
+        client_uuid: clientUuid,
+        invite_token: value,
+      });
+      projectUuid = joined.project_uuid;
+      projectName = joined.name;
+      await this.activateProjectForSession({
+        principal,
+        sessionId: pending.sessionId,
+        projectUuid,
+        projectName,
+      });
+      await this.replyText(
+        ctx,
+        `Joined project: ${projectName}`,
+        { kind: "menu", sessionId: pending.sessionId },
+      );
+    }
+
+    this.pendingProjects.delete(principalKey);
+    await this.showProjectsMenu(ctx, `Current project: ${projectName}`);
     return true;
   }
 }

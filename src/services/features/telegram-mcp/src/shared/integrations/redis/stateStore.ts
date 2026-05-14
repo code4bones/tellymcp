@@ -71,6 +71,10 @@ function menuPayloadKey(key: string): string {
   return `${KEY_PREFIX}:menu-payload:${key}`;
 }
 
+function gatewayClientUuidKey(): string {
+  return `${KEY_PREFIX}:gateway:client-uuid`;
+}
+
 function xchangeFileMetaKey(sessionId: string, filePath: string): string {
   const fingerprint = createHash("sha1").update(filePath).digest("hex");
   return `${KEY_PREFIX}:xchange-file:${sessionId}:${fingerprint}`;
@@ -484,6 +488,14 @@ export class RedisStateStore
     } while (cursor !== "0");
 
     return { deletedKeys };
+  }
+
+  public async getGatewayClientUuid(): Promise<string | null> {
+    return (await this.redis.get(gatewayClientUuidKey())) ?? null;
+  }
+
+  public async setGatewayClientUuid(clientUuid: string): Promise<void> {
+    await this.redis.set(gatewayClientUuidKey(), clientUuid);
   }
 
   private async detachSessionFromPrincipal(

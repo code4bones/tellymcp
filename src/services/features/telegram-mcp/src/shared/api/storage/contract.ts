@@ -89,4 +89,6 @@ export interface TelegramXchangeFileMetaStore {
 
 export interface MaintenanceStore {
   pruneAll(): Promise<{ deletedKeys: number }>;
+  getGatewayClientUuid(): Promise<string | null>;
+  setGatewayClientUuid(clientUuid: string): Promise<void>;
 }

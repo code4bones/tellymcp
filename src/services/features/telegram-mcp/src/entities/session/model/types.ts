@@ -3,6 +3,8 @@ export type SessionContext = {
   label?: string | undefined;
   cwd?: string | undefined;
   linkedSessionId?: string | undefined;
+  activeProjectUuid?: string | undefined;
+  activeProjectName?: string | undefined;
   task?: string | undefined;
   summary?: string | undefined;
   files?: string[] | undefined;
@@ -57,11 +59,13 @@ export type GetSessionContextOutput = {
   has_binding: boolean;
   status_message: string;
   context?: {
-    session_label?: string | undefined;
-    cwd?: string | undefined;
-    linked_session_id?: string | undefined;
-    linked_session_label?: string | undefined;
-    task?: string | undefined;
+      session_label?: string | undefined;
+      cwd?: string | undefined;
+      linked_session_id?: string | undefined;
+      linked_session_label?: string | undefined;
+      active_project_uuid?: string | undefined;
+      active_project_name?: string | undefined;
+      task?: string | undefined;
     summary?: string | undefined;
     files?: string[] | undefined;
     decisions?: string[] | undefined;

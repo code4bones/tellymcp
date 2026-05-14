@@ -37,6 +37,20 @@ type GatewayServiceCarrier = Service & {
     created: boolean;
     updated_at: string;
   }>;
+  listProjectsRecord?: (input: Record<string, unknown>) => Promise<{
+    projects: Array<{
+      project_uuid: string;
+      name: string;
+      invite_token: string;
+      role: string;
+      status: string;
+      joined_at?: string;
+    }>;
+  }>;
+  leaveProjectRecord?: (input: Record<string, unknown>) => Promise<{
+    project_uuid: string;
+    left: boolean;
+  }>;
 };
 
 const TelegramMcpGatewayService: ServiceSchema = {
@@ -324,6 +338,58 @@ const TelegramMcpGatewayService: ServiceSchema = {
         updated_at: now,
       };
     },
+
+    async listProjectsRecord(this: GatewayServiceCarrier, input: Record<string, unknown>) {
+      const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
+      const rows = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_project_members as m")
+        .join("gateway_projects as p", "p.project_uuid", "m.project_uuid")
+        .where("m.client_uuid", clientUuid)
+        .where("m.status", "active")
+        .where("p.is_active", true)
+        .select(
+          "p.project_uuid",
+          "p.name",
+          "p.invite_token",
+          "m.role",
+          "m.status",
+          "m.joined_at",
+        )
+        .orderBy("p.name", "asc");
+
+      return {
+        projects: rows.map((row) => ({
+          project_uuid: row.project_uuid,
+          name: row.name,
+          invite_token: row.invite_token,
+          role: row.role,
+          status: row.status,
+          ...(row.joined_at ? { joined_at: String(row.joined_at) } : {}),
+        })),
+      };
+    },
+
+    async leaveProjectRecord(this: GatewayServiceCarrier, input: Record<string, unknown>) {
+      const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
+      const projectUuid = this.requireText?.(input.project_uuid, "project_uuid");
+
+      const updated = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_project_members")
+        .where({
+          client_uuid: clientUuid,
+          project_uuid: projectUuid,
+        })
+        .update({
+          status: "left",
+        });
+
+      return {
+        project_uuid: projectUuid,
+        left: updated > 0,
+      };
+    },
   },
 
   actions: {
@@ -357,6 +423,22 @@ const TelegramMcpGatewayService: ServiceSchema = {
           throw new Error("Gateway service is disabled in client mode");
         }
         return this.registerSessionRecord?.(ctx.params as Record<string, unknown>);
+      },
+    },
+    listProjects: {
+      async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
+        return this.listProjectsRecord?.(ctx.params as Record<string, unknown>);
+      },
+    },
+    leaveProject: {
+      async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
+        return this.leaveProjectRecord?.(ctx.params as Record<string, unknown>);
       },
     },
   },

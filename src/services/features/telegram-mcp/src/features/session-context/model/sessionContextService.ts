@@ -49,6 +49,12 @@ export class SessionContextService {
       ...(existing?.linkedSessionId
         ? { linkedSessionId: existing.linkedSessionId }
         : {}),
+      ...(existing?.activeProjectUuid
+        ? { activeProjectUuid: existing.activeProjectUuid }
+        : {}),
+      ...(existing?.activeProjectName
+        ? { activeProjectName: existing.activeProjectName }
+        : {}),
       ...(input.task
         ? { task: redactSecrets(input.task) }
         : existing?.task
@@ -123,6 +129,12 @@ export class SessionContextService {
       ...(existing?.cwd ? { cwd: existing.cwd } : {}),
       ...(existing?.linkedSessionId
         ? { linkedSessionId: existing.linkedSessionId }
+        : {}),
+      ...(existing?.activeProjectUuid
+        ? { activeProjectUuid: existing.activeProjectUuid }
+        : {}),
+      ...(existing?.activeProjectName
+        ? { activeProjectName: existing.activeProjectName }
         : {}),
       ...(existing?.task ? { task: existing.task } : {}),
       ...(existing?.summary ? { summary: existing.summary } : {}),
@@ -203,6 +215,12 @@ export class SessionContextService {
                 : {}),
               ...(linkedSession?.label
                 ? { linked_session_label: linkedSession.label }
+                : {}),
+              ...(session.activeProjectUuid
+                ? { active_project_uuid: session.activeProjectUuid }
+                : {}),
+              ...(session.activeProjectName
+                ? { active_project_name: session.activeProjectName }
                 : {}),
               ...(session.task ? { task: session.task } : {}),
               ...(session.summary ? { summary: session.summary } : {}),
@@ -303,6 +321,12 @@ export class SessionContextService {
       ...(existing?.cwd ? { cwd: existing.cwd } : {}),
       ...(existing?.linkedSessionId
         ? { linkedSessionId: existing.linkedSessionId }
+        : {}),
+      ...(existing?.activeProjectUuid
+        ? { activeProjectUuid: existing.activeProjectUuid }
+        : {}),
+      ...(existing?.activeProjectName
+        ? { activeProjectName: existing.activeProjectName }
         : {}),
       ...(existing?.task ? { task: existing.task } : {}),
       ...(existing?.summary ? { summary: existing.summary } : {}),

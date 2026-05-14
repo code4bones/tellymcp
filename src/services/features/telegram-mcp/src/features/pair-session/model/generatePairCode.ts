@@ -57,6 +57,12 @@ export class PairSessionService {
       ...(existingSession?.linkedSessionId
         ? { linkedSessionId: existingSession.linkedSessionId }
         : {}),
+      ...(existingSession?.activeProjectUuid
+        ? { activeProjectUuid: existingSession.activeProjectUuid }
+        : {}),
+      ...(existingSession?.activeProjectName
+        ? { activeProjectName: existingSession.activeProjectName }
+        : {}),
       ...(existingSession?.task ? { task: existingSession.task } : {}),
       ...(existingSession?.summary ? { summary: existingSession.summary } : {}),
       ...(existingSession?.files ? { files: existingSession.files } : {}),

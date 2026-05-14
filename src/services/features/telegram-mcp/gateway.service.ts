@@ -78,6 +78,7 @@ type GatewayServiceCarrier = Service & {
       delivery_uuid: string;
       message_uuid: string;
       share_id: string;
+      project_name?: string;
       kind: string;
       summary: string;
       message: string;
@@ -722,6 +723,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .withSchema(MCP_SCHEMA)
         .table("gateway_deliveries as d")
         .join("gateway_messages as m", "m.message_uuid", "d.message_uuid")
+        .join("gateway_projects as p", "p.project_uuid", "m.project_uuid")
         .join("gateway_sessions as s_from", "s_from.session_uuid", "m.from_session_uuid")
         .join("gateway_sessions as s_to", "s_to.session_uuid", "m.to_session_uuid")
         .where("d.target_client_uuid", clientUuid)
@@ -738,6 +740,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
           "m.in_reply_to",
           "m.meta",
           "m.created_at",
+          "p.name as project_name",
           "s_from.session_uuid as source_session_uuid",
           "s_from.local_session_id as source_local_session_id",
           "s_from.label as source_session_label",
@@ -801,6 +804,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
             delivery_uuid: row.delivery_uuid,
             message_uuid: row.message_uuid,
             share_id: shareId,
+            ...(row.project_name ? { project_name: row.project_name } : {}),
             kind: row.kind,
             summary: row.summary,
             message: row.body,

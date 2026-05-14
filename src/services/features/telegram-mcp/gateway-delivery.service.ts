@@ -35,6 +35,7 @@ type GatewayDelivery = {
   delivery_uuid: string;
   message_uuid: string;
   share_id: string;
+  project_name?: string;
   kind: string;
   summary: string;
   message: string;
@@ -161,7 +162,10 @@ function buildPartnerInboxText(input: {
 
   return [
     kindTitle,
-    `От: ${input.delivery.source_session_label}`,
+    ...(input.delivery.project_name
+      ? [`Проект: ${input.delivery.project_name}`]
+      : []),
+    `Сессия: ${input.delivery.source_session_label}`,
     `Кратко: ${input.delivery.summary}`,
     "",
     `Действие: открой ${input.delivery.share_index_file_name}, затем note ниже.`,
@@ -195,7 +199,10 @@ function buildTelegramDeliveryNotification(input: {
 
   return [
     kindTitle,
-    `От: ${input.delivery.source_session_label}`,
+    ...(input.delivery.project_name
+      ? [`Проект: ${input.delivery.project_name}`]
+      : []),
+    `Сессия: ${input.delivery.source_session_label}`,
     `Тип: ${input.delivery.kind}`,
     `Кратко: ${input.delivery.summary}`,
     ...(input.copiedArtifacts.length > 0

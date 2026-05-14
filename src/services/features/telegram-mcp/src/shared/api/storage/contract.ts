@@ -14,6 +14,17 @@ import type {
 } from "../../../entities/request/model/types";
 import type { SessionContext } from "../../../entities/session/model/types";
 
+export type OutgoingDeliveryNotice = {
+  deliveryUuid: string;
+  sessionId: string;
+  telegramChatId: number;
+  telegramMessageId: number;
+  shareId: string;
+  kind: string;
+  summary: string;
+  targetLabel?: string | undefined;
+};
+
 export interface SessionStore {
   getSession(sessionId: string): Promise<SessionContext | null>;
   listSessions(): Promise<SessionContext[]>;
@@ -91,4 +102,7 @@ export interface MaintenanceStore {
   pruneAll(): Promise<{ deletedKeys: number }>;
   getGatewayClientUuid(): Promise<string | null>;
   setGatewayClientUuid(clientUuid: string): Promise<void>;
+  setOutgoingDeliveryNotice(notice: OutgoingDeliveryNotice): Promise<void>;
+  listOutgoingDeliveryNotices(): Promise<OutgoingDeliveryNotice[]>;
+  deleteOutgoingDeliveryNotice(deliveryUuid: string): Promise<boolean>;
 }

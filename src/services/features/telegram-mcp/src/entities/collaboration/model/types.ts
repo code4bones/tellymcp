@@ -33,6 +33,7 @@ export type SendPartnerNoteOutput = {
   partner_session_id: string;
   kind: PartnerNoteKind;
   share_id: string;
+  delivery_status: "queued" | "delivered";
   note_path: string;
   share_index_path: string;
   copied_artifacts: string[];

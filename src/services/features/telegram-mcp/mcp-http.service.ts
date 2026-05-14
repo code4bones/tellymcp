@@ -47,7 +47,7 @@ const TelegramMcpHttpService: ServiceSchema = {
         throw new Error("telegram_mcp HTTP handler is not initialized yet");
       }
 
-      this.logger.info("telegram_mcp HTTP routeRequest received", {
+      this.logger.debug("telegram_mcp HTTP routeRequest received", {
         method: req.method,
         pathname,
       });

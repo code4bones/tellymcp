@@ -382,6 +382,7 @@ export class LocalCollaborationBackend implements CollaborationBackend {
       partner_session_id: targetSession.sessionId,
       kind: input.kind,
       share_id: shareId,
+      delivery_status: "delivered",
       note_path: notePath,
       share_index_path: shareIndexPath,
       copied_artifacts: copiedArtifacts,

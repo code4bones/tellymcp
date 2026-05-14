@@ -9,13 +9,13 @@ import {
 import type { TelegramInboxMessage } from "./src/entities/inbox/model/types";
 import { createInboxMessageId } from "./src/shared/lib/ids/ids";
 import { writeXchangeRelativeFile } from "./src/shared/integrations/tmux/client";
+import type { OutgoingDeliveryNotice } from "./src/shared/api/storage/contract";
 
 const CronMixin = require("@r2d2bzh/moleculer-cron") as ServiceSchema;
 
 export const TELEGRAM_MCP_GATEWAY_DELIVERY_SERVICE_NAME =
   "telegramMcp.gatewayDelivery";
 
-const POLL_INTERVAL_MS = 5000;
 const POLL_CRON_TIME = "*/5 * * * * *";
 const GATEWAY_POLL_TIMEOUT_MS = 15000;
 const GATEWAY_ACK_TIMEOUT_MS = 10000;
@@ -49,6 +49,14 @@ type GatewayDelivery = {
   note_relative_path: string;
   share_index_file_name: string;
   artifacts: GatewayDeliveryArtifact[];
+};
+
+type GatewayDeliveryStatus = {
+  delivery_uuid: string;
+  share_id: string;
+  status: string;
+  delivered_at?: string;
+  acked_at?: string;
 };
 
 type RuntimeCarrier = Service & {
@@ -140,28 +148,79 @@ function buildPartnerInboxText(input: {
 }): string {
   const kindTitle =
     input.delivery.kind === "question"
-      ? "Partner question received."
+      ? "Получен вопрос от напарника."
       : input.delivery.kind === "reply"
-        ? "Partner reply received."
+        ? "Получен ответ от напарника."
         : input.delivery.kind === "request"
-          ? "Partner request received."
+          ? "Получен запрос от напарника."
           : input.delivery.kind === "handoff"
-            ? "Partner handoff received."
-            : "Partner update received.";
+            ? "Получен handoff от напарника."
+            : "Получено обновление от напарника.";
 
   return [
     kindTitle,
-    `From: ${input.delivery.source_session_label}`,
-    `Summary: ${input.delivery.summary}`,
+    `От: ${input.delivery.source_session_label}`,
+    `Кратко: ${input.delivery.summary}`,
     "",
-    `Immediate action: read ${input.delivery.share_index_file_name} and then open the note below.`,
+    `Действие: открой ${input.delivery.share_index_file_name}, затем note ниже.`,
     `Note: ${input.notePath}`,
     ...(input.copiedArtifacts.length > 0
-      ? ["", "Artifacts:", ...input.copiedArtifacts.map((item) => `- ${item}`)]
+      ? ["", "Файлы:", ...input.copiedArtifacts.map((item) => `- ${item}`)]
       : []),
     ...(input.delivery.requires_reply
-      ? ["", "Reply through send_partner_note when you are ready."]
+      ? ["", "Когда будешь готов, отправь ответ через send_partner_note."]
       : []),
+  ].join("\n");
+}
+
+function buildTelegramDeliveryNotification(input: {
+  delivery: GatewayDelivery;
+  notePath: string;
+  copiedArtifacts: string[];
+}): string {
+  const kindTitle =
+    input.delivery.kind === "question"
+      ? "Получен вопрос от напарника."
+      : input.delivery.kind === "reply"
+        ? "Получен ответ от напарника."
+        : input.delivery.kind === "request"
+          ? "Получен запрос от напарника."
+          : input.delivery.kind === "handoff"
+            ? input.copiedArtifacts.length > 0
+              ? "Получен файл от напарника."
+              : "Получен handoff от напарника."
+            : "Получено обновление от напарника.";
+
+  return [
+    kindTitle,
+    `От: ${input.delivery.source_session_label}`,
+    `Тип: ${input.delivery.kind}`,
+    `Кратко: ${input.delivery.summary}`,
+    ...(input.copiedArtifacts.length > 0
+      ? [
+          "",
+          `Файлы: ${input.copiedArtifacts.length}`,
+          ...input.copiedArtifacts.map((item) => `- ${path.basename(item)}`),
+        ]
+      : []),
+    "",
+    `Note: ${input.notePath}`,
+  ].join("\n");
+}
+
+function buildOutgoingDeliveredText(input: {
+  notice: OutgoingDeliveryNotice;
+  status: GatewayDeliveryStatus;
+}): string {
+  return [
+    "✅ Доставка выполнена.",
+    ...(input.notice.targetLabel
+      ? [`Напарник: ${input.notice.targetLabel}`]
+      : []),
+    `Тип: ${input.notice.kind}`,
+    "Статус: доставлено",
+    `Кратко: ${input.notice.summary}`,
+    `Share: ${input.notice.shareId || input.status.share_id}`,
   ].join("\n");
 }
 
@@ -364,6 +423,34 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
             };
             await runtime.inboxStore.createInboxMessage(inboxMessage);
 
+            try {
+              await runtime.telegramTransport.sendNotification({
+                sessionId: targetSession.sessionId,
+                ...(targetSession.label
+                  ? { sessionLabel: targetSession.label }
+                  : {}),
+                recipient: {
+                  telegramChatId: targetBinding.telegramChatId,
+                  telegramUserId: targetBinding.telegramUserId,
+                },
+                message: buildTelegramDeliveryNotification({
+                  delivery,
+                  notePath,
+                  copiedArtifacts,
+                }),
+              });
+            } catch (error) {
+              runtime.logger.warn(
+                "Failed to send Telegram notification for gateway delivery",
+                {
+                  deliveryUuid: delivery.delivery_uuid,
+                  sessionId: targetSession.sessionId,
+                  error:
+                    error instanceof Error ? (error.stack ?? error.message) : String(error),
+                },
+              );
+            }
+
             const ackUrl = new URL(baseUrl);
             ackUrl.pathname = `${ackUrl.pathname}/deliveries/ack`.replace(
               /\/{2,}/gu,
@@ -394,6 +481,82 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
               notePath,
               copiedArtifacts,
             });
+          }
+
+          const outgoingNotices =
+            await runtime.maintenanceStore.listOutgoingDeliveryNotices();
+          if (outgoingNotices.length > 0) {
+            const statusUrl = new URL(baseUrl);
+            statusUrl.pathname = `${statusUrl.pathname}/deliveries/status`.replace(
+              /\/{2,}/gu,
+              "/",
+            );
+
+            const statusResponse = await fetch(statusUrl, {
+              method: "POST",
+              signal: AbortSignal.timeout(GATEWAY_POLL_TIMEOUT_MS),
+              headers: {
+                "content-type": "application/json",
+                ...(runtime.config.distributed.gatewayAuthToken
+                  ? {
+                      authorization: `Bearer ${runtime.config.distributed.gatewayAuthToken}`,
+                    }
+                  : {}),
+              },
+              body: JSON.stringify({
+                client_uuid: clientUuid,
+                delivery_ids: outgoingNotices.map((item) => item.deliveryUuid),
+              }),
+            });
+
+            if (!statusResponse.ok) {
+              throw new Error(
+                `Gateway delivery status check failed with status ${statusResponse.status}: ${await statusResponse.text()}`,
+              );
+            }
+
+            const statusPayload = (await statusResponse.json()) as {
+              deliveries?: GatewayDeliveryStatus[];
+            };
+            const statuses = Array.isArray(statusPayload.deliveries)
+              ? statusPayload.deliveries
+              : [];
+
+            for (const notice of outgoingNotices) {
+              const status = statuses.find(
+                (item) =>
+                  item.delivery_uuid === notice.deliveryUuid &&
+                  item.status === "delivered",
+              );
+              if (!status) {
+                continue;
+              }
+
+              try {
+                await runtime.telegramTransport.editChatMessage(
+                  notice.telegramChatId,
+                  notice.telegramMessageId,
+                  buildOutgoingDeliveredText({ notice, status }),
+                );
+                await runtime.maintenanceStore.deleteOutgoingDeliveryNotice(
+                  notice.deliveryUuid,
+                );
+              } catch (error) {
+                runtime.logger.warn(
+                  "Failed to update outgoing delivery status message in Telegram",
+                  {
+                    deliveryUuid: notice.deliveryUuid,
+                    sessionId: notice.sessionId,
+                    telegramChatId: notice.telegramChatId,
+                    telegramMessageId: notice.telegramMessageId,
+                    error:
+                      error instanceof Error
+                        ? (error.stack ?? error.message)
+                        : String(error),
+                  },
+                );
+              }
+            }
           }
         } catch (error) {
           if (this.stopRequested) {

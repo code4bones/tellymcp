@@ -34,7 +34,7 @@ function createTelegramMcpAliasHandler(routeBasePath: string) {
 	return function (
 		this: {
 			broker: { getLocalService: (name: string) => unknown };
-			logger?: { info?: (...args: unknown[]) => void };
+			logger?: { debug?: (...args: unknown[]) => void };
 		},
 		req: IncomingMessage & { originalUrl?: string; parsedUrl?: string },
 		res: OutgoingMessage,
@@ -73,7 +73,7 @@ function createTelegramMcpAliasHandler(routeBasePath: string) {
 				? normalizedRelativePath || "/"
 				: `${normalizedBasePath}${normalizedRelativePath}` || normalizedBasePath;
 		const requestUrl = new URL(fullPath, "http://gateway.local");
-		this.logger?.info?.("telegram_mcp gateway alias matched", {
+		this.logger?.debug?.("telegram_mcp gateway alias matched", {
 			method: req.method,
 			routeBasePath: normalizedBasePath,
 			rawPath,

@@ -540,6 +540,7 @@ export const sendPartnerNoteOutputSchema = z.object({
   partner_session_id: z.string(),
   kind: partnerNoteKindSchema,
   share_id: z.string(),
+  delivery_status: z.enum(["queued", "delivered"]),
   note_path: z.string(),
   share_index_path: z.string(),
   copied_artifacts: z.array(z.string()),

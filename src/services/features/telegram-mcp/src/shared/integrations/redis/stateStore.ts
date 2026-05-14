@@ -19,6 +19,7 @@ import type {
 import type { SessionContext } from "../../../entities/session/model/types";
 import type {
   MaintenanceStore,
+  OutgoingDeliveryNotice,
   PendingRequestStore,
   SessionBindingStore,
   SessionStore,
@@ -73,6 +74,10 @@ function menuPayloadKey(key: string): string {
 
 function gatewayClientUuidKey(): string {
   return `${KEY_PREFIX}:gateway:client-uuid`;
+}
+
+function outgoingDeliveryNoticeKey(deliveryUuid: string): string {
+  return `${KEY_PREFIX}:gateway:outgoing-delivery:${deliveryUuid}`;
 }
 
 function xchangeFileMetaKey(sessionId: string, filePath: string): string {
@@ -496,6 +501,52 @@ export class RedisStateStore
 
   public async setGatewayClientUuid(clientUuid: string): Promise<void> {
     await this.redis.set(gatewayClientUuidKey(), clientUuid);
+  }
+
+  public async setOutgoingDeliveryNotice(
+    notice: OutgoingDeliveryNotice,
+  ): Promise<void> {
+    await this.redis.set(
+      outgoingDeliveryNoticeKey(notice.deliveryUuid),
+      JSON.stringify(notice),
+    );
+  }
+
+  public async listOutgoingDeliveryNotices(): Promise<OutgoingDeliveryNotice[]> {
+    const notices: OutgoingDeliveryNotice[] = [];
+    let cursor = "0";
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        `${KEY_PREFIX}:gateway:outgoing-delivery:*`,
+        "COUNT",
+        100,
+      );
+      cursor = nextCursor;
+
+      if (keys.length === 0) {
+        continue;
+      }
+
+      const rows = await this.redis.mget(...keys);
+      for (const row of rows) {
+        const notice = parseJson<OutgoingDeliveryNotice>(row);
+        if (notice) {
+          notices.push(notice);
+        }
+      }
+    } while (cursor !== "0");
+
+    return notices;
+  }
+
+  public async deleteOutgoingDeliveryNotice(
+    deliveryUuid: string,
+  ): Promise<boolean> {
+    const deleted = await this.redis.del(outgoingDeliveryNoticeKey(deliveryUuid));
+    return deleted > 0;
   }
 
   private async detachSessionFromPrincipal(

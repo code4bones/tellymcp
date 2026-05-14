@@ -106,6 +106,15 @@ type GatewayServiceCarrier = Service & {
   ackDeliveriesRecord?: (input: Record<string, unknown>) => Promise<{
     acked: number;
   }>;
+  getDeliveryStatusesRecord?: (input: Record<string, unknown>) => Promise<{
+    deliveries: Array<{
+      delivery_uuid: string;
+      share_id: string;
+      status: string;
+      delivered_at?: string;
+      acked_at?: string;
+    }>;
+  }>;
 };
 
 function trimOptionalText(value: unknown): string | null {
@@ -674,7 +683,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
         message_uuid: messageUuid,
         target_client_uuid: targetSession.client_uuid,
         target_session_uuid: targetSession.session_uuid,
-        status: "pending",
+        status: "queued",
         attempt_count: 0,
         available_at: now,
         created_at: now,
@@ -685,6 +694,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
         partner_session_id: targetSession.session_uuid,
         kind: kind as SendPartnerNoteOutput["kind"],
         share_id: shareId,
+        delivery_status: "queued",
         note_path: `gateway://shares/${shareId}.md`,
         share_index_path: "gateway://SHARED_INDEX.md",
         copied_artifacts: artifactRefs.map((artifact) =>
@@ -715,7 +725,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .join("gateway_sessions as s_from", "s_from.session_uuid", "m.from_session_uuid")
         .join("gateway_sessions as s_to", "s_to.session_uuid", "m.to_session_uuid")
         .where("d.target_client_uuid", clientUuid)
-        .where("d.status", "pending")
+        .where("d.status", "queued")
         .where("d.available_at", "<=", this.db.fn.now())
         .select(
           "d.delivery_uuid",
@@ -835,11 +845,52 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .where("target_client_uuid", clientUuid)
         .whereIn("delivery_uuid", deliveryIds)
         .update({
-          status: "acked",
+          status: "delivered",
           acked_at: new Date().toISOString(),
         });
 
       return { acked: updated };
+    },
+
+    async getDeliveryStatusesRecord(
+      this: GatewayServiceCarrier,
+      input: Record<string, unknown>,
+    ) {
+      const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
+      const deliveryIds = Array.isArray(input.delivery_ids)
+        ? input.delivery_ids
+            .map((item) => this.normalizeOptionalText?.(item))
+            .filter((item): item is string => Boolean(item))
+        : [];
+
+      if (deliveryIds.length === 0) {
+        return { deliveries: [] };
+      }
+
+      const rows = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_deliveries as d")
+        .join("gateway_messages as m", "m.message_uuid", "d.message_uuid")
+        .join("gateway_sessions as s_from", "s_from.session_uuid", "m.from_session_uuid")
+        .where("s_from.client_uuid", clientUuid)
+        .whereIn("d.delivery_uuid", deliveryIds)
+        .select(
+          "d.delivery_uuid",
+          "d.status",
+          "d.delivered_at",
+          "d.acked_at",
+          this.db.raw(`coalesce(m.meta->>'share_id', '') as share_id`),
+        );
+
+      return {
+        deliveries: rows.map((row) => ({
+          delivery_uuid: row.delivery_uuid,
+          share_id: String(row.share_id || ""),
+          status: row.status,
+          ...(row.delivered_at ? { delivered_at: String(row.delivered_at) } : {}),
+          ...(row.acked_at ? { acked_at: String(row.acked_at) } : {}),
+        })),
+      };
     },
   },
 
@@ -922,6 +973,14 @@ const TelegramMcpGatewayService: ServiceSchema = {
           throw new Error("Gateway service is disabled in client mode");
         }
         return this.ackDeliveriesRecord?.(ctx.params as Record<string, unknown>);
+      },
+    },
+    getDeliveryStatuses: {
+      async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
+        return this.getDeliveryStatusesRecord?.(ctx.params as Record<string, unknown>);
       },
     },
   },

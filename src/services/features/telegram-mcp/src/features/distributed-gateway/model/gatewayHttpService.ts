@@ -101,6 +101,8 @@ function buildPartnerNoteOutputFallback(
       typeof outputRecord.share_id === "string"
         ? outputRecord.share_id
         : `gateway-${Date.now()}`,
+    delivery_status:
+      outputRecord.delivery_status === "delivered" ? "delivered" : "queued",
     note_path:
       typeof outputRecord.note_path === "string"
         ? outputRecord.note_path
@@ -700,6 +702,29 @@ export class GatewayHttpService {
         const body = (await this.readJsonBody(req)) as Record<string, unknown>;
         const result = await this.callBroker(
           "telegramMcp.gateway.ackDeliveries",
+          body,
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, result);
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/deliveries/status") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const result = await this.callBroker(
+          "telegramMcp.gateway.getDeliveryStatuses",
           body,
           { meta: { internal_call: true } },
         );

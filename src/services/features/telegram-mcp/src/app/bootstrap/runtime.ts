@@ -108,6 +108,9 @@ export async function createAppRuntime(input: {
     config.exchange.dir,
     config.mcp.vfsScope,
     logger,
+    config.distributed.mode,
+    config.distributed.gatewayPublicUrl,
+    config.distributed.gatewayAuthToken,
   );
   await stateStore.resetRuntimeState();
   logger.info("Runtime pending state reset");

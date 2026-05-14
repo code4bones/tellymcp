@@ -183,6 +183,24 @@ Current implementation status:
 - in `DISTRIBUTED_MODE=both`, this also covers same-bot local delivery transparently
 - remote relay persistence/polling through shared DB is still not implemented yet
 
+Mode-specific runtime requirements:
+
+- `client`
+  - local Redis
+  - `GATEWAY_PUBLIC_URL`
+  - optional local tmux proxy when the service runs in Docker
+  - no gateway Postgres bootstrap is performed
+- `gateway`
+  - Postgres is required for gateway persistence
+- `both`
+  - Postgres is required because the gateway role is active
+
+Important current limitation:
+
+- exchange files and screenshots still use the existing local `vfs + minio` backend flow
+- this means that if a client instance must support Telegram uploads, screenshots, and VFS-backed exchange locally, the backend storage DB used by `vfs/minio` is still required there as well
+- only the new gateway persistence layer is disabled in pure `client` mode
+
 ## Mini App
 
 If `WEBAPP_ENABLED=true` and `WEBAPP_PUBLIC_URL` is configured, the session menu exposes `🖥 Live`.

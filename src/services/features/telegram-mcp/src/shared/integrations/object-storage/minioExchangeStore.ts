@@ -158,6 +158,9 @@ export class MinioExchangeStore {
     private readonly exchangeDirName: string,
     private readonly vfsScope: string,
     private readonly logger: Logger,
+    private readonly distributedMode: "client" | "gateway" | "both" = "client",
+    private readonly gatewayPublicUrl?: string,
+    private readonly gatewayAuthToken?: string,
   ) {}
 
   public resolveWorkspaceDir(session: SessionContext | null): string {
@@ -189,6 +192,10 @@ export class MinioExchangeStore {
     vfsParentId: number;
     sizeBytes: number;
   }> {
+    if (this.shouldUseGatewayStorage()) {
+      return this.storeFileThroughGateway(params);
+    }
+
     const relativePath = normalizeRelativePath(params.relativePath);
 
     const targetDir = await this.ensureVfsDirectory(
@@ -275,17 +282,22 @@ export class MinioExchangeStore {
       // continue and rehydrate from MinIO
     }
 
-    const resolved = await this.callInternalBroker<{
-      bucketName: string;
-      objectName: string;
-    }>("minio.resolveFileRef", {
-      ref: params.storageRef,
-      name: path.basename(relativePath),
-    });
-    const content = await this.callInternalBroker<MinioGetObjectResponse>("minio.getObject", {
-      bucketName: resolved.bucketName,
-      objectName: resolved.objectName,
-    });
+    const content = this.shouldUseGatewayStorage()
+      ? Buffer.from(
+          (
+            await this.callGateway<{
+              contentBase64: string;
+            }>("/xchange/read", {
+              storageRef: params.storageRef,
+              relativePath,
+            })
+          ).contentBase64,
+          "base64",
+        )
+      : await this.readStoredContent({
+          relativePath,
+          storageRef: params.storageRef,
+        });
 
     const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
     let materializedPath: string;
@@ -320,6 +332,16 @@ export class MinioExchangeStore {
     relativePath: string;
     storageRef: string;
   }): Promise<Uint8Array> {
+    if (this.shouldUseGatewayStorage()) {
+      const result = await this.callGateway<{
+        contentBase64: string;
+      }>("/xchange/read", {
+        storageRef: params.storageRef,
+        relativePath: params.relativePath,
+      });
+      return Buffer.from(result.contentBase64, "base64");
+    }
+
     const relativePath = normalizeRelativePath(params.relativePath);
     const resolved = await this.callInternalBroker<{
       bucketName: string;
@@ -344,6 +366,16 @@ export class MinioExchangeStore {
     vfsNodeId?: number | undefined;
   }): Promise<void> {
     if (!params?.storageRef && !params?.vfsNodeId) {
+      return;
+    }
+
+    if (this.shouldUseGatewayStorage()) {
+      await this.callGateway("/xchange/delete", {
+        ...(params.storageRef ? { storageRef: params.storageRef } : {}),
+        ...(typeof params.vfsNodeId === "number"
+          ? { vfsNodeId: params.vfsNodeId }
+          : {}),
+      });
       return;
     }
 
@@ -376,6 +408,104 @@ export class MinioExchangeStore {
     return this.callBroker<T>(actionName, params, {
       meta: this.internalCallMeta,
     });
+  }
+
+  private shouldUseGatewayStorage(): boolean {
+    return this.distributedMode === "client" && Boolean(this.gatewayPublicUrl);
+  }
+
+  private async callGateway<T>(
+    endpointPath: string,
+    body: Record<string, unknown>,
+  ): Promise<T> {
+    if (!this.gatewayPublicUrl) {
+      throw new Error("Gateway storage relay requires GATEWAY_PUBLIC_URL.");
+    }
+
+    const url = new URL(this.gatewayPublicUrl);
+    url.pathname = url.pathname.replace(/\/+$/u, "");
+    if (!url.pathname.endsWith("/gateway")) {
+      url.pathname = `${url.pathname}/gateway`.replace(/\/{2,}/gu, "/");
+    }
+    url.pathname = `${url.pathname}${endpointPath}`.replace(/\/{2,}/gu, "/");
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(this.gatewayAuthToken
+          ? { authorization: `Bearer ${this.gatewayAuthToken}` }
+          : {}),
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(
+        `Gateway xchange request failed with status ${response.status}: ${message || response.statusText}`,
+      );
+    }
+
+    return (await response.json()) as T;
+  }
+
+  private async storeFileThroughGateway(params: {
+    session: SessionContext | null;
+    sessionId: string;
+    source: ExchangeFileSource;
+    relativePath: string;
+    content: Uint8Array;
+    mimeType?: string | undefined;
+  }): Promise<{
+    filePath: string;
+    relativePath: string;
+    storageRef: string;
+    bucketName: string;
+    objectName: string;
+    vfsNodeId: number;
+    vfsPublicUrl: string;
+    vfsParentId: number;
+    sizeBytes: number;
+  }> {
+    const relativePath = normalizeRelativePath(params.relativePath);
+    const binding = await this.bindingStore.getBinding(params.sessionId);
+    const ownerSegment = this.buildOwnerSegment(binding, params.sessionId);
+    const sessionSegment = this.buildSessionSegment(params.session, params.sessionId);
+    const inferredMimeType =
+      params.mimeType || inferMimeType(path.basename(relativePath));
+
+    const response = await this.callGateway<{
+      filePath: string;
+      relativePath: string;
+      storageRef: string;
+      bucketName: string;
+      objectName: string;
+      vfsNodeId: number;
+      vfsPublicUrl: string;
+      vfsParentId: number;
+      sizeBytes: number;
+    }>("/xchange/store", {
+      ownerSegment,
+      sessionSegment,
+      source: params.source,
+      relativePath,
+      mimeType: inferredMimeType,
+      contentBase64: Buffer.from(params.content).toString("base64"),
+      vfsScope: this.vfsScope,
+    });
+
+    this.logger.info("Exchange file stored via gateway VFS + MinIO relay", {
+      sessionId: params.sessionId,
+      source: params.source,
+      relativePath,
+      vfsScope: this.vfsScope,
+      vfsNodeId: response.vfsNodeId,
+      vfsPublicUrl: response.vfsPublicUrl,
+      storageRef: response.storageRef,
+    });
+
+    return response;
   }
 
   private async ensureVfsDirectory(

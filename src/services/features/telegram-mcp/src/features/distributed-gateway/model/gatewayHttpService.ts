@@ -9,6 +9,7 @@ import type {
   SendPartnerNoteInput,
   SendPartnerNoteOutput,
 } from "../../../entities/collaboration/model/types";
+import type { ExchangeFileSource } from "../../../shared/integrations/object-storage/minioExchangeStore";
 
 function readHeader(
   req: IncomingMessage,
@@ -36,6 +37,42 @@ function writeText(
   res.statusCode = statusCode;
   res.setHeader("content-type", "text/plain; charset=utf-8");
   res.end(message);
+}
+
+function sanitizePathSegment(value: string): string {
+  return String(value || "")
+    .trim()
+    .replace(/[\/\\]+/gu, "-")
+    .replace(/[\x00-\x1f]+/gu, "-")
+    .replace(/\s+/gu, "-")
+    .replace(/[^-\p{L}\p{N}._@]+/gu, "-")
+    .replace(/-+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .slice(0, 120);
+}
+
+function normalizeRelativePath(relativePath: string): string {
+  const normalized = String(relativePath || "")
+    .split(/[\/\\]+/u)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0 && segment !== "." && segment !== "..")
+    .join("/");
+
+  if (!normalized) {
+    throw new Error("Relative exchange path is required.");
+  }
+
+  return normalized;
+}
+
+function getXchangeKind(source: ExchangeFileSource): string {
+  if (source === "browser-screenshot") {
+    return "screenshots";
+  }
+  if (source === "partner-artifact") {
+    return "shares";
+  }
+  return "files";
 }
 
 export class GatewayHttpService {
@@ -67,6 +104,189 @@ export class GatewayHttpService {
 
   public matches(pathname: string): boolean {
     return pathname === "/gateway/healthz" || pathname.startsWith("/gateway/");
+  }
+
+  private isAuthorized(req: IncomingMessage): boolean {
+    if (!this.config.distributed.gatewayAuthToken) {
+      return true;
+    }
+
+    const authorization = readHeader(req, "authorization");
+    return authorization === `Bearer ${this.config.distributed.gatewayAuthToken}`;
+  }
+
+  private async storeXchangeFile(body: Record<string, unknown>): Promise<unknown> {
+    const ownerSegment = sanitizePathSegment(String(body.ownerSegment || ""));
+    const sessionSegment = sanitizePathSegment(String(body.sessionSegment || ""));
+    const source = String(body.source || "") as ExchangeFileSource;
+    const relativePath = normalizeRelativePath(String(body.relativePath || ""));
+    const mimeType =
+      typeof body.mimeType === "string" && body.mimeType.trim()
+        ? body.mimeType.trim()
+        : "application/octet-stream";
+    const contentBase64 = String(body.contentBase64 || "");
+    const vfsScope =
+      typeof body.vfsScope === "string" && body.vfsScope.trim()
+        ? body.vfsScope.trim()
+        : this.config.mcp.vfsScope;
+
+    if (!ownerSegment || !sessionSegment) {
+      throw new Error("ownerSegment and sessionSegment are required");
+    }
+
+    if (
+      source !== "telegram-upload" &&
+      source !== "browser-screenshot" &&
+      source !== "partner-artifact"
+    ) {
+      throw new Error("Invalid exchange file source");
+    }
+
+    if (!contentBase64) {
+      throw new Error("contentBase64 is required");
+    }
+
+    const normalizedRelativePath = normalizeRelativePath(relativePath);
+    const kindSegment = getXchangeKind(source);
+    const relativeDir = normalizedRelativePath.includes("/")
+      ? normalizedRelativePath.slice(0, normalizedRelativePath.lastIndexOf("/"))
+      : ".";
+    const targetDirPath =
+      source === "partner-artifact"
+        ? relativeDir === "." ? kindSegment : relativeDir
+        : relativeDir === "." ? kindSegment : `${kindSegment}/${relativeDir}`;
+
+    const targetDir = await this.callBroker<{
+      node_id: number;
+    }>(
+      "vfs.vfsCreateDir",
+      {
+        scope: vfsScope,
+        node: {
+          name: `xchange/${ownerSegment}/${sessionSegment}/${targetDirPath}`,
+        },
+      },
+      { meta: { internal_call: true } },
+    );
+
+    const content = Buffer.from(contentBase64, "base64");
+    const response = await this.callBroker<{
+      node: {
+        node_id: number;
+        parent_id: number;
+        public_url: string;
+      };
+      upload: {
+        bucketName: string;
+        objectName: string;
+        storageRef: string;
+      };
+    }>(
+      "minio.ingest",
+      {
+        files: [
+          {
+            fieldname: "file",
+            originalname: normalizedRelativePath.split("/").pop() || "file.bin",
+            encoding: "7bit",
+            mimetype: mimeType,
+            size: content.byteLength,
+            buffer: content,
+          },
+        ],
+        fields: {
+          parent_id: String(targetDir.node_id),
+          name: normalizedRelativePath.split("/").pop() || "file.bin",
+        },
+      },
+      { meta: { internal_call: true } },
+    );
+
+    return {
+      filePath: `vfs://${response.node.public_url}`,
+      relativePath: normalizedRelativePath,
+      storageRef: response.upload.storageRef,
+      bucketName: response.upload.bucketName,
+      objectName: response.upload.objectName,
+      vfsNodeId: response.node.node_id,
+      vfsPublicUrl: response.node.public_url,
+      vfsParentId: response.node.parent_id,
+      sizeBytes: content.byteLength,
+    };
+  }
+
+  private async readXchangeFile(body: Record<string, unknown>): Promise<unknown> {
+    const storageRef = String(body.storageRef || "").trim();
+    const relativePath = normalizeRelativePath(String(body.relativePath || ""));
+
+    if (!storageRef) {
+      throw new Error("storageRef is required");
+    }
+
+    const resolved = await this.callBroker<{
+      bucketName: string;
+      objectName: string;
+    }>(
+      "minio.resolveFileRef",
+      {
+        ref: storageRef,
+        name: relativePath.split("/").pop() || "file.bin",
+      },
+      { meta: { internal_call: true } },
+    );
+
+    const content = await this.callBroker<Uint8Array | Buffer>(
+      "minio.getObject",
+      {
+        bucketName: resolved.bucketName,
+        objectName: resolved.objectName,
+      },
+      { meta: { internal_call: true } },
+    );
+
+    const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
+    return {
+      contentBase64: buffer.toString("base64"),
+    };
+  }
+
+  private async deleteXchangeFile(body: Record<string, unknown>): Promise<unknown> {
+    const vfsNodeId =
+      typeof body.vfsNodeId === "number" && Number.isFinite(body.vfsNodeId)
+        ? body.vfsNodeId
+        : undefined;
+    const storageRef =
+      typeof body.storageRef === "string" && body.storageRef.trim()
+        ? body.storageRef.trim()
+        : undefined;
+
+    if (typeof vfsNodeId === "number" && vfsNodeId > 0) {
+      try {
+        await this.callBroker(
+          "vfs.vfsDeleteNode",
+          {
+            node_id: [vfsNodeId],
+          },
+          { meta: { internal_call: true } },
+        );
+        return { deleted: true };
+      } catch {
+        // fallback to direct object deletion below
+      }
+    }
+
+    if (storageRef) {
+      await this.callBroker(
+        "minio.deleteByRef",
+        {
+          ref: storageRef,
+        },
+        { meta: { internal_call: true } },
+      );
+      return { deleted: true };
+    }
+
+    return { deleted: false };
   }
 
   private async readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -126,6 +346,11 @@ export class GatewayHttpService {
       return true;
     }
 
+    if (!this.isAuthorized(req)) {
+      writeText(res, 401, "Unauthorized");
+      return true;
+    }
+
     if (pathname === "/gateway/partner-note") {
       if (req.method !== "POST") {
         writeText(res, 405, "Method not allowed");
@@ -144,6 +369,63 @@ export class GatewayHttpService {
         const input = sendPartnerNoteInputSchema.parse(body);
         const output = await this.partnerNoteRelayHandler(input);
         writeJson(res, 200, sendPartnerNoteOutputSchema.parse(output));
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/xchange/store") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const result = await this.storeXchangeFile(body);
+        writeJson(res, 200, result);
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/xchange/read") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const result = await this.readXchangeFile(body);
+        writeJson(res, 200, result);
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/xchange/delete") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const result = await this.deleteXchangeFile(body);
+        writeJson(res, 200, result);
         return true;
       } catch (error) {
         writeJson(res, 400, {
@@ -241,16 +523,6 @@ export class GatewayHttpService {
         writeJson(res, 400, {
           error: error instanceof Error ? error.message : String(error),
         });
-        return true;
-      }
-    }
-
-    if (this.config.distributed.gatewayAuthToken) {
-      const authorization = readHeader(req, "authorization");
-      if (
-        authorization !== `Bearer ${this.config.distributed.gatewayAuthToken}`
-      ) {
-        writeText(res, 401, "Unauthorized");
         return true;
       }
     }

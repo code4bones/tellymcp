@@ -8,6 +8,9 @@ import { TELEGRAM_MCP_ENSUREDB_SERVICE_NAME } from "./ensuredb.service";
 export const TELEGRAM_MCP_GATEWAY_SERVICE_NAME = "telegramMcp.gateway";
 
 const MCP_SCHEMA = process.env.DB_SCHEME || "mcp";
+const DISTRIBUTED_MODE = process.env.DISTRIBUTED_MODE || "client";
+const GATEWAY_ENABLED =
+  DISTRIBUTED_MODE === "gateway" || DISTRIBUTED_MODE === "both";
 
 type GatewayServiceCarrier = Service & {
   normalizeOptionalText?: (value: unknown) => string | null;
@@ -326,21 +329,33 @@ const TelegramMcpGatewayService: ServiceSchema = {
   actions: {
     registerClient: {
       async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
         return this.registerClientRecord?.(ctx.params as Record<string, unknown>);
       },
     },
     createProject: {
       async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
         return this.createProjectRecord?.(ctx.params as Record<string, unknown>);
       },
     },
     joinProject: {
       async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
         return this.joinProjectRecord?.(ctx.params as Record<string, unknown>);
       },
     },
     registerSession: {
       async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
         return this.registerSessionRecord?.(ctx.params as Record<string, unknown>);
       },
     },

@@ -3,6 +3,9 @@ import type { Service, ServiceSchema } from "moleculer";
 import { DBMixin } from "@src/lib/mixins/db";
 
 export const TELEGRAM_MCP_ENSUREDB_SERVICE_NAME = "telegramMcp.ensuredb";
+const DISTRIBUTED_MODE = process.env.DISTRIBUTED_MODE || "client";
+const GATEWAY_ENABLED =
+  DISTRIBUTED_MODE === "gateway" || DISTRIBUTED_MODE === "both";
 
 type EnsureDbServiceCarrier = Service & {
   ensureGatewaySchema?: () => Promise<void>;
@@ -269,6 +272,13 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
   },
 
   async started(this: EnsureDbServiceCarrier) {
+    if (!GATEWAY_ENABLED) {
+      this.logger.info("Skipping telegram_mcp gateway database bootstrap", {
+        mode: DISTRIBUTED_MODE,
+      });
+      return;
+    }
+
     this.logger.info("Ensuring telegram_mcp gateway database schema", {
       schema: MCP_SCHEMA,
     });

@@ -134,6 +134,12 @@ Current rule:
 - gateway DB bootstrap belongs in `ensuredb.service.ts`
 - future project/session/message repositories should depend on this service instead of repeating DDL checks ad hoc
 
+Mode rule:
+
+- `telegramMcp.ensuredb` must be a no-op in `DISTRIBUTED_MODE=client`
+- gateway persistence is only active in `gateway` and `both`
+- this does not remove the separate DB dependency of the existing `vfs/minio` backend stack
+
 ## Core runtime components
 
 ### Config

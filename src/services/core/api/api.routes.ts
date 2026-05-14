@@ -80,8 +80,7 @@ function createTelegramMcpAliasHandler(routeBasePath: string) {
 			fullPath: requestUrl.pathname,
 		});
 
-		void service.routeRequest(req, res as never, requestUrl.pathname).then(
-			() => next(),
+		void service.routeRequest(req, res as never, requestUrl.pathname).catch(
 			(error) => next(error),
 		);
 	};

@@ -6031,7 +6031,7 @@ export class TelegramTransport implements HumanTransport {
         ctx,
         text,
         { kind: "menu", sessionId: input.sessionId },
-        { reply_markup: keyboard },
+        { parse_mode: "HTML", reply_markup: keyboard },
       );
       return;
     }
@@ -6040,7 +6040,7 @@ export class TelegramTransport implements HumanTransport {
       ctx,
       text,
       { kind: "menu", sessionId: input.sessionId },
-      { reply_markup: keyboard },
+      { parse_mode: "HTML", reply_markup: keyboard },
     );
   }
 
@@ -6117,7 +6117,7 @@ export class TelegramTransport implements HumanTransport {
         ctx,
         text,
         { kind: "menu", sessionId: input.sessionId },
-        { reply_markup: keyboard },
+        { parse_mode: "HTML", reply_markup: keyboard },
       );
       return;
     }
@@ -6126,7 +6126,7 @@ export class TelegramTransport implements HumanTransport {
       ctx,
       text,
       { kind: "menu", sessionId: input.sessionId },
-      { reply_markup: keyboard },
+      { parse_mode: "HTML", reply_markup: keyboard },
     );
   }
 
@@ -6173,7 +6173,7 @@ export class TelegramTransport implements HumanTransport {
         ctx,
         text,
         { kind: "menu", sessionId: input.sessionId },
-        { reply_markup: keyboard },
+        { parse_mode: "HTML", reply_markup: keyboard },
       );
       return;
     }
@@ -6182,7 +6182,7 @@ export class TelegramTransport implements HumanTransport {
       ctx,
       text,
       { kind: "menu", sessionId: input.sessionId },
-      { reply_markup: keyboard },
+      { parse_mode: "HTML", reply_markup: keyboard },
     );
   }
 

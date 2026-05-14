@@ -107,9 +107,191 @@ const DBConfig: Knex.PgConnectionConfig = {
 	database: process.env.DB_NAME || "",
 };
 
+const DB_ENABLED = Boolean(process.env.DB_HOST?.trim());
+
+type NoopBuilderState = {
+	countMode?: boolean;
+};
+
+const createNoopPromise = (value: unknown) => Promise.resolve(value);
+
+const createNoopQueryBuilder = (state: NoopBuilderState = {}): any => {
+	const target = function noopQueryBuilder() {
+		return createNoopQueryBuilder(state);
+	};
+
+	const proxy = new Proxy(target, {
+		apply() {
+			return createNoopQueryBuilder(state);
+		},
+		get(_obj, prop: string | symbol) {
+			if (prop === "then") {
+				return createNoopPromise([]).then.bind(createNoopPromise([]));
+			}
+			if (prop === "catch") {
+				return createNoopPromise([]).catch.bind(createNoopPromise([]));
+			}
+			if (prop === "finally") {
+				return createNoopPromise([]).finally.bind(createNoopPromise([]));
+			}
+			if (prop === "first") {
+				return () => createNoopPromise(state.countMode ? { count: 0 } : null);
+			}
+			if (prop === "pluck") {
+				return () => createNoopPromise([]);
+			}
+			if (
+				prop === "insert" ||
+				prop === "update" ||
+				prop === "delete" ||
+				prop === "del" ||
+				prop === "increment" ||
+				prop === "decrement"
+			) {
+				return () => createNoopPromise([]);
+			}
+			if (prop === "count") {
+				return () => createNoopQueryBuilder({ ...state, countMode: true });
+			}
+			if (
+				prop === "clone" ||
+				prop === "clearSelect" ||
+				prop === "clearOrder" ||
+				prop === "select" ||
+				prop === "from" ||
+				prop === "table" ||
+				prop === "withSchema" ||
+				prop === "where" ||
+				prop === "andWhere" ||
+				prop === "orWhere" ||
+				prop === "whereIn" ||
+				prop === "whereNotIn" ||
+				prop === "whereNull" ||
+				prop === "whereNotNull" ||
+				prop === "leftJoin" ||
+				prop === "rightJoin" ||
+				prop === "join" ||
+				prop === "groupBy" ||
+				prop === "having" ||
+				prop === "orderBy" ||
+				prop === "orderByRaw" ||
+				prop === "limit" ||
+				prop === "offset" ||
+				prop === "transacting" ||
+				prop === "onConflict" ||
+				prop === "merge" ||
+				prop === "returning" ||
+				prop === "modify" ||
+				prop === "column" ||
+				prop === "union" ||
+				prop === "unionAll" ||
+				prop === "forUpdate" ||
+				prop === "forShare"
+			) {
+				return () => createNoopQueryBuilder(state);
+			}
+
+			return createNoopQueryBuilder(state);
+		},
+	});
+
+	return proxy;
+};
+
+const createNoopSchema = (): any => {
+	const schemaTarget = {};
+	return new Proxy(schemaTarget, {
+		get(_obj, prop: string | symbol) {
+			if (prop === "hasTable") {
+				return () => Promise.resolve(false);
+			}
+			if (
+				prop === "withSchema" ||
+				prop === "createTable" ||
+				prop === "alterTable" ||
+				prop === "dropTable" ||
+				prop === "dropTableIfExists" ||
+				prop === "createSchema" ||
+				prop === "createSchemaIfNotExists"
+			) {
+				return () => createNoopSchema();
+			}
+			if (prop === "then") {
+				return Promise.resolve(undefined).then.bind(Promise.resolve(undefined));
+			}
+			if (prop === "catch") {
+				return Promise.resolve(undefined).catch.bind(Promise.resolve(undefined));
+			}
+			if (prop === "finally") {
+				return Promise.resolve(undefined).finally.bind(Promise.resolve(undefined));
+			}
+			return () => createNoopSchema();
+		},
+	});
+};
+
+const createNoopKnex = (): Knex => {
+	const queryBuilder = createNoopQueryBuilder();
+	const schema = createNoopSchema();
+	const rawResult = {
+		rows: [],
+		rowCount: 0,
+		command: "NOOP",
+	};
+
+	const target = function noopKnex() {
+		return createNoopQueryBuilder();
+	};
+
+	const proxy = new Proxy(target, {
+		apply() {
+			return createNoopQueryBuilder();
+		},
+		get(_obj, prop: string | symbol) {
+			if (prop === "schema") {
+				return schema;
+			}
+			if (prop === "fn") {
+				return {
+					now: () => new Date(),
+				};
+			}
+			if (prop === "raw") {
+				return async () => rawResult;
+			}
+			if (prop === "destroy") {
+				return async () => undefined;
+			}
+			if (prop === "transaction") {
+				return async (handler?: (trx: Knex) => unknown) => {
+					if (typeof handler === "function") {
+						return handler(proxy as unknown as Knex);
+					}
+					return proxy;
+				};
+			}
+			if (prop === "withSchema" || prop === "table") {
+				return () => createNoopQueryBuilder();
+			}
+			if (prop === "queryBuilder") {
+				return () => createNoopQueryBuilder();
+			}
+			return (queryBuilder as Record<string | symbol, unknown>)[prop] ?? createNoopQueryBuilder();
+		},
+	});
+
+	return proxy as unknown as Knex;
+};
+
 const DBMixin: GQLSchema = {
 	name: "DBMixin",
 	created() {
+		if (!DB_ENABLED) {
+			this.logger?.warn?.("DBMixin: DB_HOST is not set, using no-op database stub");
+			this.db = createNoopKnex();
+			return;
+		}
+
 		this.db = knex({
 			debug: Boolean(process.env.PG_DEBUG),
 			client: "pg",

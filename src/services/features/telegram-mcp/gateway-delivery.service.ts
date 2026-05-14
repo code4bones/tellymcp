@@ -1,4 +1,3 @@
-import { setTimeout as delay } from "node:timers/promises";
 import path from "node:path";
 
 import type { Service, ServiceSchema } from "moleculer";
@@ -11,10 +10,15 @@ import type { TelegramInboxMessage } from "./src/entities/inbox/model/types";
 import { createInboxMessageId } from "./src/shared/lib/ids/ids";
 import { writeXchangeRelativeFile } from "./src/shared/integrations/tmux/client";
 
+const CronMixin = require("@r2d2bzh/moleculer-cron") as ServiceSchema;
+
 export const TELEGRAM_MCP_GATEWAY_DELIVERY_SERVICE_NAME =
   "telegramMcp.gatewayDelivery";
 
 const POLL_INTERVAL_MS = 5000;
+const POLL_CRON_TIME = "*/5 * * * * *";
+const GATEWAY_POLL_TIMEOUT_MS = 15000;
+const GATEWAY_ACK_TIMEOUT_MS = 10000;
 
 type GatewayDeliveryArtifact = {
   artifact_uuid: string;
@@ -49,7 +53,11 @@ type GatewayDelivery = {
 
 type RuntimeCarrier = Service & {
   stopRequested?: boolean;
-  pollLoop?: Promise<void> | null;
+  pollTickInFlight?: Promise<void> | null;
+  pollingEnabled?: boolean;
+  runtimeService?: TelegramMcpRuntimeServiceInstance | null;
+  getRuntimeOrThrow?: () => ReturnType<TelegramMcpRuntimeServiceInstance["getRuntime"]>;
+  runPollIteration?: () => Promise<void>;
 };
 
 function normalizeGatewayBaseUrl(value: string): URL {
@@ -160,10 +168,265 @@ function buildPartnerInboxText(input: {
 const TelegramMcpGatewayDeliveryService: ServiceSchema = {
   name: TELEGRAM_MCP_GATEWAY_DELIVERY_SERVICE_NAME,
   dependencies: [TELEGRAM_MCP_RUNTIME_SERVICE_NAME],
+  mixins: [CronMixin],
+  crons: [
+    {
+      name: "GatewayDeliveryPoll",
+      cronTime: POLL_CRON_TIME,
+      onTick(this: { call: (action: string, params?: unknown) => Promise<unknown> }) {
+        void this.call(`${TELEGRAM_MCP_GATEWAY_DELIVERY_SERVICE_NAME}.pollTick`);
+      },
+    },
+  ],
+
+  methods: {
+    getRuntimeOrThrow(this: RuntimeCarrier) {
+      const runtimeService =
+        this.runtimeService ??
+        (this.broker.getLocalService(
+          TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
+        ) as TelegramMcpRuntimeServiceInstance | null);
+
+      if (!runtimeService) {
+        throw new Error(
+          `Local Moleculer service '${TELEGRAM_MCP_RUNTIME_SERVICE_NAME}' is unavailable`,
+        );
+      }
+
+      this.runtimeService = runtimeService;
+      return runtimeService.getRuntime();
+    },
+
+    async runPollIteration(this: RuntimeCarrier): Promise<void> {
+      if (this.stopRequested || !this.pollingEnabled) {
+        return;
+      }
+
+      if (this.pollTickInFlight) {
+        return this.pollTickInFlight;
+      }
+
+      this.pollTickInFlight = (async () => {
+        const runtime = this.getRuntimeOrThrow?.();
+        if (!runtime?.config.distributed.gatewayPublicUrl) {
+          return;
+        }
+
+        try {
+          const clientUuid = await runtime.maintenanceStore.getGatewayClientUuid();
+          if (!clientUuid) {
+            return;
+          }
+
+          const baseUrl = normalizeGatewayBaseUrl(
+            runtime.config.distributed.gatewayPublicUrl,
+          );
+          const pollUrl = new URL(baseUrl);
+          pollUrl.pathname = `${pollUrl.pathname}/deliveries/poll`.replace(
+            /\/{2,}/gu,
+            "/",
+          );
+
+          const response = await fetch(pollUrl, {
+            method: "POST",
+            signal: AbortSignal.timeout(GATEWAY_POLL_TIMEOUT_MS),
+            headers: {
+              "content-type": "application/json",
+              ...(runtime.config.distributed.gatewayAuthToken
+                ? {
+                    authorization: `Bearer ${runtime.config.distributed.gatewayAuthToken}`,
+                  }
+                : {}),
+            },
+            body: JSON.stringify({
+              client_uuid: clientUuid,
+              limit: 20,
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(
+              `Gateway deliveries poll failed with status ${response.status}: ${await response.text()}`,
+            );
+          }
+
+          const payload = (await response.json()) as {
+            deliveries?: GatewayDelivery[];
+          };
+          const deliveries = Array.isArray(payload.deliveries)
+            ? payload.deliveries
+            : [];
+
+          for (const delivery of deliveries) {
+            const targetSession = await runtime.sessionStore.getSession(
+              delivery.target_local_session_id,
+            );
+            if (!targetSession) {
+              runtime.logger.warn(
+                "Skipping gateway delivery because target local session is not available",
+                {
+                  deliveryUuid: delivery.delivery_uuid,
+                  targetLocalSessionId: delivery.target_local_session_id,
+                },
+              );
+              continue;
+            }
+
+            const targetBinding = await runtime.bindingStore.getBinding(
+              targetSession.sessionId,
+            );
+            if (!targetBinding) {
+              runtime.logger.warn(
+                "Skipping gateway delivery because target session is not paired with Telegram",
+                {
+                  deliveryUuid: delivery.delivery_uuid,
+                  sessionId: targetSession.sessionId,
+                },
+              );
+              continue;
+            }
+
+            const copiedArtifacts: string[] = [];
+            for (const artifact of delivery.artifacts) {
+              const relativePath =
+                artifact.relative_path ||
+                `shares/files/${delivery.share_id}/${artifact.original_name}`;
+              const localArtifactPath = await runtime.objectStore.ensureLocalFile({
+                sessionId: targetSession.sessionId,
+                session: targetSession,
+                filePath: artifact.original_name,
+                relativePath,
+                storageRef: artifact.storage_ref,
+                source: "partner-artifact",
+              });
+              copiedArtifacts.push(localArtifactPath);
+              await runtime.xchangeFileMetaStore.setXchangeFileMeta({
+                sessionId: targetSession.sessionId,
+                filePath: localArtifactPath,
+                relativePath,
+                source: "partner-artifact",
+                uploadedAt: delivery.created_at,
+                originalName: artifact.original_name,
+                ...(artifact.storage_ref ? { storageRef: artifact.storage_ref } : {}),
+                ...(artifact.mime_type ? { mimeType: artifact.mime_type } : {}),
+                ...(typeof artifact.size_bytes === "number"
+                  ? { sizeBytes: artifact.size_bytes }
+                  : {}),
+              });
+            }
+
+            const noteContent = buildNoteContent({ delivery, copiedArtifacts });
+            const notePath = await writeXchangeRelativeFile(
+              runtime.config.tmux,
+              runtime.objectStore.resolveWorkspaceDir(targetSession),
+              runtime.config.exchange.dir,
+              delivery.note_relative_path,
+              Buffer.from(noteContent, "utf8"),
+            );
+            await runtime.xchangeFileMetaStore.setXchangeFileMeta({
+              sessionId: targetSession.sessionId,
+              filePath: notePath,
+              relativePath: delivery.note_relative_path,
+              source: "partner-artifact",
+              uploadedAt: delivery.created_at,
+              mimeType: "text/markdown",
+              sizeBytes: Buffer.byteLength(noteContent, "utf8"),
+            });
+
+            await writeXchangeRelativeFile(
+              runtime.config.tmux,
+              runtime.objectStore.resolveWorkspaceDir(targetSession),
+              runtime.config.exchange.dir,
+              delivery.share_index_file_name,
+              Buffer.from(
+                `${buildShareIndexLine({
+                  delivery,
+                  relativeNotePath: delivery.note_relative_path,
+                })}\n`,
+                "utf8",
+              ),
+              { append: true },
+            );
+
+            const inboxMessage: TelegramInboxMessage = {
+              id: createInboxMessageId(new Date(delivery.created_at)),
+              sessionId: targetSession.sessionId,
+              telegramChatId: targetBinding.telegramChatId,
+              telegramUserId: targetBinding.telegramUserId,
+              sourceTelegramMessageId: Date.now(),
+              text: buildPartnerInboxText({
+                delivery,
+                notePath,
+                copiedArtifacts,
+              }),
+              attachments: [notePath, ...copiedArtifacts],
+              receivedAt: delivery.created_at,
+            };
+            await runtime.inboxStore.createInboxMessage(inboxMessage);
+
+            const ackUrl = new URL(baseUrl);
+            ackUrl.pathname = `${ackUrl.pathname}/deliveries/ack`.replace(
+              /\/{2,}/gu,
+              "/",
+            );
+            await fetch(ackUrl, {
+              method: "POST",
+              signal: AbortSignal.timeout(GATEWAY_ACK_TIMEOUT_MS),
+              headers: {
+                "content-type": "application/json",
+                ...(runtime.config.distributed.gatewayAuthToken
+                  ? {
+                      authorization: `Bearer ${runtime.config.distributed.gatewayAuthToken}`,
+                    }
+                  : {}),
+              },
+              body: JSON.stringify({
+                client_uuid: clientUuid,
+                delivery_ids: [delivery.delivery_uuid],
+              }),
+            });
+
+            runtime.logger.info("Gateway delivery materialized locally", {
+              deliveryUuid: delivery.delivery_uuid,
+              sessionId: targetSession.sessionId,
+              shareId: delivery.share_id,
+              kind: delivery.kind,
+              notePath,
+              copiedArtifacts,
+            });
+          }
+        } catch (error) {
+          if (this.stopRequested) {
+            return;
+          }
+          this.logger.warn("telegram_mcp gateway delivery poll iteration failed", {
+            gatewayUrl: runtime.config.distributed.gatewayPublicUrl,
+            error:
+              error instanceof Error ? (error.stack ?? error.message) : String(error),
+          });
+        } finally {
+          this.pollTickInFlight = null;
+        }
+      })();
+
+      return this.pollTickInFlight;
+    },
+  },
+
+  actions: {
+    pollTick: {
+      async handler(this: RuntimeCarrier) {
+        await this.runPollIteration?.();
+        return { ok: true };
+      },
+    },
+  },
 
   created(this: RuntimeCarrier) {
     this.stopRequested = false;
-    this.pollLoop = null;
+    this.pollTickInFlight = null;
+    this.pollingEnabled = false;
+    this.runtimeService = null;
   },
 
   async started(this: RuntimeCarrier) {
@@ -188,208 +451,20 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
     }
 
     this.stopRequested = false;
-    this.pollLoop = (async () => {
-      const baseUrl = normalizeGatewayBaseUrl(
-        runtime.config.distributed.gatewayPublicUrl!,
-      );
-
-      while (!this.stopRequested) {
-        try {
-          const clientUuid = await runtime.maintenanceStore.getGatewayClientUuid();
-          if (clientUuid) {
-            const pollUrl = new URL(baseUrl);
-            pollUrl.pathname = `${pollUrl.pathname}/deliveries/poll`.replace(
-              /\/{2,}/gu,
-              "/",
-            );
-
-            const response = await fetch(pollUrl, {
-              method: "POST",
-              headers: {
-                "content-type": "application/json",
-                ...(runtime.config.distributed.gatewayAuthToken
-                  ? {
-                      authorization: `Bearer ${runtime.config.distributed.gatewayAuthToken}`,
-                    }
-                  : {}),
-              },
-              body: JSON.stringify({
-                client_uuid: clientUuid,
-                limit: 20,
-              }),
-            });
-
-            if (!response.ok) {
-              throw new Error(
-                `Gateway deliveries poll failed with status ${response.status}: ${await response.text()}`,
-              );
-            }
-
-            const payload = (await response.json()) as {
-              deliveries?: GatewayDelivery[];
-            };
-            const deliveries = Array.isArray(payload.deliveries)
-              ? payload.deliveries
-              : [];
-
-            for (const delivery of deliveries) {
-              const targetSession = await runtime.sessionStore.getSession(
-                delivery.target_local_session_id,
-              );
-              if (!targetSession) {
-                runtime.logger.warn(
-                  "Skipping gateway delivery because target local session is not available",
-                  {
-                    deliveryUuid: delivery.delivery_uuid,
-                    targetLocalSessionId: delivery.target_local_session_id,
-                  },
-                );
-                continue;
-              }
-
-              const targetBinding = await runtime.bindingStore.getBinding(
-                targetSession.sessionId,
-              );
-              if (!targetBinding) {
-                runtime.logger.warn(
-                  "Skipping gateway delivery because target session is not paired with Telegram",
-                  {
-                    deliveryUuid: delivery.delivery_uuid,
-                    sessionId: targetSession.sessionId,
-                  },
-                );
-                continue;
-              }
-
-              const copiedArtifacts: string[] = [];
-              for (const artifact of delivery.artifacts) {
-                const relativePath =
-                  artifact.relative_path ||
-                  `shares/files/${delivery.share_id}/${artifact.original_name}`;
-                const localArtifactPath = await runtime.objectStore.ensureLocalFile({
-                  sessionId: targetSession.sessionId,
-                  session: targetSession,
-                  filePath: artifact.original_name,
-                  relativePath,
-                  storageRef: artifact.storage_ref,
-                  source: "partner-artifact",
-                });
-                copiedArtifacts.push(localArtifactPath);
-                await runtime.xchangeFileMetaStore.setXchangeFileMeta({
-                  sessionId: targetSession.sessionId,
-                  filePath: localArtifactPath,
-                  relativePath,
-                  source: "partner-artifact",
-                  uploadedAt: delivery.created_at,
-                  originalName: artifact.original_name,
-                  ...(artifact.storage_ref ? { storageRef: artifact.storage_ref } : {}),
-                  ...(artifact.mime_type ? { mimeType: artifact.mime_type } : {}),
-                  ...(typeof artifact.size_bytes === "number"
-                    ? { sizeBytes: artifact.size_bytes }
-                    : {}),
-                });
-              }
-
-              const noteContent = buildNoteContent({ delivery, copiedArtifacts });
-              const notePath = await writeXchangeRelativeFile(
-                runtime.config.tmux,
-                runtime.objectStore.resolveWorkspaceDir(targetSession),
-                runtime.config.exchange.dir,
-                delivery.note_relative_path,
-                Buffer.from(noteContent, "utf8"),
-              );
-              await runtime.xchangeFileMetaStore.setXchangeFileMeta({
-                sessionId: targetSession.sessionId,
-                filePath: notePath,
-                relativePath: delivery.note_relative_path,
-                source: "partner-artifact",
-                uploadedAt: delivery.created_at,
-                mimeType: "text/markdown",
-                sizeBytes: Buffer.byteLength(noteContent, "utf8"),
-              });
-
-              await writeXchangeRelativeFile(
-                runtime.config.tmux,
-                runtime.objectStore.resolveWorkspaceDir(targetSession),
-                runtime.config.exchange.dir,
-                delivery.share_index_file_name,
-                Buffer.from(
-                  `${buildShareIndexLine({
-                    delivery,
-                    relativeNotePath: delivery.note_relative_path,
-                  })}\n`,
-                  "utf8",
-                ),
-                { append: true },
-              );
-
-              const inboxMessage: TelegramInboxMessage = {
-                id: createInboxMessageId(new Date(delivery.created_at)),
-                sessionId: targetSession.sessionId,
-                telegramChatId: targetBinding.telegramChatId,
-                telegramUserId: targetBinding.telegramUserId,
-                sourceTelegramMessageId: Date.now(),
-                text: buildPartnerInboxText({
-                  delivery,
-                  notePath,
-                  copiedArtifacts,
-                }),
-                attachments: [notePath, ...copiedArtifacts],
-                receivedAt: delivery.created_at,
-              };
-              await runtime.inboxStore.createInboxMessage(inboxMessage);
-
-              const ackUrl = new URL(baseUrl);
-              ackUrl.pathname = `${ackUrl.pathname}/deliveries/ack`.replace(
-                /\/{2,}/gu,
-                "/",
-              );
-              await fetch(ackUrl, {
-                method: "POST",
-                headers: {
-                  "content-type": "application/json",
-                  ...(runtime.config.distributed.gatewayAuthToken
-                    ? {
-                        authorization: `Bearer ${runtime.config.distributed.gatewayAuthToken}`,
-                      }
-                    : {}),
-                },
-                body: JSON.stringify({
-                  client_uuid: clientUuid,
-                  delivery_ids: [delivery.delivery_uuid],
-                }),
-              });
-
-              runtime.logger.info("Gateway delivery materialized locally", {
-                deliveryUuid: delivery.delivery_uuid,
-                sessionId: targetSession.sessionId,
-                shareId: delivery.share_id,
-                kind: delivery.kind,
-                notePath,
-                copiedArtifacts,
-              });
-            }
-          }
-        } catch (error) {
-          this.logger.warn("telegram_mcp gateway delivery poll iteration failed", {
-            error: error instanceof Error ? (error.stack ?? error.message) : String(error),
-          });
-        }
-
-        await delay(POLL_INTERVAL_MS);
-      }
-    })();
+    this.pollingEnabled = true;
+    await this.runPollIteration?.();
 
     this.logger.info("telegram_mcp gateway delivery polling started", {
-      pollIntervalMs: POLL_INTERVAL_MS,
+      cronTime: POLL_CRON_TIME,
     });
   },
 
   async stopped(this: RuntimeCarrier) {
     this.stopRequested = true;
-    if (this.pollLoop) {
-      await this.pollLoop;
-      this.pollLoop = null;
+    this.pollingEnabled = false;
+    if (this.pollTickInFlight) {
+      await this.pollTickInFlight;
+      this.pollTickInFlight = null;
     }
   },
 };

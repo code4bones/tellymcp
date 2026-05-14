@@ -11,7 +11,7 @@
     "@core": "src/services/features/core"
   },
   "scripts": {
-    "mcp:local":"codex mcp add telegramHuman --url http://127.0.0.1:8080/api/mcp",
+    "mcp:local": "codex mcp add telegramHuman --url http://127.0.0.1:8080/api/mcp",
     "dev:gw": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_EXPERIMENTAL_RESOLVER=1 NODE_OPTIONS=--openssl-legacy-provider ts-node ./node_modules/moleculer/bin/moleculer-runner.js src/services --config src/moleculer.config.ts --envfile ./.env-dev --hot --mask \"**/*.service.ts\"",
     "dev:gw:telegram": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_EXPERIMENTAL_RESOLVER=1 NODE_OPTIONS=--openssl-legacy-provider ts-node ./node_modules/moleculer/bin/moleculer-runner.js src/services/features/telegram-mcp --config src/moleculer.config.ts --envfile ./.env-dev --hot --mask \"**/*.service.ts\"",
     "dev:client": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_EXPERIMENTAL_RESOLVER=1 NODE_OPTIONS=--openssl-legacy-provider ts-node ./node_modules/moleculer/bin/moleculer-runner.js src/services --config src/moleculer.config.ts --envfile ./.env-client --hot --mask \"**/*.service.ts\"",
@@ -43,6 +43,7 @@
     "@graphql-tools/schema": "^10.0.33",
     "@hapi/accept": "^6.0.3",
     "@modelcontextprotocol/sdk": "^1.18.1",
+    "@r2d2bzh/moleculer-cron": "^0.1.4",
     "apollo-server-core": "^3.13.0",
     "axios": "^1.16.0",
     "busboy": "^1.6.0",

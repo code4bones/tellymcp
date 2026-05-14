@@ -777,6 +777,33 @@ export class TelegramTransport implements HumanTransport {
     return response.sessions;
   }
 
+  private async ensureProjectSessionRegistered(input: {
+    principal: { telegramChatId: number; telegramUserId: number };
+    sessionId: string;
+    projectUuid: string;
+  }): Promise<void> {
+    const session = await this.sessionStore.getSession(input.sessionId);
+    if (!session) {
+      throw new Error("Active session not found.");
+    }
+
+    const clientUuid = await this.ensureGatewayClientUuid(input.principal);
+    await this.callGatewayJson("/sessions/register", {
+      client_uuid: clientUuid,
+      project_uuid: input.projectUuid,
+      local_session_id: session.sessionId,
+      label: session.label ?? session.sessionId,
+      cwd: session.cwd,
+      tmux_session_name: session.tmuxSessionName,
+      tmux_window_name: session.tmuxWindowName,
+      tmux_window_index: session.tmuxWindowIndex,
+      tmux_pane_id: session.tmuxPaneId,
+      tmux_pane_index: session.tmuxPaneIndex,
+      tmux_target: session.tmuxTarget,
+      status: "active",
+    });
+  }
+
   private async loadProjectsContext(
     ctx: TelegramMenuContext,
   ): Promise<{
@@ -815,20 +842,10 @@ export class TelegramTransport implements HumanTransport {
       throw new Error("Active session not found.");
     }
 
-    const clientUuid = await this.ensureGatewayClientUuid(input.principal);
-    await this.callGatewayJson("/sessions/register", {
-      client_uuid: clientUuid,
-      project_uuid: input.projectUuid,
-      local_session_id: session.sessionId,
-      label: session.label ?? session.sessionId,
-      cwd: session.cwd,
-      tmux_session_name: session.tmuxSessionName,
-      tmux_window_name: session.tmuxWindowName,
-      tmux_window_index: session.tmuxWindowIndex,
-      tmux_pane_id: session.tmuxPaneId,
-      tmux_pane_index: session.tmuxPaneIndex,
-      tmux_target: session.tmuxTarget,
-      status: "active",
+    await this.ensureProjectSessionRegistered({
+      principal: input.principal,
+      sessionId: input.sessionId,
+      projectUuid: input.projectUuid,
     });
 
     await this.sessionStore.setSession({
@@ -6118,7 +6135,11 @@ export class TelegramTransport implements HumanTransport {
     }
 
     const session = await this.sessionStore.getSession(input.sessionId);
-    const clientUuid = await this.ensureGatewayClientUuid(principal);
+    await this.ensureProjectSessionRegistered({
+      principal,
+      sessionId: input.sessionId,
+      projectUuid: input.projectUuid,
+    });
     const sessions = await this.listGatewayProjectSessions(principal, input.projectUuid);
     const activeSessionId = session?.sessionId ?? null;
     const selectableMembers = sessions.filter(
@@ -6876,6 +6897,13 @@ export class TelegramTransport implements HumanTransport {
     }
 
     const parsed = this.parsePartnerNoteText(text);
+    if (pending.projectUuid) {
+      await this.ensureProjectSessionRegistered({
+        principal,
+        sessionId: pending.sessionId,
+        projectUuid: pending.projectUuid,
+      });
+    }
     const output = await this.sendPartnerNote({
       session_id: pending.sessionId,
       ...(pending.targetSessionId
@@ -6963,6 +6991,14 @@ export class TelegramTransport implements HumanTransport {
         { kind: "menu", sessionId: pending.sessionId },
       );
       return true;
+    }
+
+    if (pending.projectUuid) {
+      await this.ensureProjectSessionRegistered({
+        principal,
+        sessionId: pending.sessionId,
+        projectUuid: pending.projectUuid,
+      });
     }
 
     const output = await this.deliverFileToPartner({

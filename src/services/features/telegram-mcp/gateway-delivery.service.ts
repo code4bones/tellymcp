@@ -15,6 +15,8 @@ const CronMixin = require("@r2d2bzh/moleculer-cron") as ServiceSchema;
 
 export const TELEGRAM_MCP_GATEWAY_DELIVERY_SERVICE_NAME =
   "telegramMcp.gatewayDelivery";
+const TELEGRAM_MCP_GATEWAY_DELIVERY_TICK_EVENT =
+  "telegramMcp.gatewayDelivery.tick";
 
 const POLL_CRON_TIME = "*/5 * * * * *";
 const GATEWAY_POLL_TIMEOUT_MS = 15000;
@@ -232,11 +234,19 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
     {
       name: "GatewayDeliveryPoll",
       cronTime: POLL_CRON_TIME,
-      onTick(this: RuntimeCarrier) {
-        void this.runPollIteration?.();
+      onTick(this: { emit: (eventName: string, payload?: unknown) => void }) {
+        this.emit(TELEGRAM_MCP_GATEWAY_DELIVERY_TICK_EVENT);
       },
     },
   ],
+
+  events: {
+    [TELEGRAM_MCP_GATEWAY_DELIVERY_TICK_EVENT]: {
+      async handler(this: RuntimeCarrier) {
+        await this.runPollIteration?.();
+      },
+    },
+  },
 
   methods: {
     getRuntimeOrThrow(this: RuntimeCarrier) {
@@ -573,15 +583,6 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
       })();
 
       return this.pollTickInFlight;
-    },
-  },
-
-  actions: {
-    pollTick: {
-      async handler(this: RuntimeCarrier) {
-        await this.runPollIteration?.();
-        return { ok: true };
-      },
     },
   },
 

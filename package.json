@@ -14,6 +14,7 @@
     "mcp:local":"codex mcp add telegramHuman --url http://127.0.0.1:8080/api/mcp",
     "dev:gw": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_EXPERIMENTAL_RESOLVER=1 NODE_OPTIONS=--openssl-legacy-provider ts-node ./node_modules/moleculer/bin/moleculer-runner.js src/services --config src/moleculer.config.ts --envfile ./.env-dev --hot --mask \"**/*.service.ts\"",
     "dev:gw:telegram": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_EXPERIMENTAL_RESOLVER=1 NODE_OPTIONS=--openssl-legacy-provider ts-node ./node_modules/moleculer/bin/moleculer-runner.js src/services/features/telegram-mcp --config src/moleculer.config.ts --envfile ./.env-dev --hot --mask \"**/*.service.ts\"",
+    "dev:client": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_EXPERIMENTAL_RESOLVER=1 NODE_OPTIONS=--openssl-legacy-provider ts-node ./node_modules/moleculer/bin/moleculer-runner.js src/services --config src/moleculer.config.ts --envfile ./.env-client --hot --mask \"**/*.service.ts\"",
     "dev": "yarn dev:gw",
     "dev:watch": "yarn dev:gw",
     "dev:service": "yarn dev:gw",

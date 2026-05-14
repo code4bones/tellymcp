@@ -148,7 +148,7 @@ const createNoopQueryBuilder = (state: NoopBuilderState = {}): any => {
 				prop === "increment" ||
 				prop === "decrement"
 			) {
-				return () => createNoopPromise([]);
+				return () => createNoopQueryBuilder(state);
 			}
 			if (prop === "count") {
 				return () => createNoopQueryBuilder({ ...state, countMode: true });

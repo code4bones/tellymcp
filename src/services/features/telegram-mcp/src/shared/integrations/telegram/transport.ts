@@ -249,6 +249,11 @@ function readMenuPayloadKey(ctx: TelegramMenuContext): string | null {
   return typeof payload === "string" && payload.length > 0 ? payload : null;
 }
 
+function buildDatedRelativePath(fileName: string, date = new Date()): string {
+  const dateSegment = date.toISOString().slice(0, 10);
+  return `${dateSegment}/${fileName}`;
+}
+
 function buildPrincipalKey(principal: {
   telegramChatId: number;
   telegramUserId: number;
@@ -4349,7 +4354,7 @@ export class TelegramTransport implements HumanTransport {
       session,
       sessionId,
       source: "telegram-upload",
-      relativePath: outputName,
+      relativePath: buildDatedRelativePath(outputName),
       content: buffer,
       mimeType:
         preferredMimeType ||

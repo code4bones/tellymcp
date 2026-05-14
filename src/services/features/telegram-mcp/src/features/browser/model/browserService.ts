@@ -141,6 +141,11 @@ function sanitizeScreenshotName(fileName?: string): string {
   return `${base}${extension}`;
 }
 
+function buildDatedRelativePath(fileName: string, date = new Date()): string {
+  const dateSegment = date.toISOString().slice(0, 10);
+  return `${dateSegment}/${fileName}`;
+}
+
 function isAbsoluteBrowserUrl(value: string): boolean {
   return /^https?:\/\//iu.test(value) || value.startsWith("data:");
 }
@@ -644,7 +649,7 @@ export class BrowserService {
       session,
       sessionId,
       source: "browser-screenshot",
-      relativePath: fileName,
+      relativePath: buildDatedRelativePath(fileName),
       content: pngBuffer,
       mimeType: "image/png",
     });

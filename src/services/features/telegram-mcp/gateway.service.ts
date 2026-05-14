@@ -109,6 +109,9 @@ type GatewayServiceCarrier = Service & {
   ackDeliveriesRecord?: (input: Record<string, unknown>) => Promise<{
     acked: number;
   }>;
+  failDeliveriesRecord?: (input: Record<string, unknown>) => Promise<{
+    failed: number;
+  }>;
   getDeliveryStatusesRecord?: (input: Record<string, unknown>) => Promise<{
     deliveries: Array<{
       delivery_uuid: string;
@@ -939,6 +942,36 @@ const TelegramMcpGatewayService: ServiceSchema = {
       return { acked: updated };
     },
 
+    async failDeliveriesRecord(
+      this: GatewayServiceCarrier,
+      input: Record<string, unknown>,
+    ) {
+      const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
+      const deliveryIds = Array.isArray(input.delivery_ids)
+        ? input.delivery_ids
+            .map((item) => this.normalizeOptionalText?.(item))
+            .filter((item): item is string => Boolean(item))
+        : [];
+      const errorText = this.normalizeOptionalText?.(input.error_text);
+
+      if (deliveryIds.length === 0) {
+        throw new Error("delivery_ids must contain at least one id");
+      }
+
+      const updated = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_deliveries")
+        .where("target_client_uuid", clientUuid)
+        .whereIn("delivery_uuid", deliveryIds)
+        .update({
+          status: "failed",
+          ...(errorText ? { last_error: errorText } : {}),
+          acked_at: new Date().toISOString(),
+        });
+
+      return { failed: updated };
+    },
+
     async getDeliveryStatusesRecord(
       this: GatewayServiceCarrier,
       input: Record<string, unknown>,
@@ -1060,6 +1093,14 @@ const TelegramMcpGatewayService: ServiceSchema = {
           throw new Error("Gateway service is disabled in client mode");
         }
         return this.ackDeliveriesRecord?.(ctx.params as Record<string, unknown>);
+      },
+    },
+    failDeliveries: {
+      async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
+        return this.failDeliveriesRecord?.(ctx.params as Record<string, unknown>);
       },
     },
     getDeliveryStatuses: {

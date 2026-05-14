@@ -36,6 +36,7 @@ type GatewayDelivery = {
   message_uuid: string;
   share_id: string;
   project_name?: string;
+  source_actor_label?: string;
   kind: string;
   summary: string;
   message: string;
@@ -149,16 +150,18 @@ function buildPartnerInboxText(input: {
   notePath: string;
   copiedArtifacts: string[];
 }): string {
+  const sourceActorLabel =
+    input.delivery.source_actor_label || input.delivery.source_session_label;
   const kindTitle =
     input.delivery.kind === "question"
-      ? "Получен вопрос от напарника."
+      ? `Получен вопрос от ${sourceActorLabel}.`
       : input.delivery.kind === "reply"
-        ? "Получен ответ от напарника."
+        ? `Получен ответ от ${sourceActorLabel}.`
         : input.delivery.kind === "request"
-          ? "Получен запрос от напарника."
+          ? `Получен запрос от ${sourceActorLabel}.`
           : input.delivery.kind === "handoff"
-            ? "Получен handoff от напарника."
-            : "Получено обновление от напарника.";
+            ? `Получен handoff от ${sourceActorLabel}.`
+            : `Получено обновление от ${sourceActorLabel}.`;
 
   return [
     kindTitle,
@@ -184,18 +187,20 @@ function buildTelegramDeliveryNotification(input: {
   notePath: string;
   copiedArtifacts: string[];
 }): string {
+  const sourceActorLabel =
+    input.delivery.source_actor_label || input.delivery.source_session_label;
   const kindTitle =
     input.delivery.kind === "question"
-      ? "Получен вопрос от напарника."
+      ? `Получен вопрос от ${sourceActorLabel}.`
       : input.delivery.kind === "reply"
-        ? "Получен ответ от напарника."
+        ? `Получен ответ от ${sourceActorLabel}.`
         : input.delivery.kind === "request"
-          ? "Получен запрос от напарника."
+          ? `Получен запрос от ${sourceActorLabel}.`
           : input.delivery.kind === "handoff"
             ? input.copiedArtifacts.length > 0
-              ? "Получен файл от напарника."
-              : "Получен handoff от напарника."
-            : "Получено обновление от напарника.";
+              ? `Получен файл от ${sourceActorLabel}.`
+              : `Получен handoff от ${sourceActorLabel}.`
+            : `Получено обновление от ${sourceActorLabel}.`;
 
   return [
     kindTitle,

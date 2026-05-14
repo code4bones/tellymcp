@@ -65,6 +65,7 @@ type GatewayServiceCarrier = Service & {
       label: string | null;
       status: string;
       client_label: string | null;
+      telegram_username: string | null;
       bot_username: string | null;
       joined_at?: string;
       updated_at?: string;
@@ -79,6 +80,7 @@ type GatewayServiceCarrier = Service & {
       message_uuid: string;
       share_id: string;
       project_name?: string;
+      source_actor_label?: string;
       kind: string;
       summary: string;
       message: string;
@@ -590,6 +592,9 @@ const TelegramMcpGatewayService: ServiceSchema = {
           "s.status",
           "s.updated_at",
           "c.client_label",
+          this.db.raw(
+            "coalesce(nullif(m.telegram_username, ''), nullif(c.meta->>'telegram_username', '')) as telegram_username",
+          ),
           "c.bot_username",
           "m.joined_at",
         )
@@ -605,6 +610,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
           label: row.label ?? null,
           status: row.status,
           client_label: row.client_label ?? null,
+          telegram_username: row.telegram_username ?? null,
           bot_username: row.bot_username ?? null,
           ...(row.joined_at ? { joined_at: String(row.joined_at) } : {}),
           ...(row.updated_at ? { updated_at: String(row.updated_at) } : {}),
@@ -778,6 +784,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .join("gateway_projects as p", "p.project_uuid", "m.project_uuid")
         .join("gateway_sessions as s_from", "s_from.session_uuid", "m.from_session_uuid")
         .join("gateway_sessions as s_to", "s_to.session_uuid", "m.to_session_uuid")
+        .leftJoin("gateway_clients as c_from", "c_from.client_uuid", "s_from.client_uuid")
         .where("d.target_client_uuid", clientUuid)
         .where("d.status", "queued")
         .where("d.available_at", "<=", this.db.fn.now())
@@ -793,6 +800,9 @@ const TelegramMcpGatewayService: ServiceSchema = {
           "m.meta",
           "m.created_at",
           "p.name as project_name",
+          this.db.raw(
+            "coalesce(nullif(c_from.meta->>'telegram_display_name', ''), nullif(c_from.meta->>'telegram_username', ''), c_from.client_label, c_from.bot_username) as source_actor_label",
+          ),
           "s_from.session_uuid as source_session_uuid",
           "s_from.local_session_id as source_local_session_id",
           "s_from.label as source_session_label",
@@ -857,6 +867,9 @@ const TelegramMcpGatewayService: ServiceSchema = {
             message_uuid: row.message_uuid,
             share_id: shareId,
             ...(row.project_name ? { project_name: row.project_name } : {}),
+            ...(row.source_actor_label
+              ? { source_actor_label: row.source_actor_label }
+              : {}),
             kind: row.kind,
             summary: row.summary,
             message: row.body,

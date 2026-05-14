@@ -141,6 +141,7 @@ type GatewayProjectSessionRecord = {
   label: string | null;
   status: string;
   client_label: string | null;
+  telegram_username: string | null;
   bot_username: string | null;
   joined_at?: string;
   updated_at?: string;
@@ -6203,18 +6204,17 @@ export class TelegramTransport implements HumanTransport {
     const keyboard = new InlineKeyboard();
     for (const member of selectableMembers) {
       const sessionLabel = member.label?.trim() || member.local_session_id;
-      const clientLabel = member.client_label?.trim() || null;
+      const telegramUsernameRaw = member.telegram_username?.trim() || null;
       const botUsernameRaw = member.bot_username?.trim() || null;
-      const normalizedClientLabel = clientLabel?.replace(/^@/u, "") || null;
+      const normalizedTelegramUsername =
+        telegramUsernameRaw?.replace(/^@/u, "") || null;
       const normalizedBotUsername = botUsernameRaw?.replace(/^@/u, "") || null;
-      const ownerParts = [
-        clientLabel,
-        normalizedBotUsername && normalizedBotUsername !== normalizedClientLabel
-          ? `@${normalizedBotUsername}`
-          : null,
+      const identityParts = [
+        normalizedTelegramUsername ? `👤${normalizedTelegramUsername}` : null,
+        normalizedBotUsername ? `🤖${normalizedBotUsername}` : null,
       ].filter(Boolean);
-      const buttonLabel = ownerParts.length > 0
-        ? `${sessionLabel} · ${ownerParts.join(" ")}`.slice(0, 56)
+      const buttonLabel = identityParts.length > 0
+        ? `${sessionLabel} · ${identityParts.join(" / ")}`.slice(0, 56)
         : sessionLabel.slice(0, 56);
       const payloadKey = await this.createProjectMemberMenuPayload(
         input.sessionId,

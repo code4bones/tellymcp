@@ -244,18 +244,19 @@ export class LocalCollaborationBackend implements CollaborationBackend {
       );
     }
 
-    if (!sourceSession.linkedSessionId) {
+    const targetSessionId =
+      trimOptional(input.target_session_id) ?? sourceSession.linkedSessionId;
+
+    if (!targetSessionId) {
       throw new Error(
         "This session has no linked partner. Link another session in Telegram first.",
       );
     }
 
-    const targetSession = await this.sessionStore.getSession(
-      sourceSession.linkedSessionId,
-    );
+    const targetSession = await this.sessionStore.getSession(targetSessionId);
     if (!targetSession) {
       throw new Error(
-        `Linked partner session ${sourceSession.linkedSessionId} was not found.`,
+        `Target partner session ${targetSessionId} was not found.`,
       );
     }
 

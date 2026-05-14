@@ -78,6 +78,7 @@ const TelegramMcpCollaborationService: ServiceSchema = {
       runtime.config.distributed.gatewayPublicUrl
         ? new GatewayCollaborationBackend(
             runtime.logger,
+            runtime.stateStore,
             runtime.config.distributed.gatewayPublicUrl,
             runtime.config.distributed.gatewayAuthToken,
           )

@@ -2,6 +2,7 @@ import type {
   SendPartnerNoteInput,
   SendPartnerNoteOutput,
 } from "../../../entities/collaboration/model/types";
+import type { MaintenanceStore } from "../../../shared/api/storage/contract";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import type { ResolvedSessionDefaults } from "../../../shared/lib/project-identity/projectIdentity";
 import type { CollaborationBackend } from "../../collaboration/model/backend";
@@ -20,6 +21,7 @@ function normalizeGatewayBaseUrl(value: string): URL {
 export class GatewayCollaborationBackend implements CollaborationBackend {
   public constructor(
     private readonly logger: Logger,
+    private readonly maintenanceStore: MaintenanceStore,
     private readonly gatewayPublicUrl?: string,
     private readonly gatewayAuthToken?: string,
   ) {}
@@ -36,6 +38,12 @@ export class GatewayCollaborationBackend implements CollaborationBackend {
 
     const url = normalizeGatewayBaseUrl(this.gatewayPublicUrl);
     url.pathname = `${url.pathname}/partner-note`.replace(/\/{2,}/gu, "/");
+    const clientUuid = await this.maintenanceStore.getGatewayClientUuid();
+    if (!clientUuid) {
+      throw new Error(
+        "Gateway collaboration requires a registered client_uuid. Join or create a project first.",
+      );
+    }
 
     const response = await fetch(url, {
       method: "POST",
@@ -45,7 +53,11 @@ export class GatewayCollaborationBackend implements CollaborationBackend {
           ? { authorization: `Bearer ${this.gatewayAuthToken}` }
           : {}),
       },
-      body: JSON.stringify(input),
+      body: JSON.stringify({
+        ...input,
+        session_id: input.session_id ?? resolved.sessionId,
+        client_uuid: clientUuid,
+      }),
     });
 
     if (!response.ok) {

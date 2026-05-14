@@ -357,17 +357,27 @@ export class GatewayHttpService {
         return true;
       }
 
-      if (!this.partnerNoteRelayHandler) {
-        writeJson(res, 503, {
-          error: "Gateway partner relay handler is not configured.",
-        });
-        return true;
-      }
-
       try {
         const body = await this.readJsonBody(req);
         const input = sendPartnerNoteInputSchema.parse(body);
-        const output = await this.partnerNoteRelayHandler(input);
+        const useQueuedGatewayDelivery =
+          typeof (body as { client_uuid?: unknown })?.client_uuid === "string" &&
+          typeof input.target_session_id === "string" &&
+          input.target_session_id.trim().length > 0;
+
+        const output = useQueuedGatewayDelivery
+          ? await this.callBroker(
+              "telegramMcp.gateway.sendPartnerNote",
+              body,
+              { meta: { internal_call: true } },
+            )
+          : this.partnerNoteRelayHandler
+            ? await this.partnerNoteRelayHandler(input)
+            : (() => {
+                throw new Error(
+                  "Gateway partner relay handler is not configured.",
+                );
+              })();
         writeJson(res, 200, sendPartnerNoteOutputSchema.parse(output));
         return true;
       } catch (error) {
@@ -583,6 +593,52 @@ export class GatewayHttpService {
         const body = (await this.readJsonBody(req)) as Record<string, unknown>;
         const result = await this.callBroker(
           "telegramMcp.gateway.listProjectSessions",
+          body,
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, result);
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/deliveries/poll") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const result = await this.callBroker(
+          "telegramMcp.gateway.pollDeliveries",
+          body,
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, result);
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/deliveries/ack") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const result = await this.callBroker(
+          "telegramMcp.gateway.ackDeliveries",
           body,
           { meta: { internal_call: true } },
         );

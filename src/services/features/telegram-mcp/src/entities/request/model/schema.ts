@@ -512,6 +512,7 @@ export const browserCloseOutputSchema = z.object({
 
 export const sendPartnerNoteInputSchema = z.object({
   session_id: z.string().trim().min(1).optional(),
+  target_session_id: z.string().trim().min(1).optional(),
   kind: partnerNoteKindSchema,
   summary: z.string().trim().min(1),
   message: z.string().trim().min(1),
@@ -519,6 +520,18 @@ export const sendPartnerNoteInputSchema = z.object({
   requires_reply: z.boolean().optional(),
   in_reply_to: z.string().trim().min(1).optional(),
   artifacts: z.array(z.string().trim().min(1)).optional(),
+  artifact_refs: z
+    .array(
+      z.object({
+        file_path: z.string().trim().min(1),
+        relative_path: z.string().trim().min(1).optional(),
+        original_name: z.string().trim().min(1).optional(),
+        mime_type: z.string().trim().min(1).optional(),
+        size_bytes: z.number().int().nonnegative().optional(),
+        storage_ref: z.string().trim().min(1).optional(),
+      }),
+    )
+    .optional(),
 });
 
 export const sendPartnerNoteOutputSchema = z.object({

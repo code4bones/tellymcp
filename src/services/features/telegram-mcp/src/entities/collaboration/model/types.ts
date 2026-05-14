@@ -5,8 +5,18 @@ export type PartnerNoteKind =
   | "request"
   | "handoff";
 
+export type PartnerArtifactRef = {
+  file_path: string;
+  relative_path?: string | undefined;
+  original_name?: string | undefined;
+  mime_type?: string | undefined;
+  size_bytes?: number | undefined;
+  storage_ref?: string | undefined;
+};
+
 export type SendPartnerNoteInput = {
   session_id?: string | undefined;
+  target_session_id?: string | undefined;
   kind: PartnerNoteKind;
   summary: string;
   message: string;
@@ -14,6 +24,7 @@ export type SendPartnerNoteInput = {
   requires_reply?: boolean | undefined;
   in_reply_to?: string | undefined;
   artifacts?: string[] | undefined;
+  artifact_refs?: PartnerArtifactRef[] | undefined;
 };
 
 export type SendPartnerNoteOutput = {

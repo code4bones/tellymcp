@@ -2,31 +2,66 @@
 
 Current state:
 
-- Moleculer migration for `telegram_mcp` is done.
-- MCP works through `${ROOT_PREFIX}/mcp`.
-- Mini App `Live` works through `${ROOT_PREFIX}/webapp`.
-- local agent pairing, browser flow, and local partner collaboration are working.
-- GraphQL subscriptions are working again after the `graphql-ws` downgrade fix.
+- `telegram_mcp` переведён на `Moleculer`.
+- MCP работает через `${ROOT_PREFIX}/mcp`.
+- Mini App `Live` работает через `${ROOT_PREFIX}/webapp`.
+- Локальный `Local` flow работает:
+  - pairing
+  - link
+  - `Передать агенту`
+  - local notes через `LOCAL_INDEX.md`
+- Remote `Collab` flow работает:
+  - projects
+  - members
+  - `Ask / Share / Reply / Handoff / File`
+  - `SHARED_INDEX.md`
+  - gateway delivery queue/status/ack/fail
+- Exchange files работают через `vfs + minio`.
+- Доставка файлов между машинами и между локальными сессиями работает.
 
 Plan for tomorrow:
 
-- [ ] Run a full local collaboration smoke pass:
+- [ ] Начать с gateway-relayed `Live View`:
+  - Mini App должен уметь открываться через домен gateway
+  - без собственного публичного домена на клиентской машине
+  - gateway должен уметь релеить `bootstrap/view/action` до нужного client session
+  - проверить, как лучше посадить это на текущий poll/relay transport
+
+- [ ] Причесать документацию под текущее состояние:
+  - `README.md`
+  - `TOOLS.md`
+  - `docs/DEVELOPMENT.md`
+  - убрать устаревшие упоминания `Partner`, `Link`, `SHARE_INDEX.md`, если они ещё где-то остались
+
+- [ ] Пройти полный smoke-pass `Local` flow:
   - `Link`
   - `Ask / Share / Reply / Handoff`
-  - `SHARE_INDEX.md`
-  - partner wake-up and note reading flow
-- [ ] Run a full local browser smoke pass:
-  - `open`
-  - `reload`
-  - `click/fill/press/wait`
-  - screenshot save
-  - screenshot send to Telegram
-- [ ] Remove or reduce temporary `telegram_mcp` debug logs added during the gateway/webapp migration.
-- [ ] Do a short documentation pass for the final local architecture:
-  - Moleculer services layout
-  - `${ROOT_PREFIX}` routes
-  - local collaboration workflow
-  - browser workflow
-- [ ] Start the distributed gateway track:
-  - define the first real `client | gateway | both` flow
-  - pick the first metadata model for remote note relay
+  - `Передать агенту`
+  - `LOCAL_INDEX.md`
+  - поведение после рестарта сервиса
+
+- [ ] Пройти полный smoke-pass `Collab` flow между машинами:
+  - `Create / Join project`
+  - `Members`
+  - `Ask / Share / Reply / Handoff`
+  - `File`
+  - sender status:
+    - `⏳`
+    - `✅`
+    - `❌`
+  - обработка битого delivery без зацикливания
+
+- [ ] Проверить file lifecycle после handoff:
+  - удаление исходного файла после отправки
+  - повторная отправка того же файла
+  - одинаковые имена файлов
+  - dated VFS paths `YYYY-MM-DD/HH-mm-ss`
+
+- [ ] Дочистить логи:
+  - убедиться, что poll/status/gateway не шумят в `info`
+  - оставить только полезные operational logs
+
+- [ ] Подумать над следующей итерацией UX:
+  - нужен ли отдельный экран истории delivery
+  - нужен ли просмотр failed deliveries из Telegram
+  - нужен ли manual retry для failed delivery

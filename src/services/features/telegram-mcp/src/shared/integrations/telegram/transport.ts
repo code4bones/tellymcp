@@ -6013,7 +6013,7 @@ export class TelegramTransport implements HumanTransport {
       "",
       `Name: ${input.projectName}`,
       `UUID: ${input.projectUuid}`,
-      `Invite: <code>${escapeHtml(input.inviteToken)}</code>`,
+      `Invite: <i>${escapeHtml(input.inviteToken)}</i>`,
       `Status: ${isActive ? "current" : "available"}`,
       "",
       "Choose what to do with this project.",

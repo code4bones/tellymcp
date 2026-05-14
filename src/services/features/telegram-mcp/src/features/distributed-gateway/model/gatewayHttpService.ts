@@ -75,6 +75,61 @@ function getXchangeKind(source: ExchangeFileSource): string {
   return "files";
 }
 
+function buildPartnerNoteOutputFallback(
+  input: SendPartnerNoteInput,
+  rawOutput: unknown,
+): SendPartnerNoteOutput {
+  const outputRecord =
+    rawOutput && typeof rawOutput === "object"
+      ? (rawOutput as Record<string, unknown>)
+      : {};
+
+  return {
+    session_id:
+      typeof outputRecord.session_id === "string"
+        ? outputRecord.session_id
+        : input.session_id ?? "unknown-session",
+    partner_session_id:
+      typeof outputRecord.partner_session_id === "string"
+        ? outputRecord.partner_session_id
+        : input.target_session_id ?? "unknown-partner-session",
+    kind:
+      typeof outputRecord.kind === "string"
+        ? (outputRecord.kind as SendPartnerNoteOutput["kind"])
+        : input.kind,
+    share_id:
+      typeof outputRecord.share_id === "string"
+        ? outputRecord.share_id
+        : `gateway-${Date.now()}`,
+    note_path:
+      typeof outputRecord.note_path === "string"
+        ? outputRecord.note_path
+        : "gateway://shares/pending.md",
+    share_index_path:
+      typeof outputRecord.share_index_path === "string"
+        ? outputRecord.share_index_path
+        : "gateway://SHARED_INDEX.md",
+    copied_artifacts: Array.isArray(outputRecord.copied_artifacts)
+      ? outputRecord.copied_artifacts.filter(
+          (item): item is string => typeof item === "string",
+        )
+      : [
+          ...(input.artifact_refs?.map(
+            (item) => item.original_name ?? item.relative_path ?? item.file_path,
+          ) ?? []),
+          ...(input.artifacts ?? []),
+        ],
+    inbox_message_id:
+      typeof outputRecord.inbox_message_id === "string"
+        ? outputRecord.inbox_message_id
+        : `gateway-${Date.now()}`,
+    requires_reply:
+      typeof outputRecord.requires_reply === "boolean"
+        ? outputRecord.requires_reply
+        : Boolean(input.requires_reply ?? (input.kind === "question" || input.kind === "request")),
+  };
+}
+
 export class GatewayHttpService {
   public constructor(
     private readonly config: AppConfig,
@@ -378,7 +433,13 @@ export class GatewayHttpService {
                   "Gateway partner relay handler is not configured.",
                 );
               })();
-        writeJson(res, 200, sendPartnerNoteOutputSchema.parse(output));
+        const parsedOutput = sendPartnerNoteOutputSchema.safeParse(output);
+        if (!parsedOutput.success) {
+          const fallback = buildPartnerNoteOutputFallback(input, output);
+          writeJson(res, 200, fallback);
+          return true;
+        }
+        writeJson(res, 200, parsedOutput.data);
         return true;
       } catch (error) {
         writeJson(res, 400, {

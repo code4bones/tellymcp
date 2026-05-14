@@ -22,7 +22,9 @@ export type OutgoingDeliveryNotice = {
   shareId: string;
   kind: string;
   summary: string;
+  projectName?: string | undefined;
   targetLabel?: string | undefined;
+  targetSessionLabel?: string | undefined;
 };
 
 export interface SessionStore {

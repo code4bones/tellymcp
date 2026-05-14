@@ -641,11 +641,20 @@ const TelegramMcpGatewayService: ServiceSchema = {
 
       const targetSession = await this.db
         .withSchema(MCP_SCHEMA)
-        .table("gateway_sessions")
+        .table("gateway_sessions as s")
+        .leftJoin("gateway_clients as c", "c.client_uuid", "s.client_uuid")
+        .leftJoin("gateway_projects as p", "p.project_uuid", "s.project_uuid")
         .where({
-          session_uuid: targetSessionId,
-          status: "active",
+          "s.session_uuid": targetSessionId,
+          "s.status": "active",
         })
+        .select(
+          "s.*",
+          "p.name as project_name",
+          this.db.raw(
+            "coalesce(nullif(c.meta->>'telegram_display_name', ''), nullif(c.meta->>'telegram_username', ''), c.client_label, c.bot_username) as target_actor_label",
+          ),
+        )
         .first();
 
       if (!targetSession) {
@@ -751,6 +760,15 @@ const TelegramMcpGatewayService: ServiceSchema = {
       return {
         session_id: localSessionId,
         partner_session_id: targetSession.session_uuid,
+        ...(targetSession.project_name
+          ? { project_name: targetSession.project_name }
+          : {}),
+        ...(targetSession.target_actor_label
+          ? { target_actor_label: targetSession.target_actor_label }
+          : {}),
+        ...(targetSession.label
+          ? { target_session_label: targetSession.label }
+          : {}),
         kind: kind as SendPartnerNoteOutput["kind"],
         share_id: shareId,
         delivery_status: "queued",

@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import path from "node:path";
 
 import type { AppConfig } from "../../../app/config/env";
 import {
@@ -74,6 +75,32 @@ function getXchangeKind(source: ExchangeFileSource): string {
   }
   return "files";
 }
+
+type GatewayRequestUploadResponse = {
+  uploadId: string;
+  method: "PUT";
+  bucketName: string;
+  objectName: string;
+  storageRef: string;
+  uploadUrl: string;
+  expiresIn: number;
+  headers?: Record<string, string> | undefined;
+  contentType: string;
+  createdAt: string;
+};
+
+type GatewayVfsCreateFileResponse = {
+  node_id: number;
+  parent_id: number;
+  public_url: string;
+  name: string;
+  hash: string;
+};
+
+type GatewayVfsNodeExistsResult = {
+  error?: boolean;
+  message?: string;
+};
 
 function buildPartnerNoteOutputFallback(
   input: SendPartnerNoteInput,
@@ -227,49 +254,134 @@ export class GatewayHttpService {
     );
 
     const content = Buffer.from(contentBase64, "base64");
-    const response = await this.callBroker<{
-      node: {
-        node_id: number;
-        parent_id: number;
-        public_url: string;
-      };
-      upload: {
-        bucketName: string;
-        objectName: string;
-        storageRef: string;
-      };
-    }>(
-      "minio.ingest",
+    const requestedFileName = normalizedRelativePath.split("/").pop() || "file.bin";
+    const fileName = await this.ensureUniqueFileName(
+      targetDir.node_id,
+      requestedFileName,
+      vfsScope,
+    );
+    const ownerSub = `telegram-mcp:${sessionSegment || "session"}`;
+    const request = await this.callBroker<GatewayRequestUploadResponse>(
+      "minio.requestUpload",
       {
-        files: [
-          {
-            fieldname: "file",
-            originalname: normalizedRelativePath.split("/").pop() || "file.bin",
-            encoding: "7bit",
-            mimetype: mimeType,
-            size: content.byteLength,
-            buffer: content,
-          },
-        ],
-        fields: {
-          parent_id: String(targetDir.node_id),
-          name: normalizedRelativePath.split("/").pop() || "file.bin",
+        name: fileName,
+        contentType: mimeType,
+        parent_id: targetDir.node_id,
+        size: content.byteLength,
+      },
+      { meta: { internal_call: true, user: { sub: ownerSub } } },
+    );
+
+    const uploadHeaders = new Headers();
+    Object.entries(request.headers || {}).forEach(([key, value]) => {
+      if (value != null && value !== "") {
+        uploadHeaders.set(key, value);
+      }
+    });
+
+    const uploadResponse = await fetch(request.uploadUrl, {
+      method: request.method || "PUT",
+      headers: uploadHeaders,
+      body: content,
+    });
+    if (!uploadResponse.ok) {
+      const message = await uploadResponse.text().catch(() => "");
+      throw new Error(
+        `Managed upload PUT failed with status ${uploadResponse.status}: ${message || uploadResponse.statusText}`,
+      );
+    }
+
+    const node = await this.callBroker<unknown>(
+      "vfs.vsCreateFile",
+      {
+        file: {
+          parent_id: targetDir.node_id,
+          name: fileName,
+          hash: request.storageRef,
         },
       },
       { meta: { internal_call: true } },
     );
+    if (!this.isVfsCreateFileResponse(node)) {
+      throw new Error(this.extractActionErrorMessage(node, "VFS file creation failed"));
+    }
 
     return {
-      filePath: `vfs://${response.node.public_url}`,
+      filePath: `vfs://${node.public_url}`,
       relativePath: normalizedRelativePath,
-      storageRef: response.upload.storageRef,
-      bucketName: response.upload.bucketName,
-      objectName: response.upload.objectName,
-      vfsNodeId: response.node.node_id,
-      vfsPublicUrl: response.node.public_url,
-      vfsParentId: response.node.parent_id,
+      storageRef: request.storageRef,
+      bucketName: request.bucketName,
+      objectName: request.objectName,
+      vfsNodeId: node.node_id,
+      vfsPublicUrl: node.public_url,
+      vfsParentId: node.parent_id,
       sizeBytes: content.byteLength,
     };
+  }
+
+  private async ensureUniqueFileName(
+    parentNodeId: number,
+    requestedFileName: string,
+    vfsScope: string,
+  ): Promise<string> {
+    const ext = path.extname(requestedFileName);
+    const baseName = path.basename(requestedFileName, ext) || "file";
+    let candidate = requestedFileName;
+    let index = 1;
+
+    while (await this.vfsFileExists(parentNodeId, candidate, vfsScope)) {
+      candidate = `${baseName}--${index}${ext}`;
+      index += 1;
+    }
+
+    return candidate;
+  }
+
+  private async vfsFileExists(
+    parentNodeId: number,
+    fileName: string,
+    vfsScope: string,
+  ): Promise<boolean> {
+    const result = await this.callBroker<GatewayVfsNodeExistsResult>(
+      "vfs.vfsNodeExists",
+      {
+        node: {
+          parent_id: parentNodeId,
+          name: fileName,
+          type: "FILE",
+          scope: vfsScope,
+        },
+        throw: false,
+      },
+      { meta: { internal_call: true } },
+    );
+    return Boolean(result?.error);
+  }
+
+  private isVfsCreateFileResponse(value: unknown): value is GatewayVfsCreateFileResponse {
+    return Boolean(
+      value &&
+      typeof value === "object" &&
+      typeof (value as GatewayVfsCreateFileResponse).node_id === "number" &&
+      typeof (value as GatewayVfsCreateFileResponse).public_url === "string",
+    );
+  }
+
+  private extractActionErrorMessage(value: unknown, fallback: string): string {
+    if (value && typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      if (typeof record.message === "string" && record.message.trim()) {
+        return record.message;
+      }
+      const extensions = record.extensions;
+      if (extensions && typeof extensions === "object") {
+        const extRecord = extensions as Record<string, unknown>;
+        if (typeof extRecord.message === "string" && extRecord.message.trim()) {
+          return extRecord.message;
+        }
+      }
+    }
+    return fallback;
   }
 
   private async readXchangeFile(body: Record<string, unknown>): Promise<unknown> {

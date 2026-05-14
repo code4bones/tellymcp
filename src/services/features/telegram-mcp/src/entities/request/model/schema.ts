@@ -538,6 +538,9 @@ export const sendPartnerNoteInputSchema = z.object({
 export const sendPartnerNoteOutputSchema = z.object({
   session_id: z.string(),
   partner_session_id: z.string(),
+  project_name: z.string().optional(),
+  target_actor_label: z.string().optional(),
+  target_session_label: z.string().optional(),
   kind: partnerNoteKindSchema,
   share_id: z.string(),
   delivery_status: z.enum(["queued", "delivered"]),

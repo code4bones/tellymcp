@@ -228,8 +228,13 @@ function buildOutgoingDeliveredText(input: {
 }): string {
   return [
     "✅ Доставка выполнена.",
+    ...(input.notice.projectName ? [`Проект: ${input.notice.projectName}`] : []),
     ...(input.notice.targetLabel
-      ? [`Напарник: ${input.notice.targetLabel}`]
+      ? [`Получатель: ${input.notice.targetLabel}`]
+      : []),
+    ...(input.notice.targetSessionLabel &&
+    input.notice.targetSessionLabel !== input.notice.targetLabel
+      ? [`Сессия: ${input.notice.targetSessionLabel}`]
       : []),
     `Тип: ${input.notice.kind}`,
     "Статус: доставлено",

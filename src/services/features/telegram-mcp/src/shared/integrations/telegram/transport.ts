@@ -7051,6 +7051,9 @@ export class TelegramTransport implements HumanTransport {
       ctx,
       [
         "Note поставлена в очередь доставки.",
+        ...(output.project_name ? [`Проект: ${output.project_name}`] : []),
+        ...(output.target_actor_label ? [`Получатель: ${output.target_actor_label}`] : []),
+        ...(output.target_session_label ? [`Сессия: ${output.target_session_label}`] : []),
         `Тип: ${output.kind}`,
         `Статус: ${output.delivery_status === "delivered" ? "доставлено" : "в очереди"}`,
         `Note: ${output.note_path}`,
@@ -7071,8 +7074,14 @@ export class TelegramTransport implements HumanTransport {
         shareId: output.share_id,
         kind: output.kind,
         summary: parsed.summary,
-        ...(pending.targetSessionLabel
-          ? { targetLabel: pending.targetSessionLabel }
+        ...(output.project_name ? { projectName: output.project_name } : {}),
+        ...(output.target_actor_label
+          ? { targetLabel: output.target_actor_label }
+          : pending.targetSessionLabel
+            ? { targetLabel: pending.targetSessionLabel }
+            : {}),
+        ...(output.target_session_label
+          ? { targetSessionLabel: output.target_session_label }
           : {}),
       });
     }
@@ -7146,6 +7155,9 @@ export class TelegramTransport implements HumanTransport {
       ctx,
       [
         "Файл поставлен в очередь доставки напарнику.",
+        ...(output.project_name ? [`Проект: ${output.project_name}`] : []),
+        ...(output.target_actor_label ? [`Получатель: ${output.target_actor_label}`] : []),
+        ...(output.target_session_label ? [`Сессия: ${output.target_session_label}`] : []),
         `Статус: ${output.delivery_status === "delivered" ? "доставлено" : "в очереди"}`,
         `Share: ${output.share_id}`,
       ].join("\n"),
@@ -7178,8 +7190,14 @@ export class TelegramTransport implements HumanTransport {
         shareId: output.share_id,
         kind: output.kind,
         summary: handoffSummary,
-        ...(pending.targetSessionLabel
-          ? { targetLabel: pending.targetSessionLabel }
+        ...(output.project_name ? { projectName: output.project_name } : {}),
+        ...(output.target_actor_label
+          ? { targetLabel: output.target_actor_label }
+          : pending.targetSessionLabel
+            ? { targetLabel: pending.targetSessionLabel }
+            : {}),
+        ...(output.target_session_label
+          ? { targetSessionLabel: output.target_session_label }
           : {}),
       });
     }

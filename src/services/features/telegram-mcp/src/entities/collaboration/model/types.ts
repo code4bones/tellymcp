@@ -31,6 +31,9 @@ export type SendPartnerNoteInput = {
 export type SendPartnerNoteOutput = {
   session_id: string;
   partner_session_id: string;
+  project_name?: string | undefined;
+  target_actor_label?: string | undefined;
+  target_session_label?: string | undefined;
   kind: PartnerNoteKind;
   share_id: string;
   delivery_status: "queued" | "delivered";

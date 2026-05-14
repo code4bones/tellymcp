@@ -32,6 +32,11 @@ type VfsNode = {
   scope?: string | undefined;
 };
 
+type VfsNodeExistsResult = {
+  error?: boolean;
+  message?: string;
+};
+
 type MinioIngestResponse = {
   node: {
     node_id: number;
@@ -49,6 +54,29 @@ type MinioIngestResponse = {
 };
 
 type MinioGetObjectResponse = Uint8Array | Buffer;
+type MinioRequestUploadResponse = {
+  uploadId: string;
+  method: "PUT";
+  bucketName: string;
+  objectName: string;
+  storageRef: string;
+  uploadUrl: string;
+  expiresIn: number;
+  headers?: Record<string, string> | undefined;
+  contentType: string;
+  createdAt: string;
+};
+
+type VfsCreateFileResponse = {
+  node_id: number;
+  parent_id: number;
+  public_url: string;
+  name: string;
+  hash: string;
+  scope?: string | undefined;
+  visibility?: string | undefined;
+  effectiveVisibility?: string | undefined;
+};
 const TEMP_XCHANGE_ROOT = path.join(tmpdir(), "telegram-mcp-xchange");
 
 function sanitizePathSegment(value: string): string {
@@ -206,24 +234,16 @@ export class MinioExchangeStore {
     );
     const inferredMimeType =
       params.mimeType || inferMimeType(path.basename(relativePath));
-    const response = await this.callInternalBroker<MinioIngestResponse>(
-      "minio.ingest",
-      {
-        files: [
-          {
-            fieldname: "file",
-            originalname: path.basename(relativePath),
-            encoding: "7bit",
-            mimetype: inferredMimeType,
-            size: params.content.byteLength,
-            buffer: Buffer.from(params.content),
-          },
-        ],
-        fields: {
-          parent_id: String(targetDir.node_id),
-          name: path.basename(relativePath),
-        },
-      },
+    const targetFileName = await this.ensureUniqueFileName(
+      targetDir.node_id,
+      path.basename(relativePath),
+    );
+    const response = await this.uploadFileThroughRequestFlow(
+      targetDir.node_id,
+      targetFileName,
+      inferredMimeType,
+      params.content,
+      this.buildUploadOwnerSub(params.session, params.sessionId),
     );
 
     this.logger.info("Exchange file stored via VFS + MinIO", {
@@ -404,10 +424,121 @@ export class MinioExchangeStore {
   private async callInternalBroker<T>(
     actionName: string,
     params?: unknown,
+    extraMeta?: Record<string, unknown>,
   ): Promise<T> {
     return this.callBroker<T>(actionName, params, {
-      meta: this.internalCallMeta,
+      meta: {
+        ...this.internalCallMeta,
+        ...(extraMeta || {}),
+      },
     });
+  }
+
+  private async uploadFileThroughRequestFlow(
+    parentNodeId: number,
+    fileName: string,
+    mimeType: string,
+    content: Uint8Array,
+    ownerSub: string,
+  ): Promise<{
+    node: VfsCreateFileResponse;
+    upload: {
+      bucketName: string;
+      objectName: string;
+      storageRef: string;
+    };
+  }> {
+    const request = await this.callInternalBroker<MinioRequestUploadResponse>(
+      "minio.requestUpload",
+      {
+        name: fileName,
+        contentType: mimeType,
+        parent_id: parentNodeId,
+        size: content.byteLength,
+      },
+      { user: { sub: ownerSub } },
+    );
+
+    const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
+    const uploadHeaders = new Headers();
+    Object.entries(request.headers || {}).forEach(([key, value]) => {
+      if (value != null && value !== "") {
+        uploadHeaders.set(key, value);
+      }
+    });
+
+    const uploadResponse = await fetch(request.uploadUrl, {
+      method: request.method || "PUT",
+      headers: uploadHeaders,
+      body: buffer,
+    });
+
+    if (!uploadResponse.ok) {
+      const message = await uploadResponse.text().catch(() => "");
+      throw new Error(
+        `Managed upload PUT failed with status ${uploadResponse.status}: ${message || uploadResponse.statusText}`,
+      );
+    }
+
+    const node = await this.callInternalBroker<unknown>(
+      "vfs.vsCreateFile",
+      {
+        file: {
+          parent_id: parentNodeId,
+          name: fileName,
+          hash: request.storageRef,
+        },
+      },
+    );
+
+    if (!this.isVfsCreateFileResponse(node)) {
+      throw new Error(this.extractActionErrorMessage(node, "VFS file creation failed"));
+    }
+
+    return {
+      node,
+      upload: {
+        bucketName: request.bucketName,
+        objectName: request.objectName,
+        storageRef: request.storageRef,
+      },
+    };
+  }
+
+  private async ensureUniqueFileName(
+    parentNodeId: number,
+    requestedFileName: string,
+  ): Promise<string> {
+    const ext = path.extname(requestedFileName);
+    const baseName = path.basename(requestedFileName, ext) || "file";
+    let candidate = requestedFileName;
+    let index = 1;
+
+    while (await this.vfsFileExists(parentNodeId, candidate)) {
+      candidate = `${baseName}--${index}${ext}`;
+      index += 1;
+    }
+
+    return candidate;
+  }
+
+  private async vfsFileExists(
+    parentNodeId: number,
+    fileName: string,
+  ): Promise<boolean> {
+    const result = await this.callInternalBroker<VfsNodeExistsResult>(
+      "vfs.vfsNodeExists",
+      {
+        node: {
+          parent_id: parentNodeId,
+          name: fileName,
+          type: "FILE",
+          scope: this.vfsScope,
+        },
+        throw: false,
+      },
+    );
+    return Boolean(result?.error);
   }
 
   private shouldUseGatewayStorage(): boolean {
@@ -531,6 +662,40 @@ export class MinioExchangeStore {
         name: `xchange/${ownerSegment}/${sessionSegment}/${targetDirPath}`,
       },
     });
+  }
+
+  private buildUploadOwnerSub(
+    session: SessionContext | null,
+    sessionId: string,
+  ): string {
+    const sessionSegment = this.buildSessionSegment(session, sessionId) || "session";
+    return `telegram-mcp:${sanitizePathSegment(sessionSegment) || "session"}`;
+  }
+
+  private isVfsCreateFileResponse(value: unknown): value is VfsCreateFileResponse {
+    return Boolean(
+      value &&
+      typeof value === "object" &&
+      typeof (value as VfsCreateFileResponse).node_id === "number" &&
+      typeof (value as VfsCreateFileResponse).public_url === "string",
+    );
+  }
+
+  private extractActionErrorMessage(value: unknown, fallback: string): string {
+    if (value && typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      if (typeof record.message === "string" && record.message.trim()) {
+        return record.message;
+      }
+      const extensions = record.extensions;
+      if (extensions && typeof extensions === "object") {
+        const extRecord = extensions as Record<string, unknown>;
+        if (typeof extRecord.message === "string" && extRecord.message.trim()) {
+          return extRecord.message;
+        }
+      }
+    }
+    return fallback;
   }
 
   private buildOwnerSegment(

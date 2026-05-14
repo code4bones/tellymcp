@@ -153,6 +153,16 @@ function allocateArtifactRelativePath(
   return `shares/files/${shareId}/${candidate}`;
 }
 
+function readClientMeta(
+  client: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (!client?.meta || typeof client.meta !== "object" || Array.isArray(client.meta)) {
+    return {};
+  }
+
+  return client.meta as Record<string, unknown>;
+}
+
 const TelegramMcpGatewayService: ServiceSchema = {
   name: TELEGRAM_MCP_GATEWAY_SERVICE_NAME,
   mixins: [DBMixin],
@@ -242,6 +252,17 @@ const TelegramMcpGatewayService: ServiceSchema = {
         throw new Error(`Client ${clientUuid} is not registered`);
       }
 
+      const clientMeta = readClientMeta(client as Record<string, unknown>);
+      const ownerTelegramUserId = this.normalizeOptionalText?.(
+        clientMeta.telegram_user_id,
+      );
+      const ownerTelegramUsername = this.normalizeOptionalText?.(
+        clientMeta.telegram_username,
+      );
+      const ownerDisplayName = this.normalizeOptionalText?.(
+        clientMeta.telegram_display_name,
+      );
+
       const projectUuid = randomUUID();
       const inviteToken = randomUUID();
       const now = new Date().toISOString();
@@ -251,6 +272,13 @@ const TelegramMcpGatewayService: ServiceSchema = {
         name,
         invite_token: inviteToken,
         created_by_client_uuid: clientUuid,
+        ...(ownerTelegramUserId
+          ? { owner_telegram_user_id: ownerTelegramUserId }
+          : {}),
+        ...(ownerTelegramUsername
+          ? { owner_telegram_username: ownerTelegramUsername }
+          : {}),
+        ...(ownerDisplayName ? { owner_display_name: ownerDisplayName } : {}),
         is_active: true,
         created_at: now,
         updated_at: now,
@@ -261,6 +289,9 @@ const TelegramMcpGatewayService: ServiceSchema = {
         client_uuid: clientUuid,
         role: "owner",
         status: "active",
+        ...(ownerTelegramUserId ? { telegram_user_id: ownerTelegramUserId } : {}),
+        ...(ownerTelegramUsername ? { telegram_username: ownerTelegramUsername } : {}),
+        ...(ownerDisplayName ? { display_name: ownerDisplayName } : {}),
         joined_at: now,
       });
 
@@ -284,6 +315,17 @@ const TelegramMcpGatewayService: ServiceSchema = {
       if (!client) {
         throw new Error(`Client ${clientUuid} is not registered`);
       }
+
+      const clientMeta = readClientMeta(client as Record<string, unknown>);
+      const memberTelegramUserId = this.normalizeOptionalText?.(
+        clientMeta.telegram_user_id,
+      );
+      const memberTelegramUsername = this.normalizeOptionalText?.(
+        clientMeta.telegram_username,
+      );
+      const memberDisplayName = this.normalizeOptionalText?.(
+        clientMeta.telegram_display_name,
+      );
 
       const project = await this.db
         .withSchema(MCP_SCHEMA)
@@ -314,6 +356,13 @@ const TelegramMcpGatewayService: ServiceSchema = {
             })
             .update({
               status: "active",
+              ...(memberTelegramUserId
+                ? { telegram_user_id: memberTelegramUserId }
+                : {}),
+              ...(memberTelegramUsername
+                ? { telegram_username: memberTelegramUsername }
+                : {}),
+              ...(memberDisplayName ? { display_name: memberDisplayName } : {}),
               joined_at: new Date().toISOString(),
             });
         }
@@ -331,6 +380,9 @@ const TelegramMcpGatewayService: ServiceSchema = {
         client_uuid: clientUuid,
         role: "member",
         status: "active",
+        ...(memberTelegramUserId ? { telegram_user_id: memberTelegramUserId } : {}),
+        ...(memberTelegramUsername ? { telegram_username: memberTelegramUsername } : {}),
+        ...(memberDisplayName ? { display_name: memberDisplayName } : {}),
         joined_at: new Date().toISOString(),
       });
 

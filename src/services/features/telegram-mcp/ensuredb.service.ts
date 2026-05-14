@@ -50,6 +50,9 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
             .references("client_uuid")
             .inTable(`${MCP_SCHEMA}.gateway_clients`)
             .onDelete("RESTRICT");
+          table.bigInteger("owner_telegram_user_id");
+          table.text("owner_telegram_username");
+          table.text("owner_display_name");
           table.boolean("is_active").notNullable().defaultTo(true);
           table
             .timestamp("created_at", { useTz: true })
@@ -70,6 +73,9 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
             table.uuid("client_uuid").notNullable();
             table.text("role").notNullable().defaultTo("member");
             table.text("status").notNullable().defaultTo("active");
+            table.bigInteger("telegram_user_id");
+            table.text("telegram_username");
+            table.text("display_name");
             table
               .timestamp("joined_at", { useTz: true })
               .notNullable()
@@ -147,7 +153,85 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
       if (legacyConstraint?.conname) {
         await this.db.raw(
           `ALTER TABLE "${MCP_SCHEMA}"."gateway_sessions" DROP CONSTRAINT "${legacyConstraint.conname}"`,
-        );
+          );
+      }
+
+      if (
+        (await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_projects")) &&
+        !(await this.db.schema.withSchema(MCP_SCHEMA).hasColumn(
+          "gateway_projects",
+          "owner_telegram_user_id",
+        ))
+      ) {
+        await this.db.schema.withSchema(MCP_SCHEMA).alterTable("gateway_projects", (table) => {
+          table.bigInteger("owner_telegram_user_id");
+        });
+      }
+
+      if (
+        (await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_projects")) &&
+        !(await this.db.schema.withSchema(MCP_SCHEMA).hasColumn(
+          "gateway_projects",
+          "owner_telegram_username",
+        ))
+      ) {
+        await this.db.schema.withSchema(MCP_SCHEMA).alterTable("gateway_projects", (table) => {
+          table.text("owner_telegram_username");
+        });
+      }
+
+      if (
+        (await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_projects")) &&
+        !(await this.db.schema.withSchema(MCP_SCHEMA).hasColumn(
+          "gateway_projects",
+          "owner_display_name",
+        ))
+      ) {
+        await this.db.schema.withSchema(MCP_SCHEMA).alterTable("gateway_projects", (table) => {
+          table.text("owner_display_name");
+        });
+      }
+
+      if (
+        (await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_project_members")) &&
+        !(await this.db.schema.withSchema(MCP_SCHEMA).hasColumn(
+          "gateway_project_members",
+          "telegram_user_id",
+        ))
+      ) {
+        await this.db.schema
+          .withSchema(MCP_SCHEMA)
+          .alterTable("gateway_project_members", (table) => {
+            table.bigInteger("telegram_user_id");
+          });
+      }
+
+      if (
+        (await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_project_members")) &&
+        !(await this.db.schema.withSchema(MCP_SCHEMA).hasColumn(
+          "gateway_project_members",
+          "telegram_username",
+        ))
+      ) {
+        await this.db.schema
+          .withSchema(MCP_SCHEMA)
+          .alterTable("gateway_project_members", (table) => {
+            table.text("telegram_username");
+          });
+      }
+
+      if (
+        (await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_project_members")) &&
+        !(await this.db.schema.withSchema(MCP_SCHEMA).hasColumn(
+          "gateway_project_members",
+          "display_name",
+        ))
+      ) {
+        await this.db.schema
+          .withSchema(MCP_SCHEMA)
+          .alterTable("gateway_project_members", (table) => {
+            table.text("display_name");
+          });
       }
 
       await this.db.raw(

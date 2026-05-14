@@ -146,6 +146,13 @@ type GatewayProjectSessionRecord = {
   updated_at?: string;
 };
 
+type GatewayActorProfile = {
+  telegramUsername?: string;
+  telegramFirstName?: string;
+  telegramLastName?: string;
+  telegramDisplayName?: string;
+};
+
 type TmuxProxyStatusCacheEntry = {
   checkedAtMs: number;
   statusLine: string;
@@ -727,15 +734,17 @@ export class TelegramTransport implements HumanTransport {
 
   private async ensureGatewayClientUuid(
     principal: { telegramChatId: number; telegramUserId: number },
+    actor?: GatewayActorProfile,
   ): Promise<string> {
     const existing = await this.maintenanceStore.getGatewayClientUuid();
-    if (existing) {
+    if (existing && !actor) {
       return existing;
     }
 
     const response = await this.callGatewayJson<{
       client_uuid: string;
     }>("/client/register", {
+      ...(existing ? { client_uuid: existing } : {}),
       client_label:
         this.config.project.name ||
         this.config.telegram.botUsername ||
@@ -744,6 +753,18 @@ export class TelegramTransport implements HumanTransport {
       meta: {
         telegram_chat_id: principal.telegramChatId,
         telegram_user_id: principal.telegramUserId,
+        ...(actor?.telegramUsername
+          ? { telegram_username: actor.telegramUsername }
+          : {}),
+        ...(actor?.telegramFirstName
+          ? { telegram_first_name: actor.telegramFirstName }
+          : {}),
+        ...(actor?.telegramLastName
+          ? { telegram_last_name: actor.telegramLastName }
+          : {}),
+        ...(actor?.telegramDisplayName
+          ? { telegram_display_name: actor.telegramDisplayName }
+          : {}),
       },
     });
 
@@ -753,8 +774,9 @@ export class TelegramTransport implements HumanTransport {
 
   private async listGatewayProjects(
     principal: { telegramChatId: number; telegramUserId: number },
+    actor?: GatewayActorProfile,
   ): Promise<GatewayProjectRecord[]> {
-    const clientUuid = await this.ensureGatewayClientUuid(principal);
+    const clientUuid = await this.ensureGatewayClientUuid(principal, actor);
     const response = await this.callGatewayJson<{
       projects: GatewayProjectRecord[];
     }>("/projects/list", {
@@ -827,7 +849,10 @@ export class TelegramTransport implements HumanTransport {
       return { principal, session: null, projects: null };
     }
 
-    const projects = await this.listGatewayProjects(principal);
+    const projects = await this.listGatewayProjects(
+      principal,
+      this.getGatewayActorFromContext(ctx),
+    );
     return { principal, session, projects };
   }
 
@@ -4330,6 +4355,26 @@ export class TelegramTransport implements HumanTransport {
     return {
       telegramChatId: chatId,
       telegramUserId: userId,
+    };
+  }
+
+  private getGatewayActorFromContext(
+    ctx: TelegramMenuContext,
+  ): GatewayActorProfile | undefined {
+    const firstName = ctx.from?.first_name?.trim();
+    const lastName = ctx.from?.last_name?.trim();
+    const username = ctx.from?.username?.trim();
+    const displayName = [firstName, lastName].filter(Boolean).join(" ").trim();
+
+    if (!firstName && !lastName && !username) {
+      return undefined;
+    }
+
+    return {
+      ...(username ? { telegramUsername: username } : {}),
+      ...(firstName ? { telegramFirstName: firstName } : {}),
+      ...(lastName ? { telegramLastName: lastName } : {}),
+      ...(displayName ? { telegramDisplayName: displayName } : {}),
     };
   }
 

@@ -516,6 +516,7 @@ export class TelegramTransport implements HumanTransport {
   private readonly filesMenu: Menu<TelegramMenuContext>;
   private readonly browserMenu: Menu<TelegramMenuContext>;
   private readonly projectsMenu: Menu<TelegramMenuContext>;
+  private readonly localMenu: Menu<TelegramMenuContext>;
   private readonly screenshotsMenu: Menu<TelegramMenuContext>;
   private readonly linkMenu: Menu<TelegramMenuContext>;
   private readonly partnerMenu: Menu<TelegramMenuContext>;
@@ -584,6 +585,7 @@ export class TelegramTransport implements HumanTransport {
     this.filesMenu = this.createFilesMenu();
     this.browserMenu = this.createBrowserMenu();
     this.projectsMenu = this.createProjectsMenu();
+    this.localMenu = this.createLocalMenu();
     this.screenshotsMenu = this.createScreenshotsMenu();
     this.linkMenu = this.createLinkMenu();
     this.partnerMenu = this.createPartnerMenu();
@@ -600,6 +602,7 @@ export class TelegramTransport implements HumanTransport {
       this.filesMenu,
       this.browserMenu,
       this.projectsMenu,
+      this.localMenu,
       this.screenshotsMenu,
       this.linkMenu,
       this.partnerMenu,
@@ -1533,22 +1536,16 @@ export class TelegramTransport implements HumanTransport {
         await this.showActiveSessionInfo(ctx);
       })
       .row()
-      .text("🤝 Partner", async (ctx) => {
-        await this.showPartnerEntryPoint(ctx);
+      .text("🏠 Local", async (ctx) => {
+        await this.showLocalEntryPoint(ctx);
       })
-      .text("📦 Projects", async (ctx) => {
+      .text("👥 Collab", async (ctx) => {
         await this.showProjectsEntryPoint(ctx);
       })
       .row()
       .text("✏ Rename", async (ctx) => {
         await this.beginRenameActiveSession(ctx);
       })
-      .text(
-        async (ctx) => this.buildLinkButtonLabel(ctx),
-        async (ctx) => {
-          await this.handleLinkButton(ctx);
-        },
-      )
       .text("🔄 Refresh", async (ctx) => {
         await ctx.answerCallbackQuery({ text: "Session menu refreshed." });
         await this.showMainMenu(ctx);
@@ -1643,6 +1640,27 @@ export class TelegramTransport implements HumanTransport {
       .text("🔑 Войти", async (ctx) => {
         await this.beginProjectMode(ctx, "join");
       })
+      .text("⬅ Назад", async (ctx) => {
+        await ctx.answerCallbackQuery({ text: "Назад к меню сессии." });
+        await this.showMainMenu(ctx);
+      });
+  }
+
+  private createLocalMenu(): Menu<TelegramMenuContext> {
+    return new Menu<TelegramMenuContext>(
+      "telegram-local-menu",
+      this.createMenuOptions((ctx) => this.showLocalMenu(ctx)),
+    )
+      .text("🤝 Напарник", async (ctx) => {
+        await this.showPartnerEntryPoint(ctx);
+      })
+      .text(
+        async (ctx) => this.buildLinkButtonLabel(ctx),
+        async (ctx) => {
+          await this.handleLinkButton(ctx);
+        },
+      )
+      .row()
       .text("⬅ Назад", async (ctx) => {
         await ctx.answerCallbackQuery({ text: "Назад к меню сессии." });
         await this.showMainMenu(ctx);
@@ -3167,26 +3185,26 @@ export class TelegramTransport implements HumanTransport {
   ): Promise<string> {
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "🔗 Link";
+      return "🔗 Связать";
     }
 
     const sessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
-      return "🔗 Link";
+      return "🔗 Связать";
     }
 
     const session = await this.sessionStore.getSession(sessionId);
     if (!session?.linkedSessionId) {
-      return "🔗 Link";
+      return "🔗 Связать";
     }
 
     const linkedSession = await this.sessionStore.getSession(
       session.linkedSessionId,
     );
     return linkedSession?.label
-      ? `🔓 Unlink ${linkedSession.label}`
-      : "🔓 Unlink";
+      ? `🔓 Разорвать ${linkedSession.label}`
+      : "🔓 Разорвать";
   }
 
   private async createInboxMenuPayload(
@@ -3745,18 +3763,25 @@ export class TelegramTransport implements HumanTransport {
     await this.showPartnerMenu(ctx);
   }
 
+  private async showLocalEntryPoint(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    await ctx.answerCallbackQuery({ text: "Открываю локальное взаимодействие." });
+    await this.showLocalMenu(ctx);
+  }
+
   private async showProjectsEntryPoint(
     ctx: TelegramMenuContext,
   ): Promise<void> {
     if (!this.config.distributed.gatewayPublicUrl) {
       await ctx.answerCallbackQuery({
-        text: "Проекты доступны только через gateway.",
+        text: "Collab доступен только через gateway.",
         show_alert: true,
       });
       return;
     }
 
-    await ctx.answerCallbackQuery({ text: "Открываю проекты." });
+    await ctx.answerCallbackQuery({ text: "Открываю Collab." });
     await this.showProjectsMenu(ctx);
   }
 
@@ -4485,6 +4510,19 @@ export class TelegramTransport implements HumanTransport {
     );
   }
 
+  private async showLocalMenu(
+    ctx: TelegramMenuContext,
+    introText?: string,
+  ): Promise<void> {
+    const text = await this.buildLocalMenuText(ctx);
+    await this.renderMenuScreen(
+      ctx,
+      introText ? `${introText}\n\n${text}` : text,
+      { kind: "menu" },
+      this.localMenu,
+    );
+  }
+
   private async showProjectsMenu(
     ctx: TelegramMenuContext,
     introText?: string,
@@ -5098,25 +5136,55 @@ export class TelegramTransport implements HumanTransport {
     ].join("\n");
   }
 
+  private async buildLocalMenuText(
+    ctx: TelegramMenuContext,
+  ): Promise<string> {
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal) {
+      return "Локальное взаимодействие недоступно для этого чата.";
+    }
+
+    const activeSessionId =
+      await this.bindingStore.getActiveSessionIdForPrincipal(principal);
+    if (!activeSessionId) {
+      return "Активная сессия не выбрана. Сначала привяжи её через /start.";
+    }
+
+    const session = await this.sessionStore.getSession(activeSessionId);
+    const linkedSession = session?.linkedSessionId
+      ? await this.sessionStore.getSession(session.linkedSessionId)
+      : null;
+
+    return [
+      "🏠 Local",
+      "",
+      `📌 Активная сессия: ${session?.label ?? activeSessionId}`,
+      `🤝 Связь: ${linkedSession?.label ?? "не настроена"}`,
+      "",
+      "Здесь живёт локальная работа в одном боте:",
+      "связка сессий, обмен note и файлами без gateway.",
+    ].join("\n");
+  }
+
   private async buildProjectsMenuText(
     ctx: TelegramMenuContext,
   ): Promise<string> {
     const { session, projects } = await this.loadProjectsContext(ctx);
     if (!this.config.distributed.gatewayPublicUrl) {
       return [
-        "📦 Проекты",
+        "👥 Collab",
         "",
         "Gateway не настроен для этого запуска.",
-        "Для локальной работы в одном боте продолжай использовать Link и Partner.",
+        "Для локальной работы в одном боте используй раздел Local.",
       ].join("\n");
     }
 
     if (!session || !projects) {
-      return "Проекты недоступны для текущей сессии.";
+      return "Collab недоступен для текущей сессии.";
     }
 
     return [
-      "📦 Проекты",
+      "👥 Collab",
       "",
       `📌 Активная сессия: ${session.label ?? session.sessionId}`,
       `📦 Открытый проект: ${session.activeProjectName ?? "не выбран"}`,

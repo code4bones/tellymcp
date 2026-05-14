@@ -131,33 +131,24 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
         });
       }
 
-      await this.db.raw(
-        `
-        DO $$
-        DECLARE legacy_constraint_name text;
-        BEGIN
-          SELECT con.conname
-          INTO legacy_constraint_name
-          FROM pg_constraint con
-          JOIN pg_class rel ON rel.oid = con.conrelid
-          JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
-          WHERE nsp.nspname = ?
-            AND rel.relname = 'gateway_sessions'
-            AND con.contype = 'u'
-            AND pg_get_constraintdef(con.oid) = 'UNIQUE (client_uuid, local_session_id)';
+      const legacyConstraint = await this.db
+        .select<{ conname: string }[]>("con.conname")
+        .from({ con: "pg_constraint" })
+        .join({ rel: "pg_class" }, "rel.oid", "con.conrelid")
+        .join({ nsp: "pg_namespace" }, "nsp.oid", "rel.relnamespace")
+        .where("nsp.nspname", MCP_SCHEMA)
+        .where("rel.relname", "gateway_sessions")
+        .where("con.contype", "u")
+        .whereRaw("pg_get_constraintdef(con.oid) = ?", [
+          "UNIQUE (client_uuid, local_session_id)",
+        ])
+        .first();
 
-          IF legacy_constraint_name IS NOT NULL THEN
-            EXECUTE format(
-              'ALTER TABLE %I.%I DROP CONSTRAINT %I',
-              ?,
-              'gateway_sessions',
-              legacy_constraint_name
-            );
-          END IF;
-        END $$;
-        `,
-        [MCP_SCHEMA, MCP_SCHEMA],
-      );
+      if (legacyConstraint?.conname) {
+        await this.db.raw(
+          `ALTER TABLE "${MCP_SCHEMA}"."gateway_sessions" DROP CONSTRAINT "${legacyConstraint.conname}"`,
+        );
+      }
 
       await this.db.raw(
         `

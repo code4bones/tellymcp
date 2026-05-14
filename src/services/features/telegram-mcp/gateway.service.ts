@@ -357,6 +357,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .withSchema(MCP_SCHEMA)
         .table("gateway_sessions")
         .where({
+          project_uuid: projectUuid,
           client_uuid: clientUuid,
           local_session_id: localSessionId,
         })
@@ -559,6 +560,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
         input.target_session_id,
         "target_session_id",
       );
+      const requestedProjectUuid = this.normalizeOptionalText?.(input.project_uuid);
       const kind = this.requireText?.(input.kind, "kind");
       const summary = this.requireText?.(input.summary, "summary");
       const message = this.requireText?.(input.message, "message");
@@ -568,22 +570,6 @@ const TelegramMcpGatewayService: ServiceSchema = {
         typeof input.requires_reply === "boolean"
           ? input.requires_reply
           : kind === "question" || kind === "request";
-
-      const sourceSession = await this.db
-        .withSchema(MCP_SCHEMA)
-        .table("gateway_sessions")
-        .where({
-          client_uuid: clientUuid,
-          local_session_id: localSessionId,
-          status: "active",
-        })
-        .first();
-
-      if (!sourceSession) {
-        throw new Error(
-          `Active project session '${localSessionId}' is not registered for client ${clientUuid}.`,
-        );
-      }
 
       const targetSession = await this.db
         .withSchema(MCP_SCHEMA)
@@ -598,8 +584,28 @@ const TelegramMcpGatewayService: ServiceSchema = {
         throw new Error(`Target project session ${targetSessionId} was not found.`);
       }
 
-      if (sourceSession.project_uuid !== targetSession.project_uuid) {
-        throw new Error("Source and target sessions must belong to the same project.");
+      if (
+        requestedProjectUuid &&
+        requestedProjectUuid !== String(targetSession.project_uuid)
+      ) {
+        throw new Error("Target session does not belong to the requested project.");
+      }
+
+      const sourceSession = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_sessions")
+        .where({
+          project_uuid: String(targetSession.project_uuid),
+          client_uuid: clientUuid,
+          local_session_id: localSessionId,
+          status: "active",
+        })
+        .first();
+
+      if (!sourceSession) {
+        throw new Error(
+          `Active project session '${localSessionId}' is not registered for client ${clientUuid} in project ${targetSession.project_uuid}.`,
+        );
       }
 
       const shareId = randomUUID();

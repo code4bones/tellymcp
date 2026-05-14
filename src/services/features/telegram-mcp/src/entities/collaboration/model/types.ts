@@ -17,6 +17,7 @@ export type PartnerArtifactRef = {
 export type SendPartnerNoteInput = {
   session_id?: string | undefined;
   target_session_id?: string | undefined;
+  project_uuid?: string | undefined;
   kind: PartnerNoteKind;
   summary: string;
   message: string;

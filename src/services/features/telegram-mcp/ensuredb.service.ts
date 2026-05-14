@@ -122,11 +122,49 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
             .references("client_uuid")
             .inTable(`${MCP_SCHEMA}.gateway_clients`)
             .onDelete("CASCADE");
-          table.unique(["client_uuid", "local_session_id"]);
+          table.unique(
+            ["project_uuid", "client_uuid", "local_session_id"],
+            "gateway_sessions_project_client_local_unique",
+          );
           table.index(["project_uuid"], "gateway_sessions_project_idx");
           table.index(["client_uuid"], "gateway_sessions_client_idx");
         });
       }
+
+      await this.db.raw(
+        `
+        DO $$
+        DECLARE legacy_constraint_name text;
+        BEGIN
+          SELECT con.conname
+          INTO legacy_constraint_name
+          FROM pg_constraint con
+          JOIN pg_class rel ON rel.oid = con.conrelid
+          JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+          WHERE nsp.nspname = ?
+            AND rel.relname = 'gateway_sessions'
+            AND con.contype = 'u'
+            AND pg_get_constraintdef(con.oid) = 'UNIQUE (client_uuid, local_session_id)';
+
+          IF legacy_constraint_name IS NOT NULL THEN
+            EXECUTE format(
+              'ALTER TABLE %I.%I DROP CONSTRAINT %I',
+              ?,
+              'gateway_sessions',
+              legacy_constraint_name
+            );
+          END IF;
+        END $$;
+        `,
+        [MCP_SCHEMA, MCP_SCHEMA],
+      );
+
+      await this.db.raw(
+        `
+        CREATE UNIQUE INDEX IF NOT EXISTS gateway_sessions_project_client_local_unique
+        ON "${MCP_SCHEMA}"."gateway_sessions" ("project_uuid", "client_uuid", "local_session_id")
+        `,
+      );
 
       if (!(await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_session_links"))) {
         await this.db.schema

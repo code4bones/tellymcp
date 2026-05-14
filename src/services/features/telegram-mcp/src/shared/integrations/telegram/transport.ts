@@ -6739,6 +6739,7 @@ export class TelegramTransport implements HumanTransport {
     filePath: string;
     description: string;
     targetSessionId?: string;
+    projectUuid?: string;
   }): Promise<SendPartnerNoteOutput> {
     const meta = await this.xchangeFileMetaStore.getXchangeFileMeta(
       input.sessionId,
@@ -6752,6 +6753,7 @@ export class TelegramTransport implements HumanTransport {
     return this.sendPartnerNote({
       session_id: input.sessionId,
       ...(input.targetSessionId ? { target_session_id: input.targetSessionId } : {}),
+      ...(input.projectUuid ? { project_uuid: input.projectUuid } : {}),
       kind: "handoff",
       summary: `File handoff: ${fileName}`,
       message: [
@@ -6807,6 +6809,7 @@ export class TelegramTransport implements HumanTransport {
       ...(pending.targetSessionId
         ? { target_session_id: pending.targetSessionId }
         : {}),
+      ...(pending.projectUuid ? { project_uuid: pending.projectUuid } : {}),
       kind: pending.kind,
       summary: parsed.summary,
       message: parsed.message,
@@ -6877,6 +6880,7 @@ export class TelegramTransport implements HumanTransport {
       ...(pending.targetSessionId
         ? { targetSessionId: pending.targetSessionId }
         : {}),
+      ...(pending.projectUuid ? { projectUuid: pending.projectUuid } : {}),
     });
     this.pendingFileHandoffs.delete(principalKey);
     await this.deletePendingFileHandoffPrompt(ctx, pending);

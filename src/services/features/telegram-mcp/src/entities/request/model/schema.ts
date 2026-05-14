@@ -513,6 +513,7 @@ export const browserCloseOutputSchema = z.object({
 export const sendPartnerNoteInputSchema = z.object({
   session_id: z.string().trim().min(1).optional(),
   target_session_id: z.string().trim().min(1).optional(),
+  project_uuid: z.string().trim().min(1).optional(),
   kind: partnerNoteKindSchema,
   summary: z.string().trim().min(1),
   message: z.string().trim().min(1),

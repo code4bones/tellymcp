@@ -124,6 +124,19 @@ type GatewayProjectRecord = {
   joined_at?: string;
 };
 
+type GatewayProjectSessionRecord = {
+  session_uuid: string;
+  project_uuid: string;
+  client_uuid: string;
+  local_session_id: string;
+  label: string | null;
+  status: string;
+  client_label: string | null;
+  bot_username: string | null;
+  joined_at?: string;
+  updated_at?: string;
+};
+
 type TmuxProxyStatusCacheEntry = {
   checkedAtMs: number;
   statusLine: string;
@@ -600,6 +613,22 @@ export class TelegramTransport implements HumanTransport {
     this.bot.callbackQuery("file-handoff-cancel", async (ctx) => {
       await this.cancelPendingFileHandoff(ctx);
     });
+    this.bot.callbackQuery(/^project-set:(.+)$/u, async (ctx) => {
+      await this.handleProjectSetCallback(ctx);
+    });
+    this.bot.callbackQuery(/^project-members:(.+)$/u, async (ctx) => {
+      await this.handleProjectMembersCallback(ctx);
+    });
+    this.bot.callbackQuery(/^project-detail:(.+)$/u, async (ctx) => {
+      await this.handleProjectDetailCallback(ctx);
+    });
+    this.bot.callbackQuery(/^project-leave:(.+)$/u, async (ctx) => {
+      await this.handleProjectLeaveCallback(ctx);
+    });
+    this.bot.callbackQuery("project-back", async (ctx) => {
+      await ctx.answerCallbackQuery({ text: "Back to projects." });
+      await this.showProjectsMenu(ctx);
+    });
     this.bot.on("message", async (ctx) => {
       await this.handleMessage(ctx);
     });
@@ -714,6 +743,20 @@ export class TelegramTransport implements HumanTransport {
       client_uuid: clientUuid,
     });
     return response.projects;
+  }
+
+  private async listGatewayProjectSessions(
+    principal: { telegramChatId: number; telegramUserId: number },
+    projectUuid: string,
+  ): Promise<GatewayProjectSessionRecord[]> {
+    const clientUuid = await this.ensureGatewayClientUuid(principal);
+    const response = await this.callGatewayJson<{
+      sessions: GatewayProjectSessionRecord[];
+    }>("/projects/sessions", {
+      client_uuid: clientUuid,
+      project_uuid: projectUuid,
+    });
+    return response.sessions;
   }
 
   private async loadProjectsContext(
@@ -1468,10 +1511,6 @@ export class TelegramTransport implements HumanTransport {
       })
       .text("🔑 Join", async (ctx) => {
         await this.beginProjectMode(ctx, "join");
-      })
-      .row()
-      .text("🚪 Leave", async (ctx) => {
-        await this.leaveActiveProject(ctx);
       })
       .text("⬅ Back", async (ctx) => {
         await ctx.answerCallbackQuery({ text: "Back to session menu." });
@@ -5712,17 +5751,12 @@ export class TelegramTransport implements HumanTransport {
       return;
     }
 
-    await this.activateProjectForSession({
-      principal,
+    await ctx.answerCallbackQuery({ text: "Opening project." });
+    await this.showProjectDetail(ctx, {
       sessionId: payload.sessionId,
       projectUuid: payload.projectUuid,
       projectName: payload.title ?? payload.projectUuid,
     });
-    await ctx.answerCallbackQuery({ text: "Project selected." });
-    await this.showProjectsMenu(
-      ctx,
-      `Current project: ${payload.title ?? payload.projectUuid}`,
-    );
   }
 
   private async leaveActiveProject(
@@ -5771,6 +5805,329 @@ export class TelegramTransport implements HumanTransport {
 
     await ctx.answerCallbackQuery({ text: "Project left." });
     await this.showProjectsMenu(ctx, "Left current project.");
+  }
+
+  private async showProjectDetail(
+    ctx: TelegramMenuContext,
+    input: {
+      sessionId: string;
+      projectUuid: string;
+      projectName: string;
+    },
+  ): Promise<void> {
+    const session = await this.sessionStore.getSession(input.sessionId);
+    const isActive = session?.activeProjectUuid === input.projectUuid;
+    const text = [
+      "📦 Project",
+      "",
+      `Name: ${input.projectName}`,
+      `UUID: ${input.projectUuid}`,
+      `Status: ${isActive ? "current" : "available"}`,
+      "",
+      "Choose what to do with this project.",
+    ].join("\n");
+
+    const keyboard = new InlineKeyboard()
+      .text("✅ Set current", `project-set:${input.projectUuid}`)
+      .text("👥 Members", `project-members:${input.projectUuid}`)
+      .row()
+      .text("🚪 Leave", `project-leave:${input.projectUuid}`)
+      .text("⬅ Back", "project-back");
+
+    if (ctx.callbackQuery?.message) {
+      await this.editText(
+        ctx,
+        text,
+        { kind: "menu", sessionId: input.sessionId },
+        { reply_markup: keyboard },
+      );
+      return;
+    }
+
+    await this.replyText(
+      ctx,
+      text,
+      { kind: "menu", sessionId: input.sessionId },
+      { reply_markup: keyboard },
+    );
+  }
+
+  private async showProjectMembers(
+    ctx: TelegramMenuContext,
+    input: {
+      sessionId: string;
+      projectUuid: string;
+      projectName: string;
+    },
+  ): Promise<void> {
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal) {
+      throw new Error("Telegram identity is unavailable.");
+    }
+
+    const session = await this.sessionStore.getSession(input.sessionId);
+    const clientUuid = await this.ensureGatewayClientUuid(principal);
+    const sessions = await this.listGatewayProjectSessions(principal, input.projectUuid);
+    const activeSessionId = session?.sessionId ?? null;
+
+    const lines = [
+      "👥 Project Members",
+      "",
+      `Project: ${input.projectName}`,
+      `UUID: ${input.projectUuid}`,
+      "",
+    ];
+
+    if (sessions.length === 0) {
+      lines.push("No active sessions are registered in this project yet.");
+    } else {
+      for (const item of sessions) {
+        const isCurrentClient = item.client_uuid === clientUuid;
+        const isCurrentSession = item.local_session_id === activeSessionId;
+        const sessionLabel = item.label?.trim() || item.local_session_id;
+        const markers = [
+          isCurrentClient ? "this bot" : null,
+          isCurrentSession ? "current session" : null,
+        ].filter(Boolean);
+
+        lines.push(
+          `${isCurrentSession ? "✅" : "•"} ${sessionLabel}${markers.length ? ` (${markers.join(", ")})` : ""}`,
+        );
+
+        const ownerLineParts = [
+          item.client_label?.trim() || null,
+          item.bot_username?.trim() ? `@${item.bot_username.trim()}` : null,
+        ].filter(Boolean);
+
+        if (ownerLineParts.length > 0) {
+          lines.push(`  Owner: ${ownerLineParts.join(" · ")}`);
+        }
+
+        lines.push(`  Local ID: ${item.local_session_id}`);
+        lines.push(`  Status: ${item.status}`);
+      }
+    }
+
+    const keyboard = new InlineKeyboard()
+      .text("⬅ Back to project", `project-detail:${input.projectUuid}`)
+      .row()
+      .text("📦 Projects", "project-back");
+
+    const text = lines.join("\n");
+    if (ctx.callbackQuery?.message) {
+      await this.editText(
+        ctx,
+        text,
+        { kind: "menu", sessionId: input.sessionId },
+        { reply_markup: keyboard },
+      );
+      return;
+    }
+
+    await this.replyText(
+      ctx,
+      text,
+      { kind: "menu", sessionId: input.sessionId },
+      { reply_markup: keyboard },
+    );
+  }
+
+  private async getProjectPayloadByUuid(
+    sessionId: string,
+    projectUuid: string,
+  ): Promise<{ sessionId: string; projectUuid: string; projectName: string } | null> {
+    const session = await this.sessionStore.getSession(sessionId);
+    if (!session) {
+      return null;
+    }
+
+    const principalBindings = await this.bindingStore.getBinding(sessionId);
+    if (!principalBindings) {
+      return null;
+    }
+
+    const projects = await this.listGatewayProjects({
+      telegramChatId: principalBindings.telegramChatId,
+      telegramUserId: principalBindings.telegramUserId,
+    });
+    const project = projects.find((item) => item.project_uuid === projectUuid);
+    if (!project) {
+      return null;
+    }
+
+    return {
+      sessionId,
+      projectUuid,
+      projectName: project.name,
+    };
+  }
+
+  private extractCallbackSuffix(
+    ctx: TelegramMenuContext,
+    prefix: string,
+  ): string | null {
+    const data = ctx.callbackQuery?.data;
+    if (!data || !data.startsWith(prefix)) {
+      return null;
+    }
+    return data.slice(prefix.length) || null;
+  }
+
+  private async handleProjectSetCallback(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const projectUuid = this.extractCallbackSuffix(ctx, "project-set:");
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!projectUuid || !principal) {
+      await ctx.answerCallbackQuery({
+        text: "Project action is invalid.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const sessionId =
+      await this.bindingStore.getActiveSessionIdForPrincipal(principal);
+    if (!sessionId) {
+      await ctx.answerCallbackQuery({
+        text: "No active session selected.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const payload = await this.getProjectPayloadByUuid(sessionId, projectUuid);
+    if (!payload) {
+      await ctx.answerCallbackQuery({
+        text: "Project not found.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    await this.activateProjectForSession({
+      principal,
+      sessionId,
+      projectUuid: payload.projectUuid,
+      projectName: payload.projectName,
+    });
+    await ctx.answerCallbackQuery({ text: "Current project updated." });
+    await this.showProjectDetail(ctx, payload);
+  }
+
+  private async handleProjectDetailCallback(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const projectUuid = this.extractCallbackSuffix(ctx, "project-detail:");
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!projectUuid || !principal) {
+      await ctx.answerCallbackQuery({
+        text: "Project action is invalid.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const sessionId =
+      await this.bindingStore.getActiveSessionIdForPrincipal(principal);
+    if (!sessionId) {
+      await ctx.answerCallbackQuery({
+        text: "No active session selected.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const payload = await this.getProjectPayloadByUuid(sessionId, projectUuid);
+    if (!payload) {
+      await ctx.answerCallbackQuery({
+        text: "Project not found.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    await ctx.answerCallbackQuery({ text: "Opening project." });
+    await this.showProjectDetail(ctx, payload);
+  }
+
+  private async handleProjectMembersCallback(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const projectUuid = this.extractCallbackSuffix(ctx, "project-members:");
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!projectUuid || !principal) {
+      await ctx.answerCallbackQuery({
+        text: "Project action is invalid.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const sessionId =
+      await this.bindingStore.getActiveSessionIdForPrincipal(principal);
+    if (!sessionId) {
+      await ctx.answerCallbackQuery({
+        text: "No active session selected.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const payload = await this.getProjectPayloadByUuid(sessionId, projectUuid);
+    if (!payload) {
+      await ctx.answerCallbackQuery({
+        text: "Project not found.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    await ctx.answerCallbackQuery({ text: "Loading members." });
+    await this.showProjectMembers(ctx, payload);
+  }
+
+  private async handleProjectLeaveCallback(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const projectUuid = this.extractCallbackSuffix(ctx, "project-leave:");
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!projectUuid || !principal) {
+      await ctx.answerCallbackQuery({
+        text: "Project action is invalid.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const sessionId =
+      await this.bindingStore.getActiveSessionIdForPrincipal(principal);
+    if (!sessionId) {
+      await ctx.answerCallbackQuery({
+        text: "No active session selected.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const session = await this.sessionStore.getSession(sessionId);
+    const clientUuid = await this.ensureGatewayClientUuid(principal);
+    await this.callGatewayJson("/projects/leave", {
+      client_uuid: clientUuid,
+      project_uuid: projectUuid,
+    });
+
+    if (session?.activeProjectUuid === projectUuid) {
+      await this.sessionStore.setSession({
+        ...session,
+        activeProjectUuid: undefined,
+        activeProjectName: undefined,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    await ctx.answerCallbackQuery({ text: "Project left." });
+    await this.showProjectsMenu(ctx, "Left selected project.");
   }
 
   private async deletePendingFileHandoffPrompt(

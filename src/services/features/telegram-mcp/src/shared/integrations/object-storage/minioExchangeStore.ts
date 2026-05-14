@@ -1,6 +1,7 @@
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { mkdir, writeFile, access } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 
 import type { SessionBinding } from "../../../entities/auth/model/types";
 import type { SessionContext } from "../../../entities/session/model/types";
@@ -37,7 +38,7 @@ type VfsNodeExistsResult = {
   message?: string;
 };
 
-type MinioIngestResponse = {
+type MinioCompleteUploadResponse = {
   node: {
     node_id: number;
     parent_id: number;
@@ -65,17 +66,6 @@ type MinioRequestUploadResponse = {
   headers?: Record<string, string> | undefined;
   contentType: string;
   createdAt: string;
-};
-
-type VfsCreateFileResponse = {
-  node_id: number;
-  parent_id: number;
-  public_url: string;
-  name: string;
-  hash: string;
-  scope?: string | undefined;
-  visibility?: string | undefined;
-  effectiveVisibility?: string | undefined;
 };
 const TEMP_XCHANGE_ROOT = path.join(tmpdir(), "telegram-mcp-xchange");
 
@@ -238,13 +228,16 @@ export class MinioExchangeStore {
       targetDir.node_id,
       path.basename(relativePath),
     );
-    const response = await this.uploadFileThroughRequestFlow(
+    const response = await this.uploadFileThroughManagedFlow(
       targetDir.node_id,
       targetFileName,
       inferredMimeType,
       params.content,
-      this.buildUploadOwnerSub(params.session, params.sessionId),
+      this.createUploadOwnerSub(),
     );
+    if (!response.node?.node_id || !response.upload?.storageRef) {
+      throw new Error("Managed upload completed without VFS node metadata.");
+    }
 
     this.logger.info("Exchange file stored via VFS + MinIO", {
       sessionId: params.sessionId,
@@ -366,19 +359,39 @@ export class MinioExchangeStore {
     const resolved = await this.callInternalBroker<{
       bucketName: string;
       objectName: string;
-    }>("minio.resolveFileRef", {
+    } | unknown>("minio.resolveFileRef", {
       ref: params.storageRef,
       name: path.basename(relativePath),
     });
+    if (
+      !resolved ||
+      typeof resolved !== "object" ||
+      typeof (resolved as { bucketName?: unknown }).bucketName !== "string" ||
+      typeof (resolved as { objectName?: unknown }).objectName !== "string"
+    ) {
+      throw new Error(
+        this.extractActionErrorMessage(
+          resolved,
+          "Failed to resolve stored file reference.",
+        ),
+      );
+    }
     const content = await this.callInternalBroker<MinioGetObjectResponse>(
       "minio.getObject",
       {
-        bucketName: resolved.bucketName,
-        objectName: resolved.objectName,
+        bucketName: (resolved as { bucketName: string }).bucketName,
+        objectName: (resolved as { objectName: string }).objectName,
       },
     );
-
-    return Buffer.isBuffer(content) ? content : Buffer.from(content);
+    if (Buffer.isBuffer(content)) {
+      return content;
+    }
+    if (content instanceof Uint8Array) {
+      return Buffer.from(content);
+    }
+    throw new Error(
+      this.extractActionErrorMessage(content, "Failed to read stored file content."),
+    );
   }
 
   public async deleteStoredFile(params?: {
@@ -434,20 +447,13 @@ export class MinioExchangeStore {
     });
   }
 
-  private async uploadFileThroughRequestFlow(
+  private async uploadFileThroughManagedFlow(
     parentNodeId: number,
     fileName: string,
     mimeType: string,
     content: Uint8Array,
     ownerSub: string,
-  ): Promise<{
-    node: VfsCreateFileResponse;
-    upload: {
-      bucketName: string;
-      objectName: string;
-      storageRef: string;
-    };
-  }> {
+  ): Promise<MinioCompleteUploadResponse> {
     const request = await this.callInternalBroker<MinioRequestUploadResponse>(
       "minio.requestUpload",
       {
@@ -480,29 +486,16 @@ export class MinioExchangeStore {
       );
     }
 
-    const node = await this.callInternalBroker<unknown>(
-      "vfs.vsCreateFile",
+    return this.callInternalBroker<MinioCompleteUploadResponse>(
+      "minio.completeUpload",
       {
-        file: {
-          parent_id: parentNodeId,
-          name: fileName,
-          hash: request.storageRef,
-        },
-      },
-    );
-
-    if (!this.isVfsCreateFileResponse(node)) {
-      throw new Error(this.extractActionErrorMessage(node, "VFS file creation failed"));
-    }
-
-    return {
-      node,
-      upload: {
-        bucketName: request.bucketName,
-        objectName: request.objectName,
+        uploadId: request.uploadId,
         storageRef: request.storageRef,
+        name: fileName,
+        parent_id: parentNodeId,
       },
-    };
+      { user: { sub: ownerSub } },
+    );
   }
 
   private async ensureUniqueFileName(
@@ -664,21 +657,8 @@ export class MinioExchangeStore {
     });
   }
 
-  private buildUploadOwnerSub(
-    session: SessionContext | null,
-    sessionId: string,
-  ): string {
-    const sessionSegment = this.buildSessionSegment(session, sessionId) || "session";
-    return `telegram-mcp:${sanitizePathSegment(sessionSegment) || "session"}`;
-  }
-
-  private isVfsCreateFileResponse(value: unknown): value is VfsCreateFileResponse {
-    return Boolean(
-      value &&
-      typeof value === "object" &&
-      typeof (value as VfsCreateFileResponse).node_id === "number" &&
-      typeof (value as VfsCreateFileResponse).public_url === "string",
-    );
+  private createUploadOwnerSub(): string {
+    return randomUUID();
   }
 
   private extractActionErrorMessage(value: unknown, fallback: string): string {

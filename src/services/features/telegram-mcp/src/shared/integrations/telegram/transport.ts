@@ -251,7 +251,8 @@ function readMenuPayloadKey(ctx: TelegramMenuContext): string | null {
 
 function buildDatedRelativePath(fileName: string, date = new Date()): string {
   const dateSegment = date.toISOString().slice(0, 10);
-  return `${dateSegment}/${fileName}`;
+  const timeSegment = date.toTimeString().slice(0, 8).replace(/:/gu, "-");
+  return `${dateSegment}/${timeSegment}/${fileName}`;
 }
 
 function buildPrincipalKey(principal: {

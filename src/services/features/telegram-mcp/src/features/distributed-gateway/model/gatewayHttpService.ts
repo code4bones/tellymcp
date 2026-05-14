@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 import type { AppConfig } from "../../../app/config/env";
 import {
@@ -89,12 +90,19 @@ type GatewayRequestUploadResponse = {
   createdAt: string;
 };
 
-type GatewayVfsCreateFileResponse = {
-  node_id: number;
-  parent_id: number;
-  public_url: string;
-  name: string;
-  hash: string;
+type GatewayCompleteUploadResponse = {
+  node?: {
+    node_id: number;
+    parent_id: number;
+    public_url: string;
+    name: string;
+    hash: string;
+  } | null;
+  upload?: {
+    bucketName: string;
+    objectName: string;
+    storageRef: string;
+  } | null;
 };
 
 type GatewayVfsNodeExistsResult = {
@@ -260,7 +268,7 @@ export class GatewayHttpService {
       requestedFileName,
       vfsScope,
     );
-    const ownerSub = `telegram-mcp:${sessionSegment || "session"}`;
+    const ownerSub = randomUUID();
     const request = await this.callBroker<GatewayRequestUploadResponse>(
       "minio.requestUpload",
       {
@@ -291,30 +299,34 @@ export class GatewayHttpService {
       );
     }
 
-    const node = await this.callBroker<unknown>(
-      "vfs.vsCreateFile",
+    const response = await this.callBroker<GatewayCompleteUploadResponse>(
+      "minio.completeUpload",
       {
-        file: {
-          parent_id: targetDir.node_id,
-          name: fileName,
-          hash: request.storageRef,
-        },
+        uploadId: request.uploadId,
+        storageRef: request.storageRef,
+        name: fileName,
+        parent_id: targetDir.node_id,
       },
-      { meta: { internal_call: true } },
+      { meta: { internal_call: true, user: { sub: ownerSub } } },
     );
-    if (!this.isVfsCreateFileResponse(node)) {
-      throw new Error(this.extractActionErrorMessage(node, "VFS file creation failed"));
+    if (!response.node?.node_id || !response.upload?.storageRef) {
+      throw new Error(
+        this.extractActionErrorMessage(
+          response,
+          "Managed upload completed without VFS node metadata.",
+        ),
+      );
     }
 
     return {
-      filePath: `vfs://${node.public_url}`,
+      filePath: `vfs://${response.node.public_url}`,
       relativePath: normalizedRelativePath,
-      storageRef: request.storageRef,
-      bucketName: request.bucketName,
-      objectName: request.objectName,
-      vfsNodeId: node.node_id,
-      vfsPublicUrl: node.public_url,
-      vfsParentId: node.parent_id,
+      storageRef: response.upload.storageRef,
+      bucketName: response.upload.bucketName,
+      objectName: response.upload.objectName,
+      vfsNodeId: response.node.node_id,
+      vfsPublicUrl: response.node.public_url,
+      vfsParentId: response.node.parent_id,
       sizeBytes: content.byteLength,
     };
   }
@@ -358,15 +370,6 @@ export class GatewayHttpService {
     return Boolean(result?.error);
   }
 
-  private isVfsCreateFileResponse(value: unknown): value is GatewayVfsCreateFileResponse {
-    return Boolean(
-      value &&
-      typeof value === "object" &&
-      typeof (value as GatewayVfsCreateFileResponse).node_id === "number" &&
-      typeof (value as GatewayVfsCreateFileResponse).public_url === "string",
-    );
-  }
-
   private extractActionErrorMessage(value: unknown, fallback: string): string {
     if (value && typeof value === "object") {
       const record = value as Record<string, unknown>;
@@ -395,7 +398,7 @@ export class GatewayHttpService {
     const resolved = await this.callBroker<{
       bucketName: string;
       objectName: string;
-    }>(
+    } | unknown>(
       "minio.resolveFileRef",
       {
         ref: storageRef,
@@ -403,17 +406,40 @@ export class GatewayHttpService {
       },
       { meta: { internal_call: true } },
     );
+    if (
+      !resolved ||
+      typeof resolved !== "object" ||
+      typeof (resolved as { bucketName?: unknown }).bucketName !== "string" ||
+      typeof (resolved as { objectName?: unknown }).objectName !== "string"
+    ) {
+      throw new Error(
+        this.extractActionErrorMessage(
+          resolved,
+          "Failed to resolve stored file reference.",
+        ),
+      );
+    }
 
     const content = await this.callBroker<Uint8Array | Buffer>(
       "minio.getObject",
       {
-        bucketName: resolved.bucketName,
-        objectName: resolved.objectName,
+        bucketName: (resolved as { bucketName: string }).bucketName,
+        objectName: (resolved as { objectName: string }).objectName,
       },
       { meta: { internal_call: true } },
     );
-
-    const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
+    const buffer = Buffer.isBuffer(content)
+      ? content
+      : content instanceof Uint8Array
+        ? Buffer.from(content)
+        : (() => {
+            throw new Error(
+              this.extractActionErrorMessage(
+                content,
+                "Failed to read stored file content.",
+              ),
+            );
+          })();
     return {
       contentBase64: buffer.toString("base64"),
     };

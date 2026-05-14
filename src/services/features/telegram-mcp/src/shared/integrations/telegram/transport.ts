@@ -6091,9 +6091,15 @@ export class TelegramTransport implements HumanTransport {
     const keyboard = new InlineKeyboard();
     for (const member of selectableMembers) {
       const sessionLabel = member.label?.trim() || member.local_session_id;
+      const clientLabel = member.client_label?.trim() || null;
+      const botUsernameRaw = member.bot_username?.trim() || null;
+      const normalizedClientLabel = clientLabel?.replace(/^@/u, "") || null;
+      const normalizedBotUsername = botUsernameRaw?.replace(/^@/u, "") || null;
       const ownerParts = [
-        member.client_label?.trim() || null,
-        member.bot_username?.trim() ? `@${member.bot_username.trim()}` : null,
+        clientLabel,
+        normalizedBotUsername && normalizedBotUsername !== normalizedClientLabel
+          ? `@${normalizedBotUsername}`
+          : null,
       ].filter(Boolean);
       const buttonLabel = ownerParts.length > 0
         ? `${sessionLabel} · ${ownerParts.join(" ")}`.slice(0, 56)

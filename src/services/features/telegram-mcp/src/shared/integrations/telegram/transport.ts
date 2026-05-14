@@ -109,6 +109,9 @@ type PendingFileHandoffRecord = {
   target: "agent" | "partner";
   initiatedAt: string;
   promptMessageId?: number;
+  targetSessionId?: string;
+  targetSessionLabel?: string;
+  projectUuid?: string;
 };
 
 type PendingProjectRecord = {
@@ -627,6 +630,9 @@ export class TelegramTransport implements HumanTransport {
     });
     this.bot.callbackQuery(/^project-member-note:(question|reply|handoff|share):(.+)$/u, async (ctx) => {
       await this.handleProjectMemberNoteCallback(ctx);
+    });
+    this.bot.callbackQuery(/^project-member-files:(.+)$/u, async (ctx) => {
+      await this.handleProjectMemberFilesCallback(ctx);
     });
     this.bot.callbackQuery(/^project-detail:(.+)$/u, async (ctx) => {
       await this.handleProjectDetailCallback(ctx);
@@ -2055,6 +2061,9 @@ export class TelegramTransport implements HumanTransport {
             }
 
             const session = await this.sessionStore.getSession(payload.sessionId);
+            if (session?.activeProjectUuid) {
+              return "🤝 Передать участнику";
+            }
             if (!session?.linkedSessionId) {
               return "🤝 Передать партнёру";
             }
@@ -3182,17 +3191,19 @@ export class TelegramTransport implements HumanTransport {
     projectUuid: string,
     targetSessionId: string,
     title: string,
+    filePath?: string,
   ): Promise<string> {
     const key = createMenuPayloadKey();
     const now = new Date();
     await this.menuPayloadStore.createMenuPayload(
       {
         key,
-        kind: "project-member",
+        kind: filePath ? "project-file-target" : "project-member",
         sessionId,
         projectUuid,
         targetSessionId,
         title,
+        ...(filePath ? { filePath } : {}),
         createdAt: now.toISOString(),
         expiresAt: new Date(
           now.getTime() + this.config.telegram.menuPayloadTtlSeconds * 1000,
@@ -3371,15 +3382,36 @@ export class TelegramTransport implements HumanTransport {
       return;
     }
 
-    if (target === "partner") {
-      const session = await this.sessionStore.getSession(payload.sessionId);
-      if (!session?.linkedSessionId) {
+    const session = await this.sessionStore.getSession(payload.sessionId);
+
+    if (target === "partner" && session?.activeProjectUuid) {
+      const project = await this.getProjectPayloadByUuid(
+        payload.sessionId,
+        session.activeProjectUuid,
+      );
+      if (!project) {
         await ctx.answerCallbackQuery({
-          text: "Link a partner session first.",
+          text: "Active project is unavailable.",
           show_alert: true,
         });
         return;
       }
+
+      await ctx.answerCallbackQuery({
+        text: "Choose project session.",
+      });
+      await this.showProjectMembers(ctx, project, {
+        filePath: payload.filePath,
+      });
+      return;
+    }
+
+    if (target === "partner" && !session?.linkedSessionId) {
+      await ctx.answerCallbackQuery({
+        text: "Link a partner session first.",
+        show_alert: true,
+      });
+      return;
     }
 
     const meta = await this.xchangeFileMetaStore.getXchangeFileMeta(
@@ -3417,6 +3449,67 @@ export class TelegramTransport implements HumanTransport {
       sessionId: payload.sessionId,
       filePath: payload.filePath,
       target,
+      initiatedAt: new Date().toISOString(),
+      ...(sent && "message_id" in sent ? { promptMessageId: sent.message_id } : {}),
+    });
+  }
+
+  private async beginFileHandoffModeForTarget(
+    ctx: TelegramMenuContext,
+    input: {
+      sessionId: string;
+      filePath: string;
+      targetSessionId: string;
+      targetSessionLabel: string;
+      projectUuid?: string;
+    },
+  ): Promise<void> {
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal) {
+      await ctx.answerCallbackQuery({
+        text: "Telegram user or chat is missing.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const meta = await this.xchangeFileMetaStore.getXchangeFileMeta(
+      input.sessionId,
+      input.filePath,
+    );
+    const fileName =
+      meta?.originalName ||
+      (meta?.relativePath ? path.basename(meta.relativePath) : undefined) ||
+      path.basename(input.filePath);
+    const principalKey = buildPrincipalKey(principal);
+
+    await ctx.answerCallbackQuery({
+      text: "Project file handoff.",
+    });
+    const sent = await this.replyText(
+      ctx,
+      [
+        "🤝 Передать участнику",
+        "",
+        `Кому: ${input.targetSessionLabel}`,
+        `Файл: ${fileName}`,
+        "",
+        "Send the next text message with additional description or instructions for this file.",
+        "This text will be attached to the handoff.",
+      ].join("\n"),
+      { kind: "menu", sessionId: input.sessionId },
+      {
+        reply_markup: new InlineKeyboard().text("Cancel", "file-handoff-cancel"),
+      },
+    );
+
+    this.pendingFileHandoffs.set(principalKey, {
+      sessionId: input.sessionId,
+      filePath: input.filePath,
+      target: "partner",
+      targetSessionId: input.targetSessionId,
+      targetSessionLabel: input.targetSessionLabel,
+      ...(input.projectUuid ? { projectUuid: input.projectUuid } : {}),
       initiatedAt: new Date().toISOString(),
       ...(sent && "message_id" in sent ? { promptMessageId: sent.message_id } : {}),
     });
@@ -5840,12 +5933,20 @@ export class TelegramTransport implements HumanTransport {
       return;
     }
 
+    const project = await this.getProjectPayloadByUuid(
+      payload.sessionId,
+      payload.projectUuid,
+    );
+    if (!project) {
+      await ctx.answerCallbackQuery({
+        text: "Project not found.",
+        show_alert: true,
+      });
+      return;
+    }
+
     await ctx.answerCallbackQuery({ text: "Opening project." });
-    await this.showProjectDetail(ctx, {
-      sessionId: payload.sessionId,
-      projectUuid: payload.projectUuid,
-      projectName: payload.title ?? payload.projectUuid,
-    });
+    await this.showProjectDetail(ctx, project);
   }
 
   private async leaveActiveProject(
@@ -5902,6 +6003,7 @@ export class TelegramTransport implements HumanTransport {
       sessionId: string;
       projectUuid: string;
       projectName: string;
+      inviteToken: string;
     },
   ): Promise<void> {
     const session = await this.sessionStore.getSession(input.sessionId);
@@ -5911,6 +6013,7 @@ export class TelegramTransport implements HumanTransport {
       "",
       `Name: ${input.projectName}`,
       `UUID: ${input.projectUuid}`,
+      `Invite: <code>${escapeHtml(input.inviteToken)}</code>`,
       `Status: ${isActive ? "current" : "available"}`,
       "",
       "Choose what to do with this project.",
@@ -5947,6 +6050,10 @@ export class TelegramTransport implements HumanTransport {
       sessionId: string;
       projectUuid: string;
       projectName: string;
+      inviteToken: string;
+    },
+    options?: {
+      filePath?: string;
     },
   ): Promise<void> {
     const principal = this.getPrincipalFromContext(ctx);
@@ -5975,7 +6082,9 @@ export class TelegramTransport implements HumanTransport {
       `Other sessions: ${selectableMembers.length}`,
       "",
       selectableMembers.length > 0
-        ? "Choose a session to ask, share, reply, or hand off."
+        ? options?.filePath
+          ? "Choose who should receive this file."
+          : "Choose a session to ask, share, reply, or hand off."
         : "No other active sessions are registered in this project yet.",
     ];
 
@@ -5994,14 +6103,13 @@ export class TelegramTransport implements HumanTransport {
         input.projectUuid,
         member.session_uuid,
         sessionLabel,
+        options?.filePath,
       );
       keyboard.text(buttonLabel, `project-member-open:${payloadKey}`).row();
     }
 
     keyboard
-      .text("⬅ Back to project", `project-detail:${input.projectUuid}`)
-      .row()
-      .text("📦 Projects", "project-back");
+      .text("⬅ Back to project", `project-detail:${input.projectUuid}`);
 
     const text = lines.join("\n");
     if (ctx.callbackQuery?.message) {
@@ -6028,6 +6136,7 @@ export class TelegramTransport implements HumanTransport {
       sessionId: string;
       projectUuid: string;
       projectName: string;
+      inviteToken: string;
       targetSessionId: string;
       targetSessionLabel: string;
     },
@@ -6055,9 +6164,76 @@ export class TelegramTransport implements HumanTransport {
       .text("↩ Reply", `project-member-note:reply:${payloadKey}`)
       .text("📦 Handoff", `project-member-note:handoff:${payloadKey}`)
       .row()
-      .text("⬅ Back to members", `project-members:${input.projectUuid}`)
-      .text("📦 Projects", "project-back");
+      .text("📎 File", `project-member-files:${payloadKey}`)
+      .row()
+      .text("⬅ Back to members", `project-members:${input.projectUuid}`);
 
+    if (ctx.callbackQuery?.message) {
+      await this.editText(
+        ctx,
+        text,
+        { kind: "menu", sessionId: input.sessionId },
+        { reply_markup: keyboard },
+      );
+      return;
+    }
+
+    await this.replyText(
+      ctx,
+      text,
+      { kind: "menu", sessionId: input.sessionId },
+      { reply_markup: keyboard },
+    );
+  }
+
+  private async showProjectMemberFiles(
+    ctx: TelegramMenuContext,
+    input: {
+      sessionId: string;
+      projectUuid: string;
+      projectName: string;
+      inviteToken: string;
+      targetSessionId: string;
+      targetSessionLabel: string;
+    },
+  ): Promise<void> {
+    const files = await this.listActiveSessionFiles(input.sessionId);
+    const lines = [
+      "📎 Choose File",
+      "",
+      `Project: ${input.projectName}`,
+      `Target: ${input.targetSessionLabel}`,
+      "",
+      files.length > 0
+        ? "Choose which file to send."
+        : "No uploaded files are available in this session.",
+    ];
+
+    const keyboard = new InlineKeyboard();
+    for (const filePath of files) {
+      const meta = await this.xchangeFileMetaStore.getXchangeFileMeta(
+        input.sessionId,
+        filePath,
+      );
+      const label = this.formatFilePreviewLabel(filePath, meta).slice(0, 56);
+      const payloadKey = await this.createProjectMemberMenuPayload(
+        input.sessionId,
+        input.projectUuid,
+        input.targetSessionId,
+        input.targetSessionLabel,
+        filePath,
+      );
+      keyboard.text(label, `project-member-open:${payloadKey}`).row();
+    }
+
+    keyboard.text("⬅ Back to session", `project-member-open:${await this.createProjectMemberMenuPayload(
+      input.sessionId,
+      input.projectUuid,
+      input.targetSessionId,
+      input.targetSessionLabel,
+    )}`);
+
+    const text = lines.join("\n");
     if (ctx.callbackQuery?.message) {
       await this.editText(
         ctx,
@@ -6079,7 +6255,12 @@ export class TelegramTransport implements HumanTransport {
   private async getProjectPayloadByUuid(
     sessionId: string,
     projectUuid: string,
-  ): Promise<{ sessionId: string; projectUuid: string; projectName: string } | null> {
+  ): Promise<{
+    sessionId: string;
+    projectUuid: string;
+    projectName: string;
+    inviteToken: string;
+  } | null> {
     const session = await this.sessionStore.getSession(sessionId);
     if (!session) {
       return null;
@@ -6103,6 +6284,7 @@ export class TelegramTransport implements HumanTransport {
       sessionId,
       projectUuid,
       projectName: project.name,
+      inviteToken: project.invite_token,
     };
   }
 
@@ -6112,13 +6294,16 @@ export class TelegramTransport implements HumanTransport {
     sessionId: string;
     projectUuid: string;
     projectName: string;
+    inviteToken: string;
     targetSessionId: string;
     targetSessionLabel: string;
+    filePath?: string;
   } | null> {
     const payload = await this.menuPayloadStore.getMenuPayload(payloadKey);
     if (
       !payload ||
-      payload.kind !== "project-member" ||
+      (payload.kind !== "project-member" &&
+        payload.kind !== "project-file-target") ||
       !payload.sessionId ||
       !payload.projectUuid ||
       !payload.targetSessionId
@@ -6138,8 +6323,10 @@ export class TelegramTransport implements HumanTransport {
       sessionId: payload.sessionId,
       projectUuid: payload.projectUuid,
       projectName: project.projectName,
+      inviteToken: project.inviteToken,
       targetSessionId: payload.targetSessionId,
       targetSessionLabel: payload.title ?? payload.targetSessionId,
+      ...(payload.filePath ? { filePath: payload.filePath } : {}),
     };
   }
 
@@ -6253,6 +6440,17 @@ export class TelegramTransport implements HumanTransport {
       return;
     }
 
+    if (payload.filePath) {
+      await this.beginFileHandoffModeForTarget(ctx, {
+        sessionId: payload.sessionId,
+        filePath: payload.filePath,
+        targetSessionId: payload.targetSessionId,
+        targetSessionLabel: payload.targetSessionLabel,
+        projectUuid: payload.projectUuid,
+      });
+      return;
+    }
+
     await ctx.answerCallbackQuery({ text: "Opening session." });
     await this.showProjectMemberDetail(ctx, payload);
   }
@@ -6293,6 +6491,31 @@ export class TelegramTransport implements HumanTransport {
       targetSessionLabel: payload.targetSessionLabel,
       projectUuid: payload.projectUuid,
     });
+  }
+
+  private async handleProjectMemberFilesCallback(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const payloadKey = this.extractCallbackSuffix(ctx, "project-member-files:");
+    if (!payloadKey) {
+      await ctx.answerCallbackQuery({
+        text: "Project member payload is invalid.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const payload = await this.getProjectMemberPayloadByKey(payloadKey);
+    if (!payload) {
+      await ctx.answerCallbackQuery({
+        text: "Project member payload is invalid or expired.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    await ctx.answerCallbackQuery({ text: "Opening files." });
+    await this.showProjectMemberFiles(ctx, payload);
   }
 
   private async handleProjectMembersCallback(
@@ -6515,6 +6738,7 @@ export class TelegramTransport implements HumanTransport {
     sessionId: string;
     filePath: string;
     description: string;
+    targetSessionId?: string;
   }): Promise<SendPartnerNoteOutput> {
     const meta = await this.xchangeFileMetaStore.getXchangeFileMeta(
       input.sessionId,
@@ -6527,6 +6751,7 @@ export class TelegramTransport implements HumanTransport {
 
     return this.sendPartnerNote({
       session_id: input.sessionId,
+      ...(input.targetSessionId ? { target_session_id: input.targetSessionId } : {}),
       kind: "handoff",
       summary: `File handoff: ${fileName}`,
       message: [
@@ -6649,6 +6874,9 @@ export class TelegramTransport implements HumanTransport {
       sessionId: pending.sessionId,
       filePath: pending.filePath,
       description,
+      ...(pending.targetSessionId
+        ? { targetSessionId: pending.targetSessionId }
+        : {}),
     });
     this.pendingFileHandoffs.delete(principalKey);
     await this.deletePendingFileHandoffPrompt(ctx, pending);

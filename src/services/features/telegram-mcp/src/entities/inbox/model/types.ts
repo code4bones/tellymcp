@@ -76,7 +76,8 @@ export type TelegramMenuPayloadRecord = {
     | "file-entry"
     | "link-target"
     | "project-entry"
-    | "project-member";
+    | "project-member"
+    | "project-file-target";
   sessionId: string;
   messageId?: string | undefined;
   filePath?: string | undefined;

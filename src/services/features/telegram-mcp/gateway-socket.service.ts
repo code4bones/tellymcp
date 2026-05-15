@@ -90,6 +90,7 @@ type GatewaySocketCarrier = Service & {
   wsIdentityRefreshTimer?: NodeJS.Timeout | null;
   wsConnectionId?: string | null;
   wsHelloClientUuid?: string | null;
+  wsClientHasConnectedOnce?: boolean;
   wsUpgradeHandler?:
     | ((req: IncomingMessage, socket: Socket, head: Buffer) => void)
     | null;
@@ -186,6 +187,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
     this.wsIdentityRefreshTimer = null;
     this.wsConnectionId = null;
     this.wsHelloClientUuid = null;
+    this.wsClientHasConnectedOnce = false;
     this.wsUpgradeHandler = null;
     this.stopRequested = false;
     this.connectedClients = new Map();
@@ -560,7 +562,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           }
         }
 
-        runtime.logger.info("Gateway WS client connected", {
+        runtime.logger.warn("Gateway WS client connected", {
           remoteAddress: req.socket.remoteAddress,
           path: req.url,
         });
@@ -580,7 +582,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             this.connectedClientsByUuid?.delete(hello.client_uuid);
           }
           this.connectedClients?.delete(socket);
-          runtime.logger.info("Gateway WS client disconnected", {
+          runtime.logger.warn("Gateway WS client disconnected", {
             connectionId: hello?.connection_id ?? null,
             clientUuid: hello?.client_uuid ?? null,
           });
@@ -607,7 +609,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
       this.wsServer = wsServer;
       this.wsUpgradeHandler = upgradeHandler;
-      runtime.logger.info("Gateway WS server attached", {
+      runtime.logger.warn("Gateway WS server attached", {
         path: runtime.config.distributed.gatewayWsPath,
       });
     },
@@ -616,6 +618,11 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       if (this.stopRequested || this.wsReconnectTimer) {
         return;
       }
+
+      const runtime = this.getRuntimeOrThrow?.();
+      runtime?.logger.warn("Gateway WS reconnect scheduled", {
+        delayMs: CLIENT_RECONNECT_DELAY_MS,
+      });
 
       this.wsReconnectTimer = setTimeout(() => {
         this.wsReconnectTimer = null;
@@ -652,9 +659,15 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       });
 
       socket.on("open", () => {
-        runtime.logger.info("Gateway WS client connected", {
+        runtime.logger.warn(
+          this.wsClientHasConnectedOnce
+            ? "Gateway WS connected to gateway again"
+            : "Gateway WS connected to gateway",
+          {
           url: normalizedUrl,
-        });
+          },
+        );
+        this.wsClientHasConnectedOnce = true;
         void this.sendClientHello?.(socket);
       });
 
@@ -676,7 +689,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       });
 
       socket.on("close", () => {
-        runtime.logger.info("Gateway WS client disconnected", {
+        runtime.logger.warn("Gateway WS connection to gateway closed", {
           url: normalizedUrl,
           clientUuid: this.wsHelloClientUuid,
         });

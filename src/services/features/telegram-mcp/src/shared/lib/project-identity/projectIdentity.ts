@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
 import type { AppConfig } from "../../../app/config/env";
@@ -180,6 +180,24 @@ export class ProjectIdentityResolver {
       sessionLabel: input.sessionLabel || current?.sessionLabel,
       cwd: resolvedCwd,
     });
+  }
+
+  public removeSessionMarker(cwd?: string | undefined): void {
+    const resolvedCwd = resolveInputCwd(cwd) || this.identity.cwd;
+    const markerPath = join(resolvedCwd, SESSION_MARKER_FILE_NAME);
+    if (!existsSync(markerPath)) {
+      return;
+    }
+
+    try {
+      rmSync(markerPath, { force: true });
+    } catch (error) {
+      this.logger.warn("Failed to remove .mcpsession.json", {
+        cwd: resolvedCwd,
+        markerPath,
+        error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+      });
+    }
   }
 
   private buildIdentity(): ProjectIdentity {

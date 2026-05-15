@@ -1,12 +1,14 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import type { AppConfig } from "../../../app/config/env";
 import type {
   RefreshToolsMarkdownInput,
   RefreshToolsMarkdownOutput,
 } from "../../../entities/request/model/types";
+import type { SessionStore } from "../../../shared/api/storage/contract";
 import type { Logger } from "../../../shared/lib/logger/logger";
+import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
 
 function normalizeGatewayBaseUrl(value: string): URL {
   const url = new URL(value);
@@ -22,14 +24,23 @@ function normalizeGatewayBaseUrl(value: string): URL {
 export class RefreshToolsMarkdownService {
   public constructor(
     private readonly config: AppConfig,
+    private readonly sessionStore: SessionStore,
     private readonly logger: Logger,
+    private readonly projectIdentityResolver: ProjectIdentityResolver,
   ) {}
 
   public async refresh(
     input: RefreshToolsMarkdownInput = {},
   ): Promise<RefreshToolsMarkdownOutput> {
-    const toolsPath = join(process.cwd(), "TOOLS.md");
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const session = await this.sessionStore.getSession(resolved.sessionId);
+    const workspaceDir = input.cwd?.trim()
+      ? resolve(input.cwd.trim())
+      : session?.cwd?.trim()
+        ? resolve(session.cwd.trim())
+        : undefined;
     const saveLocally = input.save_locally !== false;
+    const gatewayToolsPath = join(process.cwd(), "TOOLS.md");
 
     let source: "gateway" | "local" = "local";
     let content: string;
@@ -57,8 +68,16 @@ export class RefreshToolsMarkdownService {
       content = await response.text();
       source = "gateway";
     } else {
-      content = readFileSync(toolsPath, "utf8");
+      content = readFileSync(gatewayToolsPath, "utf8");
     }
+
+    if (!workspaceDir) {
+      throw new Error(
+        "Could not resolve target workspace for TOOLS.md. Pair the session with cwd first or pass cwd/session_id explicitly.",
+      );
+    }
+
+    const toolsPath = join(workspaceDir, "TOOLS.md");
 
     if (saveLocally) {
       writeFileSync(toolsPath, content, "utf8");

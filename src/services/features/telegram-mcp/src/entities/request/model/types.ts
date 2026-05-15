@@ -45,6 +45,8 @@ export type NotifyTelegramOutput = {
 };
 
 export type RefreshToolsMarkdownInput = {
+  session_id?: string | undefined;
+  cwd?: string | undefined;
   save_locally?: boolean | undefined;
 };
 

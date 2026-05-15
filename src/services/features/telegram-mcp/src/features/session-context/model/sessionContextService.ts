@@ -288,8 +288,10 @@ export class SessionContextService {
     input: ClearSessionContextInput,
   ): Promise<ClearSessionContextOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const existing = await this.sessionStore.getSession(resolved.sessionId);
     await this.sessionStore.clearSession(resolved.sessionId);
     await this.bindingStore.clearBinding(resolved.sessionId);
+    this.projectIdentityResolver.removeSessionMarker(existing?.cwd || resolved.cwd);
 
     this.logger.info("Session context cleared", {
       sessionId: resolved.sessionId,

@@ -45,6 +45,8 @@ export const notifyTelegramOutputSchema = z.object({
 });
 
 export const refreshToolsMarkdownInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  cwd: z.string().trim().min(1).optional(),
   save_locally: z.boolean().optional(),
 });
 

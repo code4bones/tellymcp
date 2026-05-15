@@ -162,6 +162,11 @@ export class RedisStateStore
   }
 
   public async clearSession(sessionId: string): Promise<void> {
+    await this.unlinkPartnerSession(sessionId);
+    await this.clearInboxMessages(sessionId);
+    await this.clearXchangeFileMetas(sessionId);
+    await this.clearProjectMenuViewStates(sessionId);
+    await this.clearOutgoingDeliveryNoticesForSession(sessionId);
     await this.sessionAdapter.delete(sessionKey(sessionId));
   }
 
@@ -208,6 +213,7 @@ export class RedisStateStore
   }
 
   public async clearBinding(sessionId: string): Promise<void> {
+    await this.unlinkPartnerSession(sessionId);
     const existing = await this.getBinding(sessionId);
     await this.redis.del(bindingKey(sessionId));
     if (existing) {
@@ -623,5 +629,114 @@ export class RedisStateStore
     }
 
     await this.redis.del(activeKey);
+  }
+
+  private async unlinkPartnerSession(sessionId: string): Promise<void> {
+    const sourceSession = await this.getSession(sessionId);
+    if (!sourceSession?.linkedSessionId) {
+      return;
+    }
+
+    const { linkedSessionId: partnerId } = sourceSession;
+    const { linkedSessionId: _linkedSessionId, ...restSource } = sourceSession;
+    await this.setSession({
+      ...restSource,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const partnerSession = await this.getSession(partnerId);
+    if (!partnerSession || partnerSession.linkedSessionId !== sessionId) {
+      return;
+    }
+
+    const { linkedSessionId: _partnerLinkedSessionId, ...restPartner } =
+      partnerSession;
+    await this.setSession({
+      ...restPartner,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  private async clearInboxMessages(sessionId: string): Promise<void> {
+    const listKey = inboxListKey(sessionId);
+    const messageKeys: string[] = [];
+    let cursor = "0";
+    const pattern = `${KEY_PREFIX}:inbox-message:${sessionId}:*`;
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        pattern,
+        "COUNT",
+        200,
+      );
+      cursor = nextCursor;
+      messageKeys.push(...keys);
+    } while (cursor !== "0");
+
+    if (messageKeys.length > 0) {
+      await this.redis.del(...messageKeys);
+    }
+    await this.redis.del(listKey);
+  }
+
+  private async clearXchangeFileMetas(sessionId: string): Promise<void> {
+    let cursor = "0";
+    const pattern = `${KEY_PREFIX}:xchange-file:${sessionId}:*`;
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        pattern,
+        "COUNT",
+        200,
+      );
+      cursor = nextCursor;
+
+      if (keys.length > 0) {
+        await this.redis.del(...keys);
+      }
+    } while (cursor !== "0");
+  }
+
+  private async clearProjectMenuViewStates(sessionId: string): Promise<void> {
+    let cursor = "0";
+    const pattern = `${KEY_PREFIX}:project-menu-view:*:${sessionId}`;
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        pattern,
+        "COUNT",
+        100,
+      );
+      cursor = nextCursor;
+
+      if (keys.length > 0) {
+        await this.redis.del(...keys);
+      }
+    } while (cursor !== "0");
+  }
+
+  private async clearOutgoingDeliveryNoticesForSession(
+    sessionId: string,
+  ): Promise<void> {
+    const notices = await this.listOutgoingDeliveryNotices();
+    const deliveryUuids = notices
+      .filter((item) => item.sessionId === sessionId)
+      .map((item) => item.deliveryUuid);
+
+    if (deliveryUuids.length === 0) {
+      return;
+    }
+
+    await this.redis.del(
+      ...deliveryUuids.map((deliveryUuid) =>
+        outgoingDeliveryNoticeKey(deliveryUuid),
+      ),
+    );
   }
 }

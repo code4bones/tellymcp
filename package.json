@@ -44,6 +44,7 @@
     "@graphql-tools/schema": "^10.0.33",
     "@hapi/accept": "^6.0.3",
     "@modelcontextprotocol/sdk": "^1.18.1",
+    "amqplib": "^2.0.1",
     "apollo-server-core": "^3.13.0",
     "dataloader": "^2.2.3",
     "dotenv": "^17.4.2",
@@ -77,6 +78,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.34.0",
+    "@types/amqplib": "^0.10.8",
     "@types/mime-types": "^3.0.1",
     "@types/node": "^24.3.0",
     "eslint": "^9.34.0",

@@ -63,6 +63,12 @@ const envSchema = z.object({
   GATEWAY_S3_BUCKET: z.string().min(1).optional(),
   GATEWAY_S3_ACCESS_KEY: z.string().min(1).optional(),
   GATEWAY_S3_SECRET_KEY: z.string().min(1).optional(),
+  RMQ_HOST: z.string().min(1).optional(),
+  RMQ_PORT: z.coerce.number().int().positive().optional(),
+  RMQ_USER: z.string().min(1).optional(),
+  RMQ_PASSWORD: z.string().min(1).optional(),
+  RMQ_VHOST: z.string().optional(),
+  RMQ_EXCHANGE: z.string().min(1).default("telegram_mcp.gateway"),
   WEBAPP_ENABLED: z
     .string()
     .optional()
@@ -175,6 +181,14 @@ export type AppConfig = {
     gatewayS3Bucket?: string;
     gatewayS3AccessKey?: string;
     gatewayS3SecretKey?: string;
+    rmq?: {
+      host: string;
+      port: number;
+      user?: string;
+      password?: string;
+      vhost: string;
+      exchange: string;
+    };
   };
   webapp: {
     enabled: boolean;
@@ -312,6 +326,20 @@ export function loadConfig(): AppConfig {
         : {}),
       ...(parsed.GATEWAY_S3_SECRET_KEY
         ? { gatewayS3SecretKey: parsed.GATEWAY_S3_SECRET_KEY }
+        : {}),
+      ...(parsed.RMQ_HOST
+        ? {
+            rmq: {
+              host: parsed.RMQ_HOST,
+              port: parsed.RMQ_PORT ?? 5672,
+              ...(parsed.RMQ_USER ? { user: parsed.RMQ_USER } : {}),
+              ...(parsed.RMQ_PASSWORD
+                ? { password: parsed.RMQ_PASSWORD }
+                : {}),
+              vhost: parsed.RMQ_VHOST ?? "/",
+              exchange: parsed.RMQ_EXCHANGE,
+            },
+          }
         : {}),
     },
     webapp: {

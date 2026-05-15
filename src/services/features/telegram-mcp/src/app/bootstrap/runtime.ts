@@ -76,6 +76,7 @@ export async function createAppRuntime(input: {
         config.distributed.gatewayDatabaseUrl,
       ),
       gatewayS3Configured: Boolean(config.distributed.gatewayS3Bucket),
+      gatewayRmqConfigured: Boolean(config.distributed.rmq?.host),
     },
     webapp: {
       enabled: config.webapp.enabled,

@@ -409,14 +409,24 @@ export class GatewayHttpService {
           (output as { delivery?: unknown }).delivery &&
           typeof (output as { delivery?: unknown }).delivery === "object"
         ) {
-          await this.callBroker(
-            "telegramMcp.gatewaySocket.notifyDeliveryQueued",
+          const publishResult = await this.callBroker<{ published?: boolean }>(
+            "telegramMcp.gatewayRmq.publishDeliveryQueued",
             {
               clientUuid: (output as { target_client_uuid: string }).target_client_uuid,
               delivery: (output as { delivery: Record<string, unknown> }).delivery,
             },
             { meta: { internal_call: true } },
           );
+          if (!publishResult?.published) {
+            await this.callBroker(
+              "telegramMcp.gatewaySocket.notifyDeliveryQueued",
+              {
+                clientUuid: (output as { target_client_uuid: string }).target_client_uuid,
+                delivery: (output as { delivery: Record<string, unknown> }).delivery,
+              },
+              { meta: { internal_call: true } },
+            );
+          }
         }
         const parsedOutput = sendPartnerNoteOutputSchema.safeParse(output);
         if (!parsedOutput.success) {
@@ -499,8 +509,8 @@ export class GatewayHttpService {
           typeof result.project_uuid === "string" &&
           typeof result.name === "string"
         ) {
-          await this.callBroker(
-            "telegramMcp.gatewaySocket.notifyProjectMemberJoined",
+          const publishResult = await this.callBroker<{ published?: boolean }>(
+            "telegramMcp.gatewayRmq.publishProjectMemberJoined",
             {
               clientUuids: result.notify_client_uuids,
               projectUuid: result.project_uuid,
@@ -516,6 +526,25 @@ export class GatewayHttpService {
             },
             { meta: { internal_call: true } },
           );
+          if (!publishResult?.published) {
+            await this.callBroker(
+              "telegramMcp.gatewaySocket.notifyProjectMemberJoined",
+              {
+                clientUuids: result.notify_client_uuids,
+                projectUuid: result.project_uuid,
+                projectName: result.name,
+                memberDisplayName:
+                  typeof result.member_display_name === "string"
+                    ? result.member_display_name
+                    : undefined,
+                memberTelegramUsername:
+                  typeof result.member_telegram_username === "string"
+                    ? result.member_telegram_username
+                    : undefined,
+              },
+              { meta: { internal_call: true } },
+            );
+          }
         }
         writeJson(res, 200, result);
         return true;
@@ -593,8 +622,8 @@ export class GatewayHttpService {
           typeof result.project_uuid === "string" &&
           typeof result.project_name === "string"
         ) {
-          await this.callBroker(
-            "telegramMcp.gatewaySocket.notifyProjectMemberLeft",
+          const publishResult = await this.callBroker<{ published?: boolean }>(
+            "telegramMcp.gatewayRmq.publishProjectMemberLeft",
             {
               clientUuids: result.notify_client_uuids,
               projectUuid: result.project_uuid,
@@ -610,6 +639,25 @@ export class GatewayHttpService {
             },
             { meta: { internal_call: true } },
           );
+          if (!publishResult?.published) {
+            await this.callBroker(
+              "telegramMcp.gatewaySocket.notifyProjectMemberLeft",
+              {
+                clientUuids: result.notify_client_uuids,
+                projectUuid: result.project_uuid,
+                projectName: result.project_name,
+                memberDisplayName:
+                  typeof result.member_display_name === "string"
+                    ? result.member_display_name
+                    : undefined,
+                memberTelegramUsername:
+                  typeof result.member_telegram_username === "string"
+                    ? result.member_telegram_username
+                    : undefined,
+              },
+              { meta: { internal_call: true } },
+            );
+          }
         }
         writeJson(res, 200, result);
         return true;

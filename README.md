@@ -184,6 +184,7 @@ Current implementation status:
 - `POST /gateway/sessions/register` works
 - `POST /gateway/partner-note` works
 - `ws` control-plane is active
+- optional `RabbitMQ` exchange can be enabled for durable gateway-side event fanout
 - if `GATEWAY_PUBLIC_URL` is configured, partner-note delivery goes through the gateway HTTP surface
 - in `DISTRIBUTED_MODE=both`, this also covers same-bot local delivery transparently
 - remote project messaging and delivery status go through the gateway DB and `ws`
@@ -198,8 +199,10 @@ Mode-specific runtime requirements:
   - no gateway Postgres bootstrap is performed
 - `gateway`
   - Postgres is required for gateway persistence
+  - optional `RMQ_*` enables durable gateway-side event dispatch
 - `both`
   - Postgres is required because the gateway role is active
+  - optional `RMQ_*` enables durable gateway-side event dispatch
 
 Important current limitation:
 

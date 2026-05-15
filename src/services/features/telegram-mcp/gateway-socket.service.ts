@@ -706,10 +706,21 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           if (!status.source_client_uuid) {
             continue;
           }
-          await this.notifyDeliveryStatus?.({
-            clientUuid: status.source_client_uuid,
-            status,
-          });
+          const publishResult = await (this.broker.call as any)(
+            "telegramMcp.gatewayRmq.publishDeliveryStatus",
+            {
+              clientUuid: status.source_client_uuid,
+              status,
+            },
+            { meta: { internal_call: true } },
+          ) as { published?: boolean };
+
+          if (!publishResult?.published) {
+            await this.notifyDeliveryStatus?.({
+              clientUuid: status.source_client_uuid,
+              status,
+            });
+          }
         }
       }
     },

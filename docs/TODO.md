@@ -16,7 +16,7 @@ Current state:
   - `Ask / Share / Reply / Handoff / File`
   - `SHARED_INDEX.md`
   - gateway delivery queue/status/ack/fail
-- Exchange files работают через `vfs + minio`.
+- Exchange files работают напрямую без `vfs + minio`.
 - Доставка файлов между машинами и между локальными сессиями работает.
 
 Current tails:
@@ -25,11 +25,15 @@ Current tails:
   - [x] Поднять базовый `ws` control plane между `client` и `gateway`
   - [x] Перевести `Live relay` с HTTP poll на `ws` request/response
   - [x] Посадить `ws` на общий backend ingress `${ROOT_PREFIX}/gateway/ws`
-  - [ ] Перевести delivery status/update push на `ws`
-  - [ ] Ввести `RabbitMQ` для durable remote delivery:
-    - очередь handoff/messages
+  - [x] Перевести delivery status/update push на `ws`
+  - [x] Ввести базовый `RabbitMQ` для durable gateway-side event fanout:
+    - `delivery.queued`
+    - `delivery.status`
+    - `project.member_joined`
+    - `project.member_left`
+  - [ ] Решить, нужен ли полноценный `RabbitMQ` queue flow для:
     - retry / DLQ
-    - offline client delivery
+    - offline client delivery beyond DB backlog
   - [ ] Оставить `DB` источником истины для:
     - projects
     - sessions

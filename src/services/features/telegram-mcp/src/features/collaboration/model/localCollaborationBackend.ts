@@ -289,6 +289,7 @@ export class LocalCollaborationBackend implements CollaborationBackend {
       sourceSession,
       targetSession,
       sourceWorkspaceDir,
+      targetWorkspaceDir,
       shareId,
       createdAt,
       input.artifacts ?? [],
@@ -410,6 +411,7 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     sourceSession: SessionContext,
     targetSession: SessionContext,
     sourceWorkspaceDir: string,
+    targetWorkspaceDir: string,
     shareId: string,
     uploadedAt: string,
     artifacts: string[],
@@ -445,50 +447,28 @@ export class LocalCollaborationBackend implements CollaborationBackend {
         shareId,
         artifactName,
       ].join("/");
-      let materializedArtifactPath: string;
-
-      if (sourceMeta?.storageRef) {
-        materializedArtifactPath = await this.objectStore.ensureLocalFile({
-          sessionId: targetSession.sessionId,
-          session: targetSession,
-          filePath: artifactPath,
-          relativePath: relativeArtifactPath,
-          storageRef: sourceMeta.storageRef,
-          source: "partner-artifact",
-        });
-      } else {
-        const ensuredArtifactPath = sourceMeta
-          ? await this.objectStore.ensureLocalFile({
-              sessionId: sourceSession.sessionId,
-              session: sourceSession,
-              filePath: artifactPath,
-              relativePath: sourceMeta.relativePath,
-              storageRef: sourceMeta.storageRef,
-              source: sourceMeta.source,
-            })
-          : artifactPath;
-        const content = await readWorkspaceFile(
-          this.config.tmux,
-          sourceWorkspaceDir,
-          ensuredArtifactPath,
-        );
-        const storedArtifact = await this.objectStore.storeFile({
-          session: targetSession,
-          sessionId: targetSession.sessionId,
-          source: "partner-artifact",
-          relativePath: relativeArtifactPath,
-          content,
-          ...(sourceMeta?.mimeType ? { mimeType: sourceMeta.mimeType } : {}),
-        });
-        materializedArtifactPath = await this.objectStore.ensureLocalFile({
-          sessionId: targetSession.sessionId,
-          session: targetSession,
-          filePath: storedArtifact.filePath,
-          relativePath: storedArtifact.relativePath,
-          storageRef: storedArtifact.storageRef,
-          source: "partner-artifact",
-        });
-      }
+      const ensuredArtifactPath = sourceMeta
+        ? await this.objectStore.ensureLocalFile({
+            sessionId: sourceSession.sessionId,
+            session: sourceSession,
+            filePath: artifactPath,
+            relativePath: sourceMeta.relativePath,
+            storageRef: sourceMeta.storageRef,
+            source: sourceMeta.source,
+          })
+        : artifactPath;
+      const content = await readWorkspaceFile(
+        this.config.tmux,
+        sourceWorkspaceDir,
+        ensuredArtifactPath,
+      );
+      const materializedArtifactPath = await writeXchangeRelativeFile(
+        this.config.tmux,
+        targetWorkspaceDir,
+        this.config.exchange.dir,
+        relativeArtifactPath,
+        content,
+      );
       await this.xchangeFileMetaStore.setXchangeFileMeta({
         sessionId: targetSession.sessionId,
         filePath: materializedArtifactPath,
@@ -499,9 +479,6 @@ export class LocalCollaborationBackend implements CollaborationBackend {
           ? { originalName: sourceMeta.originalName }
           : {}),
         ...(sourceMeta?.caption ? { caption: sourceMeta.caption } : {}),
-        ...(sourceMeta?.storageRef ? { storageRef: sourceMeta.storageRef } : {}),
-        ...(sourceMeta?.bucketName ? { bucketName: sourceMeta.bucketName } : {}),
-        ...(sourceMeta?.objectName ? { objectName: sourceMeta.objectName } : {}),
         ...(sourceMeta?.mimeType ? { mimeType: sourceMeta.mimeType } : {}),
         ...(typeof sourceMeta?.sizeBytes === "number"
           ? { sizeBytes: sourceMeta.sizeBytes }

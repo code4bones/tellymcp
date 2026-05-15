@@ -848,6 +848,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
             JSON.stringify({
               file_path: trimOptionalText(artifact.file_path),
               relative_path: trimOptionalText(artifact.relative_path),
+              content_base64: trimOptionalText(artifact.content_base64),
             }),
           ]),
           created_at: now,
@@ -953,6 +954,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
               "size_bytes",
               "storage_ref",
               "relative_path",
+              "meta",
             )
             .orderBy("created_at", "asc")
         : [];
@@ -964,9 +966,12 @@ const TelegramMcpGatewayService: ServiceSchema = {
         size_bytes?: number;
         storage_ref?: string;
         relative_path?: string;
+        content_base64?: string;
       }>>();
 
       for (const artifact of artifactRows) {
+        const meta =
+          artifact.meta && typeof artifact.meta === "object" ? artifact.meta : {};
         const list = artifactsByMessage.get(artifact.message_uuid) ?? [];
         list.push({
           artifact_uuid: artifact.artifact_uuid,
@@ -977,6 +982,11 @@ const TelegramMcpGatewayService: ServiceSchema = {
             : {}),
           ...(artifact.storage_ref ? { storage_ref: artifact.storage_ref } : {}),
           ...(artifact.relative_path ? { relative_path: artifact.relative_path } : {}),
+          ...(typeof (meta as { content_base64?: unknown }).content_base64 === "string"
+            ? {
+                content_base64: (meta as { content_base64: string }).content_base64,
+              }
+            : {}),
         });
         artifactsByMessage.set(artifact.message_uuid, list);
       }

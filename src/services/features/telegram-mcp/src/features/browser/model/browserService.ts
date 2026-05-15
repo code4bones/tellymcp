@@ -665,7 +665,6 @@ export class BrowserService {
       filePath,
       selector: input.selector,
       fullPage: input.full_page === true,
-      storageRef: storedFile.storageRef,
     });
 
     await this.xchangeFileMetaStore.setXchangeFileMeta({
@@ -674,12 +673,6 @@ export class BrowserService {
       relativePath: storedFile.relativePath,
       source: "browser-screenshot",
       uploadedAt: new Date().toISOString(),
-      storageRef: storedFile.storageRef,
-      bucketName: storedFile.bucketName,
-      objectName: storedFile.objectName,
-      vfsNodeId: storedFile.vfsNodeId,
-      vfsPublicUrl: storedFile.vfsPublicUrl,
-      vfsParentId: storedFile.vfsParentId,
       mimeType: "image/png",
       sizeBytes: storedFile.sizeBytes,
       ...(input.caption ? { caption: input.caption } : {}),

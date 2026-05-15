@@ -530,6 +530,7 @@ export const sendPartnerNoteInputSchema = z.object({
         mime_type: z.string().trim().min(1).optional(),
         size_bytes: z.number().int().nonnegative().optional(),
         storage_ref: z.string().trim().min(1).optional(),
+        content_base64: z.string().trim().min(1).optional(),
       }),
     )
     .optional(),

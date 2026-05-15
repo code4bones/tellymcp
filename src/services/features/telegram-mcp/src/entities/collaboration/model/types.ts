@@ -12,6 +12,7 @@ export type PartnerArtifactRef = {
   mime_type?: string | undefined;
   size_bytes?: number | undefined;
   storage_ref?: string | undefined;
+  content_base64?: string | undefined;
 };
 
 export type SendPartnerNoteInput = {

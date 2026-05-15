@@ -29,6 +29,7 @@ type GatewayDeliveryArtifact = {
   size_bytes?: number;
   storage_ref?: string;
   relative_path?: string;
+  content_base64?: string;
 };
 
 type GatewayDelivery = {
@@ -420,14 +421,25 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
                 const relativePath =
                   artifact.relative_path ||
                   `shares/files/${delivery.share_id}/${artifact.original_name}`;
-                const localArtifactPath = await runtime.objectStore.ensureLocalFile({
-                  sessionId: targetSession.sessionId,
-                  session: targetSession,
-                  filePath: artifact.original_name,
-                  relativePath,
-                  storageRef: artifact.storage_ref,
-                  source: "partner-artifact",
-                });
+                let localArtifactPath: string;
+                if (artifact.content_base64) {
+                  localArtifactPath = await writeXchangeRelativeFile(
+                    runtime.config.tmux,
+                    runtime.objectStore.resolveWorkspaceDir(targetSession),
+                    runtime.config.exchange.dir,
+                    relativePath,
+                    Buffer.from(artifact.content_base64, "base64"),
+                  );
+                } else {
+                  localArtifactPath = await runtime.objectStore.ensureLocalFile({
+                    sessionId: targetSession.sessionId,
+                    session: targetSession,
+                    filePath: artifact.original_name,
+                    relativePath,
+                    storageRef: artifact.storage_ref,
+                    source: "partner-artifact",
+                  });
+                }
                 copiedArtifacts.push(localArtifactPath);
                 await runtime.xchangeFileMetaStore.setXchangeFileMeta({
                   sessionId: targetSession.sessionId,
@@ -436,7 +448,6 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
                   source: "partner-artifact",
                   uploadedAt: delivery.created_at,
                   originalName: artifact.original_name,
-                  ...(artifact.storage_ref ? { storageRef: artifact.storage_ref } : {}),
                   ...(artifact.mime_type ? { mimeType: artifact.mime_type } : {}),
                   ...(typeof artifact.size_bytes === "number"
                     ? { sizeBytes: artifact.size_bytes }

@@ -70,6 +70,8 @@ type RuntimeCarrier = Service & {
   pollingEnabled?: boolean;
   runtimeService?: TelegramMcpRuntimeServiceInstance | null;
   getRuntimeOrThrow?: () => ReturnType<TelegramMcpRuntimeServiceInstance["getRuntime"]>;
+  materializeIncomingDelivery?: (delivery: GatewayDelivery) => Promise<void>;
+  applyOutgoingDeliveryStatus?: (status: GatewayDeliveryStatus) => Promise<void>;
   runPollIteration?: () => Promise<void>;
 };
 
@@ -326,6 +328,217 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
       return runtimeService.getRuntime();
     },
 
+    async materializeIncomingDelivery(
+      this: RuntimeCarrier,
+      delivery: GatewayDelivery,
+    ): Promise<void> {
+      const runtime = this.getRuntimeOrThrow?.();
+      if (!runtime) {
+        throw new Error("Runtime is unavailable");
+      }
+
+      const targetSession = await runtime.sessionStore.getSession(
+        delivery.target_local_session_id,
+      );
+      if (!targetSession) {
+        runtime.logger.warn(
+          "Skipping gateway delivery because target local session is not available",
+          {
+            deliveryUuid: delivery.delivery_uuid,
+            targetLocalSessionId: delivery.target_local_session_id,
+          },
+        );
+        return;
+      }
+
+      const targetBinding = await runtime.bindingStore.getBinding(
+        targetSession.sessionId,
+      );
+      if (!targetBinding) {
+        runtime.logger.warn(
+          "Skipping gateway delivery because target session is not paired with Telegram",
+          {
+            deliveryUuid: delivery.delivery_uuid,
+            sessionId: targetSession.sessionId,
+          },
+        );
+        return;
+      }
+
+      const copiedArtifacts: string[] = [];
+      for (const artifact of delivery.artifacts) {
+        const relativePath =
+          artifact.relative_path ||
+          `shares/files/${delivery.share_id}/${artifact.original_name}`;
+        let localArtifactPath: string;
+        if (artifact.content_base64) {
+          localArtifactPath = await writeXchangeRelativeFile(
+            runtime.config.tmux,
+            runtime.objectStore.resolveWorkspaceDir(targetSession),
+            runtime.config.exchange.dir,
+            relativePath,
+            Buffer.from(artifact.content_base64, "base64"),
+          );
+        } else {
+          localArtifactPath = await runtime.objectStore.ensureLocalFile({
+            sessionId: targetSession.sessionId,
+            session: targetSession,
+            filePath: artifact.original_name,
+            relativePath,
+            storageRef: artifact.storage_ref,
+            source: "partner-artifact",
+          });
+        }
+        copiedArtifacts.push(localArtifactPath);
+        await runtime.xchangeFileMetaStore.setXchangeFileMeta({
+          sessionId: targetSession.sessionId,
+          filePath: localArtifactPath,
+          relativePath,
+          source: "partner-artifact",
+          uploadedAt: delivery.created_at,
+          originalName: artifact.original_name,
+          ...(artifact.mime_type ? { mimeType: artifact.mime_type } : {}),
+          ...(typeof artifact.size_bytes === "number"
+            ? { sizeBytes: artifact.size_bytes }
+            : {}),
+        });
+      }
+
+      const noteContent = buildNoteContent({ delivery, copiedArtifacts });
+      const notePath = await writeXchangeRelativeFile(
+        runtime.config.tmux,
+        runtime.objectStore.resolveWorkspaceDir(targetSession),
+        runtime.config.exchange.dir,
+        delivery.note_relative_path,
+        Buffer.from(noteContent, "utf8"),
+      );
+      await runtime.xchangeFileMetaStore.setXchangeFileMeta({
+        sessionId: targetSession.sessionId,
+        filePath: notePath,
+        relativePath: delivery.note_relative_path,
+        source: "partner-artifact",
+        uploadedAt: delivery.created_at,
+        mimeType: "text/markdown",
+        sizeBytes: Buffer.byteLength(noteContent, "utf8"),
+      });
+
+      await writeXchangeRelativeFile(
+        runtime.config.tmux,
+        runtime.objectStore.resolveWorkspaceDir(targetSession),
+        runtime.config.exchange.dir,
+        delivery.share_index_file_name,
+        Buffer.from(
+          `${buildShareIndexLine({
+            delivery,
+            relativeNotePath: delivery.note_relative_path,
+          })}\n`,
+          "utf8",
+        ),
+        { append: true },
+      );
+
+      const inboxMessage: TelegramInboxMessage = {
+        id: createInboxMessageId(new Date(delivery.created_at)),
+        sessionId: targetSession.sessionId,
+        telegramChatId: targetBinding.telegramChatId,
+        telegramUserId: targetBinding.telegramUserId,
+        sourceTelegramMessageId: Date.now(),
+        text: buildPartnerInboxText({
+          delivery,
+          notePath,
+          copiedArtifacts,
+        }),
+        attachments: [notePath, ...copiedArtifacts],
+        receivedAt: delivery.created_at,
+      };
+      await runtime.inboxStore.createInboxMessage(inboxMessage);
+
+      try {
+        await runtime.telegramTransport.sendNotification({
+          sessionId: targetSession.sessionId,
+          ...(targetSession.label ? { sessionLabel: targetSession.label } : {}),
+          recipient: {
+            telegramChatId: targetBinding.telegramChatId,
+            telegramUserId: targetBinding.telegramUserId,
+          },
+          message: buildTelegramDeliveryNotification({
+            delivery,
+            notePath,
+            copiedArtifacts,
+          }),
+        });
+      } catch (error) {
+        runtime.logger.warn(
+          "Failed to send Telegram notification for gateway delivery",
+          {
+            deliveryUuid: delivery.delivery_uuid,
+            sessionId: targetSession.sessionId,
+            error:
+              error instanceof Error ? (error.stack ?? error.message) : String(error),
+          },
+        );
+      }
+
+      runtime.logger.info("Gateway delivery materialized locally", {
+        deliveryUuid: delivery.delivery_uuid,
+        sessionId: targetSession.sessionId,
+        shareId: delivery.share_id,
+        kind: delivery.kind,
+        notePath,
+        copiedArtifacts,
+      });
+    },
+
+    async applyOutgoingDeliveryStatus(
+      this: RuntimeCarrier,
+      status: GatewayDeliveryStatus,
+    ): Promise<void> {
+      if (status.status !== "delivered" && status.status !== "failed") {
+        return;
+      }
+
+      const runtime = this.getRuntimeOrThrow?.();
+      if (!runtime) {
+        throw new Error("Runtime is unavailable");
+      }
+
+      const outgoingNotices =
+        await runtime.maintenanceStore.listOutgoingDeliveryNotices();
+      const notice = outgoingNotices.find(
+        (item) => item.deliveryUuid === status.delivery_uuid,
+      );
+      if (!notice) {
+        return;
+      }
+
+      try {
+        await runtime.telegramTransport.editChatMessage(
+          notice.telegramChatId,
+          notice.telegramMessageId,
+          status.status === "failed"
+            ? buildOutgoingFailedText({ notice, status })
+            : buildOutgoingDeliveredText({ notice, status }),
+        );
+        await runtime.maintenanceStore.deleteOutgoingDeliveryNotice(
+          notice.deliveryUuid,
+        );
+      } catch (error) {
+        runtime.logger.warn(
+          "Failed to update outgoing delivery status message in Telegram",
+          {
+            deliveryUuid: notice.deliveryUuid,
+            sessionId: notice.sessionId,
+            telegramChatId: notice.telegramChatId,
+            telegramMessageId: notice.telegramMessageId,
+            error:
+              error instanceof Error
+                ? (error.stack ?? error.message)
+                : String(error),
+          },
+        );
+      }
+    },
+
     async runPollIteration(this: RuntimeCarrier): Promise<void> {
       if (this.stopRequested || !this.pollingEnabled) {
         return;
@@ -388,149 +601,7 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
 
           for (const delivery of deliveries) {
             try {
-              const targetSession = await runtime.sessionStore.getSession(
-                delivery.target_local_session_id,
-              );
-              if (!targetSession) {
-                runtime.logger.warn(
-                  "Skipping gateway delivery because target local session is not available",
-                  {
-                    deliveryUuid: delivery.delivery_uuid,
-                    targetLocalSessionId: delivery.target_local_session_id,
-                  },
-                );
-                continue;
-              }
-
-              const targetBinding = await runtime.bindingStore.getBinding(
-                targetSession.sessionId,
-              );
-              if (!targetBinding) {
-                runtime.logger.warn(
-                  "Skipping gateway delivery because target session is not paired with Telegram",
-                  {
-                    deliveryUuid: delivery.delivery_uuid,
-                    sessionId: targetSession.sessionId,
-                  },
-                );
-                continue;
-              }
-
-              const copiedArtifacts: string[] = [];
-              for (const artifact of delivery.artifacts) {
-                const relativePath =
-                  artifact.relative_path ||
-                  `shares/files/${delivery.share_id}/${artifact.original_name}`;
-                let localArtifactPath: string;
-                if (artifact.content_base64) {
-                  localArtifactPath = await writeXchangeRelativeFile(
-                    runtime.config.tmux,
-                    runtime.objectStore.resolveWorkspaceDir(targetSession),
-                    runtime.config.exchange.dir,
-                    relativePath,
-                    Buffer.from(artifact.content_base64, "base64"),
-                  );
-                } else {
-                  localArtifactPath = await runtime.objectStore.ensureLocalFile({
-                    sessionId: targetSession.sessionId,
-                    session: targetSession,
-                    filePath: artifact.original_name,
-                    relativePath,
-                    storageRef: artifact.storage_ref,
-                    source: "partner-artifact",
-                  });
-                }
-                copiedArtifacts.push(localArtifactPath);
-                await runtime.xchangeFileMetaStore.setXchangeFileMeta({
-                  sessionId: targetSession.sessionId,
-                  filePath: localArtifactPath,
-                  relativePath,
-                  source: "partner-artifact",
-                  uploadedAt: delivery.created_at,
-                  originalName: artifact.original_name,
-                  ...(artifact.mime_type ? { mimeType: artifact.mime_type } : {}),
-                  ...(typeof artifact.size_bytes === "number"
-                    ? { sizeBytes: artifact.size_bytes }
-                    : {}),
-                });
-              }
-
-              const noteContent = buildNoteContent({ delivery, copiedArtifacts });
-              const notePath = await writeXchangeRelativeFile(
-                runtime.config.tmux,
-                runtime.objectStore.resolveWorkspaceDir(targetSession),
-                runtime.config.exchange.dir,
-                delivery.note_relative_path,
-                Buffer.from(noteContent, "utf8"),
-              );
-              await runtime.xchangeFileMetaStore.setXchangeFileMeta({
-                sessionId: targetSession.sessionId,
-                filePath: notePath,
-                relativePath: delivery.note_relative_path,
-                source: "partner-artifact",
-                uploadedAt: delivery.created_at,
-                mimeType: "text/markdown",
-                sizeBytes: Buffer.byteLength(noteContent, "utf8"),
-              });
-
-              await writeXchangeRelativeFile(
-                runtime.config.tmux,
-                runtime.objectStore.resolveWorkspaceDir(targetSession),
-                runtime.config.exchange.dir,
-                delivery.share_index_file_name,
-                Buffer.from(
-                  `${buildShareIndexLine({
-                    delivery,
-                    relativeNotePath: delivery.note_relative_path,
-                  })}\n`,
-                  "utf8",
-                ),
-                { append: true },
-              );
-
-              const inboxMessage: TelegramInboxMessage = {
-                id: createInboxMessageId(new Date(delivery.created_at)),
-                sessionId: targetSession.sessionId,
-                telegramChatId: targetBinding.telegramChatId,
-                telegramUserId: targetBinding.telegramUserId,
-                sourceTelegramMessageId: Date.now(),
-                text: buildPartnerInboxText({
-                  delivery,
-                  notePath,
-                  copiedArtifacts,
-                }),
-                attachments: [notePath, ...copiedArtifacts],
-                receivedAt: delivery.created_at,
-              };
-              await runtime.inboxStore.createInboxMessage(inboxMessage);
-
-              try {
-                await runtime.telegramTransport.sendNotification({
-                  sessionId: targetSession.sessionId,
-                  ...(targetSession.label
-                    ? { sessionLabel: targetSession.label }
-                    : {}),
-                  recipient: {
-                    telegramChatId: targetBinding.telegramChatId,
-                    telegramUserId: targetBinding.telegramUserId,
-                  },
-                  message: buildTelegramDeliveryNotification({
-                    delivery,
-                    notePath,
-                    copiedArtifacts,
-                  }),
-                });
-              } catch (error) {
-                runtime.logger.warn(
-                  "Failed to send Telegram notification for gateway delivery",
-                  {
-                    deliveryUuid: delivery.delivery_uuid,
-                    sessionId: targetSession.sessionId,
-                    error:
-                      error instanceof Error ? (error.stack ?? error.message) : String(error),
-                  },
-                );
-              }
+              await this.materializeIncomingDelivery?.(delivery);
 
               const ackUrl = new URL(baseUrl);
               ackUrl.pathname = `${ackUrl.pathname}/deliveries/ack`.replace(
@@ -552,15 +623,6 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
                   client_uuid: clientUuid,
                   delivery_ids: [delivery.delivery_uuid],
                 }),
-              });
-
-              runtime.logger.info("Gateway delivery materialized locally", {
-                deliveryUuid: delivery.delivery_uuid,
-                sessionId: targetSession.sessionId,
-                shareId: delivery.share_id,
-                kind: delivery.kind,
-                notePath,
-                copiedArtifacts,
               });
             } catch (error) {
               if (isIrrecoverableDeliveryError(error)) {
@@ -650,33 +712,7 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
               if (!status) {
                 continue;
               }
-
-              try {
-                await runtime.telegramTransport.editChatMessage(
-                  notice.telegramChatId,
-                  notice.telegramMessageId,
-                  status.status === "failed"
-                    ? buildOutgoingFailedText({ notice, status })
-                    : buildOutgoingDeliveredText({ notice, status }),
-                );
-                await runtime.maintenanceStore.deleteOutgoingDeliveryNotice(
-                  notice.deliveryUuid,
-                );
-              } catch (error) {
-                runtime.logger.warn(
-                  "Failed to update outgoing delivery status message in Telegram",
-                  {
-                    deliveryUuid: notice.deliveryUuid,
-                    sessionId: notice.sessionId,
-                    telegramChatId: notice.telegramChatId,
-                    telegramMessageId: notice.telegramMessageId,
-                    error:
-                      error instanceof Error
-                        ? (error.stack ?? error.message)
-                        : String(error),
-                  },
-                );
-              }
+              await this.applyOutgoingDeliveryStatus?.(status);
             }
           }
         } catch (error) {
@@ -705,6 +741,27 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
     },
   },
 
+  actions: {
+    materializeIncomingDelivery: {
+      async handler(
+        this: RuntimeCarrier,
+        ctx: { params: { delivery: GatewayDelivery } },
+      ) {
+        await this.materializeIncomingDelivery?.(ctx.params.delivery);
+        return { ok: true };
+      },
+    },
+    applyOutgoingDeliveryStatus: {
+      async handler(
+        this: RuntimeCarrier,
+        ctx: { params: { status: GatewayDeliveryStatus } },
+      ) {
+        await this.applyOutgoingDeliveryStatus?.(ctx.params.status);
+        return { ok: true };
+      },
+    },
+  },
+
   created(this: RuntimeCarrier) {
     this.stopRequested = false;
     this.pollTickInFlight = null;
@@ -729,6 +786,12 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
     if (!runtime.config.distributed.gatewayPublicUrl) {
       this.logger.info(
         "telegram_mcp gateway delivery polling is disabled because gateway URL is not configured",
+      );
+      return;
+    }
+    if (runtime.config.distributed.gatewayWsUrl) {
+      this.logger.info(
+        "telegram_mcp gateway delivery polling is disabled because WS delivery transport is configured",
       );
       return;
     }

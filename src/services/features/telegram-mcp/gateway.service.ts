@@ -125,6 +125,15 @@ type GatewayServiceCarrier = Service & {
       acked_at?: string;
     }>;
   }>;
+  listSenderDeliveryStatusesRecord?: (input: Record<string, unknown>) => Promise<{
+    deliveries: Array<{
+      delivery_uuid: string;
+      share_id: string;
+      status: string;
+      delivered_at?: string;
+      acked_at?: string;
+    }>;
+  }>;
 };
 
 function trimOptionalText(value: unknown): string | null {
@@ -817,6 +826,15 @@ const TelegramMcpGatewayService: ServiceSchema = {
         ? (input.artifact_refs as PartnerArtifactRef[])
         : [];
       const usedArtifactNames = new Set<string>();
+      const queuedArtifacts: Array<{
+        artifact_uuid: string;
+        original_name: string;
+        mime_type?: string;
+        size_bytes?: number;
+        storage_ref?: string;
+        relative_path: string;
+        content_base64?: string;
+      }> = [];
 
       for (const artifact of artifactRefs) {
         const originalName =
@@ -829,19 +847,35 @@ const TelegramMcpGatewayService: ServiceSchema = {
           path.basename(originalName),
           usedArtifactNames,
         );
-
-        await this.db.withSchema(MCP_SCHEMA).table("gateway_message_artifacts").insert({
+        const mimeType = trimOptionalText(artifact.mime_type) ?? undefined;
+        const storageRef = trimOptionalText(artifact.storage_ref) ?? undefined;
+        const contentBase64 =
+          trimOptionalText(artifact.content_base64) ?? undefined;
+        const queuedArtifact = {
           artifact_uuid: randomUUID(),
-          message_uuid: messageUuid,
           original_name: path.basename(originalName),
-          ...(trimOptionalText(artifact.mime_type)
-            ? { mime_type: trimOptionalText(artifact.mime_type) }
-            : {}),
+          ...(mimeType ? { mime_type: mimeType } : {}),
           ...(typeof artifact.size_bytes === "number"
             ? { size_bytes: artifact.size_bytes }
             : {}),
-          ...(trimOptionalText(artifact.storage_ref)
-            ? { storage_ref: trimOptionalText(artifact.storage_ref) }
+          ...(storageRef ? { storage_ref: storageRef } : {}),
+          relative_path: relativePath,
+          ...(contentBase64 ? { content_base64: contentBase64 } : {}),
+        };
+        queuedArtifacts.push(queuedArtifact);
+
+        await this.db.withSchema(MCP_SCHEMA).table("gateway_message_artifacts").insert({
+          artifact_uuid: queuedArtifact.artifact_uuid,
+          message_uuid: messageUuid,
+          original_name: queuedArtifact.original_name,
+          ...(queuedArtifact.mime_type
+            ? { mime_type: queuedArtifact.mime_type }
+            : {}),
+          ...(typeof queuedArtifact.size_bytes === "number"
+            ? { size_bytes: queuedArtifact.size_bytes }
+            : {}),
+          ...(queuedArtifact.storage_ref
+            ? { storage_ref: queuedArtifact.storage_ref }
             : {}),
           relative_path: relativePath,
           meta: this.db.raw(`?::jsonb`, [
@@ -891,6 +925,36 @@ const TelegramMcpGatewayService: ServiceSchema = {
         ),
         inbox_message_id: deliveryUuid,
         requires_reply: requiresReply,
+        delivery_uuid: deliveryUuid,
+        target_client_uuid: targetSession.client_uuid,
+        delivery: {
+          delivery_uuid: deliveryUuid,
+          message_uuid: messageUuid,
+          share_id: shareId,
+          ...(targetSession.project_name
+            ? { project_name: targetSession.project_name }
+            : {}),
+          source_actor_label:
+            sourceSession.label ?? sourceSession.local_session_id,
+          kind,
+          summary,
+          message,
+          ...(expectedReply ? { expected_reply: expectedReply } : {}),
+          requires_reply: requiresReply,
+          ...(inReplyTo ? { in_reply_to: inReplyTo } : {}),
+          source_session_uuid: sourceSession.session_uuid,
+          source_session_label:
+            sourceSession.label ?? sourceSession.local_session_id,
+          source_local_session_id: sourceSession.local_session_id,
+          target_session_uuid: targetSession.session_uuid,
+          target_local_session_id: targetSession.local_session_id,
+          target_session_label:
+            targetSession.label ?? targetSession.local_session_id,
+          created_at: now,
+          note_relative_path: `shares/${shareId}.md`,
+          share_index_file_name: "SHARED_INDEX.md",
+          artifacts: queuedArtifacts,
+        },
       };
     },
 
@@ -1044,6 +1108,21 @@ const TelegramMcpGatewayService: ServiceSchema = {
         throw new Error("delivery_ids must contain at least one id");
       }
 
+      const rows = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_deliveries as d")
+        .join("gateway_messages as m", "m.message_uuid", "d.message_uuid")
+        .join("gateway_sessions as s_from", "s_from.session_uuid", "m.from_session_uuid")
+        .where("d.target_client_uuid", clientUuid)
+        .whereIn("d.delivery_uuid", deliveryIds)
+        .select(
+          "d.delivery_uuid",
+          "d.delivered_at",
+          "d.acked_at",
+          "s_from.client_uuid as source_client_uuid",
+          this.db.raw(`coalesce(m.meta->>'share_id', '') as share_id`),
+        );
+
       const updated = await this.db
         .withSchema(MCP_SCHEMA)
         .table("gateway_deliveries")
@@ -1054,7 +1133,17 @@ const TelegramMcpGatewayService: ServiceSchema = {
           acked_at: new Date().toISOString(),
         });
 
-      return { acked: updated };
+      return {
+        acked: updated,
+        deliveries: rows.map((row) => ({
+          delivery_uuid: row.delivery_uuid,
+          share_id: String(row.share_id || ""),
+          status: "delivered",
+          source_client_uuid: row.source_client_uuid,
+          ...(row.delivered_at ? { delivered_at: String(row.delivered_at) } : {}),
+          acked_at: new Date().toISOString(),
+        })),
+      };
     },
 
     async failDeliveriesRecord(
@@ -1073,6 +1162,21 @@ const TelegramMcpGatewayService: ServiceSchema = {
         throw new Error("delivery_ids must contain at least one id");
       }
 
+      const rows = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_deliveries as d")
+        .join("gateway_messages as m", "m.message_uuid", "d.message_uuid")
+        .join("gateway_sessions as s_from", "s_from.session_uuid", "m.from_session_uuid")
+        .where("d.target_client_uuid", clientUuid)
+        .whereIn("d.delivery_uuid", deliveryIds)
+        .select(
+          "d.delivery_uuid",
+          "d.delivered_at",
+          "d.acked_at",
+          "s_from.client_uuid as source_client_uuid",
+          this.db.raw(`coalesce(m.meta->>'share_id', '') as share_id`),
+        );
+
       const updated = await this.db
         .withSchema(MCP_SCHEMA)
         .table("gateway_deliveries")
@@ -1084,7 +1188,17 @@ const TelegramMcpGatewayService: ServiceSchema = {
           acked_at: new Date().toISOString(),
         });
 
-      return { failed: updated };
+      return {
+        failed: updated,
+        deliveries: rows.map((row) => ({
+          delivery_uuid: row.delivery_uuid,
+          share_id: String(row.share_id || ""),
+          status: "failed",
+          source_client_uuid: row.source_client_uuid,
+          ...(row.delivered_at ? { delivered_at: String(row.delivered_at) } : {}),
+          acked_at: new Date().toISOString(),
+        })),
+      };
     },
 
     async getDeliveryStatusesRecord(
@@ -1116,6 +1230,44 @@ const TelegramMcpGatewayService: ServiceSchema = {
           "d.acked_at",
           this.db.raw(`coalesce(m.meta->>'share_id', '') as share_id`),
         );
+
+      return {
+        deliveries: rows.map((row) => ({
+          delivery_uuid: row.delivery_uuid,
+          share_id: String(row.share_id || ""),
+          status: row.status,
+          ...(row.delivered_at ? { delivered_at: String(row.delivered_at) } : {}),
+          ...(row.acked_at ? { acked_at: String(row.acked_at) } : {}),
+        })),
+      };
+    },
+
+    async listSenderDeliveryStatusesRecord(
+      this: GatewayServiceCarrier,
+      input: Record<string, unknown>,
+    ) {
+      const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
+      const limit =
+        typeof input.limit === "number" && Number.isFinite(input.limit)
+          ? Math.max(1, Math.min(200, Math.trunc(input.limit)))
+          : 100;
+
+      const rows = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_deliveries as d")
+        .join("gateway_messages as m", "m.message_uuid", "d.message_uuid")
+        .join("gateway_sessions as s_from", "s_from.session_uuid", "m.from_session_uuid")
+        .where("s_from.client_uuid", clientUuid)
+        .whereIn("d.status", ["delivered", "failed"])
+        .select(
+          "d.delivery_uuid",
+          "d.status",
+          "d.delivered_at",
+          "d.acked_at",
+          this.db.raw(`coalesce(m.meta->>'share_id', '') as share_id`),
+        )
+        .orderBy("d.acked_at", "desc")
+        .limit(limit);
 
       return {
         deliveries: rows.map((row) => ({
@@ -1224,6 +1376,14 @@ const TelegramMcpGatewayService: ServiceSchema = {
           throw new Error("Gateway service is disabled in client mode");
         }
         return this.getDeliveryStatusesRecord?.(ctx.params as Record<string, unknown>);
+      },
+    },
+    listSenderDeliveryStatuses: {
+      async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
+        return this.listSenderDeliveryStatusesRecord?.(ctx.params as Record<string, unknown>);
       },
     },
   },

@@ -560,6 +560,24 @@ export class GatewayHttpService {
                   "Gateway partner relay handler is not configured.",
                 );
               })();
+        if (
+          useQueuedGatewayDelivery &&
+          output &&
+          typeof output === "object" &&
+          typeof (output as { target_client_uuid?: unknown }).target_client_uuid ===
+            "string" &&
+          (output as { delivery?: unknown }).delivery &&
+          typeof (output as { delivery?: unknown }).delivery === "object"
+        ) {
+          await this.callBroker(
+            "telegramMcp.gatewaySocket.notifyDeliveryQueued",
+            {
+              clientUuid: (output as { target_client_uuid: string }).target_client_uuid,
+              delivery: (output as { delivery: Record<string, unknown> }).delivery,
+            },
+            { meta: { internal_call: true } },
+          );
+        }
         const parsedOutput = sendPartnerNoteOutputSchema.safeParse(output);
         if (!parsedOutput.success) {
           const fallback = buildPartnerNoteOutputFallback(input, output);
@@ -817,11 +835,31 @@ export class GatewayHttpService {
 
       try {
         const body = (await this.readJsonBody(req)) as Record<string, unknown>;
-        const result = await this.callBroker(
+        const result = await this.callBroker<Record<string, unknown>>(
           "telegramMcp.gateway.ackDeliveries",
           body,
           { meta: { internal_call: true } },
         );
+        if (Array.isArray(result.deliveries)) {
+          for (const status of result.deliveries) {
+            if (
+              !status ||
+              typeof status !== "object" ||
+              typeof (status as { source_client_uuid?: unknown }).source_client_uuid !==
+                "string"
+            ) {
+              continue;
+            }
+            await this.callBroker(
+              "telegramMcp.gatewaySocket.notifyDeliveryStatus",
+              {
+                clientUuid: (status as { source_client_uuid: string }).source_client_uuid,
+                status,
+              },
+              { meta: { internal_call: true } },
+            );
+          }
+        }
         writeJson(res, 200, result);
         return true;
       } catch (error) {
@@ -840,11 +878,31 @@ export class GatewayHttpService {
 
       try {
         const body = (await this.readJsonBody(req)) as Record<string, unknown>;
-        const result = await this.callBroker(
+        const result = await this.callBroker<Record<string, unknown>>(
           "telegramMcp.gateway.failDeliveries",
           body,
           { meta: { internal_call: true } },
         );
+        if (Array.isArray(result.deliveries)) {
+          for (const status of result.deliveries) {
+            if (
+              !status ||
+              typeof status !== "object" ||
+              typeof (status as { source_client_uuid?: unknown }).source_client_uuid !==
+                "string"
+            ) {
+              continue;
+            }
+            await this.callBroker(
+              "telegramMcp.gatewaySocket.notifyDeliveryStatus",
+              {
+                clientUuid: (status as { source_client_uuid: string }).source_client_uuid,
+                status,
+              },
+              { meta: { internal_call: true } },
+            );
+          }
+        }
         writeJson(res, 200, result);
         return true;
       } catch (error) {

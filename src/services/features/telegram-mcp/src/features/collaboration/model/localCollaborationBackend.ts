@@ -385,7 +385,16 @@ export class LocalCollaborationBackend implements CollaborationBackend {
                   : `Получен handoff от ${sourceLabel}.`
                 : `Получено обновление от ${sourceLabel}.`,
         `Сессия: ${sourceLabel} -> ${targetLabel}`,
+        `Тип: ${input.kind}`,
         `Кратко: ${input.summary.trim()}`,
+        ...(copiedArtifacts.length > 0
+          ? [
+              "",
+              `Файлы: ${copiedArtifacts.length}`,
+              ...copiedArtifacts.map((item) => `- ${path.basename(item)}`),
+            ]
+          : []),
+        "",
         `Note: ${notePath}`,
       ].join("\n"),
     });

@@ -75,12 +75,80 @@ type GatewaySocketProjectEvent = {
   };
 };
 
+type GatewaySocketDeliveryArtifact = {
+  artifact_uuid: string;
+  original_name: string;
+  mime_type?: string;
+  size_bytes?: number;
+  storage_ref?: string;
+  relative_path?: string;
+  content_base64?: string;
+};
+
+type GatewaySocketDelivery = {
+  delivery_uuid: string;
+  message_uuid: string;
+  share_id: string;
+  project_name?: string;
+  source_actor_label?: string;
+  kind: string;
+  summary: string;
+  message: string;
+  expected_reply?: string;
+  requires_reply: boolean;
+  in_reply_to?: string;
+  source_session_uuid: string;
+  source_session_label: string;
+  source_local_session_id: string;
+  target_session_uuid: string;
+  target_local_session_id: string;
+  target_session_label: string;
+  created_at: string;
+  note_relative_path: string;
+  share_index_file_name: string;
+  artifacts: GatewaySocketDeliveryArtifact[];
+};
+
+type GatewaySocketDeliveryEvent = {
+  type: "delivery_event";
+  event: "incoming_delivery";
+  payload: GatewaySocketDelivery;
+};
+
+type GatewaySocketDeliveryStatus = {
+  delivery_uuid: string;
+  share_id: string;
+  status: string;
+  delivered_at?: string;
+  acked_at?: string;
+};
+
+type GatewaySocketDeliveryStatusEvent = {
+  type: "delivery_status_event";
+  payload: GatewaySocketDeliveryStatus;
+};
+
+type GatewaySocketDeliveryAck = {
+  type: "delivery_ack";
+  delivery_ids: string[];
+};
+
+type GatewaySocketDeliveryFail = {
+  type: "delivery_fail";
+  delivery_ids: string[];
+  error_text?: string;
+};
+
 type GatewaySocketMessage =
   | GatewaySocketHello
   | GatewaySocketHelloAck
   | GatewaySocketLiveRequest
   | GatewaySocketLiveResponse
-  | GatewaySocketProjectEvent;
+  | GatewaySocketProjectEvent
+  | GatewaySocketDeliveryEvent
+  | GatewaySocketDeliveryStatusEvent
+  | GatewaySocketDeliveryAck
+  | GatewaySocketDeliveryFail;
 
 type LiveRequestPending = {
   clientUuid: string;
@@ -145,6 +213,14 @@ type GatewaySocketCarrier = Service & {
     memberDisplayName?: string;
     memberTelegramUsername?: string;
   }) => Promise<number>;
+  notifyDeliveryQueued?: (params: {
+    clientUuid: string;
+    delivery: GatewaySocketDelivery;
+  }) => Promise<boolean>;
+  notifyDeliveryStatus?: (params: {
+    clientUuid: string;
+    status: GatewaySocketDeliveryStatus;
+  }) => Promise<boolean>;
 };
 
 function normalizeWebSocketUrl(value: string, defaultPath: string): string {
@@ -236,6 +312,30 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         memberTelegramUsername?: string;
       }}) {
         return await this.notifyProjectMemberLeft?.(ctx.params);
+      },
+    },
+    notifyDeliveryQueued: {
+      params: {
+        clientUuid: "string",
+        delivery: { type: "object" },
+      },
+      async handler(
+        this: GatewaySocketCarrier,
+        ctx: { params: { clientUuid: string; delivery: GatewaySocketDelivery } },
+      ) {
+        return await this.notifyDeliveryQueued?.(ctx.params);
+      },
+    },
+    notifyDeliveryStatus: {
+      params: {
+        clientUuid: "string",
+        status: { type: "object" },
+      },
+      async handler(
+        this: GatewaySocketCarrier,
+        ctx: { params: { clientUuid: string; status: GatewaySocketDeliveryStatus } },
+      ) {
+        return await this.notifyDeliveryStatus?.(ctx.params);
       },
     },
   },
@@ -494,6 +594,46 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             connection_id: hello.connection_id,
           } satisfies GatewaySocketHelloAck),
         );
+        if (hello.client_uuid) {
+          const queued = await (this.broker.call as any)(
+            "telegramMcp.gateway.pollDeliveries",
+            {
+              client_uuid: hello.client_uuid,
+              limit: 50,
+            },
+            { meta: { internal_call: true } },
+          ) as { deliveries?: GatewaySocketDelivery[] };
+          for (const delivery of Array.isArray(queued.deliveries)
+            ? queued.deliveries
+            : []) {
+            socket.send(
+              JSON.stringify({
+                type: "delivery_event",
+                event: "incoming_delivery",
+                payload: delivery,
+              } satisfies GatewaySocketDeliveryEvent),
+            );
+          }
+
+          const statuses = await (this.broker.call as any)(
+            "telegramMcp.gateway.listSenderDeliveryStatuses",
+            {
+              client_uuid: hello.client_uuid,
+              limit: 100,
+            },
+            { meta: { internal_call: true } },
+          ) as { deliveries?: GatewaySocketDeliveryStatus[] };
+          for (const status of Array.isArray(statuses.deliveries)
+            ? statuses.deliveries
+            : []) {
+            socket.send(
+              JSON.stringify({
+                type: "delivery_status_event",
+                payload: status,
+              } satisfies GatewaySocketDeliveryStatusEvent),
+            );
+          }
+        }
         return;
       }
 
@@ -520,6 +660,56 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
                 : "Live relay request failed",
             ),
           );
+        }
+        return;
+      }
+
+      if (parsed.type === "delivery_ack" || parsed.type === "delivery_fail") {
+        const hello = this.connectedClients?.get(socket);
+        const clientUuid = hello?.client_uuid?.trim();
+        if (!clientUuid) {
+          throw new Error("Gateway WS delivery update requires hello client_uuid");
+        }
+
+        const deliveryIds = Array.isArray(parsed.delivery_ids)
+          ? parsed.delivery_ids
+              .map((item) =>
+                typeof item === "string" && item.trim() ? item.trim() : null,
+              )
+              .filter((item): item is string => Boolean(item))
+          : [];
+        if (deliveryIds.length === 0) {
+          return;
+        }
+
+        const result = await (this.broker.call as any)(
+          parsed.type === "delivery_ack"
+            ? "telegramMcp.gateway.ackDeliveries"
+            : "telegramMcp.gateway.failDeliveries",
+          {
+            client_uuid: clientUuid,
+            delivery_ids: deliveryIds,
+            ...(parsed.type === "delivery_fail" &&
+            typeof parsed.error_text === "string" &&
+            parsed.error_text.trim()
+              ? { error_text: parsed.error_text.trim() }
+              : {}),
+          },
+          { meta: { internal_call: true } },
+        ) as {
+          deliveries?: Array<GatewaySocketDeliveryStatus & { source_client_uuid?: string }>;
+        };
+
+        for (const status of Array.isArray(result.deliveries)
+          ? result.deliveries
+          : []) {
+          if (!status.source_client_uuid) {
+            continue;
+          }
+          await this.notifyDeliveryStatus?.({
+            clientUuid: status.source_client_uuid,
+            status,
+          });
         }
       }
     },
@@ -571,6 +761,51 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           );
           return;
         }
+      }
+
+      if (parsed.type === "delivery_event") {
+        const delivery = parsed.payload;
+        if (!delivery) {
+          return;
+        }
+        try {
+          await this.broker.call(
+            "telegramMcp.gatewayDelivery.materializeIncomingDelivery",
+            {
+              delivery,
+            },
+            { meta: { internal_call: true } },
+          );
+
+          this.wsClient?.send(
+            JSON.stringify({
+              type: "delivery_ack",
+              delivery_ids: [delivery.delivery_uuid],
+            } satisfies GatewaySocketDeliveryAck),
+          );
+        } catch (error) {
+          this.wsClient?.send(
+            JSON.stringify({
+              type: "delivery_fail",
+              delivery_ids: [delivery.delivery_uuid],
+              error_text:
+                error instanceof Error ? error.message : String(error),
+            } satisfies GatewaySocketDeliveryFail),
+          );
+          throw error;
+        }
+        return;
+      }
+
+      if (parsed.type === "delivery_status_event") {
+        await this.broker.call(
+          "telegramMcp.gatewayDelivery.applyOutgoingDeliveryStatus",
+          {
+            status: parsed.payload,
+          },
+          { meta: { internal_call: true } },
+        );
+        return;
       }
 
       if (parsed.type === "live_request") {
@@ -706,6 +941,49 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       }
 
       return delivered;
+    },
+
+    async notifyDeliveryQueued(
+      this: GatewaySocketCarrier,
+      params: {
+        clientUuid: string;
+        delivery: GatewaySocketDelivery;
+      },
+    ): Promise<boolean> {
+      const socket = this.connectedClientsByUuid?.get(params.clientUuid);
+      if (!socket || socket.readyState !== 1) {
+        return false;
+      }
+
+      socket.send(
+        JSON.stringify({
+          type: "delivery_event",
+          event: "incoming_delivery",
+          payload: params.delivery,
+        } satisfies GatewaySocketDeliveryEvent),
+      );
+      return true;
+    },
+
+    async notifyDeliveryStatus(
+      this: GatewaySocketCarrier,
+      params: {
+        clientUuid: string;
+        status: GatewaySocketDeliveryStatus;
+      },
+    ): Promise<boolean> {
+      const socket = this.connectedClientsByUuid?.get(params.clientUuid);
+      if (!socket || socket.readyState !== 1) {
+        return false;
+      }
+
+      socket.send(
+        JSON.stringify({
+          type: "delivery_status_event",
+          payload: params.status,
+        } satisfies GatewaySocketDeliveryStatusEvent),
+      );
+      return true;
     },
 
     async startGatewayWsServer(this: GatewaySocketCarrier): Promise<void> {

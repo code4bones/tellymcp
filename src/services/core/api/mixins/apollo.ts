@@ -6,7 +6,7 @@ import { ApolloService } from "@src/lib/index";
 import * as scalars from "graphql-scalars";
 import { GraphQLScalarType, Kind } from "graphql";
 
-import { getRedisSID, onBeforeCall, sessionFromRedis, useSessionMiddleware } from "./session";
+// import { getRedisSID, onBeforeCall, sessionFromRedis, useSessionMiddleware } from "./session";
 
 const isPlaygroundRestricted = process.env.RESTRICT_PLAYGROUND === "true";
 const publicApiBase = (process.env.APIS || process.env.ROOT_PREFIX || "/api").replace(/\/$/, "");
@@ -90,7 +90,6 @@ const Apollo = ApolloService({
 		// mappingPolicy: "restrict",
 		authentication: false,
 		authorization: false,
-		use: useSessionMiddleware,
 		callOptions: {
 			timeout: 900000,
 			fallbackResponse() {
@@ -110,42 +109,16 @@ const Apollo = ApolloService({
 			credentials: true,
 			// maxAge: null,
 		},
-
-		onBeforeCall: onBeforeCall(true),
 	},
 
 	serverOptions: {
 		path: `${process.env.ROOT_PREFIX}/graphql`,
 		subscriptions: {
 			async context(this: any, $ctx: any) {
-				const {
-					params: {
-						connectionParams,
-						extra: { request },
-					},
-				} = $ctx;
-
-				const sid = connectionParams.sid || getRedisSID(request);
-				return sessionFromRedis(sid)
-					.then(s => {
-						return s?.user;
-					})
-					.catch(() => null);
+				return {}				
 			},
 			async onConnect(ctx) {
-				const {
-					params: {
-						connectionParams,
-						extra: { request },
-					},
-				} = ctx;
-				const sid = connectionParams.sid || getRedisSID(request);
-				const user = await sessionFromRedis(sid)
-					.then(s => {
-						return s?.user;
-					})
-					.catch(() => null);
-				return { Welcome: "Connected", user };
+				return { Welcome: "Connected", user:{} };
 			},
 		},
 

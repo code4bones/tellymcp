@@ -1,7 +1,6 @@
 import { IncomingHttpHeaders, IncomingMessage, OutgoingMessage } from "http";
 import { Context, Errors } from "moleculer";
 import { ApiRouteSchema } from "moleculer-web";
-import { useSessionMiddleware, onBeforeCall } from "./mixins/session";
 import {
 	TELEGRAM_MCP_HTTP_SERVICE_NAME,
 	type TelegramMcpHttpServiceInstance,
@@ -156,44 +155,9 @@ const routes: ApiRouteSchema[] = [
 		logging: false,
 	},
 	{
-		path: "/mgr/assets",
-		use: useSessionMiddleware,
-		authorization: false,
-		authentication: false,
-		onBeforeCall: onBeforeCall(false),
-		bodyParsers: {
-			json: false,
-			urlencoded: false,
-		},
-		aliases: {
-			"GET /:assetPath(.*)": "api.openWorkbenchAsset",
-		},
-		mappingPolicy: "restrict",
-		logging: true,
-	},
-	{
-		path: "/mgr",
-		use: useSessionMiddleware,
-		authorization: false,
-		authentication: false,
-		onBeforeCall: onBeforeCall(false),
-		bodyParsers: {
-			json: false,
-			urlencoded: false,
-		},
-		aliases: {
-			"GET /": "api.openWorkbench",
-			"GET /:spaPath(.*)": "api.openWorkbench",
-		},
-		mappingPolicy: "restrict",
-		logging: true,
-	},
-	{
 		path: `${rootPrefix}/graphql-assets`,
-		use: useSessionMiddleware,
 		authorization: false,
 		authentication: false,
-		onBeforeCall: onBeforeCall(false),
 		bodyParsers: {
 			json: false,
 			urlencoded: false,
@@ -207,7 +171,6 @@ const routes: ApiRouteSchema[] = [
 	{
 		path: rootPrefix,
 		whitelist: ["**"],
-		use: useSessionMiddleware,
 		mergeParams: true,
 		authentication: false,
 		authorization: false,
@@ -219,7 +182,6 @@ const routes: ApiRouteSchema[] = [
 			res.writeHead(error.code || 500);
 			res.end(JSON.stringify({ error: error.message, code: error.code, type: error.type }));
 		},*/
-		onBeforeCall: onBeforeCall(false),
 		bodyParsers: {
 			json: {
 				strict: false,

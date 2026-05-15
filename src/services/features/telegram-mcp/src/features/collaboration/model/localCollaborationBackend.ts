@@ -193,6 +193,14 @@ function buildNoteContent(input: {
       "You must send a reply via send_partner_note.",
       "Do not stop after local analysis or a chat explanation.",
       "Use the current partner route for the reply.",
+      "",
+      "# Reply Tool Call Example",
+      "send_partner_note(",
+      `  session_id=${JSON.stringify(input.targetSessionId)},`,
+      `  kind=${JSON.stringify("reply")},`,
+      "  summary=\"Короткий итог\",",
+      "  message=\"Подробный ответ\"",
+      ")",
     );
   }
 

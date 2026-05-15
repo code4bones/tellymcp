@@ -516,6 +516,82 @@ export class GatewayHttpService {
       }
     }
 
+    if (pathname === "/gateway/live/request-approval") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const clientUuid =
+          typeof body.client_uuid === "string" ? body.client_uuid.trim() : "";
+        const payload =
+          body.payload && typeof body.payload === "object"
+            ? (body.payload as Record<string, unknown>)
+            : null;
+        if (!clientUuid || !payload) {
+          writeJson(res, 400, { error: "client_uuid and payload are required" });
+          return true;
+        }
+
+        const result = await this.callBroker<{ delivered?: boolean }>(
+          "telegramMcp.gatewaySocket.notifyLiveApprovalRequest",
+          {
+            clientUuid,
+            payload,
+          },
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, { delivered: Boolean(result?.delivered) });
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/live/resolve-approval") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const clientUuid =
+          typeof body.client_uuid === "string" ? body.client_uuid.trim() : "";
+        const approved = body.approved === true;
+        const payload =
+          body.payload && typeof body.payload === "object"
+            ? (body.payload as Record<string, unknown>)
+            : null;
+        if (!clientUuid || !payload) {
+          writeJson(res, 400, { error: "client_uuid and payload are required" });
+          return true;
+        }
+
+        const result = await this.callBroker<{ delivered?: boolean }>(
+          "telegramMcp.gatewaySocket.notifyLiveApprovalResolved",
+          {
+            clientUuid,
+            approved,
+            payload,
+          },
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, { delivered: Boolean(result?.delivered) });
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
     if (pathname === "/gateway/client/register") {
       if (req.method !== "POST") {
         writeText(res, 405, "Method not allowed");

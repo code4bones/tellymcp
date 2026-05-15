@@ -77,15 +77,21 @@ export type TelegramMenuPayloadRecord = {
     | "link-target"
     | "project-entry"
     | "project-member"
+    | "live-approval"
     | "project-file-target"
     | "partner-file-target";
   sessionId: string;
   messageId?: string | undefined;
   filePath?: string | undefined;
   targetSessionId?: string | undefined;
+  sourceSessionId?: string | undefined;
+  sourceSessionLabel?: string | undefined;
+  sourceClientUuid?: string | undefined;
+  sourceLocalSessionId?: string | undefined;
   targetClientUuid?: string | undefined;
   targetLocalSessionId?: string | undefined;
   projectUuid?: string | undefined;
+  projectName?: string | undefined;
   title?: string | undefined;
   createdAt: string;
   expiresAt: string;

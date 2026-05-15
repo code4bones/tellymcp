@@ -41,6 +41,13 @@ import {
   formatTelegramMessage,
   formatTelegramNotification,
 } from "./messageFormat";
+import {
+  isExecutorTargetKind,
+} from "./collabSemantics";
+import {
+  buildPartnerNotePromptText,
+  buildProjectMemberDetailText,
+} from "./collabUi";
 import type { MinioExchangeStore } from "../object-storage/minioExchangeStore";
 import { createTelegramFetch } from "./proxyFetch";
 import {
@@ -98,6 +105,19 @@ type PendingBroadcastRecord = {
   initiatedAt: string;
   promptMessageId?: number;
   menuMessageId?: number;
+};
+
+type LiveApprovalEventPayload = {
+  project_uuid?: string;
+  project_name?: string;
+  source_session_id: string;
+  source_session_label: string;
+  source_client_uuid: string;
+  source_local_session_id: string;
+  target_session_id: string;
+  target_session_label: string;
+  target_client_uuid: string;
+  target_local_session_id: string;
 };
 
 type PendingPartnerNoteRecord = {
@@ -197,10 +217,6 @@ type StoredAttachmentRecord = {
 const LOCAL_INDEX_FILE_NAME = "LOCAL_INDEX.md";
 
 const TMUX_PROXY_STATUS_CACHE_MS = 5000;
-
-function isExecutorTargetKind(kind: PartnerNoteKind): boolean {
-  return kind === "question" || kind === "request";
-}
 
 function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/u, "");
@@ -667,8 +683,14 @@ export class TelegramTransport implements HumanTransport {
     this.bot.callbackQuery(/^project-member-open:(.+)$/u, async (ctx) => {
       await this.handleProjectMemberOpenCallback(ctx);
     });
-    this.bot.callbackQuery(/^project-member-note:(question|reply|handoff|share):(.+)$/u, async (ctx) => {
+    this.bot.callbackQuery(/^project-member-note:(question|share):(.+)$/u, async (ctx) => {
       await this.handleProjectMemberNoteCallback(ctx);
+    });
+    this.bot.callbackQuery(/^project-member-live:(.+)$/u, async (ctx) => {
+      await this.handleProjectMemberLiveCallback(ctx);
+    });
+    this.bot.callbackQuery(/^live-approval:(approve|deny):(.+)$/u, async (ctx) => {
+      await this.handleLiveApprovalCallback(ctx);
     });
     this.bot.callbackQuery(/^project-detail:(.+)$/u, async (ctx) => {
       await this.handleProjectDetailCallback(ctx);
@@ -1275,6 +1297,154 @@ export class TelegramTransport implements HumanTransport {
     }
   }
 
+  public async handleLiveViewApprovalRequestEvent(
+    input: LiveApprovalEventPayload,
+  ): Promise<void> {
+    const targetSession = await this.sessionStore.getSession(
+      input.target_local_session_id,
+    );
+    if (!targetSession) {
+      this.logger.warn("Skipping live approval request because target session is unavailable", {
+        targetLocalSessionId: input.target_local_session_id,
+        sourceLocalSessionId: input.source_local_session_id,
+      });
+      return;
+    }
+
+    const binding = await this.bindingStore.getBinding(targetSession.sessionId);
+    if (!binding) {
+      this.logger.warn("Skipping live approval request because target session is not paired", {
+        sessionId: targetSession.sessionId,
+        sourceLocalSessionId: input.source_local_session_id,
+      });
+      return;
+    }
+
+    const payloadKey = await this.createLiveApprovalMenuPayload({
+      sessionId: targetSession.sessionId,
+      sourceSessionId: input.source_session_id,
+      sourceSessionLabel: input.source_session_label,
+      sourceClientUuid: input.source_client_uuid,
+      sourceLocalSessionId: input.source_local_session_id,
+      targetSessionId: input.target_session_id,
+      targetSessionLabel: input.target_session_label,
+      targetClientUuid: input.target_client_uuid,
+      targetLocalSessionId: input.target_local_session_id,
+      ...(input.project_uuid ? { projectUuid: input.project_uuid } : {}),
+      ...(input.project_name ? { projectName: input.project_name } : {}),
+    });
+
+    const sent = await this.sendChatMessage(
+      binding.telegramChatId,
+      [
+        "🖥 Запрос Live View",
+        "",
+        ...(input.project_name ? [`Проект: ${input.project_name}`] : []),
+        `Сессия: ${input.source_session_label} -> ${input.target_session_label}`,
+        "",
+        `Сессия ${input.source_session_label} запрашивает просмотр Live вашей сессии.`,
+        "Разрешить доступ?",
+      ].join("\n"),
+      {
+        reply_markup: new InlineKeyboard()
+          .text("✅ Разрешить", `live-approval:approve:${payloadKey}`)
+          .text("❌ Отклонить", `live-approval:deny:${payloadKey}`),
+      },
+      {
+        kind: "notification",
+        sessionId: targetSession.sessionId,
+      },
+    );
+
+    this.logger.info("Telegram live approval request delivered", {
+      sessionId: targetSession.sessionId,
+      telegramChatId: binding.telegramChatId,
+      telegramUserId: binding.telegramUserId,
+      messageId: sent.message_id,
+      sourceLocalSessionId: input.source_local_session_id,
+    });
+  }
+
+  public async handleLiveViewApprovalResolvedEvent(
+    input: LiveApprovalEventPayload & { approved: boolean },
+  ): Promise<void> {
+    const sourceSession = await this.sessionStore.getSession(
+      input.source_local_session_id,
+    );
+    if (!sourceSession) {
+      this.logger.warn("Skipping live approval resolution because source session is unavailable", {
+        sourceLocalSessionId: input.source_local_session_id,
+        targetLocalSessionId: input.target_local_session_id,
+      });
+      return;
+    }
+
+    const binding = await this.bindingStore.getBinding(sourceSession.sessionId);
+    if (!binding) {
+      this.logger.warn("Skipping live approval resolution because source session is not paired", {
+        sessionId: sourceSession.sessionId,
+        targetLocalSessionId: input.target_local_session_id,
+      });
+      return;
+    }
+
+    if (!input.approved) {
+      await this.sendNotification({
+        sessionId: sourceSession.sessionId,
+        ...(sourceSession.label ? { sessionLabel: sourceSession.label } : {}),
+        recipient: {
+          telegramChatId: binding.telegramChatId,
+          telegramUserId: binding.telegramUserId,
+        },
+        message: [
+          "🖥 Live View отклонён.",
+          ...(input.project_name ? [`Проект: ${input.project_name}`] : []),
+          `Сессия: ${input.source_session_label} -> ${input.target_session_label}`,
+        ].join("\n"),
+      });
+      return;
+    }
+
+    const liveViewUrl = this.buildLiveViewUrlForSessionTarget({
+      targetSessionId: input.target_session_id,
+      targetClientUuid: input.target_client_uuid,
+      targetLocalSessionId: input.target_local_session_id,
+      sourceClientUuid: input.source_client_uuid,
+    });
+    if (!liveViewUrl) {
+      throw new Error("Unable to build Live View URL for approved request.");
+    }
+
+    const sent = await this.sendChatMessage(
+      binding.telegramChatId,
+      [
+        "🖥 Live View разрешён",
+        "",
+        ...(input.project_name ? [`Проект: ${input.project_name}`] : []),
+        `Сессия: ${input.source_session_label} -> ${input.target_session_label}`,
+        "",
+        "Открой Live по кнопке ниже.",
+      ].join("\n"),
+      {
+        reply_markup: new InlineKeyboard().webApp("Open Live View", liveViewUrl),
+      },
+      {
+        kind: "notification",
+        sessionId: sourceSession.sessionId,
+      },
+    );
+
+    this.webAppLaunchRegistry.set(
+      binding.telegramUserId,
+      sourceSession.sessionId,
+      this.config.webapp.initDataTtlSeconds,
+      {
+        telegramChatId: binding.telegramChatId,
+        telegramMessageId: sent.message_id,
+      },
+    );
+  }
+
   private async sendTextChunks(
     telegramChatId: number,
     text: string,
@@ -1443,6 +1613,20 @@ export class TelegramTransport implements HumanTransport {
         );
       }
     }
+  }
+
+  private async sendChatMessage(
+    telegramChatId: number,
+    text: string,
+    options: TelegramSendMessageOptions,
+    meta: SendMessageMeta,
+  ): Promise<{ message_id: number }> {
+    return this.sendTelegramMessageWithRetry(
+      telegramChatId,
+      text,
+      options,
+      meta,
+    );
   }
 
   public async nudgeSessionInbox(sessionId: string): Promise<void> {
@@ -3311,6 +3495,47 @@ export class TelegramTransport implements HumanTransport {
         ...(options?.targetLocalSessionId
           ? { targetLocalSessionId: options.targetLocalSessionId }
           : {}),
+        createdAt: now.toISOString(),
+        expiresAt: new Date(
+          now.getTime() + this.config.telegram.menuPayloadTtlSeconds * 1000,
+        ).toISOString(),
+      },
+      this.config.telegram.menuPayloadTtlSeconds,
+    );
+
+    return key;
+  }
+
+  private async createLiveApprovalMenuPayload(input: {
+    sessionId: string;
+    sourceSessionId: string;
+    sourceSessionLabel: string;
+    sourceClientUuid: string;
+    sourceLocalSessionId: string;
+    targetSessionId: string;
+    targetSessionLabel: string;
+    targetClientUuid: string;
+    targetLocalSessionId: string;
+    projectUuid?: string;
+    projectName?: string;
+  }): Promise<string> {
+    const key = createMenuPayloadKey();
+    const now = new Date();
+    await this.menuPayloadStore.createMenuPayload(
+      {
+        key,
+        kind: "live-approval",
+        sessionId: input.sessionId,
+        sourceSessionId: input.sourceSessionId,
+        sourceSessionLabel: input.sourceSessionLabel,
+        sourceClientUuid: input.sourceClientUuid,
+        sourceLocalSessionId: input.sourceLocalSessionId,
+        targetSessionId: input.targetSessionId,
+        title: input.targetSessionLabel,
+        targetClientUuid: input.targetClientUuid,
+        targetLocalSessionId: input.targetLocalSessionId,
+        ...(input.projectUuid ? { projectUuid: input.projectUuid } : {}),
+        ...(input.projectName ? { projectName: input.projectName } : {}),
         createdAt: now.toISOString(),
         expiresAt: new Date(
           now.getTime() + this.config.telegram.menuPayloadTtlSeconds * 1000,
@@ -5955,59 +6180,18 @@ export class TelegramTransport implements HumanTransport {
       "напарник";
     const sourceLabel = session?.label ?? sessionId;
     const isProjectTarget = Boolean(target?.projectUuid);
-    const executesOnTarget = isExecutorTargetKind(kind);
-    const kindLabel =
-      kind === "question"
-        ? isProjectTarget
-          ? "Вопрос участнику"
-          : "Вопрос напарнику"
-        : kind === "reply"
-          ? isProjectTarget
-            ? "Ответ участнику"
-            : "Ответ напарнику"
-          : kind === "handoff"
-            ? isProjectTarget
-              ? "Передача участнику"
-              : "Передача напарнику"
-            : isProjectTarget
-              ? "Поделиться с участником"
-              : "Поделиться обновлением";
+    const prompt = buildPartnerNotePromptText({
+      kind,
+      sourceLabel,
+      targetLabel,
+      isProjectTarget,
+    });
+    const kindLabel = prompt.kindLabel;
 
     await ctx.answerCallbackQuery({ text: `${kindLabel}.` });
     const sent = await this.replyText(
       ctx,
-      [
-        `🤝 ${kindLabel}`,
-        "",
-        `Текущая сессия: ${sourceLabel}`,
-        executesOnTarget
-          ? isProjectTarget
-            ? `Исполнитель: ${targetLabel}`
-            : `Напарник: ${targetLabel}`
-          : isProjectTarget
-            ? `Получатель: ${targetLabel}`
-            : `Напарник: ${targetLabel}`,
-        executesOnTarget
-          ? `Ожидаемый ответ: ${targetLabel} -> ${sourceLabel}`
-          : `Маршрут отправки: ${sourceLabel} -> ${targetLabel}`,
-        "",
-        executesOnTarget
-          ? "Отправь следующим сообщением задачу для выбранной сессии."
-          : "Отправь следующим сообщением, чем текущая сессия должна поделиться.",
-        executesOnTarget
-          ? isProjectTarget
-            ? "Агент выбранной сессии получит задачу и сможет отправить результат обратно в текущую сессию проекта."
-            : "Агент напарника получит задачу и сможет отправить результат обратно в текущую сессию."
-          : isProjectTarget
-            ? "Агент текущей сессии получит задачу и сам отправит результат в выбранную сессию проекта."
-            : "Агент текущей сессии получит задачу и сам отправит результат напарнику.",
-        "Формат:",
-        "1. Первая строка = короткое summary",
-        "2. Пустая строка опциональна",
-        "3. Остальной текст = основное сообщение",
-        "",
-        "Команды вроде /menu или /help отменят этот режим.",
-      ].join("\n"),
+      prompt.text,
       { kind: "menu", sessionId },
       {
         reply_markup: new InlineKeyboard().text("Отмена", "partner-note-cancel"),
@@ -6423,17 +6607,11 @@ export class TelegramTransport implements HumanTransport {
         ? await this.ensureGatewayClientUuid(principal, actor)
         : null;
 
-    const text = [
-      "🤝 Сессия проекта",
-      "",
-      `Проект: ${input.projectName}`,
-      `Текущая сессия: ${session?.label ?? input.sessionId}`,
-      `Исполнитель: ${input.targetSessionLabel}`,
-      `Ask: ${input.targetSessionLabel} -> ${session?.label ?? input.sessionId}`,
-      `Share: ${session?.label ?? input.sessionId} -> ${input.targetSessionLabel}`,
-      "",
-      "Выбери тип действия для этой пары сессий.",
-    ].join("\n");
+    const text = buildProjectMemberDetailText({
+      projectName: input.projectName,
+      sourceLabel: session?.label ?? input.sessionId,
+      targetLabel: input.targetSessionLabel,
+    });
 
     const payloadKey = await this.createProjectMemberMenuPayload(
       input.sessionId,
@@ -6449,19 +6627,18 @@ export class TelegramTransport implements HumanTransport {
           : {}),
       },
     );
-    const liveViewUrl = this.buildLiveViewUrlForSessionTarget({
-      targetSessionId: input.targetSessionId,
-      targetClientUuid: input.targetClientUuid,
-      targetLocalSessionId: input.targetLocalSessionId,
-      ...(sourceClientUuid ? { sourceClientUuid } : {}),
-    });
-
     const keyboard = new InlineKeyboard()
       .text("❓ Спросить", `project-member-note:question:${payloadKey}`)
       .text("📤 Поделиться", `project-member-note:share:${payloadKey}`)
       .row();
-    if (liveViewUrl) {
-      keyboard.webApp("🖥 Live", liveViewUrl).row();
+    if (
+      this.config.webapp.enabled &&
+      this.config.distributed.gatewayPublicUrl &&
+      sourceClientUuid &&
+      input.targetClientUuid &&
+      input.targetLocalSessionId
+    ) {
+      keyboard.text("🖥 Live", `project-member-live:${payloadKey}`).row();
     }
     keyboard.text("⬅ К участникам", `project-members:${input.projectUuid}`);
 
@@ -6714,6 +6891,53 @@ export class TelegramTransport implements HumanTransport {
     };
   }
 
+  private async getLiveApprovalPayloadByKey(
+    payloadKey: string,
+  ): Promise<{
+    sessionId: string;
+    sourceSessionId: string;
+    sourceSessionLabel: string;
+    sourceClientUuid: string;
+    sourceLocalSessionId: string;
+    targetSessionId: string;
+    targetSessionLabel: string;
+    targetClientUuid: string;
+    targetLocalSessionId: string;
+    projectUuid?: string;
+    projectName?: string;
+  } | null> {
+    const payload = await this.menuPayloadStore.getMenuPayload(payloadKey);
+    if (
+      !payload ||
+      payload.kind !== "live-approval" ||
+      !payload.sessionId ||
+      !payload.sourceSessionId ||
+      !payload.sourceSessionLabel ||
+      !payload.sourceClientUuid ||
+      !payload.sourceLocalSessionId ||
+      !payload.targetSessionId ||
+      !payload.title ||
+      !payload.targetClientUuid ||
+      !payload.targetLocalSessionId
+    ) {
+      return null;
+    }
+
+    return {
+      sessionId: payload.sessionId,
+      sourceSessionId: payload.sourceSessionId,
+      sourceSessionLabel: payload.sourceSessionLabel,
+      sourceClientUuid: payload.sourceClientUuid,
+      sourceLocalSessionId: payload.sourceLocalSessionId,
+      targetSessionId: payload.targetSessionId,
+      targetSessionLabel: payload.title,
+      targetClientUuid: payload.targetClientUuid,
+      targetLocalSessionId: payload.targetLocalSessionId,
+      ...(payload.projectUuid ? { projectUuid: payload.projectUuid } : {}),
+      ...(payload.projectName ? { projectName: payload.projectName } : {}),
+    };
+  }
+
   private extractCallbackSuffix(
     ctx: TelegramMenuContext,
     prefix: string,
@@ -6850,7 +7074,7 @@ export class TelegramTransport implements HumanTransport {
     ctx: TelegramMenuContext,
   ): Promise<void> {
     const data = ctx.callbackQuery?.data ?? "";
-    const match = data.match(/^project-member-note:(question|reply|handoff|share):(.+)$/u);
+    const match = data.match(/^project-member-note:(question|share):(.+)$/u);
     if (!match) {
       await ctx.answerCallbackQuery({
         text: "Некорректное действие для участника проекта.",
@@ -6883,6 +7107,146 @@ export class TelegramTransport implements HumanTransport {
       targetSessionLabel: payload.targetSessionLabel,
       projectUuid: payload.projectUuid,
     });
+  }
+
+  private async handleProjectMemberLiveCallback(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const payloadKey = this.extractCallbackSuffix(ctx, "project-member-live:");
+    if (!payloadKey) {
+      await ctx.answerCallbackQuery({
+        text: "Некорректные данные Live View.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const payload = await this.getProjectMemberPayloadByKey(payloadKey);
+    if (!payload || !payload.targetClientUuid || !payload.targetLocalSessionId) {
+      await ctx.answerCallbackQuery({
+        text: "Данные Live View некорректны или устарели.",
+        show_alert: true,
+      });
+      await ctx.deleteMessage().catch(() => undefined);
+      return;
+    }
+
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal) {
+      await ctx.answerCallbackQuery({
+        text: "Не удалось определить Telegram пользователя.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const session = await this.sessionStore.getSession(payload.sessionId);
+    const actor = this.getGatewayActorFromContext(ctx);
+    const sourceClientUuid = await this.ensureGatewayClientUuid(principal, actor);
+
+    const result = await this.callGatewayJson<{ delivered?: boolean }>(
+      "/live/request-approval",
+      {
+        client_uuid: payload.targetClientUuid,
+        payload: {
+          ...(payload.projectUuid ? { project_uuid: payload.projectUuid } : {}),
+          ...(payload.projectName ? { project_name: payload.projectName } : {}),
+          source_session_id: payload.sessionId,
+          source_session_label: session?.label ?? payload.sessionId,
+          source_client_uuid: sourceClientUuid,
+          source_local_session_id: payload.sessionId,
+          target_session_id: payload.targetSessionId,
+          target_session_label: payload.targetSessionLabel,
+          target_client_uuid: payload.targetClientUuid,
+          target_local_session_id: payload.targetLocalSessionId,
+        },
+      },
+    );
+
+    await ctx.answerCallbackQuery({
+      text: result?.delivered
+        ? "Запрос на Live отправлен на подтверждение."
+        : "Сессия сейчас недоступна для подтверждения.",
+      ...(result?.delivered ? {} : { show_alert: true }),
+    });
+  }
+
+  private async handleLiveApprovalCallback(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const data = ctx.callbackQuery?.data ?? "";
+    const match = data.match(/^live-approval:(approve|deny):(.+)$/u);
+    if (!match) {
+      await ctx.answerCallbackQuery({
+        text: "Некорректное подтверждение Live View.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const [, decision, payloadKeyRaw] = match;
+    const payloadKey = payloadKeyRaw?.trim();
+    if (!payloadKey) {
+      await ctx.answerCallbackQuery({
+        text: "Некорректные данные подтверждения.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const payload = await this.getLiveApprovalPayloadByKey(payloadKey);
+    if (!payload) {
+      await ctx.answerCallbackQuery({
+        text: "Запрос Live View устарел.",
+        show_alert: true,
+      });
+      await ctx.deleteMessage().catch(() => undefined);
+      return;
+    }
+
+    const approved = decision === "approve";
+    const result = await this.callGatewayJson<{ delivered?: boolean }>(
+      "/live/resolve-approval",
+      {
+        client_uuid: payload.sourceClientUuid,
+        approved,
+        payload: {
+          ...(payload.projectUuid ? { project_uuid: payload.projectUuid } : {}),
+          ...(payload.projectName ? { project_name: payload.projectName } : {}),
+          source_session_id: payload.sourceSessionId,
+          source_session_label: payload.sourceSessionLabel,
+          source_client_uuid: payload.sourceClientUuid,
+          source_local_session_id: payload.sourceLocalSessionId,
+          target_session_id: payload.targetSessionId,
+          target_session_label: payload.targetSessionLabel,
+          target_client_uuid: payload.targetClientUuid,
+          target_local_session_id: payload.targetLocalSessionId,
+        },
+      },
+    );
+
+    await ctx.answerCallbackQuery({
+      text: approved ? "Live View разрешён." : "Live View отклонён.",
+    });
+
+    if (ctx.callbackQuery?.message) {
+      await this.editText(
+        ctx,
+        [
+          approved ? "🖥 Live View разрешён" : "🖥 Live View отклонён",
+          "",
+          ...(payload.projectName ? [`Проект: ${payload.projectName}`] : []),
+          `Сессия: ${payload.sourceSessionLabel} -> ${payload.targetSessionLabel}`,
+          "",
+          result?.delivered
+            ? approved
+              ? "Запросившая сторона получила кнопку для открытия Live."
+              : "Запросившая сторона получила уведомление об отклонении."
+            : "Запросившая сторона сейчас недоступна.",
+        ].join("\n"),
+        { kind: "menu", sessionId: payload.sessionId },
+      );
+    }
   }
 
   private async handleProjectMemberFilesCallback(

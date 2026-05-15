@@ -8,6 +8,7 @@ import type {
   PartnerArtifactRef,
   SendPartnerNoteOutput,
 } from "./src/entities/collaboration/model/types";
+import { resolveGatewayInReplyTo } from "./src/features/distributed-gateway/model/gatewayReplyResolution";
 import { TELEGRAM_MCP_ENSUREDB_SERVICE_NAME } from "./ensuredb.service";
 
 export const TELEGRAM_MCP_GATEWAY_SERVICE_NAME = "telegramMcp.gateway";
@@ -800,32 +801,33 @@ const TelegramMcpGatewayService: ServiceSchema = {
       const messageUuid = randomUUID();
       const deliveryUuid = randomUUID();
       const now = new Date().toISOString();
-      let resolvedInReplyTo: string | null = null;
+      const resolvedInReplyTo = await resolveGatewayInReplyTo(inReplyTo ?? undefined, {
+        findMessageUuidByMessageUuid: async (messageUuid) => {
+          const directReplyTarget = await this.db
+            .withSchema(MCP_SCHEMA)
+            .table("gateway_messages")
+            .where({ message_uuid: messageUuid })
+            .select("message_uuid")
+            .first();
 
-      if (inReplyTo) {
-        const directReplyTarget = await this.db
-          .withSchema(MCP_SCHEMA)
-          .table("gateway_messages")
-          .where({ message_uuid: inReplyTo })
-          .select("message_uuid")
-          .first();
-
-        if (directReplyTarget?.message_uuid) {
-          resolvedInReplyTo = String(directReplyTarget.message_uuid);
-        } else {
+          return directReplyTarget?.message_uuid
+            ? String(directReplyTarget.message_uuid)
+            : undefined;
+        },
+        findMessageUuidByShareId: async (shareId) => {
           const shareReplyTarget = await this.db
             .withSchema(MCP_SCHEMA)
             .table("gateway_messages")
-            .whereRaw("meta->>'share_id' = ?", [inReplyTo])
+            .whereRaw("meta->>'share_id' = ?", [shareId])
             .select("message_uuid")
             .orderBy("created_at", "desc")
             .first();
 
-          if (shareReplyTarget?.message_uuid) {
-            resolvedInReplyTo = String(shareReplyTarget.message_uuid);
-          }
-        }
-      }
+          return shareReplyTarget?.message_uuid
+            ? String(shareReplyTarget.message_uuid)
+            : undefined;
+        },
+      });
 
       await this.db.withSchema(MCP_SCHEMA).table("gateway_messages").insert({
         message_uuid: messageUuid,

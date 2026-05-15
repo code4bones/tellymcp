@@ -118,6 +118,19 @@ function buildNoteContent(input: {
       "Do not rely on linked partner.",
       "Pass target_session_id explicitly.",
       "If possible, also pass in_reply_to=message_uuid.",
+      "",
+      "# Reply Tool Call Example",
+      "send_partner_note(",
+      `  session_id=${JSON.stringify(input.delivery.target_local_session_id)},`,
+      `  target_session_id=${JSON.stringify(input.delivery.source_session_uuid)},`,
+      `  kind=${JSON.stringify("reply")},`,
+      ...(input.delivery.project_uuid
+        ? [`  project_uuid=${JSON.stringify(input.delivery.project_uuid)},`]
+        : []),
+      `  in_reply_to=${JSON.stringify(input.delivery.message_uuid)},`,
+      "  summary=\"Короткий итог\",",
+      "  message=\"Подробный ответ\"",
+      ")",
     );
   }
 

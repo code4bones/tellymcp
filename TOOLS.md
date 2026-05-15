@@ -389,6 +389,8 @@ Reply rule for project asks:
 - if only the note `share_id` is available, gateway now also accepts that value in `in_reply_to`
 - do not use `linked_session_id` for that reply
 - if the note contains an `Action Required` section, treat it as mandatory execution guidance, not as optional commentary
+- do not stop after local analysis when `Action Required` says to reply
+- when `Reply Params` are present, prefer an explicit `send_partner_note(...)` call with those exact values
 
 Canonical example for a project reply:
 
@@ -1008,8 +1010,8 @@ Telegram UI summary:
   - expected reply route is `member -> current session`
   - `Share` creates a task for the current session
   - expected send route is `current session -> member`
-  - `Live` opens the selected member session immediately through the gateway-relayed Mini App path
-  - no remote approval step is currently required
+  - `Live` first sends an approval request to the selected member session
+  - after approval, the requester receives a fresh `Open Live View` button in Telegram
 - partner-note prompt format is:
   - first line = summary
   - optional blank line

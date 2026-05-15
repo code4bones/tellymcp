@@ -407,8 +407,8 @@ Collab project behavior:
   - expected reply route is `member -> current session`
   - `Share` creates a task for the current session
   - expected send route is `current session -> member`
-- `Live` opens the selected member session immediately through the existing webapp relay path
-- no remote approval step is currently required
+- `Live` now uses an approval flow before opening the selected member session
+- after approval, the requester receives a fresh `Open Live View` button through the existing webapp relay path
 - direct file uploads still go to that exact target session when a member screen is open
 - if an old member-menu message becomes stale, clicking it deletes that outdated Telegram message instead of leaving a dead keyboard
 

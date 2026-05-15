@@ -17,6 +17,10 @@ import {
   isTmuxUnavailableError,
   sendAllowedTmuxAction,
 } from "./src/app/webapp/tmux";
+import {
+  hasLocalTargetSession,
+  hasOutgoingDeliveryNotice,
+} from "./gateway-loopback";
 
 const wsLib = require("ws") as {
   WebSocket: new (
@@ -129,6 +133,25 @@ type GatewaySocketDeliveryStatusEvent = {
   payload: GatewaySocketDeliveryStatus;
 };
 
+type GatewaySocketLiveApprovalPayload = {
+  project_uuid?: string;
+  project_name?: string;
+  source_session_id: string;
+  source_session_label: string;
+  source_client_uuid: string;
+  source_local_session_id: string;
+  target_session_id: string;
+  target_session_label: string;
+  target_client_uuid: string;
+  target_local_session_id: string;
+};
+
+type GatewaySocketLiveEvent = {
+  type: "live_event";
+  event: "approval_request" | "approval_granted" | "approval_denied";
+  payload: GatewaySocketLiveApprovalPayload;
+};
+
 type GatewaySocketDeliveryAck = {
   type: "delivery_ack";
   delivery_ids: string[];
@@ -145,6 +168,7 @@ type GatewaySocketMessage =
   | GatewaySocketHelloAck
   | GatewaySocketLiveRequest
   | GatewaySocketLiveResponse
+  | GatewaySocketLiveEvent
   | GatewaySocketProjectEvent
   | GatewaySocketDeliveryEvent
   | GatewaySocketDeliveryStatusEvent
@@ -214,6 +238,15 @@ type GatewaySocketCarrier = Service & {
     memberDisplayName?: string;
     memberTelegramUsername?: string;
   }) => Promise<number>;
+  notifyLiveApprovalRequest?: (params: {
+    clientUuid: string;
+    payload: GatewaySocketLiveApprovalPayload;
+  }) => Promise<boolean>;
+  notifyLiveApprovalResolved?: (params: {
+    clientUuid: string;
+    approved: boolean;
+    payload: GatewaySocketLiveApprovalPayload;
+  }) => Promise<boolean>;
   isLocalGatewayClientUuid?: (clientUuid: string) => Promise<boolean>;
   handleLocalIncomingDelivery?: (params: {
     clientUuid: string;
@@ -322,6 +355,46 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         memberTelegramUsername?: string;
       }}) {
         return await this.notifyProjectMemberLeft?.(ctx.params);
+      },
+    },
+    notifyLiveApprovalRequest: {
+      params: {
+        clientUuid: "string",
+        payload: { type: "object" },
+      },
+      async handler(
+        this: GatewaySocketCarrier,
+        ctx: {
+          params: {
+            clientUuid: string;
+            payload: GatewaySocketLiveApprovalPayload;
+          };
+        },
+      ) {
+        return {
+          delivered: await this.notifyLiveApprovalRequest?.(ctx.params),
+        };
+      },
+    },
+    notifyLiveApprovalResolved: {
+      params: {
+        clientUuid: "string",
+        approved: "boolean",
+        payload: { type: "object" },
+      },
+      async handler(
+        this: GatewaySocketCarrier,
+        ctx: {
+          params: {
+            clientUuid: string;
+            approved: boolean;
+            payload: GatewaySocketLiveApprovalPayload;
+          };
+        },
+      ) {
+        return {
+          delivered: await this.notifyLiveApprovalResolved?.(ctx.params),
+        };
       },
     },
     notifyDeliveryQueued: {
@@ -441,7 +514,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       const localTargetSession = await runtime.sessionStore.getSession(
         params.delivery.target_local_session_id,
       );
-      if (!localTargetSession) {
+      if (!hasLocalTargetSession(localTargetSession)) {
         return false;
       }
 
@@ -527,7 +600,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
     ): Promise<boolean> {
       const runtime = this.getRuntimeOrThrow!();
       const notices = await runtime.maintenanceStore.listOutgoingDeliveryNotices();
-      if (!notices.some((item) => item.deliveryUuid === params.status.delivery_uuid)) {
+      if (!hasOutgoingDeliveryNotice(notices, params.status.delivery_uuid)) {
         return false;
       }
 
@@ -954,6 +1027,25 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         }
       }
 
+      if (parsed.type === "live_event" && parsed.payload) {
+        if (parsed.event === "approval_request") {
+          await runtime.telegramTransport.handleLiveViewApprovalRequestEvent(
+            parsed.payload as GatewaySocketLiveApprovalPayload,
+          );
+          return;
+        }
+        if (
+          parsed.event === "approval_granted" ||
+          parsed.event === "approval_denied"
+        ) {
+          await runtime.telegramTransport.handleLiveViewApprovalResolvedEvent({
+            approved: parsed.event === "approval_granted",
+            ...(parsed.payload as GatewaySocketLiveApprovalPayload),
+          });
+          return;
+        }
+      }
+
       if (parsed.type === "delivery_event") {
         const delivery = parsed.payload;
         if (!delivery) {
@@ -1148,6 +1240,68 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       }
 
       return delivered;
+    },
+
+    async notifyLiveApprovalRequest(
+      this: GatewaySocketCarrier,
+      params: {
+        clientUuid: string;
+        payload: GatewaySocketLiveApprovalPayload;
+      },
+    ): Promise<boolean> {
+      if (await this.isLocalGatewayClientUuid?.(params.clientUuid)) {
+        const runtime = this.getRuntimeOrThrow!();
+        await runtime.telegramTransport.handleLiveViewApprovalRequestEvent(
+          params.payload,
+        );
+        return true;
+      }
+
+      const socket = this.connectedClientsByUuid?.get(params.clientUuid);
+      if (!socket || socket.readyState !== 1) {
+        return false;
+      }
+
+      socket.send(
+        JSON.stringify({
+          type: "live_event",
+          event: "approval_request",
+          payload: params.payload,
+        } satisfies GatewaySocketLiveEvent),
+      );
+      return true;
+    },
+
+    async notifyLiveApprovalResolved(
+      this: GatewaySocketCarrier,
+      params: {
+        clientUuid: string;
+        approved: boolean;
+        payload: GatewaySocketLiveApprovalPayload;
+      },
+    ): Promise<boolean> {
+      if (await this.isLocalGatewayClientUuid?.(params.clientUuid)) {
+        const runtime = this.getRuntimeOrThrow!();
+        await runtime.telegramTransport.handleLiveViewApprovalResolvedEvent({
+          approved: params.approved,
+          ...params.payload,
+        });
+        return true;
+      }
+
+      const socket = this.connectedClientsByUuid?.get(params.clientUuid);
+      if (!socket || socket.readyState !== 1) {
+        return false;
+      }
+
+      socket.send(
+        JSON.stringify({
+          type: "live_event",
+          event: params.approved ? "approval_granted" : "approval_denied",
+          payload: params.payload,
+        } satisfies GatewaySocketLiveEvent),
+      );
+      return true;
     },
 
     async notifyDeliveryQueued(

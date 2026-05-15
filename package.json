@@ -28,8 +28,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "node -e \"console.log('No tests configured yet')\"",
-    "test:watch": "node -e \"console.log('No tests configured yet')\""
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "repository": "gitlab:prj/mcp/telegram_mcp.git",
   "author": "code4bones <p.olesov@code4bones.online>",
@@ -90,6 +90,7 @@
     "tsc-alias": "^1.8.17",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
-    "typescript-eslint": "^8.41.0"
+    "typescript-eslint": "^8.41.0",
+    "vitest": "^4.1.6"
   }
 }

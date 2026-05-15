@@ -59,7 +59,10 @@ const metricsEnabled = process.env.MOLECULER_METRICS === "true";
 const metricsPort = +(process.env.METRICS_PORT || 3030);
 const metricsPath = process.env.METRICS_PATH || "/metrics";
 const logFileEnabled = process.env.LOG_FILE_ENABLED === "true";
-const logFeedEnabled = process.env.LOGFEED_ENABLED !== "false";
+const logFeedEnabled =
+	process.env.ENABLE_LOGFEED != null
+		? !["0", "false", "no", "off"].includes(process.env.ENABLE_LOGFEED.toLowerCase())
+		: process.env.LOGFEED_ENABLED !== "false";
 const logFileFolder = process.env.LOG_FILE_FOLDER || "./logs";
 const logFileName = process.env.LOG_FILE_NAME || "moleculer-{date}.log";
 const logFileRetentionDays = +(process.env.LOG_FILE_RETENTION_DAYS || 14);

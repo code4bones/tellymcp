@@ -85,7 +85,7 @@ Important variables:
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_BOT_USERNAME` optional, used for `https://t.me/<bot>?start=<code>` hints
 - `PROJECT_NAME` optional, used as the preferred default project/session title
-- `TELEGRAM_MENU_PAYLOAD_TTL_SECONDS`
+- `TELEGRAM_MENU_PAYLOAD_TTL_SECONDS` default `300` seconds
 - `TELEGRAM_INBOX_BATCH_SIZE`
 - `PROXY_USE=http|socks5` optional
 - `HTTP_PROXY` required when `PROXY_USE=http`
@@ -111,6 +111,7 @@ Important variables:
 - `GATEWAY_S3_BUCKET`
 - `GATEWAY_S3_ACCESS_KEY`
 - `GATEWAY_S3_SECRET_KEY`
+- `ENABLE_LOGFEED=0` disables logfeed logger noise
 - `WEBAPP_ENABLED=false`
 - `WEBAPP_BASE_PATH=/webapp`
 - `WEBAPP_PUBLIC_URL=https://builder.undoo.ru/webapp` required for Telegram Mini App launcher

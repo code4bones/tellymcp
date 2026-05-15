@@ -26,7 +26,7 @@ const envSchema = z.object({
     .number()
     .int()
     .positive()
-    .default(86400),
+    .default(300),
   REDIS_HOST: z.string().min(1),
   REDIS_PORT: z.coerce.number().int().positive(),
   REDIS_DB: z.coerce.number().int().nonnegative(),

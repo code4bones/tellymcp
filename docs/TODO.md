@@ -23,7 +23,8 @@ Current tails:
 
 - [ ] Переход на `ws + RabbitMQ`:
   - [x] Поднять базовый `ws` control plane между `client` и `gateway`
-  - [ ] Перевести `Live relay` с HTTP poll на `ws` request/response
+  - [x] Перевести `Live relay` с HTTP poll на `ws` request/response
+  - [x] Посадить `ws` на общий backend ingress `${ROOT_PREFIX}/gateway/ws`
   - [ ] Перевести delivery status/update push на `ws`
   - [ ] Ввести `RabbitMQ` для durable remote delivery:
     - очередь handoff/messages

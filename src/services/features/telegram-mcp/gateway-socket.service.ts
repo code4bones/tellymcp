@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import type { IncomingMessage, Server as HttpServer } from "node:http";
+import type { Socket } from "node:net";
 
 import type { Service, ServiceSchema } from "moleculer";
 
@@ -27,6 +29,7 @@ const WebSocketServer = wsLib.WebSocketServer;
 
 export const TELEGRAM_MCP_GATEWAY_SOCKET_SERVICE_NAME =
   "telegramMcp.gatewaySocket";
+const API_SERVICE_NAME = "api";
 
 const CLIENT_RECONNECT_DELAY_MS = 3000;
 const LIVE_REQUEST_TIMEOUT_MS = 20000;
@@ -74,19 +77,28 @@ type LiveRequestPending = {
   timeout: NodeJS.Timeout;
 };
 
+type ApiServiceCarrier = Service & {
+  server?: HttpServer;
+};
+
 type GatewaySocketCarrier = Service & {
   runtimeService?: TelegramMcpRuntimeServiceInstance | null;
+  apiService?: ApiServiceCarrier | null;
   wsServer?: any;
   wsClient?: any;
   wsReconnectTimer?: NodeJS.Timeout | null;
   wsIdentityRefreshTimer?: NodeJS.Timeout | null;
   wsConnectionId?: string | null;
   wsHelloClientUuid?: string | null;
+  wsUpgradeHandler?:
+    | ((req: IncomingMessage, socket: Socket, head: Buffer) => void)
+    | null;
   stopRequested?: boolean;
   connectedClients?: Map<any, GatewaySocketHello>;
   connectedClientsByUuid?: Map<string, any>;
   pendingLiveRequests?: Map<string, LiveRequestPending>;
   getRuntimeOrThrow?: () => ReturnType<TelegramMcpRuntimeServiceInstance["getRuntime"]>;
+  getApiServerOrThrow?: () => HttpServer;
   startGatewayWsServer?: () => Promise<void>;
   startGatewayWsClient?: () => Promise<void>;
   scheduleGatewayWsReconnect?: () => void;
@@ -131,7 +143,7 @@ function formatTmuxRelayError(proxyUrl: string | undefined, error: unknown): str
 
 const TelegramMcpGatewaySocketService: ServiceSchema = {
   name: TELEGRAM_MCP_GATEWAY_SOCKET_SERVICE_NAME,
-  dependencies: [TELEGRAM_MCP_RUNTIME_SERVICE_NAME],
+  dependencies: [TELEGRAM_MCP_RUNTIME_SERVICE_NAME, API_SERVICE_NAME],
 
   actions: {
     requestLiveRelay: {
@@ -167,12 +179,14 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
   created(this: GatewaySocketCarrier) {
     this.runtimeService = null;
+    this.apiService = null;
     this.wsServer = null;
     this.wsClient = null;
     this.wsReconnectTimer = null;
     this.wsIdentityRefreshTimer = null;
     this.wsConnectionId = null;
     this.wsHelloClientUuid = null;
+    this.wsUpgradeHandler = null;
     this.stopRequested = false;
     this.connectedClients = new Map();
     this.connectedClientsByUuid = new Map();
@@ -195,6 +209,21 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
       this.runtimeService = runtimeService;
       return runtimeService.getRuntime();
+    },
+
+    getApiServerOrThrow(this: GatewaySocketCarrier): HttpServer {
+      const apiService =
+        this.apiService ??
+        (this.broker.getLocalService(API_SERVICE_NAME) as ApiServiceCarrier | null);
+
+      if (!apiService?.server) {
+        throw new Error(
+          `Local Moleculer service '${API_SERVICE_NAME}' HTTP server is unavailable`,
+        );
+      }
+
+      this.apiService = apiService;
+      return apiService.server;
     },
 
     async sendClientHello(this: GatewaySocketCarrier, socket: any): Promise<void> {
@@ -514,11 +543,10 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         return;
       }
 
-      const wsServer = new WebSocketServer({
-        host: runtime.config.distributed.gatewayWsBindHost,
-        port: runtime.config.distributed.gatewayWsBindPort,
-        path: runtime.config.distributed.gatewayWsPath,
-      });
+      const httpServer = this.getApiServerOrThrow?.();
+      const wsPath =
+        runtime.config.distributed.gatewayWsPath.replace(/\/+$/u, "") || "/";
+      const wsServer = new WebSocketServer({ noServer: true });
 
       wsServer.on("connection", (socket: any, req: any) => {
         if (runtime.config.distributed.gatewayAuthToken) {
@@ -559,15 +587,29 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         });
       });
 
-      wsServer.on("listening", () => {
-        runtime.logger.info("Gateway WS server started", {
-          host: runtime.config.distributed.gatewayWsBindHost,
-          port: runtime.config.distributed.gatewayWsBindPort,
-          path: runtime.config.distributed.gatewayWsPath,
+      const upgradeHandler = (
+        req: IncomingMessage,
+        socket: Socket,
+        head: Buffer,
+      ) => {
+        const requestUrl = new URL(req.url ?? "/", "http://gateway.local");
+        const requestPath = requestUrl.pathname.replace(/\/+$/u, "") || "/";
+        if (requestPath !== wsPath) {
+          return;
+        }
+
+        wsServer.handleUpgrade(req, socket, head, (clientSocket: any) => {
+          wsServer.emit("connection", clientSocket, req);
         });
-      });
+      };
+
+      httpServer?.on("upgrade", upgradeHandler);
 
       this.wsServer = wsServer;
+      this.wsUpgradeHandler = upgradeHandler;
+      runtime.logger.info("Gateway WS server attached", {
+        path: runtime.config.distributed.gatewayWsPath,
+      });
     },
 
     scheduleGatewayWsReconnect(this: GatewaySocketCarrier): void {
@@ -697,6 +739,11 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       if (this.wsServer) {
         const server = this.wsServer;
         this.wsServer = null;
+        const httpServer = this.apiService?.server;
+        if (httpServer && this.wsUpgradeHandler) {
+          httpServer.removeListener("upgrade", this.wsUpgradeHandler);
+        }
+        this.wsUpgradeHandler = null;
         await new Promise<void>((resolve, reject) => {
           server.close((error: unknown) => {
             if (error) {

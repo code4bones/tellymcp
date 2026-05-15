@@ -70,8 +70,6 @@ export async function createAppRuntime(input: {
       gatewayBindHost: config.distributed.gatewayBindHost,
       gatewayBindPort: config.distributed.gatewayBindPort,
       gatewayWsUrlConfigured: Boolean(config.distributed.gatewayWsUrl),
-      gatewayWsBindHost: config.distributed.gatewayWsBindHost,
-      gatewayWsBindPort: config.distributed.gatewayWsBindPort,
       gatewayWsPath: config.distributed.gatewayWsPath,
       gatewayAuthEnabled: Boolean(config.distributed.gatewayAuthToken),
       gatewayDatabaseConfigured: Boolean(

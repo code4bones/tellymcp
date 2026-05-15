@@ -53,9 +53,10 @@ const envSchema = z.object({
   GATEWAY_BIND_HOST: z.string().min(1).default("127.0.0.1"),
   GATEWAY_BIND_PORT: z.coerce.number().int().positive().default(8790),
   GATEWAY_WS_URL: z.string().url().optional(),
-  GATEWAY_WS_BIND_HOST: z.string().min(1).default("127.0.0.1"),
-  GATEWAY_WS_BIND_PORT: z.coerce.number().int().positive().default(8791),
-  GATEWAY_WS_PATH: z.string().min(1).default("/gateway/ws"),
+  GATEWAY_WS_PATH: z
+    .string()
+    .min(1)
+    .default(`${(process.env.ROOT_PREFIX || "/api").replace(/\/+$/u, "")}/gateway/ws`),
   GATEWAY_AUTH_TOKEN: z.string().min(1).optional(),
   GATEWAY_DATABASE_URL: z.string().min(1).optional(),
   GATEWAY_S3_ENDPOINT: z.string().min(1).optional(),
@@ -167,8 +168,6 @@ export type AppConfig = {
     gatewayBindHost: string;
     gatewayBindPort: number;
     gatewayWsUrl?: string;
-    gatewayWsBindHost: string;
-    gatewayWsBindPort: number;
     gatewayWsPath: string;
     gatewayAuthToken?: string;
     gatewayDatabaseUrl?: string;
@@ -295,8 +294,6 @@ export function loadConfig(): AppConfig {
       ...(parsed.GATEWAY_WS_URL
         ? { gatewayWsUrl: parsed.GATEWAY_WS_URL }
         : {}),
-      gatewayWsBindHost: parsed.GATEWAY_WS_BIND_HOST,
-      gatewayWsBindPort: parsed.GATEWAY_WS_BIND_PORT,
       gatewayWsPath: parsed.GATEWAY_WS_PATH,
       ...(parsed.GATEWAY_AUTH_TOKEN
         ? { gatewayAuthToken: parsed.GATEWAY_AUTH_TOKEN }

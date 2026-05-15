@@ -106,8 +106,6 @@ Important variables:
 - `GATEWAY_BIND_HOST`
 - `GATEWAY_BIND_PORT`
 - `GATEWAY_WS_URL` optional websocket control-plane URL for client mode
-- `GATEWAY_WS_BIND_HOST`
-- `GATEWAY_WS_BIND_PORT`
 - `GATEWAY_WS_PATH`
 - `GATEWAY_AUTH_TOKEN`
 - `GATEWAY_DATABASE_URL`
@@ -118,7 +116,7 @@ Important variables:
 - `ENABLE_LOGFEED=0` disables logfeed logger noise
 - `WEBAPP_ENABLED=false`
 - `WEBAPP_BASE_PATH=/webapp`
-- `WEBAPP_PUBLIC_URL=https://builder.undoo.ru/webapp` required for Telegram Mini App launcher
+- `WEBAPP_PUBLIC_URL=https://builder.undoo.ru/webapp` required for direct Telegram Mini App launcher on gateway/both nodes
 - `WEBAPP_INITDATA_TTL_SECONDS=300`
 - `WEBAPP_SESSION_TTL_SECONDS=900`
 - `WEBAPP_VISIBLE_SCREENS=2`

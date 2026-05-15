@@ -388,6 +388,7 @@ Reply rule for project asks:
 - if `in_reply_to` is available, prefer `Reply message_uuid`
 - if only the note `share_id` is available, gateway now also accepts that value in `in_reply_to`
 - do not use `linked_session_id` for that reply
+- if the note contains an `Action Required` section, treat it as mandatory execution guidance, not as optional commentary
 
 Canonical example for a project reply:
 
@@ -1000,10 +1001,16 @@ Telegram UI summary:
 - `Link` creates a mutual partner relationship between two sessions visible to the same Telegram identity
 - `Local` is the Telegram UI wrapper over same-bot partner collaboration
 - `Collab` is the project-based multi-machine collaboration flow
+- inside `Collab -> Project -> Member`, action semantics differ:
+  - `Ask` sends a task to the selected member session
+  - expected reply route is `member -> current session`
+  - `Share / Reply / Handoff` create a task for the current session
+  - expected send route is `current session -> member`
 - partner-note prompt format is:
   - first line = summary
   - optional blank line
   - remaining text = full message body
+- if an old project-member menu message becomes stale, clicking it deletes that outdated Telegram message
 - partner-note wake-up means:
   - read `.mcp-xchange/SHARED_INDEX.md`
   - then read the newest partner note

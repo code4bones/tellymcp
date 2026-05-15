@@ -76,28 +76,27 @@ function buildNoteContent(input: {
   delivery: GatewayDelivery;
   copiedArtifacts: string[];
 }): string {
-  const lines = [
-    "---",
-    `message_uuid: ${JSON.stringify(input.delivery.message_uuid)}`,
-    `share_id: ${JSON.stringify(input.delivery.share_id)}`,
-    `kind: ${JSON.stringify(input.delivery.kind)}`,
-    `project_uuid: ${input.delivery.project_uuid ? JSON.stringify(input.delivery.project_uuid) : "null"}`,
-    `from_session_id: ${JSON.stringify(input.delivery.source_session_uuid)}`,
-    `from_label: ${JSON.stringify(input.delivery.source_session_label)}`,
-    `to_session_id: ${JSON.stringify(input.delivery.target_session_uuid)}`,
-    `to_label: ${JSON.stringify(input.delivery.target_session_label)}`,
-    `created_at: ${JSON.stringify(input.delivery.created_at)}`,
-    `requires_reply: ${input.delivery.requires_reply ? "true" : "false"}`,
-    `in_reply_to: ${input.delivery.in_reply_to ? JSON.stringify(input.delivery.in_reply_to) : "null"}`,
-    `artifacts:${renderYamlArray(input.copiedArtifacts)}`,
-    "---",
-    "",
-    "# Summary",
-    input.delivery.summary.trim(),
-    "",
-    "# Message",
-    input.delivery.message.trim(),
-  ];
+  const lines = ["---"];
+  lines.push(`message_uuid: ${JSON.stringify(input.delivery.message_uuid)}`);
+  lines.push(`kind: ${JSON.stringify(input.delivery.kind)}`);
+  lines.push(`from_session_id: ${JSON.stringify(input.delivery.source_session_uuid)}`);
+  lines.push(`from_label: ${JSON.stringify(input.delivery.source_session_label)}`);
+  lines.push(`to_session_id: ${JSON.stringify(input.delivery.target_session_uuid)}`);
+  lines.push(`to_label: ${JSON.stringify(input.delivery.target_session_label)}`);
+  lines.push(`created_at: ${JSON.stringify(input.delivery.created_at)}`);
+  if (input.delivery.project_uuid) {
+    lines.push(`project_uuid: ${JSON.stringify(input.delivery.project_uuid)}`);
+  }
+  if (input.delivery.requires_reply) {
+    lines.push("requires_reply: true");
+  }
+  if (input.delivery.in_reply_to) {
+    lines.push(`in_reply_to: ${JSON.stringify(input.delivery.in_reply_to)}`);
+  }
+  if (input.copiedArtifacts.length > 0) {
+    lines.push(`artifacts:${renderYamlArray(input.copiedArtifacts)}`);
+  }
+  lines.push("---", "", "# Summary", input.delivery.summary.trim(), "", "# Message", input.delivery.message.trim());
 
   if (input.delivery.expected_reply?.trim()) {
     lines.push("", "# Expected Reply", input.delivery.expected_reply.trim());
@@ -113,9 +112,12 @@ function buildNoteContent(input: {
         ? [`project_uuid: ${input.delivery.project_uuid}`]
         : []),
       "",
-      "# Reply Instruction",
+      "# Action Required",
+      "You must send a reply via send_partner_note.",
+      "Do not stop after local analysis or a chat explanation.",
       "Do not rely on linked partner.",
-      "Use send_partner_note with the target_session_id above.",
+      "Pass target_session_id explicitly.",
+      "If possible, also pass in_reply_to=message_uuid.",
     );
   }
 
@@ -183,8 +185,9 @@ function buildPartnerInboxText(input: {
           ...(input.delivery.project_uuid
             ? [`Reply project_uuid: ${input.delivery.project_uuid}`]
             : []),
+          "Обязательно отправь reply через send_partner_note.",
+          "Не останавливайся на локальном объяснении.",
           "Не используй linked partner для ответа. Передай эти параметры явно в send_partner_note.",
-          "Когда будешь готов, отправь ответ через send_partner_note.",
         ]
       : []),
   ].join("\n");

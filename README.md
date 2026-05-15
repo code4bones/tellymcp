@@ -401,7 +401,13 @@ Collab project behavior:
 
 - `👥 Collab` is the project-based multi-machine and multi-bot collaboration flow
 - target session is chosen from `Projects -> <project> -> <member>`
-- once a member screen is open, text and file uploads go to that exact target session
+- semantics inside `Project -> Member` depend on the action:
+  - `Ask` sends a task to the selected member session
+  - expected reply route is `member -> current session`
+  - `Share / Reply / Handoff` create a task for the current session
+  - expected send route is `current session -> member`
+- direct file uploads still go to that exact target session when a member screen is open
+- if an old member-menu message becomes stale, clicking it deletes that outdated Telegram message instead of leaving a dead keyboard
 
 Recommended share-note structure:
 

@@ -6709,6 +6709,7 @@ export class TelegramTransport implements HumanTransport {
         text: "Данные участника проекта некорректны или устарели.",
         show_alert: true,
       });
+      await ctx.deleteMessage().catch(() => undefined);
       return;
     }
 
@@ -6755,6 +6756,7 @@ export class TelegramTransport implements HumanTransport {
         text: "Данные участника проекта некорректны или устарели.",
         show_alert: true,
       });
+      await ctx.deleteMessage().catch(() => undefined);
       return;
     }
 
@@ -6783,6 +6785,7 @@ export class TelegramTransport implements HumanTransport {
         text: "Данные участника проекта некорректны или устарели.",
         show_alert: true,
       });
+      await ctx.deleteMessage().catch(() => undefined);
       return;
     }
 

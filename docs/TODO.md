@@ -63,6 +63,7 @@ Current tails:
   - `Create / Join project`
   - `Members`
   - `Ask / Share / Reply / Handoff`
+  - `Ask -> reply` с `Reply message_uuid` / `in_reply_to`
   - `File`
   - sender status:
     - `⏳`

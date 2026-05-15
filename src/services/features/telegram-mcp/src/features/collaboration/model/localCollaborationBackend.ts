@@ -164,29 +164,36 @@ function buildNoteContent(input: {
   message: string;
   expectedReply?: string | undefined;
 }): string {
-  const lines = [
-    "---",
-    `share_id: ${JSON.stringify(input.shareId)}`,
-    `kind: ${JSON.stringify(input.kind)}`,
-    `from_session_id: ${JSON.stringify(input.sourceSessionId)}`,
-    `from_label: ${JSON.stringify(input.sourceLabel)}`,
-    `to_session_id: ${JSON.stringify(input.targetSessionId)}`,
-    `to_label: ${JSON.stringify(input.targetLabel)}`,
-    `created_at: ${JSON.stringify(input.createdAt)}`,
-    `requires_reply: ${input.requiresReply ? "true" : "false"}`,
-    `in_reply_to: ${input.inReplyTo ? JSON.stringify(input.inReplyTo) : "null"}`,
-    `artifacts:${renderYamlArray(input.copiedArtifacts)}`,
-    "---",
-    "",
-    "# Summary",
-    input.summary.trim(),
-    "",
-    "# Message",
-    input.message.trim(),
-  ];
+  const lines = ["---"];
+  lines.push(`kind: ${JSON.stringify(input.kind)}`);
+  lines.push(`from_session_id: ${JSON.stringify(input.sourceSessionId)}`);
+  lines.push(`from_label: ${JSON.stringify(input.sourceLabel)}`);
+  lines.push(`to_session_id: ${JSON.stringify(input.targetSessionId)}`);
+  lines.push(`to_label: ${JSON.stringify(input.targetLabel)}`);
+  lines.push(`created_at: ${JSON.stringify(input.createdAt)}`);
+  if (input.requiresReply) {
+    lines.push("requires_reply: true");
+  }
+  if (input.inReplyTo) {
+    lines.push(`in_reply_to: ${JSON.stringify(input.inReplyTo)}`);
+  }
+  if (input.copiedArtifacts.length > 0) {
+    lines.push(`artifacts:${renderYamlArray(input.copiedArtifacts)}`);
+  }
+  lines.push("---", "", "# Summary", input.summary.trim(), "", "# Message", input.message.trim());
 
   if (input.expectedReply?.trim()) {
     lines.push("", "# Expected Reply", input.expectedReply.trim());
+  }
+
+  if (input.requiresReply) {
+    lines.push(
+      "",
+      "# Action Required",
+      "You must send a reply via send_partner_note.",
+      "Do not stop after local analysis or a chat explanation.",
+      "Use the current partner route for the reply.",
+    );
   }
 
   if (input.copiedArtifacts.length > 0) {

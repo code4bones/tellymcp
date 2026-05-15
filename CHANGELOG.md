@@ -72,6 +72,10 @@
   - больше нет `cron`
   - больше нет `poll/respond/status` HTTP fallback path
   - основной transport теперь `ws`
+- Для `Collab -> Project -> Member` уточнена семантика действий:
+  - `Ask` адресуется выбранной сессии
+  - `Share / Reply / Handoff` ставят задачу текущей сессии отправить результат в выбранную
+  - file upload в member screen остаётся прямой доставкой в target session
 
 ### Fixed
 - Исправлен `Headers have already sent` при работе MCP/WebApp через `moleculer-web`.
@@ -97,3 +101,8 @@
   - ошибки чтения и resolve теперь обрабатываются явно
 - Исправлены sender-side/receiver-side статусы и сообщения по remote file exchange.
 - Исправлены временные синтаксические и debug-хвосты в Mini App `Live` relay shell.
+- Исправлен project reply path:
+  - gateway теперь принимает `in_reply_to` как `message_uuid` или как note `share_id`
+  - во входящих notes/уведомлениях добавлены `Reply Params` и `Reply message_uuid`
+- Исправлен loopback delivery для режима `both` на gateway-машине.
+- Устаревшие Telegram member-menu сообщения теперь удаляются при клике по stale payload.

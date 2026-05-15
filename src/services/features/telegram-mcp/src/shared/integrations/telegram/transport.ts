@@ -7021,6 +7021,17 @@ export class TelegramTransport implements HumanTransport {
     };
 
     await this.inboxStore.createInboxMessage(inboxMessage);
+    try {
+      await this.nudgeSessionInbox(input.sessionId);
+    } catch (error) {
+      this.logger.warn("tmux nudge failed after local agent handoff", {
+        sessionId: input.sessionId,
+        handoffId,
+        filePath: ensuredFilePath,
+        error:
+          error instanceof Error ? (error.stack ?? error.message) : String(error),
+      });
+    }
   }
 
   private async deliverFileToPartner(input: {

@@ -398,6 +398,19 @@ export class LocalCollaborationBackend implements CollaborationBackend {
         `Note: ${notePath}`,
       ].join("\n"),
     });
+    try {
+      await this.telegramTransport.nudgeSessionPartnerNote(
+        targetSession.sessionId,
+      );
+    } catch (error) {
+      this.logger.warn("tmux nudge failed after local partner delivery", {
+        sessionId: targetSession.sessionId,
+        partnerSessionId: sourceSession.sessionId,
+        shareId,
+        error:
+          error instanceof Error ? (error.stack ?? error.message) : String(error),
+      });
+    }
 
     this.logger.info("Partner note delivered through local backend", {
       sessionId: sourceSession.sessionId,

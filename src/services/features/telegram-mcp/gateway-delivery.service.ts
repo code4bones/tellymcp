@@ -416,6 +416,18 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
           },
         );
       }
+      try {
+        await runtime.telegramTransport.nudgeSessionPartnerNote(
+          targetSession.sessionId,
+        );
+      } catch (error) {
+        runtime.logger.warn("Failed to nudge tmux after gateway delivery", {
+          deliveryUuid: delivery.delivery_uuid,
+          sessionId: targetSession.sessionId,
+          error:
+            error instanceof Error ? (error.stack ?? error.message) : String(error),
+        });
+      }
 
       runtime.logger.info("Gateway delivery materialized locally", {
         deliveryUuid: delivery.delivery_uuid,

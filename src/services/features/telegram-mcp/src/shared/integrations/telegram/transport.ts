@@ -6419,9 +6419,7 @@ export class TelegramTransport implements HumanTransport {
     const session = await this.sessionStore.getSession(input.sessionId);
     const actor = this.getGatewayActorFromContext(ctx);
     const sourceClientUuid =
-      this.config.distributed.mode === "client" &&
-      this.config.distributed.gatewayPublicUrl &&
-      principal
+      this.config.distributed.gatewayPublicUrl && principal
         ? await this.ensureGatewayClientUuid(principal, actor)
         : null;
 

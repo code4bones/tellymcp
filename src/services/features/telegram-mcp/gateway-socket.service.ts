@@ -597,6 +597,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
         if (request.request_type === "bootstrap") {
           const payload = request.payload ?? {};
+          const allowForeignBinding = payload.allowForeignBinding === true;
           const trustedTelegramUserId =
             typeof payload.telegramUserId === "number"
               ? payload.telegramUserId
@@ -640,7 +641,10 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           }
 
           const binding = await runtime.bindingStore.getBinding(sessionId);
-          if (!binding || binding.telegramUserId !== telegramUserId) {
+          if (
+            !allowForeignBinding &&
+            (!binding || binding.telegramUserId !== telegramUserId)
+          ) {
             throw new Error(
               "This Telegram user is not bound to the requested session.",
             );

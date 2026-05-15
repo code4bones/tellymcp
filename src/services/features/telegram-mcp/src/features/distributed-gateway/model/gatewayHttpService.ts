@@ -202,6 +202,7 @@ export class GatewayHttpService {
     clientUuid: string;
     localSessionId: string;
     telegramUserId?: number;
+    allowForeignBinding?: boolean;
     initDataRaw: string;
     initDataUnsafe: TelegramWebAppInitDataUnsafe;
   }): Promise<LiveRelayBootstrapResult> {
@@ -209,11 +210,12 @@ export class GatewayHttpService {
       typeof input.telegramUserId === "number"
         ? {
             telegramUserId: input.telegramUserId,
+            ...(input.allowForeignBinding ? { allowForeignBinding: true } : {}),
           }
         : {
             initDataRaw: input.initDataRaw,
             initDataUnsafe: input.initDataUnsafe,
-          };
+        };
     const rawResponse = await this.callBroker<LiveRelayBootstrapResult>(
       "telegramMcp.gatewaySocket.requestLiveRelay",
       {

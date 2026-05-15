@@ -393,6 +393,10 @@ export function createMcpHttpHandler(
                 ...(trustedTelegramUserId !== null
                   ? { telegramUserId: trustedTelegramUserId }
                   : {}),
+                ...(relayTarget.sourceClientUuid &&
+                relayTarget.sourceClientUuid !== relayTarget.clientUuid
+                  ? { allowForeignBinding: true }
+                  : {}),
                 initDataRaw,
                 initDataUnsafe,
               });

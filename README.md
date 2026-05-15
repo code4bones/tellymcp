@@ -105,6 +105,10 @@ Important variables:
 - `GATEWAY_PUBLIC_URL` optional relay URL for client mode; if set, partner-note delivery goes through the gateway HTTP surface
 - `GATEWAY_BIND_HOST`
 - `GATEWAY_BIND_PORT`
+- `GATEWAY_WS_URL` optional websocket control-plane URL for client mode
+- `GATEWAY_WS_BIND_HOST`
+- `GATEWAY_WS_BIND_PORT`
+- `GATEWAY_WS_PATH`
 - `GATEWAY_AUTH_TOKEN`
 - `GATEWAY_DATABASE_URL`
 - `GATEWAY_S3_ENDPOINT`
@@ -183,6 +187,7 @@ Current implementation status:
 - `POST /gateway/partner-note` works
 - `POST /gateway/live/poll` works
 - `POST /gateway/live/respond` works
+- base `ws` control-plane scaffold is started
 - if `GATEWAY_PUBLIC_URL` is configured, partner-note delivery goes through the gateway HTTP surface
 - in `DISTRIBUTED_MODE=both`, this also covers same-bot local delivery transparently
 - remote project messaging and delivery status through the gateway DB are implemented

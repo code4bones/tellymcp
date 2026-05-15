@@ -260,6 +260,9 @@ const TelegramMcpGatewayLiveService: ServiceSchema = {
         if (!runtime?.config.distributed.gatewayPublicUrl) {
           return;
         }
+        if (runtime.config.distributed.gatewayWsUrl) {
+          return;
+        }
 
         try {
           const clientUuid = await runtime.maintenanceStore.getGatewayClientUuid();
@@ -395,6 +398,7 @@ const TelegramMcpGatewayLiveService: ServiceSchema = {
     const runtime = this.getRuntimeOrThrow?.();
     this.pollingEnabled = Boolean(
       runtime?.config.distributed.gatewayPublicUrl &&
+        !runtime.config.distributed.gatewayWsUrl &&
         (runtime.config.distributed.mode === "client" ||
           runtime.config.distributed.mode === "both"),
     );

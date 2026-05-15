@@ -21,6 +21,20 @@ Current state:
 
 Current tails:
 
+- [ ] Переход на `ws + RabbitMQ`:
+  - [x] Поднять базовый `ws` control plane между `client` и `gateway`
+  - [ ] Перевести `Live relay` с HTTP poll на `ws` request/response
+  - [ ] Перевести delivery status/update push на `ws`
+  - [ ] Ввести `RabbitMQ` для durable remote delivery:
+    - очередь handoff/messages
+    - retry / DLQ
+    - offline client delivery
+  - [ ] Оставить `DB` источником истины для:
+    - projects
+    - sessions
+    - deliveries
+    - statuses
+
 - [x] Gateway-relayed `Live View` реализован:
   - Mini App открывается через домен gateway
   - клиентской машине не нужен собственный публичный домен

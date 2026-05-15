@@ -249,14 +249,15 @@ export class GatewayHttpService {
     initDataRaw: string;
     initDataUnsafe: TelegramWebAppInitDataUnsafe;
   }): Promise<LiveRelayBootstrapResult> {
-    const response = await this.enqueueLiveRelayRequest<LiveRelayBootstrapResult>({
+    const payload = {
+      initDataRaw: input.initDataRaw,
+      initDataUnsafe: input.initDataUnsafe,
+    };
+    const response = await this.requestLiveRelayWithFallback<LiveRelayBootstrapResult>({
       clientUuid: input.clientUuid,
       localSessionId: input.localSessionId,
       type: "bootstrap",
-      payload: {
-        initDataRaw: input.initDataRaw,
-        initDataUnsafe: input.initDataUnsafe,
-      },
+      payload,
     });
 
     if (
@@ -276,7 +277,7 @@ export class GatewayHttpService {
     clientUuid: string;
     localSessionId: string;
   }): Promise<LiveRelayViewResult> {
-    const response = await this.enqueueLiveRelayRequest<LiveRelayViewResult>({
+    const response = await this.requestLiveRelayWithFallback<LiveRelayViewResult>({
       clientUuid: input.clientUuid,
       localSessionId: input.localSessionId,
       type: "view",
@@ -299,7 +300,7 @@ export class GatewayHttpService {
     localSessionId: string;
     action: "up" | "down" | "enter" | "slash" | "delete";
   }): Promise<LiveRelayActionResult> {
-    const response = await this.enqueueLiveRelayRequest<LiveRelayActionResult>({
+    const response = await this.requestLiveRelayWithFallback<LiveRelayActionResult>({
       clientUuid: input.clientUuid,
       localSessionId: input.localSessionId,
       type: "action",
@@ -317,6 +318,37 @@ export class GatewayHttpService {
     }
 
     return response;
+  }
+
+  private async requestLiveRelayWithFallback<T>(input: {
+    clientUuid: string;
+    localSessionId: string;
+    type: LiveRelayRequestType;
+    payload: Record<string, unknown>;
+  }): Promise<T> {
+    try {
+      return await this.callBroker<T>(
+        "telegramMcp.gatewaySocket.requestLiveRelay",
+        {
+          clientUuid: input.clientUuid,
+          localSessionId: input.localSessionId,
+          requestType: input.type,
+          payload: input.payload,
+        },
+        { meta: { internal_call: true } },
+      );
+    } catch (error) {
+      if (this.config.logging.level === "debug" || this.config.logging.level === "trace") {
+        console.debug("Falling back to HTTP live relay queue", {
+          clientUuid: input.clientUuid,
+          localSessionId: input.localSessionId,
+          requestType: input.type,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      return await this.enqueueLiveRelayRequest<T>(input);
+    }
   }
 
   private isAuthorized(req: IncomingMessage): boolean {

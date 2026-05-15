@@ -800,6 +800,32 @@ const TelegramMcpGatewayService: ServiceSchema = {
       const messageUuid = randomUUID();
       const deliveryUuid = randomUUID();
       const now = new Date().toISOString();
+      let resolvedInReplyTo: string | null = null;
+
+      if (inReplyTo) {
+        const directReplyTarget = await this.db
+          .withSchema(MCP_SCHEMA)
+          .table("gateway_messages")
+          .where({ message_uuid: inReplyTo })
+          .select("message_uuid")
+          .first();
+
+        if (directReplyTarget?.message_uuid) {
+          resolvedInReplyTo = String(directReplyTarget.message_uuid);
+        } else {
+          const shareReplyTarget = await this.db
+            .withSchema(MCP_SCHEMA)
+            .table("gateway_messages")
+            .whereRaw("meta->>'share_id' = ?", [inReplyTo])
+            .select("message_uuid")
+            .orderBy("created_at", "desc")
+            .first();
+
+          if (shareReplyTarget?.message_uuid) {
+            resolvedInReplyTo = String(shareReplyTarget.message_uuid);
+          }
+        }
+      }
 
       await this.db.withSchema(MCP_SCHEMA).table("gateway_messages").insert({
         message_uuid: messageUuid,
@@ -810,7 +836,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
         summary,
         body: message,
         ...(expectedReply ? { expected_reply: expectedReply } : {}),
-        ...(inReplyTo ? { in_reply_to: inReplyTo } : {}),
+        ...(resolvedInReplyTo ? { in_reply_to: resolvedInReplyTo } : {}),
         requires_reply: requiresReply,
         meta: this.db.raw(`?::jsonb`, [JSON.stringify({ share_id: shareId })]),
         created_at: now,
@@ -935,7 +961,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
           message,
           ...(expectedReply ? { expected_reply: expectedReply } : {}),
           requires_reply: requiresReply,
-          ...(inReplyTo ? { in_reply_to: inReplyTo } : {}),
+          ...(resolvedInReplyTo ? { in_reply_to: resolvedInReplyTo } : {}),
           source_session_uuid: sourceSession.session_uuid,
           source_session_label:
             sourceSession.label ?? sourceSession.local_session_id,

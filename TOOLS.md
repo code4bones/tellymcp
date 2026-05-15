@@ -380,10 +380,13 @@ Minimal safe sequence:
 Reply rule for project asks:
 
 - when a collaboration note or `.mcp-xchange/shares/*.md` note contains:
+  - `Reply message_uuid: ...`
   - `Reply target_session_id: ...`
   - `Reply project_uuid: ...`
   or a `Reply Params` section with the same data
 - then reply with those exact values
+- if `in_reply_to` is available, prefer `Reply message_uuid`
+- if only the note `share_id` is available, gateway now also accepts that value in `in_reply_to`
 - do not use `linked_session_id` for that reply
 
 Canonical example for a project reply:
@@ -391,6 +394,7 @@ Canonical example for a project reply:
 ```json
 {
   "session_id": "backend",
+  "in_reply_to": "29587d1e-2aaf-4663-a87c-a51581176cb4",
   "target_session_id": "9df1ad2e-88d4-4b01-b706-72d60f79f7cb",
   "project_uuid": "42a8ff66-....",
   "kind": "reply",

@@ -78,6 +78,7 @@ function buildNoteContent(input: {
 }): string {
   const lines = [
     "---",
+    `message_uuid: ${JSON.stringify(input.delivery.message_uuid)}`,
     `share_id: ${JSON.stringify(input.delivery.share_id)}`,
     `kind: ${JSON.stringify(input.delivery.kind)}`,
     `project_uuid: ${input.delivery.project_uuid ? JSON.stringify(input.delivery.project_uuid) : "null"}`,
@@ -106,6 +107,7 @@ function buildNoteContent(input: {
     lines.push(
       "",
       "# Reply Params",
+      `message_uuid: ${input.delivery.message_uuid}`,
       `target_session_id: ${input.delivery.source_session_uuid}`,
       ...(input.delivery.project_uuid
         ? [`project_uuid: ${input.delivery.project_uuid}`]
@@ -176,6 +178,7 @@ function buildPartnerInboxText(input: {
     ...(input.delivery.requires_reply
       ? [
           "",
+          `Reply message_uuid: ${input.delivery.message_uuid}`,
           `Reply target_session_id: ${input.delivery.source_session_uuid}`,
           ...(input.delivery.project_uuid
             ? [`Reply project_uuid: ${input.delivery.project_uuid}`]
@@ -225,6 +228,7 @@ function buildTelegramDeliveryNotification(input: {
     ...(input.delivery.requires_reply
       ? [
           "",
+          `Reply message_uuid: ${input.delivery.message_uuid}`,
           `Reply target_session_id: ${input.delivery.source_session_uuid}`,
           ...(input.delivery.project_uuid
             ? [`Reply project_uuid: ${input.delivery.project_uuid}`]

@@ -14,6 +14,7 @@ import {
   WebAppSessionRegistry,
   validateTelegramWebAppInitData,
 } from "./webapp/auth";
+import { parseLiveRelaySessionId } from "./webapp/relay";
 import {
   WEBAPP_APP_JS,
   WEBAPP_STYLES_CSS,
@@ -214,6 +215,14 @@ function normalizeBasePath(value: string): string {
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 
+function isRelayTmuxUnavailableMessage(error: unknown): boolean {
+  const text = error instanceof Error ? error.message : String(error);
+  return (
+    text.includes("TMUX bridge is unavailable") ||
+    text.includes("tmux is unavailable")
+  );
+}
+
 export function createMcpHttpHandler(
   runtime: AppRuntime,
   input: {
@@ -345,6 +354,49 @@ export function createMcpHttpHandler(
 
         if (!initDataRaw || !initDataUnsafe) {
           writeText(res, 400, "initDataRaw and initDataUnsafe are required");
+          return;
+        }
+
+        const relayTarget = parseLiveRelaySessionId(sessionId);
+        if (relayTarget) {
+          try {
+            const relayBootstrap =
+              await runtime.gatewayHttpService.requestLiveRelayBootstrap({
+                clientUuid: relayTarget.clientUuid,
+                localSessionId: relayTarget.localSessionId,
+                initDataRaw,
+                initDataUnsafe,
+              });
+            const record = webAppSessions.create(
+              sessionId,
+              relayBootstrap.telegram_user_id,
+              runtime.config.webapp.sessionTtlSeconds,
+            );
+
+            writeJson(res, 200, {
+              token: record.token,
+              session_id: relayBootstrap.session_id,
+              session_label: relayBootstrap.session_label,
+              tmux_target: relayBootstrap.tmux_target,
+              poll_interval_ms: relayBootstrap.poll_interval_ms,
+              expires_at: new Date(record.expiresAtMs).toISOString(),
+            });
+          } catch (error) {
+            runtime.logger.warn("Telegram WebApp relay bootstrap rejected", {
+              sessionId,
+              clientUuid: relayTarget.clientUuid,
+              localSessionId: relayTarget.localSessionId,
+              error:
+                error instanceof Error
+                  ? (error.stack ?? error.message)
+                  : String(error),
+            });
+            writeText(
+              res,
+              403,
+              error instanceof Error ? error.message : "WebApp relay bootstrap failed",
+            );
+          }
           return;
         }
 
@@ -489,6 +541,33 @@ export function createMcpHttpHandler(
           return;
         }
 
+        const relayTarget = parseLiveRelaySessionId(webAppSession.sessionId);
+        if (relayTarget) {
+          try {
+            const result = await runtime.gatewayHttpService.requestLiveRelayView({
+              clientUuid: relayTarget.clientUuid,
+              localSessionId: relayTarget.localSessionId,
+            });
+            writeJson(res, 200, result);
+          } catch (error) {
+            runtime.logger.error("Telegram WebApp relay visible buffer capture failed", {
+              sessionId: webAppSession.sessionId,
+              clientUuid: relayTarget.clientUuid,
+              localSessionId: relayTarget.localSessionId,
+              error:
+                error instanceof Error
+                  ? (error.stack ?? error.message)
+                  : String(error),
+            });
+            writeText(
+              res,
+              isRelayTmuxUnavailableMessage(error) ? 503 : 500,
+              error instanceof Error ? error.message : "Failed to capture relay tmux pane",
+            );
+          }
+          return;
+        }
+
         const binding = await runtime.bindingStore.getBinding(
           webAppSession.sessionId,
         );
@@ -573,6 +652,38 @@ export function createMcpHttpHandler(
           runtime.config.webapp.actionCooldownMs
         ) {
           writeText(res, 429, "Action cooldown");
+          return;
+        }
+
+        const relayTarget = parseLiveRelaySessionId(webAppSession.sessionId);
+        if (relayTarget) {
+          try {
+            await runtime.gatewayHttpService.requestLiveRelayAction({
+              clientUuid: relayTarget.clientUuid,
+              localSessionId: relayTarget.localSessionId,
+              action: action as "up" | "down" | "enter" | "slash" | "delete",
+            });
+            webAppSessions.touchAction(webAppSession.token, nowMs);
+            writeJson(res, 200, {
+              ok: true,
+            });
+          } catch (error) {
+            runtime.logger.error("Telegram WebApp relay action failed", {
+              sessionId: webAppSession.sessionId,
+              clientUuid: relayTarget.clientUuid,
+              localSessionId: relayTarget.localSessionId,
+              action,
+              error:
+                error instanceof Error
+                  ? (error.stack ?? error.message)
+                  : String(error),
+            });
+            writeText(
+              res,
+              isRelayTmuxUnavailableMessage(error) ? 503 : 500,
+              error instanceof Error ? error.message : "Failed to send relay tmux action",
+            );
+          }
           return;
         }
 

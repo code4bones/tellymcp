@@ -11,6 +11,7 @@ import type {
   SendPartnerNoteInput,
   SendPartnerNoteOutput,
 } from "../../../entities/collaboration/model/types";
+import type { TelegramWebAppInitDataUnsafe } from "../../../app/webapp/auth";
 import type { ExchangeFileSource } from "../../../shared/integrations/object-storage/minioExchangeStore";
 
 function readHeader(
@@ -110,6 +111,46 @@ type GatewayVfsNodeExistsResult = {
   message?: string;
 };
 
+type LiveRelayRequestType = "bootstrap" | "view" | "action";
+
+type LiveRelayBootstrapResult = {
+  session_id: string;
+  session_label: string | null;
+  tmux_target: boolean;
+  poll_interval_ms: number;
+  telegram_user_id: number;
+};
+
+type LiveRelayViewResult = {
+  session_id: string;
+  session_label: string | null;
+  captured_at: string;
+  content: string;
+};
+
+type LiveRelayActionResult = {
+  ok: true;
+};
+
+type LiveRelayQueueItem = {
+  requestId: string;
+  clientUuid: string;
+  localSessionId: string;
+  type: LiveRelayRequestType;
+  payload: Record<string, unknown>;
+  createdAtMs: number;
+  timeout: NodeJS.Timeout;
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+};
+
+type LiveRelayPollResponseItem = {
+  request_id: string;
+  type: LiveRelayRequestType;
+  local_session_id: string;
+  payload: Record<string, unknown>;
+};
+
 function buildPartnerNoteOutputFallback(
   input: SendPartnerNoteInput,
   rawOutput: unknown,
@@ -168,6 +209,10 @@ function buildPartnerNoteOutputFallback(
 }
 
 export class GatewayHttpService {
+  private readonly liveRelayQueue = new Map<string, LiveRelayQueueItem[]>();
+
+  private readonly liveRelayPending = new Map<string, LiveRelayQueueItem>();
+
   public constructor(
     private readonly config: AppConfig,
     private readonly callBroker: <T>(
@@ -198,6 +243,82 @@ export class GatewayHttpService {
     return pathname === "/gateway/healthz" || pathname.startsWith("/gateway/");
   }
 
+  public async requestLiveRelayBootstrap(input: {
+    clientUuid: string;
+    localSessionId: string;
+    initDataRaw: string;
+    initDataUnsafe: TelegramWebAppInitDataUnsafe;
+  }): Promise<LiveRelayBootstrapResult> {
+    const response = await this.enqueueLiveRelayRequest<LiveRelayBootstrapResult>({
+      clientUuid: input.clientUuid,
+      localSessionId: input.localSessionId,
+      type: "bootstrap",
+      payload: {
+        initDataRaw: input.initDataRaw,
+        initDataUnsafe: input.initDataUnsafe,
+      },
+    });
+
+    if (
+      !response ||
+      typeof response !== "object" ||
+      typeof (response as { session_id?: unknown }).session_id !== "string" ||
+      typeof (response as { telegram_user_id?: unknown }).telegram_user_id !==
+        "number"
+    ) {
+      throw new Error("Invalid live relay bootstrap response");
+    }
+
+    return response;
+  }
+
+  public async requestLiveRelayView(input: {
+    clientUuid: string;
+    localSessionId: string;
+  }): Promise<LiveRelayViewResult> {
+    const response = await this.enqueueLiveRelayRequest<LiveRelayViewResult>({
+      clientUuid: input.clientUuid,
+      localSessionId: input.localSessionId,
+      type: "view",
+      payload: {},
+    });
+
+    if (
+      !response ||
+      typeof response !== "object" ||
+      typeof (response as { content?: unknown }).content !== "string"
+    ) {
+      throw new Error("Invalid live relay view response");
+    }
+
+    return response;
+  }
+
+  public async requestLiveRelayAction(input: {
+    clientUuid: string;
+    localSessionId: string;
+    action: "up" | "down" | "enter" | "slash" | "delete";
+  }): Promise<LiveRelayActionResult> {
+    const response = await this.enqueueLiveRelayRequest<LiveRelayActionResult>({
+      clientUuid: input.clientUuid,
+      localSessionId: input.localSessionId,
+      type: "action",
+      payload: {
+        action: input.action,
+      },
+    });
+
+    if (
+      !response ||
+      typeof response !== "object" ||
+      (response as { ok?: unknown }).ok !== true
+    ) {
+      throw new Error("Invalid live relay action response");
+    }
+
+    return response;
+  }
+
   private isAuthorized(req: IncomingMessage): boolean {
     if (!this.config.distributed.gatewayAuthToken) {
       return true;
@@ -205,6 +326,120 @@ export class GatewayHttpService {
 
     const authorization = readHeader(req, "authorization");
     return authorization === `Bearer ${this.config.distributed.gatewayAuthToken}`;
+  }
+
+  private async enqueueLiveRelayRequest<T>(input: {
+    clientUuid: string;
+    localSessionId: string;
+    type: LiveRelayRequestType;
+    payload: Record<string, unknown>;
+  }): Promise<T> {
+    return await new Promise<T>((resolve, reject) => {
+      const requestId = randomUUID();
+      const timeout = setTimeout(() => {
+        this.liveRelayPending.delete(requestId);
+        const queue = this.liveRelayQueue.get(input.clientUuid);
+        if (queue) {
+          this.liveRelayQueue.set(
+            input.clientUuid,
+            queue.filter((item) => item.requestId !== requestId),
+          );
+        }
+        reject(new Error("Live relay request timed out"));
+      }, 20000);
+
+      const item: LiveRelayQueueItem = {
+        requestId,
+        clientUuid: input.clientUuid,
+        localSessionId: input.localSessionId,
+        type: input.type,
+        payload: input.payload,
+        createdAtMs: Date.now(),
+        timeout,
+        resolve: (value: unknown) => resolve(value as T),
+        reject,
+      };
+
+      const queue = this.liveRelayQueue.get(input.clientUuid) ?? [];
+      queue.push(item);
+      this.liveRelayQueue.set(input.clientUuid, queue);
+      this.liveRelayPending.set(requestId, item);
+    });
+  }
+
+  private dequeueLiveRelayRequests(
+    clientUuid: string,
+    limit: number,
+  ): LiveRelayPollResponseItem[] {
+    const queue = this.liveRelayQueue.get(clientUuid) ?? [];
+    if (queue.length === 0) {
+      return [];
+    }
+
+    const count = Math.max(1, Math.min(limit, queue.length));
+    const items = queue.splice(0, count);
+    if (queue.length > 0) {
+      this.liveRelayQueue.set(clientUuid, queue);
+    } else {
+      this.liveRelayQueue.delete(clientUuid);
+    }
+
+    return items.map((item) => ({
+      request_id: item.requestId,
+      type: item.type,
+      local_session_id: item.localSessionId,
+      payload: item.payload,
+    }));
+  }
+
+  private resolveLiveRelayResponses(
+    clientUuid: string,
+    responses: unknown,
+  ): { resolved: number } {
+    if (!Array.isArray(responses)) {
+      throw new Error("responses must be an array");
+    }
+
+    let resolved = 0;
+
+    for (const response of responses) {
+      if (!response || typeof response !== "object") {
+        continue;
+      }
+
+      const requestId =
+        typeof (response as { request_id?: unknown }).request_id === "string"
+          ? (response as { request_id: string }).request_id
+          : null;
+      if (!requestId) {
+        continue;
+      }
+
+      const item = this.liveRelayPending.get(requestId);
+      if (!item || item.clientUuid !== clientUuid) {
+        continue;
+      }
+
+      clearTimeout(item.timeout);
+      this.liveRelayPending.delete(requestId);
+
+      const ok =
+        typeof (response as { ok?: unknown }).ok === "boolean"
+          ? Boolean((response as { ok: boolean }).ok)
+          : false;
+      if (ok) {
+        item.resolve((response as { result?: unknown }).result);
+      } else {
+        const errorMessage =
+          typeof (response as { error?: unknown }).error === "string"
+            ? (response as { error: string }).error
+            : "Live relay request failed";
+        item.reject(new Error(errorMessage));
+      }
+      resolved += 1;
+    }
+
+    return { resolved };
   }
 
   private async storeXchangeFile(body: Record<string, unknown>): Promise<unknown> {
@@ -890,6 +1125,60 @@ export class GatewayHttpService {
           { meta: { internal_call: true } },
         );
         writeJson(res, 200, result);
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/live/poll") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const clientUuid =
+          typeof body.client_uuid === "string" ? body.client_uuid.trim() : "";
+        if (!clientUuid) {
+          throw new Error("client_uuid is required");
+        }
+
+        const limit =
+          typeof body.limit === "number" && Number.isFinite(body.limit)
+            ? body.limit
+            : 10;
+        writeJson(res, 200, {
+          requests: this.dequeueLiveRelayRequests(clientUuid, limit),
+        });
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/live/respond") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const clientUuid =
+          typeof body.client_uuid === "string" ? body.client_uuid.trim() : "";
+        if (!clientUuid) {
+          throw new Error("client_uuid is required");
+        }
+
+        writeJson(res, 200, this.resolveLiveRelayResponses(clientUuid, body.responses));
         return true;
       } catch (error) {
         writeJson(res, 400, {

@@ -6,6 +6,10 @@ import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from "gramm
 
 import type { AppConfig } from "../../../app/config/env";
 import type { WebAppLaunchRegistry } from "../../../app/webapp/auth";
+import {
+  buildLiveRelaySessionId,
+  resolveGatewayWebAppBaseUrl,
+} from "../../../app/webapp/relay";
 import type { CollaborationService } from "../../../features/collaboration/model/collaborationService";
 import type {
   PartnerNoteKind,
@@ -4708,7 +4712,11 @@ export class TelegramTransport implements HumanTransport {
       return;
     }
 
-    if (!this.config.webapp.enabled || !this.config.webapp.publicUrl) {
+    if (
+      !this.config.webapp.enabled ||
+      (!this.config.webapp.publicUrl &&
+        !this.config.distributed.gatewayPublicUrl)
+    ) {
       await ctx.answerCallbackQuery({
         text: "WebApp is not enabled on the server.",
         show_alert: true,
@@ -4717,7 +4725,19 @@ export class TelegramTransport implements HumanTransport {
     }
 
     const session = await this.sessionStore.getSession(activeSessionId);
-    const baseUrl = resolveWebAppPublicBaseUrl(this.config);
+    const actor = this.getGatewayActorFromContext(ctx);
+    const useGatewayRelay =
+      this.config.distributed.mode === "client" &&
+      Boolean(this.config.distributed.gatewayPublicUrl);
+    const clientUuid = useGatewayRelay
+      ? await this.ensureGatewayClientUuid(principal, actor)
+      : null;
+    const baseUrl = useGatewayRelay
+      ? resolveGatewayWebAppBaseUrl(
+          this.config.distributed.gatewayPublicUrl!,
+          this.config.webapp.basePath,
+        )
+      : resolveWebAppPublicBaseUrl(this.config);
     if (!baseUrl) {
       await ctx.answerCallbackQuery({
         text: "WebApp public URL is not configured.",
@@ -4725,16 +4745,21 @@ export class TelegramTransport implements HumanTransport {
       });
       return;
     }
-    const url = new URL(`${baseUrl}/live/${encodeURIComponent(activeSessionId)}`);
+    const liveSessionId =
+      useGatewayRelay && clientUuid
+        ? buildLiveRelaySessionId(clientUuid, activeSessionId)
+        : activeSessionId;
+    const url = new URL(`${baseUrl}/live/${encodeURIComponent(liveSessionId)}`);
 
-    await ctx.answerCallbackQuery({ text: "Opening live view launcher." });
+    await ctx.answerCallbackQuery({ text: "Открываю Live View." });
     const sent = await this.replyText(
       ctx,
       [
         "🖥 Live View",
         "",
-        `Session: ${session?.label ?? activeSessionId}`,
-        "Open the Mini App to view the current visible tmux pane and send Up/Down/Enter.",
+        `Сессия: ${session?.label ?? activeSessionId}`,
+        ...(useGatewayRelay ? ["Режим: relay через gateway"] : []),
+        "Открой Mini App, чтобы видеть текущий tmux-экран и отправлять Up/Down/Enter.",
       ].join("\n"),
       { kind: "menu", sessionId: activeSessionId },
       {

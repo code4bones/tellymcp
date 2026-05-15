@@ -132,12 +132,12 @@ type GatewaySocketCarrier = Service & {
     payload: Record<string, unknown>;
   }) => Promise<unknown>;
   notifyProjectMemberJoined?: (params: {
-    ownerClientUuid: string;
+    clientUuids: string[];
     projectUuid: string;
     projectName: string;
     memberDisplayName?: string;
     memberTelegramUsername?: string;
-  }) => Promise<boolean>;
+  }) => Promise<number>;
   notifyProjectMemberLeft?: (params: {
     clientUuids: string[];
     projectUuid: string;
@@ -204,14 +204,14 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
     },
     notifyProjectMemberJoined: {
       params: {
-        ownerClientUuid: "string",
+        clientUuids: { type: "array", items: "string" },
         projectUuid: "string",
         projectName: "string",
         memberDisplayName: { type: "string", optional: true },
         memberTelegramUsername: { type: "string", optional: true },
       },
       async handler(this: GatewaySocketCarrier, ctx: { params: {
-        ownerClientUuid: string;
+        clientUuids: string[];
         projectUuid: string;
         projectName: string;
         memberDisplayName?: string;
@@ -637,18 +637,13 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
     async notifyProjectMemberJoined(
       this: GatewaySocketCarrier,
       params: {
-        ownerClientUuid: string;
+        clientUuids: string[];
         projectUuid: string;
         projectName: string;
         memberDisplayName?: string;
         memberTelegramUsername?: string;
       },
-    ): Promise<boolean> {
-      const socket = this.connectedClientsByUuid?.get(params.ownerClientUuid);
-      if (!socket || socket.readyState !== 1) {
-        return false;
-      }
-
+    ): Promise<number> {
       const message: GatewaySocketProjectEvent = {
         type: "project_event",
         event: "member_joined",
@@ -663,8 +658,16 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             : {}),
         },
       };
-      socket.send(JSON.stringify(message));
-      return true;
+      let delivered = 0;
+      for (const clientUuid of params.clientUuids) {
+        const socket = this.connectedClientsByUuid?.get(clientUuid);
+        if (!socket || socket.readyState !== 1) {
+          continue;
+        }
+        socket.send(JSON.stringify(message));
+        delivered += 1;
+      }
+      return delivered;
     },
 
     async notifyProjectMemberLeft(

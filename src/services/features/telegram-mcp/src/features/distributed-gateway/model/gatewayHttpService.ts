@@ -1024,16 +1024,15 @@ export class GatewayHttpService {
           { meta: { internal_call: true } },
         );
         if (
-          result.joined === true &&
-          typeof result.owner_client_uuid === "string" &&
-          result.owner_client_uuid &&
-          typeof body.client_uuid === "string" &&
-          body.client_uuid !== result.owner_client_uuid
+          Array.isArray(result.notify_client_uuids) &&
+          result.notify_client_uuids.length > 0 &&
+          typeof result.project_uuid === "string" &&
+          typeof result.name === "string"
         ) {
           await this.callBroker(
             "telegramMcp.gatewaySocket.notifyProjectMemberJoined",
             {
-              ownerClientUuid: result.owner_client_uuid,
+              clientUuids: result.notify_client_uuids,
               projectUuid: result.project_uuid,
               projectName: result.name,
               memberDisplayName:

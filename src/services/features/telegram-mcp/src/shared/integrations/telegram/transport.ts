@@ -1201,68 +1201,31 @@ export class TelegramTransport implements HumanTransport {
     member_display_name?: string;
     member_telegram_username?: string;
   }): Promise<void> {
-    const states = await this.maintenanceStore.listProjectMenuViewStates(
-      input.project_uuid,
-    );
     const memberLabel =
       input.member_display_name?.trim() ||
       (input.member_telegram_username?.trim()
         ? `@${input.member_telegram_username.trim().replace(/^@/u, "")}`
         : "Новый участник");
 
-    let updated = 0;
-    for (const state of states) {
-      try {
-        const payload = await this.getProjectPayloadByUuid(
-          state.sessionId,
-          input.project_uuid,
-        );
-        if (!payload) {
-          await this.maintenanceStore.deleteProjectMenuViewState(
-            state.sessionId,
-            input.project_uuid,
-          );
-          continue;
-        }
+    const sessions = await this.sessionStore.listSessions();
+    const notifiedChats = new Set<number>();
 
-        const screen = await this.buildProjectMembersScreen(payload);
-        await this.editChatMessage(
-          state.telegramChatId,
-          state.telegramMessageId,
-          screen.text,
-          { parse_mode: "HTML", reply_markup: screen.keyboard },
-        );
-        updated += 1;
-      } catch (error) {
-        this.logger.warn("Project menu refresh after join failed", {
-          projectUuid: input.project_uuid,
-          sessionId: state.sessionId,
-          telegramChatId: state.telegramChatId,
-          telegramMessageId: state.telegramMessageId,
-          error:
-            error instanceof Error ? (error.stack ?? error.message) : String(error),
-        });
-      }
-    }
-
-    if (updated > 0) {
-      return;
-    }
-
-    for (const state of states) {
-      const binding = await this.bindingStore.getBinding(state.sessionId);
-      if (!binding) {
+    for (const session of sessions) {
+      const binding = await this.bindingStore.getBinding(session.sessionId);
+      if (!binding || notifiedChats.has(binding.telegramChatId)) {
         continue;
       }
+
       await this.sendNotification({
-        sessionId: state.sessionId,
+        sessionId: session.sessionId,
+        ...(session.label ? { sessionLabel: session.label } : {}),
         recipient: {
           telegramChatId: binding.telegramChatId,
           telegramUserId: binding.telegramUserId,
         },
         message: `В проект «${input.project_name}» вошёл участник: ${memberLabel}.`,
       });
-      return;
+      notifiedChats.add(binding.telegramChatId);
     }
   }
 

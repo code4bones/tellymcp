@@ -355,6 +355,21 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .first();
 
       if (existing) {
+        const notifyRows =
+          existing.status !== "active"
+            ? await this.db
+                .withSchema(MCP_SCHEMA)
+                .table("gateway_project_members")
+                .where({
+                  project_uuid: project.project_uuid,
+                  status: "active",
+                })
+                .whereNot({
+                  client_uuid: clientUuid,
+                })
+                .distinct("client_uuid")
+            : [];
+
         if (existing.status !== "active") {
           await this.db
             .withSchema(MCP_SCHEMA)
@@ -381,7 +396,13 @@ const TelegramMcpGatewayService: ServiceSchema = {
           invite_token: project.invite_token,
           name: project.name,
           joined: false,
-          owner_client_uuid: project.created_by_client_uuid,
+          ...(notifyRows.length > 0
+            ? {
+                notify_client_uuids: notifyRows
+                  .map((row) => String(row.client_uuid))
+                  .filter(Boolean),
+              }
+            : {}),
           member_display_name: memberDisplayName ?? null,
           member_telegram_username: memberTelegramUsername ?? null,
         };
@@ -398,12 +419,30 @@ const TelegramMcpGatewayService: ServiceSchema = {
         joined_at: new Date().toISOString(),
       });
 
+      const notifyRows = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_project_members")
+        .where({
+          project_uuid: project.project_uuid,
+          status: "active",
+        })
+        .whereNot({
+          client_uuid: clientUuid,
+        })
+        .distinct("client_uuid");
+
       return {
         project_uuid: project.project_uuid,
         invite_token: project.invite_token,
         name: project.name,
         joined: true,
-        owner_client_uuid: project.created_by_client_uuid,
+        ...(notifyRows.length > 0
+          ? {
+              notify_client_uuids: notifyRows
+                .map((row) => String(row.client_uuid))
+                .filter(Boolean),
+            }
+          : {}),
         member_display_name: memberDisplayName ?? null,
         member_telegram_username: memberTelegramUsername ?? null,
       };

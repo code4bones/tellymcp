@@ -7310,6 +7310,7 @@ export class TelegramTransport implements HumanTransport {
         "Содержимое для отправки:",
         input.message,
         "",
+        "Не используй linked partner для отправки. Передай target_session_id явно в send_partner_note.",
         "Когда будешь готов, используй send_partner_note.",
       ].join("\n"),
       receivedAt: new Date().toISOString(),

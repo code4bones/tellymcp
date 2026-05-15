@@ -28,6 +28,7 @@ type GatewayDelivery = {
   delivery_uuid: string;
   message_uuid: string;
   share_id: string;
+  project_uuid?: string;
   project_name?: string;
   source_actor_label?: string;
   kind: string;
@@ -79,6 +80,7 @@ function buildNoteContent(input: {
     "---",
     `share_id: ${JSON.stringify(input.delivery.share_id)}`,
     `kind: ${JSON.stringify(input.delivery.kind)}`,
+    `project_uuid: ${input.delivery.project_uuid ? JSON.stringify(input.delivery.project_uuid) : "null"}`,
     `from_session_id: ${JSON.stringify(input.delivery.source_session_uuid)}`,
     `from_label: ${JSON.stringify(input.delivery.source_session_label)}`,
     `to_session_id: ${JSON.stringify(input.delivery.target_session_uuid)}`,
@@ -98,6 +100,21 @@ function buildNoteContent(input: {
 
   if (input.delivery.expected_reply?.trim()) {
     lines.push("", "# Expected Reply", input.delivery.expected_reply.trim());
+  }
+
+  if (input.delivery.requires_reply) {
+    lines.push(
+      "",
+      "# Reply Params",
+      `target_session_id: ${input.delivery.source_session_uuid}`,
+      ...(input.delivery.project_uuid
+        ? [`project_uuid: ${input.delivery.project_uuid}`]
+        : []),
+      "",
+      "# Reply Instruction",
+      "Do not rely on linked partner.",
+      "Use send_partner_note with the target_session_id above.",
+    );
   }
 
   if (input.copiedArtifacts.length > 0) {
@@ -157,7 +174,15 @@ function buildPartnerInboxText(input: {
       ? ["", "Файлы:", ...input.copiedArtifacts.map((item) => `- ${item}`)]
       : []),
     ...(input.delivery.requires_reply
-      ? ["", "Когда будешь готов, отправь ответ через send_partner_note."]
+      ? [
+          "",
+          `Reply target_session_id: ${input.delivery.source_session_uuid}`,
+          ...(input.delivery.project_uuid
+            ? [`Reply project_uuid: ${input.delivery.project_uuid}`]
+            : []),
+          "Не используй linked partner для ответа. Передай эти параметры явно в send_partner_note.",
+          "Когда будешь готов, отправь ответ через send_partner_note.",
+        ]
       : []),
   ].join("\n");
 }
@@ -195,6 +220,15 @@ function buildTelegramDeliveryNotification(input: {
           "",
           `Файлы: ${input.copiedArtifacts.length}`,
           ...input.copiedArtifacts.map((item) => `- ${path.basename(item)}`),
+        ]
+      : []),
+    ...(input.delivery.requires_reply
+      ? [
+          "",
+          `Reply target_session_id: ${input.delivery.source_session_uuid}`,
+          ...(input.delivery.project_uuid
+            ? [`Reply project_uuid: ${input.delivery.project_uuid}`]
+            : []),
         ]
       : []),
     "",

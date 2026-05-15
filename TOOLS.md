@@ -304,7 +304,7 @@ Output:
 
 Purpose:
 
-- Send a structured collaboration note to the linked partner session.
+- Send a structured collaboration note to another session.
 - Write a note file into the partner workspace under `.mcp-xchange/shares/`.
 - Append a line to the partner `.mcp-xchange/SHARED_INDEX.md`.
 - Optionally copy listed artifacts from the current workspace into the partner `.mcp-xchange/shares/files/<share_id>/`.
@@ -313,6 +313,8 @@ Purpose:
 Input:
 
 - `session_id?`
+- `target_session_id?`
+- `project_uuid?`
 - `kind`
   - `share`
   - `question`
@@ -351,23 +353,51 @@ Required agent practice:
 
 How to find the partner correctly:
 
-- do not guess the partner session from labels, menu text, or memory
-- first call `get_session_context`
-- inspect:
-  - `context.linked_session_id`
-  - `context.linked_session_label`
-- only if `linked_session_id` exists should you call `send_partner_note`
-- if `linked_session_id` is missing:
+- never guess the target session from labels, menu text, or memory
+- there are two valid targeting modes:
+  - local linked mode:
+    - call `get_session_context`
+    - use `context.linked_session_id`
+  - project / collab mode:
+    - use the explicit `target_session_id` that came from the project note, Telegram prompt, or task context
+    - if available, also pass `project_uuid`
+- for project replies, do not fall back to `linked_session_id`
+- if `target_session_id` is explicitly known, it has priority over any linked partner
+- if neither `target_session_id` nor `linked_session_id` is available:
   - do not retry blindly
-  - tell the user the session is not linked yet
-  - ask them to link sessions through Telegram `Link`
+  - tell the user the target session is unknown
+  - ask them to relink locally or reopen the project target flow in Telegram
 
 Minimal safe sequence:
 
 1. Call `get_session_context`.
-2. Verify that `linked_session_id` is present.
+2. Resolve the target:
+   - prefer explicit `target_session_id` for project/collab work
+   - otherwise use `linked_session_id` for local partner work
 3. Decide the correct note kind: `question`, `reply`, `share`, `request`, or `handoff`.
 4. Call `send_partner_note`.
+
+Reply rule for project asks:
+
+- when a collaboration note or `.mcp-xchange/shares/*.md` note contains:
+  - `Reply target_session_id: ...`
+  - `Reply project_uuid: ...`
+  or a `Reply Params` section with the same data
+- then reply with those exact values
+- do not use `linked_session_id` for that reply
+
+Canonical example for a project reply:
+
+```json
+{
+  "session_id": "backend",
+  "target_session_id": "9df1ad2e-88d4-4b01-b706-72d60f79f7cb",
+  "project_uuid": "42a8ff66-....",
+  "kind": "reply",
+  "summary": "Описание REST API",
+  "message": "Подготовил краткое описание REST API и основных endpoints."
+}
+```
 
 How the receiving agent must react:
 

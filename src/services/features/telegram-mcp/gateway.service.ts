@@ -83,6 +83,7 @@ type GatewayServiceCarrier = Service & {
       delivery_uuid: string;
       message_uuid: string;
       share_id: string;
+      project_uuid?: string;
       project_name?: string;
       source_actor_label?: string;
       kind: string;
@@ -975,6 +976,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .select(
           "d.delivery_uuid",
           "d.message_uuid",
+          "p.project_uuid",
           "m.kind",
           "m.summary",
           "m.body",
@@ -1059,6 +1061,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
             delivery_uuid: row.delivery_uuid,
             message_uuid: row.message_uuid,
             share_id: shareId,
+            ...(row.project_uuid ? { project_uuid: row.project_uuid } : {}),
             ...(row.project_name ? { project_name: row.project_name } : {}),
             ...(row.source_actor_label
               ? { source_actor_label: row.source_actor_label }

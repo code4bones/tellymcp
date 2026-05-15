@@ -89,6 +89,7 @@ type GatewaySocketDelivery = {
   delivery_uuid: string;
   message_uuid: string;
   share_id: string;
+  project_uuid?: string;
   project_name?: string;
   source_actor_label?: string;
   kind: string;
@@ -436,7 +437,11 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         delivery: GatewaySocketDelivery;
       },
     ): Promise<boolean> {
-      if (!(await this.isLocalGatewayClientUuid?.(params.clientUuid))) {
+      const runtime = this.getRuntimeOrThrow!();
+      const localTargetSession = await runtime.sessionStore.getSession(
+        params.delivery.target_local_session_id,
+      );
+      if (!localTargetSession) {
         return false;
       }
 
@@ -520,7 +525,9 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         status: GatewaySocketDeliveryStatus;
       },
     ): Promise<boolean> {
-      if (!(await this.isLocalGatewayClientUuid?.(params.clientUuid))) {
+      const runtime = this.getRuntimeOrThrow!();
+      const notices = await runtime.maintenanceStore.listOutgoingDeliveryNotices();
+      if (!notices.some((item) => item.deliveryUuid === params.status.delivery_uuid)) {
         return false;
       }
 

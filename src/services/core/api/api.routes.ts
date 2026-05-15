@@ -205,22 +205,6 @@ const routes: ApiRouteSchema[] = [
 		logging: true,
 	},
 	{
-		path: `${rootPrefix}/tiles/vfs`,
-		use: useSessionMiddleware,
-		authorization: false,
-		authentication: false,
-		onBeforeCall: onBeforeCall(false),
-		bodyParsers: {
-			json: false,
-			urlencoded: false,
-		},
-		aliases: {
-			"GET /:publicUrl/:assetPath(.*)": "minio.tileAsset",
-		},
-		mappingPolicy: "restrict",
-		logging: true,
-	},
-	{
 		path: rootPrefix,
 		whitelist: ["**"],
 		use: useSessionMiddleware,
@@ -228,15 +212,6 @@ const routes: ApiRouteSchema[] = [
 		authentication: false,
 		authorization: false,
 		autoAliases: true,
-		aliases: {
-			"GET /storage/file/:publicUrl": "minio.getByPublicUrl",
-			"GET /storage/preview/:publicUrl": "minio.getPreviewByPublicUrl",
-			"GET /migration/source/:sourceHash": "migration.openSource",
-			"GET /s3commander/object/:connectionId/:bucketName": "s3commander.openObject",
-			"GET /s3commander/download/:connectionId/:bucketName": "s3commander.downloadObject",
-			"GET /s3commander/archive/:connectionId/:bucketName": "s3commander.downloadArchive",
-			"POST /s3commander/upload/:connectionId/:bucketName": "s3commander.uploadObjects",
-		},
 		/*
 		onError(req, res, error: Errors.MoleculerError) {
 			console.error("API Error:", error);

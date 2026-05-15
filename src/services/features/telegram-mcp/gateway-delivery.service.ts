@@ -169,7 +169,7 @@ function buildPartnerInboxText(input: {
     ...(input.delivery.project_name
       ? [`Проект: ${input.delivery.project_name}`]
       : []),
-    `Сессия: ${input.delivery.source_session_label}`,
+    `Сессия: ${input.delivery.source_session_label} -> ${input.delivery.target_session_label}`,
     `Кратко: ${input.delivery.summary}`,
     "",
     `Действие: открой ${input.delivery.share_index_file_name}, затем note ниже.`,
@@ -208,7 +208,7 @@ function buildTelegramDeliveryNotification(input: {
     ...(input.delivery.project_name
       ? [`Проект: ${input.delivery.project_name}`]
       : []),
-    `Сессия: ${input.delivery.source_session_label}`,
+    `Сессия: ${input.delivery.source_session_label} -> ${input.delivery.target_session_label}`,
     `Тип: ${input.delivery.kind}`,
     `Кратко: ${input.delivery.summary}`,
     ...(input.copiedArtifacts.length > 0

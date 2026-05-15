@@ -9,23 +9,20 @@
       "@src/*": ["src/*"],
       "@core/*": ["src/services/features/core/*"]
     },
-    "outDir": "dist",
-    "rootDir": "src",
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
+    "strict": false,
+    "noUncheckedIndexedAccess": false,
+    "exactOptionalPropertyTypes": false,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
+    "resolvePackageJsonExports": false,
+    "resolvePackageJsonImports": false,
     "lib": ["ES2022"],
-    "types": ["node"]
+    "types": ["node"],
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": false
   },
-  "include": [
-    "src/index.ts",
-    "src/moleculer.config.ts",
-    "src/services/features/telegram-mcp/**/*.ts",
-    "src/**/*.d.ts"
-  ],
   "exclude": ["dist", "node_modules"]
 }

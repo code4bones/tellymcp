@@ -11,7 +11,7 @@ import { createInboxMessageId } from "./src/shared/lib/ids/ids";
 import { writeXchangeRelativeFile } from "./src/shared/integrations/tmux/client";
 import type { OutgoingDeliveryNotice } from "./src/shared/api/storage/contract";
 
-const CronMixin = require("@r2d2bzh/moleculer-cron") as ServiceSchema;
+import CronMixin from "@r2d2bzh/moleculer-cron";
 
 export const TELEGRAM_MCP_GATEWAY_DELIVERY_SERVICE_NAME =
   "telegramMcp.gatewayDelivery";
@@ -291,7 +291,7 @@ function isExpectedGatewayPollTimeout(error: unknown): boolean {
 const TelegramMcpGatewayDeliveryService: ServiceSchema = {
   name: TELEGRAM_MCP_GATEWAY_DELIVERY_SERVICE_NAME,
   dependencies: [TELEGRAM_MCP_RUNTIME_SERVICE_NAME],
-  mixins: [CronMixin],
+  mixins: [CronMixin as ServiceSchema],
   crons: [
     {
       name: "GatewayDeliveryPoll",

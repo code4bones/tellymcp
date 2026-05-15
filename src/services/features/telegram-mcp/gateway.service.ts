@@ -142,10 +142,12 @@ function trimOptionalText(value: unknown): string | null {
 }
 
 function sanitizeArtifactName(value: string): string {
-  return value
+  const withoutControlChars = Array.from(value)
+    .map((char) => (char.charCodeAt(0) < 32 ? "-" : char))
+    .join("");
+  return withoutControlChars
     .trim()
-    .replace(/[\/\\]+/gu, "-")
-    .replace(/[\x00-\x1f]+/gu, "-")
+    .replace(/[/\\]+/gu, "-")
     .replace(/\s+/gu, " ")
     .replace(/^\.+$/u, "file")
     .slice(0, 180) || "file";

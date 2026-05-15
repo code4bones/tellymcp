@@ -16,6 +16,32 @@ import { renderWorkbench } from "@src/lib/mixins/workbench";
 const graphqlPublicRoot = path.resolve(__dirname, "../../../../public/graphql");
 const workbenchPublicRoot = path.resolve(__dirname, "../../../../public/workbench");
 
+function createLegacyRedisConnection(connectionName: string): Redis {
+	const options: {
+		host: string;
+		port: number;
+		db: number;
+		connectionName: string;
+		username?: string;
+		password?: string;
+	} = {
+		host: process.env.REDIS_HOST ?? "127.0.0.1",
+		port: Number(process.env.REDIS_PORT ?? 6379),
+		db: Number(process.env.REDIS_DB ?? 10),
+		connectionName,
+	};
+
+	if (process.env.REDIS_USER) {
+		options.username = process.env.REDIS_USER;
+	}
+
+	if (process.env.REDIS_PASSWORD) {
+		options.password = process.env.REDIS_PASSWORD;
+	}
+
+	return new Redis(options);
+}
+
 const ApiService: ApiSettingsSchema = {
 	name: "api",
 	mixins: [ApiGateway, Apollo],
@@ -185,22 +211,8 @@ const ApiService: ApiSettingsSchema = {
 		authorize(ctx: Context, route: Route, req: IncomingRequest) {},
 		createPubSub() {
 			return new RedisPubSub({
-				publisher: new Redis({
-					host: process.env.REDIS_HOST,
-					port: +process.env.REDIS_PORT,
-					username: process.env.REDIS_USER,
-					password: process.env.REDIS_PASSWORD,
-					db: +process.env.REDIS_DB || 10,
-					connectionName: "GQL",
-				}),
-				subscriber: new Redis({
-					host: process.env.REDIS_HOST,
-					port: +process.env.REDIS_PORT,
-					username: process.env.REDIS_USER,
-					password: process.env.REDIS_PASSWORD,
-					db: +process.env.REDIS_DB || 10,
-					connectionName: "GQL",
-				}),
+				publisher: createLegacyRedisConnection("GQL-pub") as never,
+				subscriber: createLegacyRedisConnection("GQL-sub") as never,
 				connectionListener: err => {
 					if (!err) console.log("******************* CONNECTED *****************");
 					else console.error(err);

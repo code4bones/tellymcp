@@ -25,6 +25,8 @@ type HttpServiceCarrier = Service & {
   ) => Promise<void>;
 };
 
+export type TelegramMcpHttpServiceInstance = HttpServiceCarrier;
+
 const TelegramMcpHttpService: ServiceSchema = {
   name: TELEGRAM_MCP_HTTP_SERVICE_NAME,
   dependencies: [

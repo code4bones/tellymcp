@@ -45,7 +45,6 @@ import type { MinioExchangeStore } from "../object-storage/minioExchangeStore";
 import { createTelegramFetch } from "./proxyFetch";
 import {
   captureTmuxPaneRange,
-  deleteXchangeFile,
   getTmuxWindowHeight,
   isTmuxUnavailableError,
   listXchangeFiles,
@@ -195,7 +194,6 @@ type StoredAttachmentRecord = {
   mimeType?: string | undefined;
 };
 
-const PARTNER_INDEX_FILE_NAME = "SHARED_INDEX.md";
 const LOCAL_INDEX_FILE_NAME = "LOCAL_INDEX.md";
 
 const TMUX_PROXY_STATUS_CACHE_MS = 5000;
@@ -5379,7 +5377,7 @@ export class TelegramTransport implements HumanTransport {
       `- Captured at: ${capturedAt}`,
       "",
       "```text",
-      stdout.replace(/\u0000/g, ""),
+      stdout.replaceAll("\u0000", ""),
       "```",
       "",
     ].join("\n");

@@ -14,7 +14,7 @@ import {
   sendAllowedTmuxAction,
 } from "./src/app/webapp/tmux";
 
-const CronMixin = require("@r2d2bzh/moleculer-cron") as ServiceSchema;
+import CronMixin from "@r2d2bzh/moleculer-cron";
 
 export const TELEGRAM_MCP_GATEWAY_LIVE_SERVICE_NAME = "telegramMcp.gatewayLive";
 const TELEGRAM_MCP_GATEWAY_LIVE_TICK_EVENT = "telegramMcp.gatewayLive.tick";
@@ -88,7 +88,7 @@ async function processBootstrapRequest(
   );
 
   let sessionId = request.local_session_id.trim();
-  let launchRecord = runtime.webAppLaunchRegistry.getByUserId(validated.user.id);
+  const launchRecord = runtime.webAppLaunchRegistry.getByUserId(validated.user.id);
 
   if (!sessionId) {
     sessionId = launchRecord?.sessionId ?? "";
@@ -209,7 +209,7 @@ async function processActionRequest(
 const TelegramMcpGatewayLiveService: ServiceSchema = {
   name: TELEGRAM_MCP_GATEWAY_LIVE_SERVICE_NAME,
   dependencies: [TELEGRAM_MCP_RUNTIME_SERVICE_NAME],
-  mixins: [CronMixin],
+  mixins: [CronMixin as ServiceSchema],
   crons: [
     {
       name: "GatewayLivePoll",

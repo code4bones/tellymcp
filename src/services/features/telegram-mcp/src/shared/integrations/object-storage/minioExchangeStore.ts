@@ -24,7 +24,7 @@ type BrokerCaller = <T>(
 
 function normalizeRelativePath(relativePath: string): string {
   const normalized = relativePath
-    .split(/[\/\\]+/u)
+    .split(/[/\\]+/u)
     .map((segment) => segment.trim())
     .filter((segment) => segment.length > 0 && segment !== "." && segment !== "..")
     .join("/");

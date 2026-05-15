@@ -93,9 +93,11 @@ function isAllowedAction(value: string): value is AllowedTmuxAction {
 
 function sanitizeFileName(fileName: string): string {
   const baseName = path.basename(fileName).trim();
-  const normalized = baseName
-    .replace(/[\/\\]/g, "-")
-    .replace(/[\x00-\x1f]/g, "-")
+  const withoutControlChars = Array.from(baseName)
+    .map((char) => (char.charCodeAt(0) < 32 ? "-" : char))
+    .join("");
+  const normalized = withoutControlChars
+    .replace(/[/\\]/g, "-")
     .replace(/[<>:"|?*]/g, "-")
     .replace(/\s+/g, " ")
     .trim();
@@ -105,7 +107,7 @@ function sanitizeFileName(fileName: string): string {
 
 function sanitizeRelativeXchangePath(relativePath: string): string {
   const normalized = relativePath
-    .split(/[\/\\]+/u)
+    .split(/[/\\]+/u)
     .map((segment) => segment.trim())
     .filter((segment) => segment.length > 0 && segment !== "." && segment !== "..")
     .join("/");

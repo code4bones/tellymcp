@@ -28,9 +28,11 @@ const SUBMIT_LINE_KEY = "C-m";
 
 function sanitizeFileName(fileName: string): string {
   const baseName = path.basename(fileName).trim();
-  const normalized = baseName
-    .replace(/[\/\\]/g, "-")
-    .replace(/[\x00-\x1f]/g, "-")
+  const withoutControlChars = Array.from(baseName)
+    .map((char) => (char.charCodeAt(0) < 32 ? "-" : char))
+    .join("");
+  const normalized = withoutControlChars
+    .replace(/[/\\]/g, "-")
     .replace(/[<>:"|?*]/g, "-")
     .replace(/\s+/g, " ")
     .trim();
@@ -40,7 +42,7 @@ function sanitizeFileName(fileName: string): string {
 
 function sanitizeRelativeXchangePath(relativePath: string): string {
   const normalized = relativePath
-    .split(/[\/\\]+/u)
+    .split(/[/\\]+/u)
     .map((segment) => segment.trim())
     .filter((segment) => segment.length > 0 && segment !== "." && segment !== "..")
     .join("/");
@@ -403,7 +405,7 @@ export async function captureTmuxPaneRange(
         ...(config.socketPath ? { socketPath: config.socketPath } : {}),
       },
     );
-    return response.content.replace(/\u0000/g, "");
+    return response.content.replaceAll("\u0000", "");
   }
 
   const args = [
@@ -416,7 +418,7 @@ export async function captureTmuxPaneRange(
     start,
   ];
   const { stdout } = await execFileOutputAsync("tmux", buildTmuxArgs(config, args));
-  return stdout.replace(/\u0000/g, "");
+  return stdout.replaceAll("\u0000", "");
 }
 
 export async function captureVisibleTmuxPane(
@@ -436,7 +438,7 @@ export async function captureVisibleTmuxPane(
         ...(config.socketPath ? { socketPath: config.socketPath } : {}),
       },
     );
-    return response.content.replace(/\u0000/g, "");
+    return response.content.replaceAll("\u0000", "");
   }
 
   const height = await getTmuxWindowHeight(config, target);
@@ -481,7 +483,7 @@ export async function captureVisibleTmuxPane(
     ));
   }
 
-  return stdout.replace(/\u0000/g, "");
+  return stdout.replaceAll("\u0000", "");
 }
 
 export async function sendAllowedTmuxAction(

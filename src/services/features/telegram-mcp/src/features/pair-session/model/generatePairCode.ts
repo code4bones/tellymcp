@@ -1,5 +1,7 @@
 import type { AppConfig } from "../../../app/config/env";
 import type {
+  ClearSessionPairingInput,
+  ClearSessionPairingOutput,
   CreateSessionPairCodeInput,
   CreateSessionPairCodeOutput,
   PairCodeRecord,
@@ -11,10 +13,6 @@ import type {
 import { createPairCode } from "../../../shared/lib/ids/ids";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
-import type {
-  ClearSessionPairingInput,
-  ClearSessionPairingOutput,
-} from "../../../entities/auth/model/types";
 
 export class PairSessionService {
   private static readonly MAX_PAIR_CODE_ATTEMPTS = 20;

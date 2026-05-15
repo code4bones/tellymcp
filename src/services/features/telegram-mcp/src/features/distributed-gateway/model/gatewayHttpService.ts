@@ -151,6 +151,21 @@ type LiveRelayPollResponseItem = {
   payload: Record<string, unknown>;
 };
 
+function unwrapLiveRelayResult<T>(response: unknown): T | null {
+  if (!response || typeof response !== "object") {
+    return null;
+  }
+
+  if ("result" in response) {
+    const wrapped = response as { result?: unknown };
+    if (wrapped.result && typeof wrapped.result === "object") {
+      return wrapped.result as T;
+    }
+  }
+
+  return response as T;
+}
+
 function buildPartnerNoteOutputFallback(
   input: SendPartnerNoteInput,
   rawOutput: unknown,
@@ -253,12 +268,13 @@ export class GatewayHttpService {
       initDataRaw: input.initDataRaw,
       initDataUnsafe: input.initDataUnsafe,
     };
-    const response = await this.requestLiveRelayWithFallback<LiveRelayBootstrapResult>({
+    const rawResponse = await this.requestLiveRelayWithFallback<LiveRelayBootstrapResult>({
       clientUuid: input.clientUuid,
       localSessionId: input.localSessionId,
       type: "bootstrap",
       payload,
     });
+    const response = unwrapLiveRelayResult<LiveRelayBootstrapResult>(rawResponse);
 
     if (
       !response ||
@@ -277,12 +293,13 @@ export class GatewayHttpService {
     clientUuid: string;
     localSessionId: string;
   }): Promise<LiveRelayViewResult> {
-    const response = await this.requestLiveRelayWithFallback<LiveRelayViewResult>({
+    const rawResponse = await this.requestLiveRelayWithFallback<LiveRelayViewResult>({
       clientUuid: input.clientUuid,
       localSessionId: input.localSessionId,
       type: "view",
       payload: {},
     });
+    const response = unwrapLiveRelayResult<LiveRelayViewResult>(rawResponse);
 
     if (
       !response ||
@@ -300,7 +317,7 @@ export class GatewayHttpService {
     localSessionId: string;
     action: "up" | "down" | "enter" | "slash" | "delete";
   }): Promise<LiveRelayActionResult> {
-    const response = await this.requestLiveRelayWithFallback<LiveRelayActionResult>({
+    const rawResponse = await this.requestLiveRelayWithFallback<LiveRelayActionResult>({
       clientUuid: input.clientUuid,
       localSessionId: input.localSessionId,
       type: "action",
@@ -308,6 +325,7 @@ export class GatewayHttpService {
         action: input.action,
       },
     });
+    const response = unwrapLiveRelayResult<LiveRelayActionResult>(rawResponse);
 
     if (
       !response ||

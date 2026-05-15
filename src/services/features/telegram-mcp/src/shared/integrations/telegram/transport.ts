@@ -198,6 +198,10 @@ const LOCAL_INDEX_FILE_NAME = "LOCAL_INDEX.md";
 
 const TMUX_PROXY_STATUS_CACHE_MS = 5000;
 
+function isExecutorTargetKind(kind: PartnerNoteKind): boolean {
+  return kind === "question" || kind === "request";
+}
+
 function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/u, "");
 }
@@ -3461,6 +3465,7 @@ export class TelegramTransport implements HumanTransport {
       return;
     }
 
+    const session = await this.sessionStore.getSession(input.sessionId);
     const meta = await this.xchangeFileMetaStore.getXchangeFileMeta(
       input.sessionId,
       input.filePath,
@@ -3479,15 +3484,16 @@ export class TelegramTransport implements HumanTransport {
       [
         "🤝 Передать участнику",
         "",
+        `Сессия: ${session?.label ?? input.sessionId} -> ${input.targetSessionLabel}`,
         `Кому: ${input.targetSessionLabel}`,
         `Файл: ${fileName}`,
         "",
-        "Send the next text message with additional description or instructions for this file.",
-        "This text will be attached to the handoff.",
+        "Отправь следующим сообщением описание или инструкции для этого файла.",
+        "Этот текст будет приложен к handoff.",
       ].join("\n"),
       { kind: "menu", sessionId: input.sessionId },
       {
-        reply_markup: new InlineKeyboard().text("Cancel", "file-handoff-cancel"),
+        reply_markup: new InlineKeyboard().text("Отмена", "file-handoff-cancel"),
       },
     );
 
@@ -5904,14 +5910,25 @@ export class TelegramTransport implements HumanTransport {
       linkedSession?.label ??
       session?.linkedSessionId ??
       "напарник";
+    const sourceLabel = session?.label ?? sessionId;
+    const isProjectTarget = Boolean(target?.projectUuid);
+    const executesOnTarget = isExecutorTargetKind(kind);
     const kindLabel =
       kind === "question"
-        ? "Вопрос напарнику"
+        ? isProjectTarget
+          ? "Вопрос участнику"
+          : "Вопрос напарнику"
         : kind === "reply"
-          ? "Ответ напарнику"
+          ? isProjectTarget
+            ? "Ответ участнику"
+            : "Ответ напарнику"
           : kind === "handoff"
-            ? "Передача напарнику"
-            : "Поделиться обновлением";
+            ? isProjectTarget
+              ? "Передача участнику"
+              : "Передача напарнику"
+            : isProjectTarget
+              ? "Поделиться с участником"
+              : "Поделиться обновлением";
 
     await ctx.answerCallbackQuery({ text: `${kindLabel}.` });
     const sent = await this.replyText(
@@ -5919,9 +5936,28 @@ export class TelegramTransport implements HumanTransport {
       [
         `🤝 ${kindLabel}`,
         "",
-        `Напарник: ${targetLabel}`,
+        `Текущая сессия: ${sourceLabel}`,
+        executesOnTarget
+          ? isProjectTarget
+            ? `Исполнитель: ${targetLabel}`
+            : `Напарник: ${targetLabel}`
+          : isProjectTarget
+            ? `Получатель: ${targetLabel}`
+            : `Напарник: ${targetLabel}`,
+        executesOnTarget
+          ? `Ожидаемый ответ: ${targetLabel} -> ${sourceLabel}`
+          : `Маршрут отправки: ${sourceLabel} -> ${targetLabel}`,
         "",
-        "Отправь следующим сообщением текст для note напарнику.",
+        executesOnTarget
+          ? "Отправь следующим сообщением задачу для выбранной сессии."
+          : "Отправь следующим сообщением, чем текущая сессия должна поделиться.",
+        executesOnTarget
+          ? isProjectTarget
+            ? "Агент выбранной сессии получит задачу и сможет отправить результат обратно в текущую сессию проекта."
+            : "Агент напарника получит задачу и сможет отправить результат обратно в текущую сессию."
+          : isProjectTarget
+            ? "Агент текущей сессии получит задачу и сам отправит результат в выбранную сессию проекта."
+            : "Агент текущей сессии получит задачу и сам отправит результат напарнику.",
         "Формат:",
         "1. Первая строка = короткое summary",
         "2. Пустая строка опциональна",
@@ -6331,14 +6367,18 @@ export class TelegramTransport implements HumanTransport {
         projectUuid: input.projectUuid,
       });
     }
+    const session = await this.sessionStore.getSession(input.sessionId);
 
     const text = [
       "🤝 Сессия проекта",
       "",
       `Проект: ${input.projectName}`,
-      `Получатель: ${input.targetSessionLabel}`,
+      `Текущая сессия: ${session?.label ?? input.sessionId}`,
+      `Исполнитель: ${input.targetSessionLabel}`,
+      `Ask: ${input.targetSessionLabel} -> ${session?.label ?? input.sessionId}`,
+      `Share/Reply/Handoff: ${session?.label ?? input.sessionId} -> ${input.targetSessionLabel}`,
       "",
-      "Выбери, что отправить в эту сессию.",
+      "Выбери тип действия для этой пары сессий.",
     ].join("\n");
 
     const payloadKey = await this.createProjectMemberMenuPayload(
@@ -7123,65 +7163,160 @@ export class TelegramTransport implements HumanTransport {
     }
 
     const parsed = this.parsePartnerNoteText(text);
-    if (pending.projectUuid) {
-      await this.ensureProjectSessionRegistered({
-        principal,
-        sessionId: pending.sessionId,
-        projectUuid: pending.projectUuid,
-      });
+    const sourceSession = await this.sessionStore.getSession(pending.sessionId);
+    const sourceLabel = sourceSession?.label ?? pending.sessionId;
+    let resolvedTargetLabel = pending.targetSessionLabel;
+    if (!resolvedTargetLabel && sourceSession?.linkedSessionId) {
+      const linkedSession = await this.sessionStore.getSession(
+        sourceSession.linkedSessionId,
+      );
+      resolvedTargetLabel =
+        linkedSession?.label ?? sourceSession.linkedSessionId ?? "напарник";
     }
-    const output = await this.sendPartnerNote({
-      session_id: pending.sessionId,
-      ...(pending.targetSessionId
-        ? { target_session_id: pending.targetSessionId }
-        : {}),
-      ...(pending.projectUuid ? { project_uuid: pending.projectUuid } : {}),
-      kind: pending.kind,
-      summary: parsed.summary,
-      message: parsed.message,
-    });
+    const targetLabel = resolvedTargetLabel ?? "напарник";
 
     this.pendingPartnerNotes.delete(principalKey);
     await this.deletePendingPartnerNotePrompt(ctx, pending);
-    const sent = await this.replyText(
+    if (isExecutorTargetKind(pending.kind)) {
+      if (pending.projectUuid) {
+        await this.ensureProjectSessionRegistered({
+          principal,
+          sessionId: pending.sessionId,
+          projectUuid: pending.projectUuid,
+        });
+      }
+      const delegatedMessage = [
+        `Пользователь из Telegram просит тебя выполнить задачу для сессии ${sourceLabel}.`,
+        `Маршрут результата: ${targetLabel} -> ${sourceLabel}`,
+        "",
+        "Задача:",
+        parsed.message,
+      ].join("\n");
+      const expectedReply = [
+        `Подготовь результат для сессии ${sourceLabel}.`,
+        "Когда будешь готов, отправь его обратно через send_partner_note.",
+      ].join(" ");
+      const output = await this.sendPartnerNote({
+        session_id: pending.sessionId,
+        ...(pending.targetSessionId
+          ? { target_session_id: pending.targetSessionId }
+          : {}),
+        ...(pending.projectUuid ? { project_uuid: pending.projectUuid } : {}),
+        kind: pending.kind,
+        summary: parsed.summary,
+        message: delegatedMessage,
+        expected_reply: expectedReply,
+        requires_reply: true,
+      });
+      const sent = await this.replyText(
+        ctx,
+        [
+          "Задача отправлена выбранной сессии.",
+          ...(output.project_name ? [`Проект: ${output.project_name}`] : []),
+          ...(output.target_actor_label ? [`Исполнитель: ${output.target_actor_label}`] : []),
+          `Маршрут результата: ${targetLabel} -> ${sourceLabel}`,
+          `Тип: ${pending.kind}`,
+          `Кратко: ${parsed.summary}`,
+          `Статус: ${output.delivery_status === "delivered" ? "доставлено" : "в очереди"}`,
+          `Share: ${output.share_id}`,
+        ].join("\n"),
+        { kind: "menu", sessionId: pending.sessionId },
+      );
+      if (
+        output.delivery_status === "queued" &&
+        sent &&
+        "message_id" in sent &&
+        ctx.chat
+      ) {
+        await this.maintenanceStore.setOutgoingDeliveryNotice({
+          deliveryUuid: output.inbox_message_id,
+          sessionId: pending.sessionId,
+          telegramChatId: ctx.chat.id,
+          telegramMessageId: sent.message_id,
+          shareId: output.share_id,
+          kind: output.kind,
+          summary: parsed.summary,
+          ...(output.project_name ? { projectName: output.project_name } : {}),
+          ...(output.target_actor_label
+            ? { targetLabel: output.target_actor_label }
+            : { targetLabel }),
+          ...(output.target_session_label
+            ? { targetSessionLabel: output.target_session_label }
+            : { targetSessionLabel: targetLabel }),
+        });
+      }
+      return true;
+    }
+
+    await this.enqueuePartnerNoteInstruction({
+      principal,
+      sessionId: pending.sessionId,
+      sourceTelegramMessageId: ctx.message?.message_id ?? 0,
+      kind: pending.kind,
+      summary: parsed.summary,
+      message: parsed.message,
+      ...(pending.targetSessionId
+        ? { targetSessionId: pending.targetSessionId }
+        : {}),
+      ...(pending.targetSessionLabel
+        ? { targetSessionLabel: pending.targetSessionLabel }
+        : {}),
+      ...(pending.projectUuid ? { projectUuid: pending.projectUuid } : {}),
+    });
+    await this.replyText(
       ctx,
       [
-        "Note поставлена в очередь доставки.",
-        ...(output.project_name ? [`Проект: ${output.project_name}`] : []),
-        ...(output.target_actor_label ? [`Получатель: ${output.target_actor_label}`] : []),
-        ...(output.target_session_label ? [`Сессия: ${output.target_session_label}`] : []),
-        `Тип: ${output.kind}`,
-        `Статус: ${output.delivery_status === "delivered" ? "доставлено" : "в очереди"}`,
-        `Note: ${output.note_path}`,
+        "Задача поставлена в inbox текущей сессии.",
+        `Маршрут отправки: ${sourceLabel} -> ${targetLabel}`,
+        `Тип: ${pending.kind}`,
+        `Кратко: ${parsed.summary}`,
+        "Текущая сессия подготовит результат и отправит его сама.",
       ].join("\n"),
       { kind: "menu", sessionId: pending.sessionId },
     );
-    if (
-      output.delivery_status === "queued" &&
-      sent &&
-      "message_id" in sent &&
-      ctx.chat
-    ) {
-      await this.maintenanceStore.setOutgoingDeliveryNotice({
-        deliveryUuid: output.inbox_message_id,
-        sessionId: pending.sessionId,
-        telegramChatId: ctx.chat.id,
-        telegramMessageId: sent.message_id,
-        shareId: output.share_id,
-        kind: output.kind,
-        summary: parsed.summary,
-        ...(output.project_name ? { projectName: output.project_name } : {}),
-        ...(output.target_actor_label
-          ? { targetLabel: output.target_actor_label }
-          : pending.targetSessionLabel
-            ? { targetLabel: pending.targetSessionLabel }
-            : {}),
-        ...(output.target_session_label
-          ? { targetSessionLabel: output.target_session_label }
-          : {}),
-      });
-    }
     return true;
+  }
+
+  private async enqueuePartnerNoteInstruction(input: {
+    principal: { telegramChatId: number; telegramUserId: number };
+    sessionId: string;
+    sourceTelegramMessageId: number;
+    kind: PartnerNoteKind;
+    summary: string;
+    message: string;
+    targetSessionId?: string;
+    targetSessionLabel?: string;
+    projectUuid?: string;
+  }): Promise<void> {
+    const session = await this.sessionStore.getSession(input.sessionId);
+    const sourceLabel = session?.label ?? input.sessionId;
+    const targetLabel = input.targetSessionLabel ?? input.targetSessionId ?? "напарник";
+    const inboxMessage: TelegramInboxMessage = {
+      id: createInboxMessageId(),
+      sessionId: input.sessionId,
+      telegramChatId: input.principal.telegramChatId,
+      telegramUserId: input.principal.telegramUserId,
+      sourceTelegramMessageId: input.sourceTelegramMessageId,
+      text: [
+        "Пользователь просит текущую сессию подготовить сообщение для другой сессии.",
+        `Маршрут отправки: ${sourceLabel} -> ${targetLabel}`,
+        `Тип: ${input.kind}`,
+        `Кратко: ${input.summary}`,
+        ...(input.projectUuid ? [`Проект UUID: ${input.projectUuid}`] : []),
+        ...(input.targetSessionId
+          ? [`Target session ID: ${input.targetSessionId}`]
+          : []),
+        "",
+        "Содержимое для отправки:",
+        input.message,
+        "",
+        "Когда будешь готов, используй send_partner_note.",
+      ].join("\n"),
+      receivedAt: new Date().toISOString(),
+    };
+
+    await this.inboxStore.createInboxMessage(inboxMessage);
+    await this.nudgeSessionInbox(input.sessionId);
   }
 
   private async handlePendingFileHandoff(

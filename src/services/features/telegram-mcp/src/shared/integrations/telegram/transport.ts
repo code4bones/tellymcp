@@ -1820,13 +1820,6 @@ export class TelegramTransport implements HumanTransport {
       .text("📤 Share", async (ctx) => {
         await this.beginPartnerNoteMode(ctx, "share");
       })
-      .text("↩ Reply", async (ctx) => {
-        await this.beginPartnerNoteMode(ctx, "reply");
-      })
-      .row()
-      .text("📦 Handoff", async (ctx) => {
-        await this.beginPartnerNoteMode(ctx, "handoff");
-      })
       .row()
       .text("🔓 Unlink", async (ctx) => {
         await this.handleLinkButton(ctx);
@@ -5082,7 +5075,7 @@ export class TelegramTransport implements HumanTransport {
       `📌 Active session: ${session.label ?? activeSessionId}`,
       `👥 Linked partner: ${linkedSession?.label ?? session.linkedSessionId}`,
       "",
-      "Ask for API details, share what changed, reply to a partner note, or hand off artifacts.",
+      "Ask for API details or share what changed.",
       "Prompt format: first line is summary. Add a blank line and then the main message body if needed.",
     ].join("\n");
   }
@@ -6376,7 +6369,7 @@ export class TelegramTransport implements HumanTransport {
       `Текущая сессия: ${session?.label ?? input.sessionId}`,
       `Исполнитель: ${input.targetSessionLabel}`,
       `Ask: ${input.targetSessionLabel} -> ${session?.label ?? input.sessionId}`,
-      `Share/Reply/Handoff: ${session?.label ?? input.sessionId} -> ${input.targetSessionLabel}`,
+      `Share: ${session?.label ?? input.sessionId} -> ${input.targetSessionLabel}`,
       "",
       "Выбери тип действия для этой пары сессий.",
     ].join("\n");
@@ -6391,9 +6384,6 @@ export class TelegramTransport implements HumanTransport {
     const keyboard = new InlineKeyboard()
       .text("❓ Спросить", `project-member-note:question:${payloadKey}`)
       .text("📤 Поделиться", `project-member-note:share:${payloadKey}`)
-      .row()
-      .text("↩ Ответить", `project-member-note:reply:${payloadKey}`)
-      .text("📦 Передать", `project-member-note:handoff:${payloadKey}`)
       .row()
       .text("⬅ К участникам", `project-members:${input.projectUuid}`);
 

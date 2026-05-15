@@ -58,7 +58,7 @@
   - вход в проект сразу открывает участников
   - отдельный `Set current` перестал быть обязательным для работы
 - `Members` теперь используются как точка выбора remote target session внутри проекта.
-- Отправка `Ask / Share / Reply / Handoff / File` в `Collab` переведена на session-targeted messaging через gateway.
+- Отправка `Ask / Share / File` в `Collab` переведена на session-targeted messaging через gateway.
 - Exchange files больше не зависят от `vfs/minio` в активном Telegram handoff path.
 - Top-level `Files` меню удалено:
   - upload в открытой session/target context сразу создаёт handoff
@@ -74,7 +74,7 @@
   - основной transport теперь `ws`
 - Для `Collab -> Project -> Member` уточнена семантика действий:
   - `Ask` адресуется выбранной сессии
-  - `Share / Reply / Handoff` ставят задачу текущей сессии отправить результат в выбранную
+  - `Share` ставит задачу текущей сессии отправить результат в выбранную
   - file upload в member screen остаётся прямой доставкой в target session
 
 ### Fixed

@@ -1004,7 +1004,7 @@ Telegram UI summary:
 - inside `Collab -> Project -> Member`, action semantics differ:
   - `Ask` sends a task to the selected member session
   - expected reply route is `member -> current session`
-  - `Share / Reply / Handoff` create a task for the current session
+  - `Share` creates a task for the current session
   - expected send route is `current session -> member`
 - partner-note prompt format is:
   - first line = summary

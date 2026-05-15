@@ -358,8 +358,6 @@ Local partner menu behavior:
 - available actions are:
   - `Ask`
   - `Share`
-  - `Reply`
-  - `Handoff`
   - `Unlink`
 - the Telegram prompt format is:
   - first line = short summary
@@ -404,7 +402,7 @@ Collab project behavior:
 - semantics inside `Project -> Member` depend on the action:
   - `Ask` sends a task to the selected member session
   - expected reply route is `member -> current session`
-  - `Share / Reply / Handoff` create a task for the current session
+  - `Share` creates a task for the current session
   - expected send route is `current session -> member`
 - direct file uploads still go to that exact target session when a member screen is open
 - if an old member-menu message becomes stale, clicking it deletes that outdated Telegram message instead of leaving a dead keyboard

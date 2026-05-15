@@ -13,7 +13,7 @@ Current state:
 - Remote `Collab` flow работает:
   - projects
   - members
-  - `Ask / Share / Reply / Handoff / File`
+  - `Ask / Share / File`
   - `SHARED_INDEX.md`
   - gateway delivery/status через `ws`
 - Exchange files работают напрямую без `vfs + minio`.
@@ -54,7 +54,7 @@ Current tails:
 
 - [ ] Пройти полный smoke-pass `Local` flow:
   - `Link`
-  - `Ask / Share / Reply / Handoff`
+  - `Ask / Share`
   - `Передать агенту`
   - `LOCAL_INDEX.md`
   - поведение после рестарта сервиса
@@ -62,7 +62,7 @@ Current tails:
 - [ ] Пройти полный smoke-pass `Collab` flow между машинами:
   - `Create / Join project`
   - `Members`
-  - `Ask / Share / Reply / Handoff`
+  - `Ask / Share`
   - `Ask -> reply` с `Reply message_uuid` / `in_reply_to`
   - `File`
   - sender status:

@@ -22,13 +22,17 @@
   - список проектов
   - выход из проекта
   - список сессий проекта
-- Добавлен gateway delivery cycle:
-  - `partner-note`
-  - `deliveries/poll`
-  - `deliveries/ack`
-  - `deliveries/status`
-  - `deliveries/fail`
 - Добавлен project-based remote flow между разными машинами и разными ботами.
+- Добавлен `ws`-only control plane:
+  - `Live`
+  - delivery push
+  - delivery status updates
+  - project join/leave notifications
+- Добавлен gateway-side `RabbitMQ` fanout:
+  - `delivery.queued`
+  - `delivery.status`
+  - `project.member_joined`
+  - `project.member_left`
 - Добавлены sender-side delivery notices со статусами Telegram-сообщений:
   - `⏳ в очереди`
   - `✅ доставка выполнена`
@@ -43,7 +47,6 @@
   - отправитель
   - список файлов
 - Добавлены `LOCAL_INDEX.md` и `SHARED_INDEX.md` для унифицированного note-based обмена.
-- Добавлен VFS-backed exchange storage через существующий `vfs + minio` слой ядра.
 
 ### Changed
 - Полностью убран `stdio`-режим. `telegram_mcp` работает только через REST/MCP over HTTP.
@@ -56,18 +59,19 @@
   - отдельный `Set current` перестал быть обязательным для работы
 - `Members` теперь используются как точка выбора remote target session внутри проекта.
 - Отправка `Ask / Share / Reply / Handoff / File` в `Collab` переведена на session-targeted messaging через gateway.
-- Exchange file storage переведён на канонический flow:
-  - `minio.requestUpload`
-  - presigned `PUT`
-  - `minio.completeUpload`
+- Exchange files больше не зависят от `vfs/minio` в активном Telegram handoff path.
+- Top-level `Files` меню удалено:
+  - upload в открытой session/target context сразу создаёт handoff
+  - `Local` и `Collab` стали основными точками file delivery
 - Для upload и screenshot VFS path стал более устойчивым к коллизиям имён:
   - `files/YYYY-MM-DD/HH-mm-ss/<name>`
   - `screenshots/YYYY-MM-DD/HH-mm-ss/<name>`
-- Partner/file handoff больше не плодит лишние копии в target-side S3:
-  - источник хранит durable object
-  - получатель materialize-ит файл локально в `.mcp-xchange`
 - Для project members добавлен более понятный label:
   - `{session} · 👤{telegram_username} / 🤖{botname}`
+- HTTP fallback для `Live` и delivery удалён:
+  - больше нет `cron`
+  - больше нет `poll/respond/status` HTTP fallback path
+  - основной transport теперь `ws`
 
 ### Fixed
 - Исправлен `Headers have already sent` при работе MCP/WebApp через `moleculer-web`.
@@ -85,11 +89,6 @@
   - переход на cron/event tick
   - таймауты для poll/ack
   - корректный shutdown без лишнего warning
-- Исправлен local/global upload path через `vfs + minio`:
-  - корректный presigned upload path
-  - корректная работа через внешний nginx/S3 endpoint
-  - устранены ошибки signed headers
-  - устранены ошибки с UUID/`sub` при internal upload
 - Исправлены циклические повторы битых gateway deliveries:
   - irrecoverable delivery помечается как `failed`
   - poll больше не пытается бесконечно дочитать несуществующий объект

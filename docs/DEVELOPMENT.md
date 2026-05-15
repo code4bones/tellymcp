@@ -138,7 +138,7 @@ Mode rule:
 
 - `telegramMcp.ensuredb` must be a no-op in `DISTRIBUTED_MODE=client`
 - gateway persistence is only active in `gateway` and `both`
-- this does not remove the separate DB dependency of the existing `vfs/minio` backend stack
+- Telegram file exchange no longer depends on `vfs/minio`
 
 ## Core runtime components
 
@@ -357,6 +357,28 @@ Invariant:
 - multiple close-together messages should coalesce into one wake-up
 - multi-agent separation depends on distinct `session_id` values; when `session_id` is omitted, tmux attributes are the preferred way to derive unique defaults
 
+### Distributed collaboration flow
+
+Current transport split:
+
+- HTTP gateway:
+  - client/project/session registration
+  - `partner-note`
+- `ws`:
+  - `Live` relay
+  - incoming delivery push
+  - delivery status push
+  - project join/leave notifications
+- optional `RabbitMQ` on gateway/both nodes:
+  - durable gateway-side fanout for `ws` notifications
+  - not used on pure client nodes without `RMQ_*`
+
+Rule:
+
+- do not reintroduce HTTP poll fallback
+- `ws` is the only active online transport between gateway and client
+- `RabbitMQ` is optional and only enhances gateway-side durability/fanout
+
 ### Mini App live view flow
 
 Flow:
@@ -366,7 +388,7 @@ Flow:
 3. transport stores a short-lived launch record keyed by Telegram user
 4. Mini App bootstraps with Telegram `initData`
 5. in direct mode the local backend validates the Telegram user and resolves the active paired session
-6. in relay mode the gateway forwards `bootstrap/view/action` to the target client node through the live relay poller
+6. in relay mode the gateway forwards `bootstrap/view/action` to the target client node through `ws`
 7. backend creates a short-lived WebApp session token
 8. backend deletes the temporary launcher message after successful bootstrap
 9. Mini App polls the visible tmux buffer and sends only fixed control actions

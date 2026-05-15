@@ -46,8 +46,8 @@ Flow:
 5. The MCP client calls `ask_user_telegram` with the linked `session_id`.
 6. The server sends a redacted Telegram message and waits for the answer.
 7. The answer is returned as structured MCP tool output.
-8. Unsolicited Telegram messages are stored in a per-session inbox for later polling by the agent.
-9. If the Telegram message contains a photo or document, the file is written into the session `.mcp-xchange/`, uploaded into the existing core MinIO storage flow, and exposed to the agent through the inbox item.
+8. Unsolicited Telegram messages are stored in a per-session inbox for later agent processing.
+9. If the Telegram message contains a photo or document, the file is written into the session `.mcp-xchange/` and delivered according to the currently open session or collaboration target.
 
 ## Architecture
 
@@ -204,11 +204,11 @@ Mode-specific runtime requirements:
   - Postgres is required because the gateway role is active
   - optional `RMQ_*` enables durable gateway-side event dispatch
 
-Important current limitation:
+Current file model:
 
-- exchange files and screenshots still use the existing local `vfs + minio` backend flow
-- this means that if a client instance must support Telegram uploads, screenshots, and VFS-backed exchange locally, the backend storage DB used by `vfs/minio` is still required there as well
-- only the new gateway persistence layer is disabled in pure `client` mode
+- exchange files and screenshots live directly in local `.mcp-xchange`
+- remote delivery sends payloads through gateway delivery events
+- `vfs/minio` are no longer part of the active Telegram file exchange path
 
 ## Mini App
 
@@ -218,7 +218,7 @@ The Mini App:
 
 - is served by this same Node service under `WEBAPP_BASE_PATH`
 - in `client` mode can also be opened through the shared gateway domain
-- uses vanilla JS and polls the visible tmux pane area
+- uses vanilla JS and reads the visible tmux pane area through gateway/client relay
 - validates Telegram `initData` server-side using the official hash check
 - requires the Telegram user from `initData` to match the bound session user
 - resolves the active session from the bound Telegram user, so a session id in the URL is not required for normal use
@@ -247,7 +247,7 @@ Current browser model:
   - page runtime errors
   - failed or HTTP-error network requests
 - screenshots are written into the same `.mcp-xchange` flow as Telegram file exchange
-- exchange files now use MinIO as the durable backend and `.mcp-xchange` as the local agent-facing cache
+- exchange files use the same local `.mcp-xchange` handoff model as Telegram uploads
 
 Recommended local dev settings:
 
@@ -317,27 +317,34 @@ Current root menu behavior:
 Current session menu behavior:
 
 - title is `Session: <name>`
-- primary actions are `Live`, `Content`, `Browser`, `Files`, and `Inbox`
-- collaboration/maintenance actions are `Info`, `Rename`, `Link` or `Unlink`, `Unpair`, `Refresh`, `Back`
-- when a partner session is linked, the menu also shows a short teammate hint in the session text
-- when a partner is linked, the session menu also exposes `Partner`
+- first row: `Live | Content | Browser`
+- second row: `Local | Collab`
+- third row: `Inbox | Settings`
+- final row: `Back`
+
+`Settings` contains:
+
+- `Info`
+- `Rename`
+- `Unpair`
+- `Back`
 
 Current browser menu behavior:
 
 - `Screenshots`
 - browser screenshots are separated from ordinary uploaded files
 
-File separation rules:
+Current file behavior:
 
-- `Files` shows only files uploaded from Telegram
-- file detail actions are:
-  - `Передать агенту`
-  - `Передать партнёру`
-  - `Delete`
-- `Browser -> Screenshots` shows only files created by `browser_screenshot`
-- both menus are now backed by Redis file metadata plus MinIO object storage, not by raw directory listing alone
+- top-level `Files` menu is removed
+- `Browser -> Screenshots` still shows screenshots created by `browser_screenshot`
+- if the user is inside:
+  - the current session
+  - `🏠 Local -> Напарник`
+  - `👥 Collab -> Project -> Member`
+  then the next uploaded file is delivered directly into that target
 
-Partner link behavior:
+Local link behavior:
 
 - `Link` opens a list of other sessions visible to the same Telegram identity
 - choosing one creates a mutual partner link between the two sessions
@@ -345,9 +352,9 @@ Partner link behavior:
 - this link is intended for backend/frontend or similar agent collaboration
 - linked agents should use `send_partner_note` for structured collaboration
 
-Partner menu behavior:
+Local partner menu behavior:
 
-- `Partner` opens a linked-session collaboration menu
+- `Local` opens a linked-session collaboration menu
 - available actions are:
   - `Ask`
   - `Share`
@@ -388,7 +395,13 @@ Linked-session collaboration contract:
   - `share` for one-way status updates
   - `request` for explicit teammate actions
   - `handoff` for transferring results or artifacts
-- before sending a partner note, the agent should call `get_session_context` and verify that `linked_session_id` exists
+- before sending a local partner note, the agent should call `get_session_context` and verify that `linked_session_id` exists
+
+Collab project behavior:
+
+- `👥 Collab` is the project-based multi-machine and multi-bot collaboration flow
+- target session is chosen from `Projects -> <project> -> <member>`
+- once a member screen is open, text and file uploads go to that exact target session
 
 Recommended share-note structure:
 
@@ -438,14 +451,12 @@ Ordinary Telegram messages may include:
 - photo with optional caption
 - document with optional caption
 
-When a photo or document arrives for the active session:
+When a photo or document arrives:
 
 - the file is downloaded into `MCP_XCHANGE_DIR`, default `.mcp-xchange`, under the paired agent workspace
-- the same file is uploaded through the existing core `minio` service and tracked in Redis file metadata
-- files are written directly into that exchange directory with safe generated names
-- the upload itself does not wake the agent
-- the file appears in the `Files` menu for that session
-- `Передать агенту` creates the inbox item that tells the agent to read that file
+- if the user is already inside a concrete target context, the upload itself is the handoff action
+- otherwise the file is delivered into the currently open session as a local session handoff
+- there is no separate `Files` confirmation screen anymore
 
 Runtime note:
 

@@ -15,13 +15,14 @@ Current state:
   - members
   - `Ask / Share / Reply / Handoff / File`
   - `SHARED_INDEX.md`
-  - gateway delivery queue/status/ack/fail
+  - gateway delivery/status через `ws`
 - Exchange files работают напрямую без `vfs + minio`.
 - Доставка файлов между машинами и между локальными сессиями работает.
+- Gateway-side `RabbitMQ` fanout работает.
 
 Current tails:
 
-- [ ] Переход на `ws + RabbitMQ`:
+- [x] Переход на `ws + RabbitMQ`:
   - [x] Поднять базовый `ws` control plane между `client` и `gateway`
   - [x] Перевести `Live relay` с HTTP poll на `ws` request/response
   - [x] Посадить `ws` на общий backend ingress `${ROOT_PREFIX}/gateway/ws`
@@ -45,7 +46,7 @@ Current tails:
   - клиентской машине не нужен собственный публичный домен
   - gateway релеит `bootstrap/view/action` до нужного client session
 
-- [ ] Причесать документацию под текущее состояние:
+- [x] Причесать документацию под текущее состояние:
   - `README.md`
   - `TOOLS.md`
   - `docs/DEVELOPMENT.md`

@@ -452,6 +452,15 @@ export class GatewayHttpService {
         }
         const parsedOutput = sendPartnerNoteOutputSchema.safeParse(output);
         if (!parsedOutput.success) {
+          if (useQueuedGatewayDelivery) {
+            writeJson(res, 500, {
+              error: "Invalid queued gateway partner-note response",
+              details: parsedOutput.error.issues,
+              output,
+            });
+            return true;
+          }
+
           const fallback = buildPartnerNoteOutputFallback(input, output);
           writeJson(res, 200, fallback);
           return true;

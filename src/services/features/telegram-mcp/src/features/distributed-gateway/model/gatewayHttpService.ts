@@ -1,4 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import type { AppConfig } from "../../../app/config/env";
 import {
@@ -371,6 +373,26 @@ export class GatewayHttpService {
     if (!this.isAuthorized(req)) {
       writeText(res, 401, "Unauthorized");
       return true;
+    }
+
+    if (pathname === "/gateway/tools-md") {
+      if (req.method !== "GET") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const toolsPath = join(process.cwd(), "TOOLS.md");
+        res.statusCode = 200;
+        res.setHeader("content-type", "text/markdown; charset=utf-8");
+        res.end(readFileSync(toolsPath, "utf8"));
+        return true;
+      } catch (error) {
+        writeJson(res, 404, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
     }
 
     if (pathname === "/gateway/partner-note") {

@@ -24,6 +24,10 @@ Collaboration tools:
 
 - `send_partner_note`
 
+Utility tools:
+
+- `refresh_tools_markdown`
+
 ## `create_session_pair_code`
 
 Purpose:
@@ -63,9 +67,9 @@ Behavior:
 - if `session_id` is omitted, the server derives it automatically
 - if `cwd` is provided, the server uses it as the agent workspace root for default session identity and for `.mcp-xchange` file downloads
 - `.mcp-xchange` is the active local exchange workspace for files, screenshots, notes, and handoffs
-- if tmux attributes are provided during pairing, they become part of the derived default session identity
-- this is the recommended way to distinguish multiple agents working from different tmux sessions, windows, or panes, regardless of project layout
-- for multi-agent work, prefer collecting tmux attributes first and passing them directly into this tool, instead of relying on a later `set_tmux_target`
+- one directory now maps to one logical session by default
+- the service stores that logical identity in `.mcpsession.json` inside the workspace
+- tmux attributes are runtime metadata only and no longer change `session_id`
 - if tmux attributes are not provided here, the Telegram session can still pair successfully, but tmux nudges, Mini App controls, and other tmux-driven features will remain unavailable until `set_tmux_target` is called later
 
 Required agent practice:
@@ -73,7 +77,8 @@ Required agent practice:
 This is mandatory for the agent:
 
 - when the user asks to register, link, pair, or connect the current agent/session to Telegram, do not call `create_session_pair_code` immediately from memory
-- first collect the current agent attributes
+- first determine the correct workspace `cwd`
+- if tmux is available, collect the current tmux attributes too
 - then call `create_session_pair_code` with them
 
 Required order:
@@ -90,11 +95,11 @@ tmux display-message -p '#{session_name} #{window_name} #{window_index} #{pane_i
    - tmux attributes when available
 4. Use `set_tmux_target` later only as a repair, refresh, or override path.
 
-Do not skip attribute collection just because pairing itself can succeed without them.
+Do not skip `cwd`. It is now the anchor for the stable session marker.
 
 If you skip `cwd`:
 
-- the derived session identity may be less specific than intended
+- the service may create or reuse the wrong `.mcpsession.json`
 - Telegram file exchange into `.mcp-xchange` may not know the correct agent workspace
 
 If you skip tmux attributes:
@@ -173,7 +178,7 @@ Purpose:
 Recommended use:
 
 - run this while still at the workstation
-- do not treat this as the normal first pairing step
+- do not treat this as the source of session identity
 - use it immediately after pairing only if you need to repair, override, or refresh the target
 - prefer a pane id such as `%7`
 
@@ -254,6 +259,30 @@ Output:
 - `context?`
 - `binding?`
 - `tmux?`
+
+## `refresh_tools_markdown`
+
+Purpose:
+
+- Download the canonical `TOOLS.md` from the configured gateway.
+- Overwrite the local `TOOLS.md` so the agent can refresh instructions without manual copying.
+
+Input:
+
+- `save_locally?`
+
+Output:
+
+- `source`
+- `saved`
+- `bytes`
+- `path?`
+
+Behavior:
+
+- if `GATEWAY_PUBLIC_URL` is configured, the tool fetches `GET /api/gateway/tools-md`
+- if no gateway is configured, the tool falls back to the local file
+- on the gateway node, the local `TOOLS.md` is the canonical source and should always be kept current
 
 ## `clear_session_context`
 
@@ -930,6 +959,8 @@ Telegram UI summary:
   - `Local | Collab`
   - `Inbox | Settings`
   - `Back`
+- default logical session identity comes from `.mcpsession.json` in the workspace
+- changing tmux session/window/pane does not change `session_id`
 - `Browser -> Screenshots` lists screenshots created by `browser_screenshot`
 - `Settings` contains `Info`, `Rename`, `Unpair`, `Back`
 - `Link` creates a mutual partner relationship between two sessions visible to the same Telegram identity

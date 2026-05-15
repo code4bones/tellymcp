@@ -45,7 +45,7 @@ export class SessionContextService {
           : existing?.label
             ? { label: existing.label }
             : {}),
-      ...(existing?.cwd ? { cwd: existing.cwd } : {}),
+      ...(existing?.cwd ? { cwd: existing.cwd } : { cwd: resolved.cwd }),
       ...(existing?.linkedSessionId
         ? { linkedSessionId: existing.linkedSessionId }
         : {}),
@@ -95,6 +95,11 @@ export class SessionContextService {
         : {}),
       updatedAt,
     });
+    this.projectIdentityResolver.persistSessionMarker({
+      cwd: resolved.cwd,
+      sessionId: resolved.sessionId,
+      sessionLabel: input.session_label?.trim() || resolved.sessionLabel,
+    });
 
     this.logger.info("Session context saved", {
       sessionId: resolved.sessionId,
@@ -126,7 +131,7 @@ export class SessionContextService {
     await this.sessionStore.setSession({
       sessionId: resolved.sessionId,
       label,
-      ...(existing?.cwd ? { cwd: existing.cwd } : {}),
+      ...(existing?.cwd ? { cwd: existing.cwd } : { cwd: resolved.cwd }),
       ...(existing?.linkedSessionId
         ? { linkedSessionId: existing.linkedSessionId }
         : {}),
@@ -159,6 +164,11 @@ export class SessionContextService {
         ? { lastTmuxNudgeAt: existing.lastTmuxNudgeAt }
         : {}),
       updatedAt,
+    });
+    this.projectIdentityResolver.persistSessionMarker({
+      cwd: resolved.cwd,
+      sessionId: resolved.sessionId,
+      sessionLabel: label,
     });
 
     this.logger.info("Session renamed", {
@@ -318,7 +328,7 @@ export class SessionContextService {
         : resolved.sessionLabel
           ? { label: redactSecrets(resolved.sessionLabel) }
           : {}),
-      ...(existing?.cwd ? { cwd: existing.cwd } : {}),
+      ...(existing?.cwd ? { cwd: existing.cwd } : { cwd: resolved.cwd }),
       ...(existing?.linkedSessionId
         ? { linkedSessionId: existing.linkedSessionId }
         : {}),
@@ -353,6 +363,11 @@ export class SessionContextService {
         ? { lastTmuxNudgeAt: existing.lastTmuxNudgeAt }
         : {}),
       updatedAt,
+    });
+    this.projectIdentityResolver.persistSessionMarker({
+      cwd: resolved.cwd,
+      sessionId: resolved.sessionId,
+      sessionLabel: existing?.label || resolved.sessionLabel,
     });
 
     this.logger.info("Session tmux target saved", {

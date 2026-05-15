@@ -44,6 +44,17 @@ export const notifyTelegramOutputSchema = z.object({
   message_id: z.number().int().positive().optional(),
 });
 
+export const refreshToolsMarkdownInputSchema = z.object({
+  save_locally: z.boolean().optional(),
+});
+
+export const refreshToolsMarkdownOutputSchema = z.object({
+  source: z.enum(["gateway", "local"]),
+  saved: z.boolean(),
+  bytes: z.number().int().nonnegative(),
+  path: z.string().optional(),
+});
+
 export const getTelegramInboxInputSchema = z.object({
   session_id: z.string().trim().min(1).optional(),
 });

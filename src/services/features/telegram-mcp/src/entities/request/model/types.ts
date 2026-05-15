@@ -44,6 +44,17 @@ export type NotifyTelegramOutput = {
   message_id?: number | undefined;
 };
 
+export type RefreshToolsMarkdownInput = {
+  save_locally?: boolean | undefined;
+};
+
+export type RefreshToolsMarkdownOutput = {
+  source: "gateway" | "local";
+  saved: boolean;
+  bytes: number;
+  path?: string | undefined;
+};
+
 export type { GetTelegramInboxInput, GetTelegramInboxOutput };
 export type { GetTelegramInboxCountInput, GetTelegramInboxCountOutput };
 export type {

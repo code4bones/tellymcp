@@ -32,6 +32,10 @@ import {
   TELEGRAM_MCP_SESSION_CONTEXT_SERVICE_NAME,
   type TelegramMcpSessionContextServiceInstance,
 } from "./session-context.service";
+import {
+  TELEGRAM_MCP_TOOLS_SYNC_SERVICE_NAME,
+  type TelegramMcpToolsSyncServiceInstance,
+} from "./tools-sync.service";
 import { AskUserTelegramTool } from "./src/features/ask-user/model/askUserTelegram";
 import { BrowserClickTool } from "./src/features/browser/model/browserClickTool";
 import { BrowserClearLogsTool } from "./src/features/browser/model/browserClearLogsTool";
@@ -61,6 +65,7 @@ import { GetTmuxTargetTool } from "./src/features/session-context/model/getTmuxT
 import { RenameSessionTool } from "./src/features/session-context/model/renameSessionTool";
 import { SetSessionContextTool } from "./src/features/session-context/model/setSessionContextTool";
 import { SetTmuxTargetTool } from "./src/features/session-context/model/setTmuxTargetTool";
+import { RefreshToolsMarkdownTool } from "./src/features/tools-sync/model/refreshToolsMarkdownTool";
 import type { ToolModule } from "./src/shared/api/tool-registry/types";
 
 export const TELEGRAM_MCP_MCP_SERVER_SERVICE_NAME = "telegramMcp.mcpServer";
@@ -83,6 +88,7 @@ const TelegramMcpMcpServerService: ServiceSchema = {
     TELEGRAM_MCP_APPROVAL_SERVICE_NAME,
     TELEGRAM_MCP_BROWSER_SERVICE_NAME,
     TELEGRAM_MCP_COLLABORATION_SERVICE_NAME,
+    TELEGRAM_MCP_TOOLS_SYNC_SERVICE_NAME,
   ],
 
   methods: {
@@ -108,6 +114,9 @@ const TelegramMcpMcpServerService: ServiceSchema = {
       const collaborationService = this.broker.getLocalService(
         TELEGRAM_MCP_COLLABORATION_SERVICE_NAME,
       ) as TelegramMcpCollaborationServiceInstance | null;
+      const toolsSyncService = this.broker.getLocalService(
+        TELEGRAM_MCP_TOOLS_SYNC_SERVICE_NAME,
+      ) as TelegramMcpToolsSyncServiceInstance | null;
 
       if (
         !pairService ||
@@ -116,7 +125,8 @@ const TelegramMcpMcpServerService: ServiceSchema = {
         !inboxService ||
         !approvalService ||
         !browserService ||
-        !collaborationService
+        !collaborationService ||
+        !toolsSyncService
       ) {
         throw new Error("telegram_mcp MCP server dependencies are not ready");
       }
@@ -161,6 +171,9 @@ const TelegramMcpMcpServerService: ServiceSchema = {
         new SendPartnerNoteTool(
           collaborationService.getCollaborationService(),
         ),
+        new RefreshToolsMarkdownTool(
+          toolsSyncService.getRefreshToolsMarkdownService(),
+        ),
       ];
 
       return createMcpServer(tools);
@@ -176,6 +189,7 @@ const TelegramMcpMcpServerService: ServiceSchema = {
       TELEGRAM_MCP_APPROVAL_SERVICE_NAME,
       TELEGRAM_MCP_BROWSER_SERVICE_NAME,
       TELEGRAM_MCP_COLLABORATION_SERVICE_NAME,
+      TELEGRAM_MCP_TOOLS_SYNC_SERVICE_NAME,
     ]);
 
     this.logger.info("telegram_mcp MCP server service is ready");

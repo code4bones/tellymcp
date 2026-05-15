@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
 import type { AppConfig } from "../../../app/config/env";
@@ -36,9 +36,21 @@ export type SessionDefaultsInput = {
 export type ResolvedSessionDefaults = {
   sessionId: string;
   sessionLabel: string;
+  cwd: string;
   sessionIdDerived: boolean;
   sessionLabelDerived: boolean;
 };
+
+type SessionMarkerShape = {
+  version?: unknown;
+  local_session_id?: unknown;
+  session_label?: unknown;
+  cwd?: unknown;
+  created_at?: unknown;
+  updated_at?: unknown;
+};
+
+const SESSION_MARKER_FILE_NAME = ".mcpsession.json";
 
 function slugify(input: string): string {
   return input
@@ -100,58 +112,6 @@ function resolveInputCwd(value: string | undefined): string | undefined {
   return trimmed ? resolve(trimmed) : undefined;
 }
 
-function buildTmuxContextParts(input: SessionDefaultsInput): {
-  labelSuffix?: string;
-  slugSuffix?: string;
-  fingerprintSource?: string;
-} {
-  const sessionName = normalizeOptionalString(input.tmux_session_name);
-  const windowName = normalizeOptionalString(input.tmux_window_name);
-  const paneId = normalizeOptionalString(input.tmux_pane_id);
-  const windowIndex =
-    typeof input.tmux_window_index === "number"
-      ? String(input.tmux_window_index)
-      : undefined;
-  const paneIndex =
-    typeof input.tmux_pane_index === "number"
-      ? String(input.tmux_pane_index)
-      : undefined;
-
-  const humanParts = [
-    sessionName,
-    windowName ?? (windowIndex ? `w${windowIndex}` : undefined),
-    paneIndex ? `p${paneIndex}` : undefined,
-  ].filter((part): part is string => Boolean(part));
-
-  const slugParts = [
-    sessionName,
-    windowName,
-    windowIndex ? `w${windowIndex}` : undefined,
-    paneId ? paneId.replace(/[^a-zA-Z0-9]+/g, "-") : undefined,
-    paneIndex ? `p${paneIndex}` : undefined,
-  ]
-    .map((part) => (part ? slugify(part) : undefined))
-    .filter((part): part is string => Boolean(part));
-
-  const fingerprintParts = [
-    sessionName,
-    windowName,
-    windowIndex,
-    paneId,
-    paneIndex,
-  ].filter((part): part is string => Boolean(part));
-
-  return {
-    ...(humanParts.length > 0
-      ? { labelSuffix: humanParts.join(":") }
-      : {}),
-    ...(slugParts.length > 0 ? { slugSuffix: slugParts.join("-") } : {}),
-    ...(fingerprintParts.length > 0
-      ? { fingerprintSource: fingerprintParts.join("|") }
-      : {}),
-  };
-}
-
 export class ProjectIdentityResolver {
   private readonly identity: ProjectIdentity;
 
@@ -181,30 +141,45 @@ export class ProjectIdentityResolver {
     input: SessionDefaultsInput,
   ): ResolvedSessionDefaults {
     const inputCwd = resolveInputCwd(input.cwd);
-    const tmuxContext = buildTmuxContextParts(input);
-    const titleBase = inputCwd ? basename(inputCwd) || "Project" : this.identity.resolvedTitle;
-    const fingerprintBase =
-      inputCwd ||
-      this.identity.gitRoot ||
-      this.identity.packageJsonPath ||
-      this.identity.cwd;
-    const derivedSessionId = tmuxContext.slugSuffix
-      ? `${slugify(titleBase) || "session"}-${tmuxContext.slugSuffix}-${shortHash(
-          `${fingerprintBase}|${tmuxContext.fingerprintSource || tmuxContext.slugSuffix}`,
-        )}`.slice(0, 64)
-      : inputCwd
-        ? `${slugify(titleBase) || "session"}-${shortHash(fingerprintBase)}`
-        : this.identity.resolvedSessionId;
-    const derivedSessionLabel = tmuxContext.labelSuffix
-      ? `${titleBase} [${tmuxContext.labelSuffix}]`
-      : titleBase;
+    const resolvedCwd = inputCwd || this.identity.cwd;
+    const titleBase = basename(resolvedCwd) || this.identity.resolvedTitle || "Project";
+    const sessionMarker = this.readSessionMarker(resolvedCwd);
+    const derivedSessionId =
+      sessionMarker?.localSessionId ||
+      `${slugify(titleBase) || "session"}-${shortHash(resolvedCwd)}`;
+    const derivedSessionLabel = sessionMarker?.sessionLabel || titleBase;
+    const explicitSessionId = input.session_id?.trim();
+    const explicitSessionLabel = input.session_label?.trim();
+
+    if (!sessionMarker) {
+      this.writeSessionMarker(resolvedCwd, {
+        localSessionId: explicitSessionId || derivedSessionId,
+        sessionLabel: explicitSessionLabel || derivedSessionLabel,
+        cwd: resolvedCwd,
+      });
+    }
 
     return {
-      sessionId: input.session_id?.trim() || derivedSessionId,
-      sessionLabel: input.session_label?.trim() || derivedSessionLabel,
-      sessionIdDerived: !input.session_id?.trim(),
-      sessionLabelDerived: !input.session_label?.trim(),
+      sessionId: explicitSessionId || derivedSessionId,
+      sessionLabel: explicitSessionLabel || derivedSessionLabel,
+      cwd: resolvedCwd,
+      sessionIdDerived: !explicitSessionId,
+      sessionLabelDerived: !explicitSessionLabel,
     };
+  }
+
+  public persistSessionMarker(input: {
+    cwd?: string | undefined;
+    sessionId: string;
+    sessionLabel?: string | undefined;
+  }): void {
+    const resolvedCwd = resolveInputCwd(input.cwd) || this.identity.cwd;
+    const current = this.readSessionMarker(resolvedCwd);
+    this.writeSessionMarker(resolvedCwd, {
+      localSessionId: input.sessionId,
+      sessionLabel: input.sessionLabel || current?.sessionLabel,
+      cwd: resolvedCwd,
+    });
   }
 
   private buildIdentity(): ProjectIdentity {
@@ -247,5 +222,82 @@ export class ProjectIdentityResolver {
       resolvedSessionId,
       titleSource,
     };
+  }
+
+  private readSessionMarker(
+    cwd: string,
+  ): { localSessionId: string; sessionLabel?: string; cwd?: string } | null {
+    const markerPath = join(cwd, SESSION_MARKER_FILE_NAME);
+    if (!existsSync(markerPath)) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(
+        readFileSync(markerPath, "utf8"),
+      ) as SessionMarkerShape;
+      const localSessionId =
+        typeof parsed.local_session_id === "string"
+          ? parsed.local_session_id.trim()
+          : "";
+      if (!localSessionId) {
+        return null;
+      }
+
+      return {
+        localSessionId,
+        ...(typeof parsed.session_label === "string" &&
+        parsed.session_label.trim()
+          ? { sessionLabel: parsed.session_label.trim() }
+          : {}),
+        ...(typeof parsed.cwd === "string" && parsed.cwd.trim()
+          ? { cwd: parsed.cwd.trim() }
+          : {}),
+      };
+    } catch (error) {
+      this.logger.warn("Failed to read .mcpsession.json, ignoring marker", {
+        cwd,
+        markerPath,
+        error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+      });
+      return null;
+    }
+  }
+
+  private writeSessionMarker(inputCwd: string, input: {
+    localSessionId: string;
+    sessionLabel?: string | undefined;
+    cwd: string;
+  }): void {
+    const markerPath = join(inputCwd, SESSION_MARKER_FILE_NAME);
+    const now = new Date().toISOString();
+    const current = this.readSessionMarker(inputCwd);
+
+    try {
+      writeFileSync(
+        markerPath,
+        `${JSON.stringify(
+          {
+            version: 1,
+            local_session_id: input.localSessionId,
+            ...(input.sessionLabel ? { session_label: input.sessionLabel } : {}),
+            cwd: input.cwd,
+            created_at: now,
+            updated_at: now,
+            ...(current ? { first_seen_local_session_id: current.localSessionId } : {}),
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+    } catch (error) {
+      this.logger.warn("Failed to write .mcpsession.json", {
+        cwd: inputCwd,
+        markerPath,
+        sessionId: input.localSessionId,
+        error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+      });
+    }
   }
 }

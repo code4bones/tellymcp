@@ -48,10 +48,11 @@ export class PairSessionService {
             ? { label: existingSession.label }
             : {}),
       ...(input.cwd
-        ? { cwd: input.cwd.trim() }
+        ? { cwd: resolved.cwd }
         : existingSession?.cwd
           ? { cwd: existingSession.cwd }
-          : {}),
+          : { cwd: resolved.cwd }
+      ),
       ...(existingSession?.linkedSessionId
         ? { linkedSessionId: existingSession.linkedSessionId }
         : {}),
@@ -104,6 +105,11 @@ export class PairSessionService {
         ? { lastTmuxNudgeAt: existingSession.lastTmuxNudgeAt }
         : {}),
       updatedAt: now.toISOString(),
+    });
+    this.projectIdentityResolver.persistSessionMarker({
+      cwd: resolved.cwd,
+      sessionId: resolved.sessionId,
+      sessionLabel: input.session_label?.trim() || resolved.sessionLabel,
     });
 
     for (

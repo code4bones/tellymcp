@@ -29,6 +29,7 @@ import { BrowserComputedStyleTool } from "../../../features/browser/model/browse
 import { BrowserScreenshotTool } from "../../../features/browser/model/browserScreenshotTool";
 import { BrowserCloseTool } from "../../../features/browser/model/browserCloseTool";
 import { SendPartnerNoteTool } from "../../../features/collaboration/model/sendPartnerNoteTool";
+import { RefreshToolsMarkdownTool } from "../../../features/tools-sync/model/refreshToolsMarkdownTool";
 import type { ToolModule } from "../../../shared/api/tool-registry/types";
 import { registerTools } from "../../../shared/api/tool-registry/registry";
 
@@ -72,4 +73,5 @@ export type AppToolModules = {
   browserScreenshotTool: BrowserScreenshotTool;
   browserCloseTool: BrowserCloseTool;
   sendPartnerNoteTool: SendPartnerNoteTool;
+  refreshToolsMarkdownTool: RefreshToolsMarkdownTool;
 };

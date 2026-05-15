@@ -16,32 +16,40 @@ export const LIVE_RELAY_SESSION_PREFIX = "relay~";
 export function buildLiveRelaySessionId(
   clientUuid: string,
   localSessionId: string,
+  sourceClientUuid?: string,
 ): string {
-  return `${LIVE_RELAY_SESSION_PREFIX}${clientUuid}~${encodeURIComponent(localSessionId)}`;
+  return `${LIVE_RELAY_SESSION_PREFIX}${clientUuid}~${encodeURIComponent(localSessionId)}${sourceClientUuid ? `~${sourceClientUuid}` : ""}`;
 }
 
 export function parseLiveRelaySessionId(
   value: string | null | undefined,
-): { clientUuid: string; localSessionId: string } | null {
+): { clientUuid: string; localSessionId: string; sourceClientUuid?: string } | null {
   if (!value || !value.startsWith(LIVE_RELAY_SESSION_PREFIX)) {
     return null;
   }
 
   const payload = value.slice(LIVE_RELAY_SESSION_PREFIX.length);
-  const separatorIndex = payload.indexOf("~");
-  if (separatorIndex <= 0) {
+  const parts = payload.split("~");
+  if (parts.length < 2) {
     return null;
   }
 
-  const clientUuid = payload.slice(0, separatorIndex).trim();
-  const encodedSessionId = payload.slice(separatorIndex + 1).trim();
+  const clientUuid = (parts[0] ?? "").trim();
+  const encodedSessionId = (parts[1] ?? "").trim();
+  const sourceClientUuid = (parts[2] ?? "").trim();
   if (!clientUuid || !encodedSessionId) {
     return null;
   }
 
   try {
     const localSessionId = decodeURIComponent(encodedSessionId);
-    return localSessionId ? { clientUuid, localSessionId } : null;
+    return localSessionId
+      ? {
+          clientUuid,
+          localSessionId,
+          ...(sourceClientUuid ? { sourceClientUuid } : {}),
+        }
+      : null;
   } catch {
     return null;
   }

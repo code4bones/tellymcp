@@ -360,10 +360,39 @@ export function createMcpHttpHandler(
         const relayTarget = parseLiveRelaySessionId(sessionId);
         if (relayTarget) {
           try {
+            let trustedTelegramUserId: number | null = null;
+            if (
+              relayTarget.sourceClientUuid &&
+              relayTarget.sourceClientUuid !== relayTarget.clientUuid
+            ) {
+              const validation =
+                await runtime.gatewayHttpService.requestLiveRelayBootstrapValidation({
+                  clientUuid: relayTarget.sourceClientUuid,
+                  initDataRaw,
+                  initDataUnsafe,
+                });
+              trustedTelegramUserId = validation.telegram_user_id;
+            } else {
+              try {
+                const validated = validateTelegramWebAppInitData(
+                  initDataRaw,
+                  initDataUnsafe,
+                  runtime.config.telegram.botToken,
+                  runtime.config.webapp.initDataTtlSeconds,
+                );
+                trustedTelegramUserId = validated.user.id;
+                runtime.webAppLaunchRegistry.deleteByUserId(validated.user.id);
+              } catch {
+                trustedTelegramUserId = null;
+              }
+            }
             const relayBootstrap =
               await runtime.gatewayHttpService.requestLiveRelayBootstrap({
                 clientUuid: relayTarget.clientUuid,
                 localSessionId: relayTarget.localSessionId,
+                ...(trustedTelegramUserId !== null
+                  ? { telegramUserId: trustedTelegramUserId }
+                  : {}),
                 initDataRaw,
                 initDataUnsafe,
               });

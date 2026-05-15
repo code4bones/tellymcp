@@ -201,13 +201,19 @@ export class GatewayHttpService {
   public async requestLiveRelayBootstrap(input: {
     clientUuid: string;
     localSessionId: string;
+    telegramUserId?: number;
     initDataRaw: string;
     initDataUnsafe: TelegramWebAppInitDataUnsafe;
   }): Promise<LiveRelayBootstrapResult> {
-    const payload = {
-      initDataRaw: input.initDataRaw,
-      initDataUnsafe: input.initDataUnsafe,
-    };
+    const payload =
+      typeof input.telegramUserId === "number"
+        ? {
+            telegramUserId: input.telegramUserId,
+          }
+        : {
+            initDataRaw: input.initDataRaw,
+            initDataUnsafe: input.initDataUnsafe,
+          };
     const rawResponse = await this.callBroker<LiveRelayBootstrapResult>(
       "telegramMcp.gatewaySocket.requestLiveRelay",
       {
@@ -225,6 +231,39 @@ export class GatewayHttpService {
     if (!response) {
       throw new Error(
         `Invalid live relay bootstrap response: ${JSON.stringify(rawResponse)}`,
+      );
+    }
+
+    return response;
+  }
+
+  public async requestLiveRelayBootstrapValidation(input: {
+    clientUuid: string;
+    initDataRaw: string;
+    initDataUnsafe: TelegramWebAppInitDataUnsafe;
+  }): Promise<{ telegram_user_id: number }> {
+    const rawResponse = await this.callBroker<{ telegram_user_id: number }>(
+      "telegramMcp.gatewaySocket.requestLiveRelay",
+      {
+        clientUuid: input.clientUuid,
+        localSessionId: "",
+        requestType: "bootstrap_validate",
+        payload: {
+          initDataRaw: input.initDataRaw,
+          initDataUnsafe: input.initDataUnsafe,
+        },
+      },
+      { meta: { internal_call: true } },
+    );
+    const response = unwrapLiveRelayResult<{ telegram_user_id: number }>(rawResponse);
+
+    if (
+      !response ||
+      typeof response !== "object" ||
+      typeof (response as { telegram_user_id?: unknown }).telegram_user_id !== "number"
+    ) {
+      throw new Error(
+        `Invalid live relay bootstrap validation response: ${JSON.stringify(rawResponse)}`,
       );
     }
 

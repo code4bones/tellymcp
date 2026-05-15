@@ -51,7 +51,7 @@ type GatewaySocketHelloAck = {
 type GatewaySocketLiveRequest = {
   type: "live_request";
   request_id: string;
-  request_type: "bootstrap" | "view" | "action";
+  request_type: "bootstrap" | "bootstrap_validate" | "view" | "action";
   local_session_id: string;
   payload: Record<string, unknown>;
 };
@@ -197,7 +197,7 @@ type GatewaySocketCarrier = Service & {
   requestLiveRelay?: (params: {
     clientUuid: string;
     localSessionId: string;
-    requestType: "bootstrap" | "view" | "action";
+    requestType: "bootstrap" | "bootstrap_validate" | "view" | "action";
     payload: Record<string, unknown>;
   }) => Promise<unknown>;
   notifyProjectMemberJoined?: (params: {
@@ -265,7 +265,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         localSessionId: "string",
         requestType: {
           type: "enum",
-          values: ["bootstrap", "view", "action"],
+          values: ["bootstrap", "bootstrap_validate", "view", "action"],
         },
         payload: { type: "object", optional: true },
       },
@@ -275,7 +275,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           params: {
             clientUuid: string;
             localSessionId: string;
-            requestType: "bootstrap" | "view" | "action";
+            requestType: "bootstrap" | "bootstrap_validate" | "view" | "action";
             payload?: Record<string, unknown>;
           };
         },
@@ -547,7 +547,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
     ): Promise<GatewaySocketLiveResponse> {
       const runtime = this.getRuntimeOrThrow!();
       try {
-        if (request.request_type === "bootstrap") {
+        if (request.request_type === "bootstrap_validate") {
           const payload = request.payload ?? {};
           const initDataRaw =
             typeof payload.initDataRaw === "string" ? payload.initDataRaw : "";
@@ -566,28 +566,11 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             runtime.config.telegram.botToken,
             runtime.config.webapp.initDataTtlSeconds,
           );
-
-          let sessionId = request.local_session_id.trim();
           const launchRecord =
             runtime.webAppLaunchRegistry.getByUserId(validated.user.id);
-          if (!sessionId) {
-            sessionId = launchRecord?.sessionId ?? "";
+          if (!launchRecord) {
+            throw new Error("No pending Telegram WebApp launch was found");
           }
-
-          if (!sessionId) {
-            throw new Error(
-              "sessionId is missing and no pending Telegram WebApp launch was found",
-            );
-          }
-
-          const binding = await runtime.bindingStore.getBinding(sessionId);
-          if (!binding || binding.telegramUserId !== validated.user.id) {
-            throw new Error(
-              "This Telegram user is not bound to the requested session.",
-            );
-          }
-
-          const session = await runtime.sessionStore.getSession(sessionId);
           runtime.webAppLaunchRegistry.deleteByUserId(validated.user.id);
 
           if (
@@ -607,11 +590,74 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             request_id: request.request_id,
             ok: true,
             result: {
+              telegram_user_id: validated.user.id,
+            },
+          };
+        }
+
+        if (request.request_type === "bootstrap") {
+          const payload = request.payload ?? {};
+          const trustedTelegramUserId =
+            typeof payload.telegramUserId === "number"
+              ? payload.telegramUserId
+              : typeof payload.telegramUserId === "string" &&
+                  payload.telegramUserId.trim()
+                ? Number(payload.telegramUserId)
+                : null;
+
+          let telegramUserId = trustedTelegramUserId;
+          if (
+            telegramUserId !== null &&
+            (!Number.isFinite(telegramUserId) || telegramUserId <= 0)
+          ) {
+            telegramUserId = null;
+          }
+
+          if (telegramUserId === null) {
+            const initDataRaw =
+              typeof payload.initDataRaw === "string" ? payload.initDataRaw : "";
+            const initDataUnsafe =
+              payload.initDataUnsafe && typeof payload.initDataUnsafe === "object"
+                ? (payload.initDataUnsafe as TelegramWebAppInitDataUnsafe)
+                : null;
+
+            if (!initDataRaw || !initDataUnsafe) {
+              throw new Error("initDataRaw and initDataUnsafe are required");
+            }
+
+            const validated = validateTelegramWebAppInitData(
+              initDataRaw,
+              initDataUnsafe,
+              runtime.config.telegram.botToken,
+              runtime.config.webapp.initDataTtlSeconds,
+            );
+            telegramUserId = validated.user.id;
+          }
+
+          const sessionId = request.local_session_id.trim();
+          if (!sessionId) {
+            throw new Error("sessionId is missing for relay bootstrap");
+          }
+
+          const binding = await runtime.bindingStore.getBinding(sessionId);
+          if (!binding || binding.telegramUserId !== telegramUserId) {
+            throw new Error(
+              "This Telegram user is not bound to the requested session.",
+            );
+          }
+
+          const session = await runtime.sessionStore.getSession(sessionId);
+
+          return {
+            type: "live_response",
+            request_id: request.request_id,
+            ok: true,
+            result: {
               session_id: sessionId,
               session_label: session?.label ?? null,
               tmux_target: Boolean(session?.tmuxTarget),
               poll_interval_ms: runtime.config.webapp.pollIntervalMs,
-              telegram_user_id: validated.user.id,
+              telegram_user_id: telegramUserId,
             },
           };
         }
@@ -966,7 +1012,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       params: {
         clientUuid: string;
         localSessionId: string;
-        requestType: "bootstrap" | "view" | "action";
+        requestType: "bootstrap" | "bootstrap_validate" | "view" | "action";
         payload: Record<string, unknown>;
       },
     ): Promise<unknown> {

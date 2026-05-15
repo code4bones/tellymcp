@@ -4693,6 +4693,7 @@ export class TelegramTransport implements HumanTransport {
     targetSessionId: string;
     targetClientUuid?: string | undefined;
     targetLocalSessionId?: string | undefined;
+    sourceClientUuid?: string | undefined;
   }): string | null {
     if (
       !this.config.webapp.enabled ||
@@ -4720,6 +4721,7 @@ export class TelegramTransport implements HumanTransport {
       ? buildLiveRelaySessionId(
           input.targetClientUuid!,
           input.targetLocalSessionId!,
+          input.sourceClientUuid,
         )
       : (input.targetLocalSessionId ?? input.targetSessionId);
     return new URL(
@@ -6415,6 +6417,13 @@ export class TelegramTransport implements HumanTransport {
       });
     }
     const session = await this.sessionStore.getSession(input.sessionId);
+    const actor = this.getGatewayActorFromContext(ctx);
+    const sourceClientUuid =
+      this.config.distributed.mode === "client" &&
+      this.config.distributed.gatewayPublicUrl &&
+      principal
+        ? await this.ensureGatewayClientUuid(principal, actor)
+        : null;
 
     const text = [
       "🤝 Сессия проекта",
@@ -6446,6 +6455,7 @@ export class TelegramTransport implements HumanTransport {
       targetSessionId: input.targetSessionId,
       targetClientUuid: input.targetClientUuid,
       targetLocalSessionId: input.targetLocalSessionId,
+      ...(sourceClientUuid ? { sourceClientUuid } : {}),
     });
 
     const keyboard = new InlineKeyboard()
@@ -6458,6 +6468,17 @@ export class TelegramTransport implements HumanTransport {
     keyboard.text("⬅ К участникам", `project-members:${input.projectUuid}`);
 
     if (ctx.callbackQuery?.message) {
+      if (principal && ctx.chat && "message_id" in ctx.callbackQuery.message) {
+        this.webAppLaunchRegistry.set(
+          principal.telegramUserId,
+          input.sessionId,
+          this.config.webapp.initDataTtlSeconds,
+          {
+            telegramChatId: ctx.chat.id,
+            telegramMessageId: ctx.callbackQuery.message.message_id,
+          },
+        );
+      }
       await this.editText(
         ctx,
         text,
@@ -6467,12 +6488,25 @@ export class TelegramTransport implements HumanTransport {
       return;
     }
 
-    await this.replyText(
+    const sent = await this.replyText(
       ctx,
       text,
       { kind: "menu", sessionId: input.sessionId },
       { parse_mode: "HTML", reply_markup: keyboard },
     );
+    if (principal) {
+      this.webAppLaunchRegistry.set(
+        principal.telegramUserId,
+        input.sessionId,
+        this.config.webapp.initDataTtlSeconds,
+        {
+          ...(ctx.chat ? { telegramChatId: ctx.chat.id } : {}),
+          ...(sent && "message_id" in sent
+            ? { telegramMessageId: sent.message_id }
+            : {}),
+        },
+      );
+    }
   }
 
   private async showProjectMemberFiles(

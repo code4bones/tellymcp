@@ -33,6 +33,10 @@
   - `⏳ в очереди`
   - `✅ доставка выполнена`
   - `❌ доставка не выполнена`
+- Добавлен gateway-relayed `Live View`:
+  - Mini App может открываться через домен gateway
+  - клиентской машине не нужен собственный публичный домен
+  - relay работает для `bootstrap/view/action`
 - Добавлены входящие Telegram-уведомления о remote delivery с контекстом:
   - проект
   - сессия
@@ -93,3 +97,4 @@
   - больше нет `Buffer.from(BackendError)`
   - ошибки чтения и resolve теперь обрабатываются явно
 - Исправлены sender-side/receiver-side статусы и сообщения по remote file exchange.
+- Исправлены временные синтаксические и debug-хвосты в Mini App `Live` relay shell.

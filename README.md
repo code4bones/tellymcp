@@ -165,10 +165,11 @@ The service now has a role-oriented distributed scaffold:
 - `DISTRIBUTED_MODE=client`
   - current default
   - full local Telegram/MCP/tmux/browser flow
-  - collaboration currently uses the local linked-session backend
+  - local `🏠 Local` flow works directly
+  - remote `👥 Collab` flow goes through gateway when `GATEWAY_PUBLIC_URL` is configured
 - `DISTRIBUTED_MODE=gateway`
   - enables `/gateway/*` HTTP surface
-  - intended future relay role for multi-developer / multi-bot setups
+  - serves as the shared relay/control plane
 - `DISTRIBUTED_MODE=both`
   - exposes both local service behavior and gateway HTTP surface in one process
 
@@ -180,9 +181,12 @@ Current implementation status:
 - `POST /gateway/projects/join` works
 - `POST /gateway/sessions/register` works
 - `POST /gateway/partner-note` works
+- `POST /gateway/live/poll` works
+- `POST /gateway/live/respond` works
 - if `GATEWAY_PUBLIC_URL` is configured, partner-note delivery goes through the gateway HTTP surface
 - in `DISTRIBUTED_MODE=both`, this also covers same-bot local delivery transparently
-- remote relay persistence/polling through shared DB is still not implemented yet
+- remote project messaging and delivery status through the gateway DB are implemented
+- gateway-relayed `Live View` is implemented for client nodes without their own public domain
 
 Mode-specific runtime requirements:
 
@@ -204,11 +208,12 @@ Important current limitation:
 
 ## Mini App
 
-If `WEBAPP_ENABLED=true` and `WEBAPP_PUBLIC_URL` is configured, the session menu exposes `🖥 Live`.
+If `WEBAPP_ENABLED=true`, the session menu exposes `🖥 Live`.
 
 The Mini App:
 
 - is served by this same Node service under `WEBAPP_BASE_PATH`
+- in `client` mode can also be opened through the shared gateway domain
 - uses vanilla JS and polls the visible tmux pane area
 - validates Telegram `initData` server-side using the official hash check
 - requires the Telegram user from `initData` to match the bound session user
@@ -222,6 +227,8 @@ The Mini App:
   - `Enter`
 
 `WEBAPP_VISIBLE_SCREENS` controls how much content the live viewport captures relative to the visible tmux height. The default `2` means about two visible screens of content.
+
+`WEBAPP_PUBLIC_URL` is only required when the node exposes its own public Mini App URL directly. In `DISTRIBUTED_MODE=client` with `GATEWAY_PUBLIC_URL` configured, `🖥 Live` can be opened through the gateway domain instead.
 
 ## Browser feedback
 

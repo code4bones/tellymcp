@@ -477,28 +477,12 @@ function getInitDataUnsafe() {
   return tg?.initDataUnsafe || null;
 }
 
-function buildStartupDebugSnapshot() {
-  const initData = getInitData();
-  const initDataUnsafe = getInitDataUnsafe();
-  return {
-    hasTelegramObject: Boolean(window.Telegram),
-    hasWebAppObject: Boolean(window.Telegram?.WebApp),
-    initDataLength: initData.length,
-    hasHashInInitData: initData.includes("hash="),
-    hasInitDataUnsafe: Boolean(initDataUnsafe),
-    locationHref: window.location.href,
-    basePath: config?.basePath || null,
-    userAgent: navigator.userAgent,
-  };
-}
-
 async function bootstrap() {
   const sessionId = getRequestedSessionId();
   const initData = getInitData();
   const initDataUnsafe = getInitDataUnsafe();
 
   if (!initDataUnsafe || !initData || !initData.includes("hash=")) {
-    console.warn("Telegram MCP WebApp bootstrap blocked before request", buildStartupDebugSnapshot());
     throw new Error("Open this page inside Telegram Mini App.");
   }
 
@@ -649,24 +633,8 @@ async function main() {
     startPolling();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const debug = buildStartupDebugSnapshot();
-    console.warn("Telegram MCP WebApp startup failed", {
-      message,
-      debug,
-    });
     setStatus(message, true);
-    elements.terminal.textContent = [
-      message,
-      "",
-      "Debug:",
-      "hasTelegramObject: " + debug.hasTelegramObject,
-      "hasWebAppObject: " + debug.hasWebAppObject,
-      "initDataLength: " + debug.initDataLength,
-      "hasHashInInitData: " + debug.hasHashInInitData,
-      "hasInitDataUnsafe: " + debug.hasInitDataUnsafe,
-      "basePath: " + (debug.basePath || "-"),
-      "url: " + debug.locationHref,
-    ].join("\\n");
+    elements.terminal.textContent = message;
   }
 }
 

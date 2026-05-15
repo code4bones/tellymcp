@@ -19,13 +19,12 @@ Current state:
 - Exchange files работают через `vfs + minio`.
 - Доставка файлов между машинами и между локальными сессиями работает.
 
-Plan for tomorrow:
+Current tails:
 
-- [ ] Начать с gateway-relayed `Live View`:
-  - Mini App должен уметь открываться через домен gateway
-  - без собственного публичного домена на клиентской машине
-  - gateway должен уметь релеить `bootstrap/view/action` до нужного client session
-  - проверить, как лучше посадить это на текущий poll/relay transport
+- [x] Gateway-relayed `Live View` реализован:
+  - Mini App открывается через домен gateway
+  - клиентской машине не нужен собственный публичный домен
+  - gateway релеит `bootstrap/view/action` до нужного client session
 
 - [ ] Причесать документацию под текущее состояние:
   - `README.md`

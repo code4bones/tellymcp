@@ -365,16 +365,18 @@ Flow:
 2. transport sends a launcher message with a WebApp button
 3. transport stores a short-lived launch record keyed by Telegram user
 4. Mini App bootstraps with Telegram `initData`
-5. backend validates the Telegram user and resolves the active paired session
-6. backend creates a short-lived WebApp session token
-7. backend deletes the temporary launcher message after successful bootstrap
-8. Mini App polls the visible tmux buffer and sends only fixed control actions
+5. in direct mode the local backend validates the Telegram user and resolves the active paired session
+6. in relay mode the gateway forwards `bootstrap/view/action` to the target client node through the live relay poller
+7. backend creates a short-lived WebApp session token
+8. backend deletes the temporary launcher message after successful bootstrap
+9. Mini App polls the visible tmux buffer and sends only fixed control actions
 
 Invariant:
 
 - the Mini App never trusts URL session parameters as the sole source of truth
 - WebApp control is restricted to `/`, `Backspace`, `Up`, `Down`, `Enter`
 - no arbitrary terminal text input should be introduced casually
+- client nodes do not need their own public domain when `Live` is opened through gateway relay
 
 ## Session model
 

@@ -2706,8 +2706,12 @@ export class TelegramTransport implements HumanTransport {
     await this.replyText(
       ctx,
       session?.label
-        ? `Сохранено файлов для сессии ${session.label}: ${attachments.length}. Передавай их через Local или Collab.`
-        : `Сохранено файлов для сессии ${sessionId}: ${attachments.length}. Передавай их через Local или Collab.`,
+        ? attachments.length === 1
+          ? `Файл доставлен в сессию ${session.label}.`
+          : `Файлы доставлены в сессию ${session.label}: ${attachments.length}.`
+        : attachments.length === 1
+          ? `Файл доставлен в сессию ${sessionId}.`
+          : `Файлы доставлены в сессию ${sessionId}: ${attachments.length}.`,
       {
         kind: "inbox",
         sessionId,

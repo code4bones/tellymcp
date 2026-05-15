@@ -666,7 +666,7 @@ async function main() {
       "hasInitDataUnsafe: " + debug.hasInitDataUnsafe,
       "basePath: " + (debug.basePath || "-"),
       "url: " + debug.locationHref,
-    ].join("\n");
+    ].join("\\n");
   }
 }
 

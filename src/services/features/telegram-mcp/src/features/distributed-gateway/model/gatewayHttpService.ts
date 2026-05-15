@@ -166,6 +166,41 @@ function unwrapLiveRelayResult<T>(response: unknown): T | null {
   return response as T;
 }
 
+function normalizeLiveRelayBootstrapResult(
+  response: unknown,
+): LiveRelayBootstrapResult | null {
+  if (!response || typeof response !== "object") {
+    return null;
+  }
+
+  const record = response as Record<string, unknown>;
+  const sessionId =
+    typeof record.session_id === "string" ? record.session_id.trim() : "";
+  const telegramUserId =
+    typeof record.telegram_user_id === "number"
+      ? record.telegram_user_id
+      : typeof record.telegram_user_id === "string" &&
+          /^\d+$/u.test(record.telegram_user_id.trim())
+        ? Number(record.telegram_user_id.trim())
+        : NaN;
+
+  if (!sessionId || !Number.isFinite(telegramUserId)) {
+    return null;
+  }
+
+  return {
+    session_id: sessionId,
+    session_label:
+      typeof record.session_label === "string" ? record.session_label : null,
+    tmux_target: record.tmux_target === true,
+    poll_interval_ms:
+      typeof record.poll_interval_ms === "number" && record.poll_interval_ms > 0
+        ? record.poll_interval_ms
+        : 2000,
+    telegram_user_id: telegramUserId,
+  };
+}
+
 function buildPartnerNoteOutputFallback(
   input: SendPartnerNoteInput,
   rawOutput: unknown,
@@ -274,16 +309,14 @@ export class GatewayHttpService {
       type: "bootstrap",
       payload,
     });
-    const response = unwrapLiveRelayResult<LiveRelayBootstrapResult>(rawResponse);
+    const response = normalizeLiveRelayBootstrapResult(
+      unwrapLiveRelayResult<LiveRelayBootstrapResult>(rawResponse),
+    );
 
-    if (
-      !response ||
-      typeof response !== "object" ||
-      typeof (response as { session_id?: unknown }).session_id !== "string" ||
-      typeof (response as { telegram_user_id?: unknown }).telegram_user_id !==
-        "number"
-    ) {
-      throw new Error("Invalid live relay bootstrap response");
+    if (!response) {
+      throw new Error(
+        `Invalid live relay bootstrap response: ${JSON.stringify(rawResponse)}`,
+      );
     }
 
     return response;

@@ -110,7 +110,11 @@ type GatewaySocketCarrier = Service & {
 
 function normalizeWebSocketUrl(value: string, defaultPath: string): string {
   const url = new URL(value);
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  if (url.protocol === "https:") {
+    url.protocol = "wss:";
+  } else if (url.protocol === "http:") {
+    url.protocol = "ws:";
+  }
   if (!url.pathname || url.pathname === "/") {
     url.pathname = defaultPath;
   }

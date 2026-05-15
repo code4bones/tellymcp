@@ -83,6 +83,8 @@ export type TelegramMenuPayloadRecord = {
   messageId?: string | undefined;
   filePath?: string | undefined;
   targetSessionId?: string | undefined;
+  targetClientUuid?: string | undefined;
+  targetLocalSessionId?: string | undefined;
   projectUuid?: string | undefined;
   title?: string | undefined;
   createdAt: string;

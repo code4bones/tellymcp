@@ -75,6 +75,8 @@
 - Для `Collab -> Project -> Member` уточнена семантика действий:
   - `Ask` адресуется выбранной сессии
   - `Share` ставит задачу текущей сессии отправить результат в выбранную
+  - `Live` добавлен второй строкой под `Ask | Share`
+  - `Live` открывает выбранную target-сессию сразу, без remote approval
   - file upload в member screen остаётся прямой доставкой в target session
 
 ### Fixed

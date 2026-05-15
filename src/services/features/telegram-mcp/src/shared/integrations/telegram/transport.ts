@@ -3288,19 +3288,29 @@ export class TelegramTransport implements HumanTransport {
     projectUuid: string,
     targetSessionId: string,
     title: string,
-    filePath?: string,
+    options?: {
+      filePath?: string;
+      targetClientUuid?: string;
+      targetLocalSessionId?: string;
+    },
   ): Promise<string> {
     const key = createMenuPayloadKey();
     const now = new Date();
     await this.menuPayloadStore.createMenuPayload(
       {
         key,
-        kind: filePath ? "project-file-target" : "project-member",
+        kind: options?.filePath ? "project-file-target" : "project-member",
         sessionId,
         projectUuid,
         targetSessionId,
         title,
-        ...(filePath ? { filePath } : {}),
+        ...(options?.filePath ? { filePath: options.filePath } : {}),
+        ...(options?.targetClientUuid
+          ? { targetClientUuid: options.targetClientUuid }
+          : {}),
+        ...(options?.targetLocalSessionId
+          ? { targetLocalSessionId: options.targetLocalSessionId }
+          : {}),
         createdAt: now.toISOString(),
         expiresAt: new Date(
           now.getTime() + this.config.telegram.menuPayloadTtlSeconds * 1000,
@@ -4677,6 +4687,44 @@ export class TelegramTransport implements HumanTransport {
           : {}),
       },
     );
+  }
+
+  private buildLiveViewUrlForSessionTarget(input: {
+    targetSessionId: string;
+    targetClientUuid?: string | undefined;
+    targetLocalSessionId?: string | undefined;
+  }): string | null {
+    if (
+      !this.config.webapp.enabled ||
+      (!this.config.webapp.publicUrl &&
+        !this.config.distributed.gatewayPublicUrl)
+    ) {
+      return null;
+    }
+
+    const canUseRelay =
+      Boolean(input.targetClientUuid) &&
+      Boolean(input.targetLocalSessionId) &&
+      Boolean(this.config.distributed.gatewayPublicUrl);
+    const baseUrl = canUseRelay
+      ? resolveGatewayWebAppBaseUrl(
+          this.config.distributed.gatewayPublicUrl!,
+          this.config.webapp.basePath,
+        )
+      : resolveWebAppPublicBaseUrl(this.config);
+    if (!baseUrl) {
+      return null;
+    }
+
+    const liveSessionId = canUseRelay
+      ? buildLiveRelaySessionId(
+          input.targetClientUuid!,
+          input.targetLocalSessionId!,
+        )
+      : (input.targetLocalSessionId ?? input.targetSessionId);
+    return new URL(
+      `${baseUrl}/live/${encodeURIComponent(liveSessionId)}`,
+    ).toString();
   }
 
   private clearPendingInteractionsForContext(ctx: TelegramMenuContext): void {
@@ -6322,7 +6370,11 @@ export class TelegramTransport implements HumanTransport {
         input.projectUuid,
         member.session_uuid,
         sessionLabel,
-        options?.filePath,
+        {
+          ...(options?.filePath ? { filePath: options.filePath } : {}),
+          targetClientUuid: member.client_uuid,
+          targetLocalSessionId: member.local_session_id,
+        },
       );
       keyboard.text(buttonLabel, `project-member-open:${payloadKey}`).row();
     }
@@ -6343,6 +6395,8 @@ export class TelegramTransport implements HumanTransport {
       inviteToken: string;
       targetSessionId: string;
       targetSessionLabel: string;
+      targetClientUuid?: string;
+      targetLocalSessionId?: string;
     },
   ): Promise<void> {
     const principal = this.getPrincipalFromContext(ctx);
@@ -6379,13 +6433,29 @@ export class TelegramTransport implements HumanTransport {
       input.projectUuid,
       input.targetSessionId,
       input.targetSessionLabel,
+      {
+        ...(input.targetClientUuid
+          ? { targetClientUuid: input.targetClientUuid }
+          : {}),
+        ...(input.targetLocalSessionId
+          ? { targetLocalSessionId: input.targetLocalSessionId }
+          : {}),
+      },
     );
+    const liveViewUrl = this.buildLiveViewUrlForSessionTarget({
+      targetSessionId: input.targetSessionId,
+      targetClientUuid: input.targetClientUuid,
+      targetLocalSessionId: input.targetLocalSessionId,
+    });
 
     const keyboard = new InlineKeyboard()
       .text("❓ Спросить", `project-member-note:question:${payloadKey}`)
       .text("📤 Поделиться", `project-member-note:share:${payloadKey}`)
-      .row()
-      .text("⬅ К участникам", `project-members:${input.projectUuid}`);
+      .row();
+    if (liveViewUrl) {
+      keyboard.webApp("🖥 Live", liveViewUrl).row();
+    }
+    keyboard.text("⬅ К участникам", `project-members:${input.projectUuid}`);
 
     if (ctx.callbackQuery?.message) {
       await this.editText(
@@ -6414,6 +6484,8 @@ export class TelegramTransport implements HumanTransport {
       inviteToken: string;
       targetSessionId: string;
       targetSessionLabel: string;
+      targetClientUuid?: string;
+      targetLocalSessionId?: string;
     },
   ): Promise<void> {
     const principal = this.getPrincipalFromContext(ctx);
@@ -6450,7 +6522,15 @@ export class TelegramTransport implements HumanTransport {
         input.projectUuid,
         input.targetSessionId,
         input.targetSessionLabel,
-        filePath,
+        {
+          filePath,
+          ...(input.targetClientUuid
+            ? { targetClientUuid: input.targetClientUuid }
+            : {}),
+          ...(input.targetLocalSessionId
+            ? { targetLocalSessionId: input.targetLocalSessionId }
+            : {}),
+        },
       );
       keyboard.text(label, `project-member-open:${payloadKey}`).row();
     }
@@ -6460,6 +6540,14 @@ export class TelegramTransport implements HumanTransport {
       input.projectUuid,
       input.targetSessionId,
       input.targetSessionLabel,
+      {
+        ...(input.targetClientUuid
+          ? { targetClientUuid: input.targetClientUuid }
+          : {}),
+        ...(input.targetLocalSessionId
+          ? { targetLocalSessionId: input.targetLocalSessionId }
+          : {}),
+      },
     )}`);
 
     const text = lines.join("\n");
@@ -6526,6 +6614,8 @@ export class TelegramTransport implements HumanTransport {
     inviteToken: string;
     targetSessionId: string;
     targetSessionLabel: string;
+    targetClientUuid?: string;
+    targetLocalSessionId?: string;
     filePath?: string;
   } | null> {
     const payload = await this.menuPayloadStore.getMenuPayload(payloadKey);
@@ -6555,6 +6645,12 @@ export class TelegramTransport implements HumanTransport {
       inviteToken: project.inviteToken,
       targetSessionId: payload.targetSessionId,
       targetSessionLabel: payload.title ?? payload.targetSessionId,
+      ...(payload.targetClientUuid
+        ? { targetClientUuid: payload.targetClientUuid }
+        : {}),
+      ...(payload.targetLocalSessionId
+        ? { targetLocalSessionId: payload.targetLocalSessionId }
+        : {}),
       ...(payload.filePath ? { filePath: payload.filePath } : {}),
     };
   }

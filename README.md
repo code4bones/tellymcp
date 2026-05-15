@@ -399,11 +399,16 @@ Collab project behavior:
 
 - `👥 Collab` is the project-based multi-machine and multi-bot collaboration flow
 - target session is chosen from `Projects -> <project> -> <member>`
+- member screen layout is:
+  - first row: `Ask | Share`
+  - second row: `Live`
 - semantics inside `Project -> Member` depend on the action:
   - `Ask` sends a task to the selected member session
   - expected reply route is `member -> current session`
   - `Share` creates a task for the current session
   - expected send route is `current session -> member`
+- `Live` opens the selected member session immediately through the existing webapp relay path
+- no remote approval step is currently required
 - direct file uploads still go to that exact target session when a member screen is open
 - if an old member-menu message becomes stale, clicking it deletes that outdated Telegram message instead of leaving a dead keyboard
 

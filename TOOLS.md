@@ -1002,10 +1002,14 @@ Telegram UI summary:
 - `Local` is the Telegram UI wrapper over same-bot partner collaboration
 - `Collab` is the project-based multi-machine collaboration flow
 - inside `Collab -> Project -> Member`, action semantics differ:
+  - first row is `Ask | Share`
+  - second row is `Live`
   - `Ask` sends a task to the selected member session
   - expected reply route is `member -> current session`
   - `Share` creates a task for the current session
   - expected send route is `current session -> member`
+  - `Live` opens the selected member session immediately through the gateway-relayed Mini App path
+  - no remote approval step is currently required
 - partner-note prompt format is:
   - first line = summary
   - optional blank line

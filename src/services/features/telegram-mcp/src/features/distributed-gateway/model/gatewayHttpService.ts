@@ -1018,11 +1018,36 @@ export class GatewayHttpService {
 
       try {
         const body = (await this.readJsonBody(req)) as Record<string, unknown>;
-        const result = await this.callBroker(
+        const result = await this.callBroker<Record<string, unknown>>(
           "telegramMcp.gateway.joinProject",
           body,
           { meta: { internal_call: true } },
         );
+        if (
+          result.joined === true &&
+          typeof result.owner_client_uuid === "string" &&
+          result.owner_client_uuid &&
+          typeof body.client_uuid === "string" &&
+          body.client_uuid !== result.owner_client_uuid
+        ) {
+          await this.callBroker(
+            "telegramMcp.gatewaySocket.notifyProjectMemberJoined",
+            {
+              ownerClientUuid: result.owner_client_uuid,
+              projectUuid: result.project_uuid,
+              projectName: result.name,
+              memberDisplayName:
+                typeof result.member_display_name === "string"
+                  ? result.member_display_name
+                  : undefined,
+              memberTelegramUsername:
+                typeof result.member_telegram_username === "string"
+                  ? result.member_telegram_username
+                  : undefined,
+            },
+            { meta: { internal_call: true } },
+          );
+        }
         writeJson(res, 200, result);
         return true;
       } catch (error) {
@@ -1087,11 +1112,36 @@ export class GatewayHttpService {
 
       try {
         const body = (await this.readJsonBody(req)) as Record<string, unknown>;
-        const result = await this.callBroker(
+        const result = await this.callBroker<Record<string, unknown>>(
           "telegramMcp.gateway.leaveProject",
           body,
           { meta: { internal_call: true } },
         );
+        if (
+          result.left === true &&
+          Array.isArray(result.notify_client_uuids) &&
+          result.notify_client_uuids.length > 0 &&
+          typeof result.project_uuid === "string" &&
+          typeof result.project_name === "string"
+        ) {
+          await this.callBroker(
+            "telegramMcp.gatewaySocket.notifyProjectMemberLeft",
+            {
+              clientUuids: result.notify_client_uuids,
+              projectUuid: result.project_uuid,
+              projectName: result.project_name,
+              memberDisplayName:
+                typeof result.member_display_name === "string"
+                  ? result.member_display_name
+                  : undefined,
+              memberTelegramUsername:
+                typeof result.member_telegram_username === "string"
+                  ? result.member_telegram_username
+                  : undefined,
+            },
+            { meta: { internal_call: true } },
+          );
+        }
         writeJson(res, 200, result);
         return true;
       } catch (error) {

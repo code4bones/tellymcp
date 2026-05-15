@@ -55,6 +55,10 @@ type GatewayServiceCarrier = Service & {
   leaveProjectRecord?: (input: Record<string, unknown>) => Promise<{
     project_uuid: string;
     left: boolean;
+    project_name?: string;
+    notify_client_uuids?: string[];
+    member_display_name?: string | null;
+    member_telegram_username?: string | null;
   }>;
   listProjectSessionsRecord?: (input: Record<string, unknown>) => Promise<{
     sessions: Array<{
@@ -377,6 +381,9 @@ const TelegramMcpGatewayService: ServiceSchema = {
           invite_token: project.invite_token,
           name: project.name,
           joined: false,
+          owner_client_uuid: project.created_by_client_uuid,
+          member_display_name: memberDisplayName ?? null,
+          member_telegram_username: memberTelegramUsername ?? null,
         };
       }
 
@@ -396,6 +403,9 @@ const TelegramMcpGatewayService: ServiceSchema = {
         invite_token: project.invite_token,
         name: project.name,
         joined: true,
+        owner_client_uuid: project.created_by_client_uuid,
+        member_display_name: memberDisplayName ?? null,
+        member_telegram_username: memberTelegramUsername ?? null,
       };
     },
 
@@ -532,6 +542,35 @@ const TelegramMcpGatewayService: ServiceSchema = {
       const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
       const projectUuid = this.requireText?.(input.project_uuid, "project_uuid");
 
+      const client = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_clients")
+        .where({ client_uuid: clientUuid })
+        .first();
+      const membership = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_project_members")
+        .where({
+          client_uuid: clientUuid,
+          project_uuid: projectUuid,
+        })
+        .first();
+      const project = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_projects")
+        .where({ project_uuid: projectUuid })
+        .first();
+
+      const clientMeta = readClientMeta((client as Record<string, unknown>) ?? {});
+      const memberDisplayName =
+        this.normalizeOptionalText?.(membership?.display_name) ??
+        this.normalizeOptionalText?.(clientMeta.telegram_display_name) ??
+        null;
+      const memberTelegramUsername =
+        this.normalizeOptionalText?.(membership?.telegram_username) ??
+        this.normalizeOptionalText?.(clientMeta.telegram_username) ??
+        null;
+
       const updated = await this.db
         .withSchema(MCP_SCHEMA)
         .table("gateway_project_members")
@@ -543,9 +582,36 @@ const TelegramMcpGatewayService: ServiceSchema = {
           status: "left",
         });
 
+      const notifyRows =
+        updated > 0
+          ? await this.db
+              .withSchema(MCP_SCHEMA)
+              .table("gateway_project_members")
+              .where({
+                project_uuid: projectUuid,
+                status: "active",
+              })
+              .whereNot({
+                client_uuid: clientUuid,
+              })
+              .distinct("client_uuid")
+          : [];
+
       return {
         project_uuid: projectUuid,
         left: updated > 0,
+        ...(project?.name ? { project_name: project.name } : {}),
+        ...(notifyRows.length > 0
+          ? {
+              notify_client_uuids: notifyRows
+                .map((row) => String(row.client_uuid))
+                .filter(Boolean),
+            }
+          : {}),
+        ...(memberDisplayName ? { member_display_name: memberDisplayName } : {}),
+        ...(memberTelegramUsername
+          ? { member_telegram_username: memberTelegramUsername }
+          : {}),
       };
     },
 

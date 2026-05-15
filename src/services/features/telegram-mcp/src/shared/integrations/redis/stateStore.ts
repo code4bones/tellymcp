@@ -20,6 +20,7 @@ import type { SessionContext } from "../../../entities/session/model/types";
 import type {
   MaintenanceStore,
   OutgoingDeliveryNotice,
+  ProjectMenuViewState,
   PendingRequestStore,
   SessionBindingStore,
   SessionStore,
@@ -78,6 +79,10 @@ function gatewayClientUuidKey(): string {
 
 function outgoingDeliveryNoticeKey(deliveryUuid: string): string {
   return `${KEY_PREFIX}:gateway:outgoing-delivery:${deliveryUuid}`;
+}
+
+function projectMenuViewStateKey(projectUuid: string, sessionId: string): string {
+  return `${KEY_PREFIX}:project-menu-view:${projectUuid}:${sessionId}`;
 }
 
 function xchangeFileMetaKey(sessionId: string, filePath: string): string {
@@ -501,6 +506,53 @@ export class RedisStateStore
 
   public async setGatewayClientUuid(clientUuid: string): Promise<void> {
     await this.redis.set(gatewayClientUuidKey(), clientUuid);
+  }
+
+  public async setProjectMenuViewState(state: ProjectMenuViewState): Promise<void> {
+    await this.redis.set(
+      projectMenuViewStateKey(state.projectUuid, state.sessionId),
+      JSON.stringify(state),
+    );
+  }
+
+  public async listProjectMenuViewStates(projectUuid: string): Promise<ProjectMenuViewState[]> {
+    const states: ProjectMenuViewState[] = [];
+    let cursor = "0";
+    const pattern = `${KEY_PREFIX}:project-menu-view:${projectUuid}:*`;
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        pattern,
+        "COUNT",
+        100,
+      );
+      cursor = nextCursor;
+
+      if (keys.length === 0) {
+        continue;
+      }
+
+      const rows = await this.redis.mget(...keys);
+      for (const row of rows) {
+        const state = parseJson<ProjectMenuViewState>(row);
+        if (state) {
+          states.push(state);
+        }
+      }
+    } while (cursor !== "0");
+
+    return states;
+  }
+
+  public async deleteProjectMenuViewState(
+    sessionId: string,
+    projectUuid: string,
+  ): Promise<boolean> {
+    return (
+      (await this.redis.del(projectMenuViewStateKey(projectUuid, sessionId))) > 0
+    );
   }
 
   public async setOutgoingDeliveryNotice(

@@ -27,6 +27,14 @@ export type OutgoingDeliveryNotice = {
   targetSessionLabel?: string | undefined;
 };
 
+export type ProjectMenuViewState = {
+  sessionId: string;
+  projectUuid: string;
+  telegramChatId: number;
+  telegramMessageId: number;
+  updatedAt: string;
+};
+
 export interface SessionStore {
   getSession(sessionId: string): Promise<SessionContext | null>;
   listSessions(): Promise<SessionContext[]>;
@@ -104,6 +112,9 @@ export interface MaintenanceStore {
   pruneAll(): Promise<{ deletedKeys: number }>;
   getGatewayClientUuid(): Promise<string | null>;
   setGatewayClientUuid(clientUuid: string): Promise<void>;
+  setProjectMenuViewState(state: ProjectMenuViewState): Promise<void>;
+  listProjectMenuViewStates(projectUuid: string): Promise<ProjectMenuViewState[]>;
+  deleteProjectMenuViewState(sessionId: string, projectUuid: string): Promise<boolean>;
   setOutgoingDeliveryNotice(notice: OutgoingDeliveryNotice): Promise<void>;
   listOutgoingDeliveryNotices(): Promise<OutgoingDeliveryNotice[]>;
   deleteOutgoingDeliveryNotice(deliveryUuid: string): Promise<boolean>;

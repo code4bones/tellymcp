@@ -64,11 +64,23 @@ type GatewaySocketLiveResponse = {
   error?: string;
 };
 
+type GatewaySocketProjectEvent = {
+  type: "project_event";
+  event: "member_joined" | "member_left";
+  payload: {
+    project_uuid: string;
+    project_name: string;
+    member_display_name?: string;
+    member_telegram_username?: string;
+  };
+};
+
 type GatewaySocketMessage =
   | GatewaySocketHello
   | GatewaySocketHelloAck
   | GatewaySocketLiveRequest
-  | GatewaySocketLiveResponse;
+  | GatewaySocketLiveResponse
+  | GatewaySocketProjectEvent;
 
 type LiveRequestPending = {
   clientUuid: string;
@@ -119,6 +131,20 @@ type GatewaySocketCarrier = Service & {
     requestType: "bootstrap" | "view" | "action";
     payload: Record<string, unknown>;
   }) => Promise<unknown>;
+  notifyProjectMemberJoined?: (params: {
+    ownerClientUuid: string;
+    projectUuid: string;
+    projectName: string;
+    memberDisplayName?: string;
+    memberTelegramUsername?: string;
+  }) => Promise<boolean>;
+  notifyProjectMemberLeft?: (params: {
+    clientUuids: string[];
+    projectUuid: string;
+    projectName: string;
+    memberDisplayName?: string;
+    memberTelegramUsername?: string;
+  }) => Promise<number>;
 };
 
 function normalizeWebSocketUrl(value: string, defaultPath: string): string {
@@ -174,6 +200,42 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           requestType: ctx.params.requestType,
           payload: ctx.params.payload ?? {},
         });
+      },
+    },
+    notifyProjectMemberJoined: {
+      params: {
+        ownerClientUuid: "string",
+        projectUuid: "string",
+        projectName: "string",
+        memberDisplayName: { type: "string", optional: true },
+        memberTelegramUsername: { type: "string", optional: true },
+      },
+      async handler(this: GatewaySocketCarrier, ctx: { params: {
+        ownerClientUuid: string;
+        projectUuid: string;
+        projectName: string;
+        memberDisplayName?: string;
+        memberTelegramUsername?: string;
+      }}) {
+        return await this.notifyProjectMemberJoined?.(ctx.params);
+      },
+    },
+    notifyProjectMemberLeft: {
+      params: {
+        clientUuids: { type: "array", items: "string" },
+        projectUuid: "string",
+        projectName: "string",
+        memberDisplayName: { type: "string", optional: true },
+        memberTelegramUsername: { type: "string", optional: true },
+      },
+      async handler(this: GatewaySocketCarrier, ctx: { params: {
+        clientUuids: string[];
+        projectUuid: string;
+        projectName: string;
+        memberDisplayName?: string;
+        memberTelegramUsername?: string;
+      }}) {
+        return await this.notifyProjectMemberLeft?.(ctx.params);
       },
     },
   },
@@ -478,6 +540,39 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         return;
       }
 
+      if (parsed.type === "project_event") {
+        if (
+          parsed.event === "member_joined" &&
+          parsed.payload &&
+          typeof parsed.payload === "object"
+        ) {
+          await runtime.telegramTransport.handleProjectMemberJoinedEvent(
+            parsed.payload as {
+              project_uuid: string;
+              project_name: string;
+              member_display_name?: string;
+              member_telegram_username?: string;
+            },
+          );
+          return;
+        }
+        if (
+          parsed.event === "member_left" &&
+          parsed.payload &&
+          typeof parsed.payload === "object"
+        ) {
+          await runtime.telegramTransport.handleProjectMemberLeftEvent(
+            parsed.payload as {
+              project_uuid: string;
+              project_name: string;
+              member_display_name?: string;
+              member_telegram_username?: string;
+            },
+          );
+          return;
+        }
+      }
+
       if (parsed.type === "live_request") {
         const request = parsed as GatewaySocketLiveRequest;
         const response = await this.processLiveRequest?.(request);
@@ -537,6 +632,77 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         requestType: params.requestType,
       });
       return response;
+    },
+
+    async notifyProjectMemberJoined(
+      this: GatewaySocketCarrier,
+      params: {
+        ownerClientUuid: string;
+        projectUuid: string;
+        projectName: string;
+        memberDisplayName?: string;
+        memberTelegramUsername?: string;
+      },
+    ): Promise<boolean> {
+      const socket = this.connectedClientsByUuid?.get(params.ownerClientUuid);
+      if (!socket || socket.readyState !== 1) {
+        return false;
+      }
+
+      const message: GatewaySocketProjectEvent = {
+        type: "project_event",
+        event: "member_joined",
+        payload: {
+          project_uuid: params.projectUuid,
+          project_name: params.projectName,
+          ...(params.memberDisplayName
+            ? { member_display_name: params.memberDisplayName }
+            : {}),
+          ...(params.memberTelegramUsername
+            ? { member_telegram_username: params.memberTelegramUsername }
+            : {}),
+        },
+      };
+      socket.send(JSON.stringify(message));
+      return true;
+    },
+
+    async notifyProjectMemberLeft(
+      this: GatewaySocketCarrier,
+      params: {
+        clientUuids: string[];
+        projectUuid: string;
+        projectName: string;
+        memberDisplayName?: string;
+        memberTelegramUsername?: string;
+      },
+    ): Promise<number> {
+      const message: GatewaySocketProjectEvent = {
+        type: "project_event",
+        event: "member_left",
+        payload: {
+          project_uuid: params.projectUuid,
+          project_name: params.projectName,
+          ...(params.memberDisplayName
+            ? { member_display_name: params.memberDisplayName }
+            : {}),
+          ...(params.memberTelegramUsername
+            ? { member_telegram_username: params.memberTelegramUsername }
+            : {}),
+        },
+      };
+
+      let delivered = 0;
+      for (const clientUuid of params.clientUuids) {
+        const socket = this.connectedClientsByUuid?.get(clientUuid);
+        if (!socket || socket.readyState !== 1) {
+          continue;
+        }
+        socket.send(JSON.stringify(message));
+        delivered += 1;
+      }
+
+      return delivered;
     },
 
     async startGatewayWsServer(this: GatewaySocketCarrier): Promise<void> {

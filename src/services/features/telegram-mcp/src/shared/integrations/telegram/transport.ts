@@ -1195,6 +1195,111 @@ export class TelegramTransport implements HumanTransport {
     return { externalMessageId: response.messageId };
   }
 
+  public async handleProjectMemberJoinedEvent(input: {
+    project_uuid: string;
+    project_name: string;
+    member_display_name?: string;
+    member_telegram_username?: string;
+  }): Promise<void> {
+    const states = await this.maintenanceStore.listProjectMenuViewStates(
+      input.project_uuid,
+    );
+    const memberLabel =
+      input.member_display_name?.trim() ||
+      (input.member_telegram_username?.trim()
+        ? `@${input.member_telegram_username.trim().replace(/^@/u, "")}`
+        : "Новый участник");
+
+    let updated = 0;
+    for (const state of states) {
+      try {
+        const payload = await this.getProjectPayloadByUuid(
+          state.sessionId,
+          input.project_uuid,
+        );
+        if (!payload) {
+          await this.maintenanceStore.deleteProjectMenuViewState(
+            state.sessionId,
+            input.project_uuid,
+          );
+          continue;
+        }
+
+        const screen = await this.buildProjectMembersScreen(payload);
+        await this.editChatMessage(
+          state.telegramChatId,
+          state.telegramMessageId,
+          screen.text,
+          { parse_mode: "HTML", reply_markup: screen.keyboard },
+        );
+        updated += 1;
+      } catch (error) {
+        this.logger.warn("Project menu refresh after join failed", {
+          projectUuid: input.project_uuid,
+          sessionId: state.sessionId,
+          telegramChatId: state.telegramChatId,
+          telegramMessageId: state.telegramMessageId,
+          error:
+            error instanceof Error ? (error.stack ?? error.message) : String(error),
+        });
+      }
+    }
+
+    if (updated > 0) {
+      return;
+    }
+
+    for (const state of states) {
+      const binding = await this.bindingStore.getBinding(state.sessionId);
+      if (!binding) {
+        continue;
+      }
+      await this.sendNotification({
+        sessionId: state.sessionId,
+        recipient: {
+          telegramChatId: binding.telegramChatId,
+          telegramUserId: binding.telegramUserId,
+        },
+        message: `В проект «${input.project_name}» вошёл участник: ${memberLabel}.`,
+      });
+      return;
+    }
+  }
+
+  public async handleProjectMemberLeftEvent(input: {
+    project_uuid: string;
+    project_name: string;
+    member_display_name?: string;
+    member_telegram_username?: string;
+  }): Promise<void> {
+    const memberLabel =
+      input.member_display_name?.trim() ||
+      (input.member_telegram_username?.trim()
+        ? `@${input.member_telegram_username.trim().replace(/^@/u, "")}`
+        : "Участник");
+
+    const sessions = await this.sessionStore.listSessions();
+    const notifiedChats = new Set<number>();
+
+    for (const session of sessions) {
+      const binding = await this.bindingStore.getBinding(session.sessionId);
+      if (!binding || notifiedChats.has(binding.telegramChatId)) {
+        continue;
+      }
+
+      await this.sendNotification({
+        sessionId: session.sessionId,
+        ...(session.label ? { sessionLabel: session.label } : {}),
+        recipient: {
+          telegramChatId: binding.telegramChatId,
+          telegramUserId: binding.telegramUserId,
+        },
+        message: `Из проекта «${input.project_name}» вышел участник: ${memberLabel}.`,
+      });
+      notifiedChats.add(binding.telegramChatId);
+    }
+  }
+
   private async sendTextChunks(
     telegramChatId: number,
     text: string,
@@ -6273,8 +6378,66 @@ export class TelegramTransport implements HumanTransport {
       projectUuid: input.projectUuid,
       projectName: input.projectName,
     });
+    const screen = await this.buildProjectMembersScreen(input, options);
+    if (ctx.callbackQuery?.message) {
+      await this.editText(
+        ctx,
+        screen.text,
+        { kind: "menu", sessionId: input.sessionId },
+        { parse_mode: "HTML", reply_markup: screen.keyboard },
+      );
+      if (ctx.chat && "message_id" in ctx.callbackQuery.message) {
+        await this.maintenanceStore.setProjectMenuViewState({
+          sessionId: input.sessionId,
+          projectUuid: input.projectUuid,
+          telegramChatId: ctx.chat.id,
+          telegramMessageId: ctx.callbackQuery.message.message_id,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+
+    const sent = await this.replyText(
+      ctx,
+      screen.text,
+      { kind: "menu", sessionId: input.sessionId },
+      { parse_mode: "HTML", reply_markup: screen.keyboard },
+    );
+    if (sent && "message_id" in sent && ctx.chat) {
+      await this.maintenanceStore.setProjectMenuViewState({
+        sessionId: input.sessionId,
+        projectUuid: input.projectUuid,
+        telegramChatId: ctx.chat.id,
+        telegramMessageId: sent.message_id,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  private async buildProjectMembersScreen(
+    input: {
+      sessionId: string;
+      projectUuid: string;
+      projectName: string;
+      inviteToken: string;
+    },
+    options?: {
+      filePath?: string;
+    },
+  ): Promise<{ text: string; keyboard: InlineKeyboard }> {
     const session = await this.sessionStore.getSession(input.sessionId);
-    const sessions = await this.listGatewayProjectSessions(principal, input.projectUuid);
+    const binding = await this.bindingStore.getBinding(input.sessionId);
+    if (!binding) {
+      throw new Error("Binding is missing for project members screen.");
+    }
+    const sessions = await this.listGatewayProjectSessions(
+      {
+        telegramChatId: binding.telegramChatId,
+        telegramUserId: binding.telegramUserId,
+      },
+      input.projectUuid,
+    );
     const activeSessionId = session?.sessionId ?? null;
     const selectableMembers = sessions.filter(
       (item) => item.local_session_id !== activeSessionId,
@@ -6329,23 +6492,7 @@ export class TelegramTransport implements HumanTransport {
       .text("🚪 Выйти", `project-leave:${input.projectUuid}`)
       .text("⬅ К проектам", "project-back");
 
-    const text = lines.join("\n");
-    if (ctx.callbackQuery?.message) {
-      await this.editText(
-        ctx,
-        text,
-        { kind: "menu", sessionId: input.sessionId },
-        { parse_mode: "HTML", reply_markup: keyboard },
-      );
-      return;
-    }
-
-    await this.replyText(
-      ctx,
-      text,
-      { kind: "menu", sessionId: input.sessionId },
-      { parse_mode: "HTML", reply_markup: keyboard },
-    );
+    return { text: lines.join("\n"), keyboard };
   }
 
   private async showProjectMemberDetail(

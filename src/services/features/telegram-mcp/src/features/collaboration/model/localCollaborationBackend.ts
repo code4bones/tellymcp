@@ -365,7 +365,30 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     };
 
     await this.inboxStore.createInboxMessage(inboxMessage);
-    // Temporary disabled while testing pure partner file delivery.
+    await this.telegramTransport.sendNotification({
+      sessionId: targetSession.sessionId,
+      ...(targetSession.label ? { sessionLabel: targetSession.label } : {}),
+      recipient: {
+        telegramChatId: targetBinding.telegramChatId,
+        telegramUserId: targetBinding.telegramUserId,
+      },
+      message: [
+        input.kind === "question"
+          ? `Получен вопрос от ${sourceLabel}.`
+          : input.kind === "reply"
+            ? `Получен ответ от ${sourceLabel}.`
+            : input.kind === "request"
+              ? `Получен запрос от ${sourceLabel}.`
+              : input.kind === "handoff"
+                ? copiedArtifacts.length > 0
+                  ? `Получен файл от ${sourceLabel}.`
+                  : `Получен handoff от ${sourceLabel}.`
+                : `Получено обновление от ${sourceLabel}.`,
+        `Сессия: ${sourceLabel} -> ${targetLabel}`,
+        `Кратко: ${input.summary.trim()}`,
+        `Note: ${notePath}`,
+      ].join("\n"),
+    });
 
     this.logger.info("Partner note delivered through local backend", {
       sessionId: sourceSession.sessionId,

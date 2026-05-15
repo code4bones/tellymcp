@@ -116,15 +116,6 @@ type GatewayServiceCarrier = Service & {
   failDeliveriesRecord?: (input: Record<string, unknown>) => Promise<{
     failed: number;
   }>;
-  getDeliveryStatusesRecord?: (input: Record<string, unknown>) => Promise<{
-    deliveries: Array<{
-      delivery_uuid: string;
-      share_id: string;
-      status: string;
-      delivered_at?: string;
-      acked_at?: string;
-    }>;
-  }>;
   listSenderDeliveryStatusesRecord?: (input: Record<string, unknown>) => Promise<{
     deliveries: Array<{
       delivery_uuid: string;
@@ -1203,47 +1194,6 @@ const TelegramMcpGatewayService: ServiceSchema = {
       };
     },
 
-    async getDeliveryStatusesRecord(
-      this: GatewayServiceCarrier,
-      input: Record<string, unknown>,
-    ) {
-      const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
-      const deliveryIds = Array.isArray(input.delivery_ids)
-        ? input.delivery_ids
-            .map((item) => this.normalizeOptionalText?.(item))
-            .filter((item): item is string => Boolean(item))
-        : [];
-
-      if (deliveryIds.length === 0) {
-        return { deliveries: [] };
-      }
-
-      const rows = await this.db
-        .withSchema(MCP_SCHEMA)
-        .table("gateway_deliveries as d")
-        .join("gateway_messages as m", "m.message_uuid", "d.message_uuid")
-        .join("gateway_sessions as s_from", "s_from.session_uuid", "m.from_session_uuid")
-        .where("s_from.client_uuid", clientUuid)
-        .whereIn("d.delivery_uuid", deliveryIds)
-        .select(
-          "d.delivery_uuid",
-          "d.status",
-          "d.delivered_at",
-          "d.acked_at",
-          this.db.raw(`coalesce(m.meta->>'share_id', '') as share_id`),
-        );
-
-      return {
-        deliveries: rows.map((row) => ({
-          delivery_uuid: row.delivery_uuid,
-          share_id: String(row.share_id || ""),
-          status: row.status,
-          ...(row.delivered_at ? { delivered_at: String(row.delivered_at) } : {}),
-          ...(row.acked_at ? { acked_at: String(row.acked_at) } : {}),
-        })),
-      };
-    },
-
     async listSenderDeliveryStatusesRecord(
       this: GatewayServiceCarrier,
       input: Record<string, unknown>,
@@ -1370,14 +1320,6 @@ const TelegramMcpGatewayService: ServiceSchema = {
           throw new Error("Gateway service is disabled in client mode");
         }
         return this.failDeliveriesRecord?.(ctx.params as Record<string, unknown>);
-      },
-    },
-    getDeliveryStatuses: {
-      async handler(this: GatewayServiceCarrier, ctx) {
-        if (!GATEWAY_ENABLED) {
-          throw new Error("Gateway service is disabled in client mode");
-        }
-        return this.getDeliveryStatusesRecord?.(ctx.params as Record<string, unknown>);
       },
     },
     listSenderDeliveryStatuses: {

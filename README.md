@@ -183,13 +183,11 @@ Current implementation status:
 - `POST /gateway/projects/join` works
 - `POST /gateway/sessions/register` works
 - `POST /gateway/partner-note` works
-- `POST /gateway/live/poll` works
-- `POST /gateway/live/respond` works
-- base `ws` control-plane scaffold is started
+- `ws` control-plane is active
 - if `GATEWAY_PUBLIC_URL` is configured, partner-note delivery goes through the gateway HTTP surface
 - in `DISTRIBUTED_MODE=both`, this also covers same-bot local delivery transparently
-- remote project messaging and delivery status through the gateway DB are implemented
-- gateway-relayed `Live View` is implemented for client nodes without their own public domain
+- remote project messaging and delivery status go through the gateway DB and `ws`
+- gateway-relayed `Live View` goes through `ws` for client nodes without their own public domain
 
 Mode-specific runtime requirements:
 

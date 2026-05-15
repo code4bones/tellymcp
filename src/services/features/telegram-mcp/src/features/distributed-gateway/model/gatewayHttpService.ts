@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { randomUUID } from "node:crypto";
 
 import type { AppConfig } from "../../../app/config/env";
 import {
@@ -40,8 +39,6 @@ function writeText(
   res.end(message);
 }
 
-type LiveRelayRequestType = "bootstrap" | "view" | "action";
-
 type LiveRelayBootstrapResult = {
   session_id: string;
   session_label: string | null;
@@ -59,25 +56,6 @@ type LiveRelayViewResult = {
 
 type LiveRelayActionResult = {
   ok: true;
-};
-
-type LiveRelayQueueItem = {
-  requestId: string;
-  clientUuid: string;
-  localSessionId: string;
-  type: LiveRelayRequestType;
-  payload: Record<string, unknown>;
-  createdAtMs: number;
-  timeout: NodeJS.Timeout;
-  resolve: (value: unknown) => void;
-  reject: (error: Error) => void;
-};
-
-type LiveRelayPollResponseItem = {
-  request_id: string;
-  type: LiveRelayRequestType;
-  local_session_id: string;
-  payload: Record<string, unknown>;
 };
 
 function unwrapLiveRelayResult<T>(response: unknown): T | null {
@@ -188,10 +166,6 @@ function buildPartnerNoteOutputFallback(
 }
 
 export class GatewayHttpService {
-  private readonly liveRelayQueue = new Map<string, LiveRelayQueueItem[]>();
-
-  private readonly liveRelayPending = new Map<string, LiveRelayQueueItem>();
-
   public constructor(
     private readonly config: AppConfig,
     private readonly callBroker: <T>(
@@ -232,12 +206,16 @@ export class GatewayHttpService {
       initDataRaw: input.initDataRaw,
       initDataUnsafe: input.initDataUnsafe,
     };
-    const rawResponse = await this.requestLiveRelayWithFallback<LiveRelayBootstrapResult>({
-      clientUuid: input.clientUuid,
-      localSessionId: input.localSessionId,
-      type: "bootstrap",
-      payload,
-    });
+    const rawResponse = await this.callBroker<LiveRelayBootstrapResult>(
+      "telegramMcp.gatewaySocket.requestLiveRelay",
+      {
+        clientUuid: input.clientUuid,
+        localSessionId: input.localSessionId,
+        requestType: "bootstrap",
+        payload,
+      },
+      { meta: { internal_call: true } },
+    );
     const response = normalizeLiveRelayBootstrapResult(
       unwrapLiveRelayResult<LiveRelayBootstrapResult>(rawResponse),
     );
@@ -255,12 +233,16 @@ export class GatewayHttpService {
     clientUuid: string;
     localSessionId: string;
   }): Promise<LiveRelayViewResult> {
-    const rawResponse = await this.requestLiveRelayWithFallback<LiveRelayViewResult>({
-      clientUuid: input.clientUuid,
-      localSessionId: input.localSessionId,
-      type: "view",
-      payload: {},
-    });
+    const rawResponse = await this.callBroker<LiveRelayViewResult>(
+      "telegramMcp.gatewaySocket.requestLiveRelay",
+      {
+        clientUuid: input.clientUuid,
+        localSessionId: input.localSessionId,
+        requestType: "view",
+        payload: {},
+      },
+      { meta: { internal_call: true } },
+    );
     const response = unwrapLiveRelayResult<LiveRelayViewResult>(rawResponse);
 
     if (
@@ -279,14 +261,18 @@ export class GatewayHttpService {
     localSessionId: string;
     action: "up" | "down" | "enter" | "slash" | "delete";
   }): Promise<LiveRelayActionResult> {
-    const rawResponse = await this.requestLiveRelayWithFallback<LiveRelayActionResult>({
-      clientUuid: input.clientUuid,
-      localSessionId: input.localSessionId,
-      type: "action",
-      payload: {
-        action: input.action,
+    const rawResponse = await this.callBroker<LiveRelayActionResult>(
+      "telegramMcp.gatewaySocket.requestLiveRelay",
+      {
+        clientUuid: input.clientUuid,
+        localSessionId: input.localSessionId,
+        requestType: "action",
+        payload: {
+          action: input.action,
+        },
       },
-    });
+      { meta: { internal_call: true } },
+    );
     const response = unwrapLiveRelayResult<LiveRelayActionResult>(rawResponse);
 
     if (
@@ -299,38 +285,6 @@ export class GatewayHttpService {
 
     return response;
   }
-
-  private async requestLiveRelayWithFallback<T>(input: {
-    clientUuid: string;
-    localSessionId: string;
-    type: LiveRelayRequestType;
-    payload: Record<string, unknown>;
-  }): Promise<T> {
-    try {
-      return await this.callBroker<T>(
-        "telegramMcp.gatewaySocket.requestLiveRelay",
-        {
-          clientUuid: input.clientUuid,
-          localSessionId: input.localSessionId,
-          requestType: input.type,
-          payload: input.payload,
-        },
-        { meta: { internal_call: true } },
-      );
-    } catch (error) {
-      if (this.config.logging.level === "debug" || this.config.logging.level === "trace") {
-        console.debug("Falling back to HTTP live relay queue", {
-          clientUuid: input.clientUuid,
-          localSessionId: input.localSessionId,
-          requestType: input.type,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-
-      return await this.enqueueLiveRelayRequest<T>(input);
-    }
-  }
-
   private isAuthorized(req: IncomingMessage): boolean {
     if (!this.config.distributed.gatewayAuthToken) {
       return true;
@@ -338,120 +292,6 @@ export class GatewayHttpService {
 
     const authorization = readHeader(req, "authorization");
     return authorization === `Bearer ${this.config.distributed.gatewayAuthToken}`;
-  }
-
-  private async enqueueLiveRelayRequest<T>(input: {
-    clientUuid: string;
-    localSessionId: string;
-    type: LiveRelayRequestType;
-    payload: Record<string, unknown>;
-  }): Promise<T> {
-    return await new Promise<T>((resolve, reject) => {
-      const requestId = randomUUID();
-      const timeout = setTimeout(() => {
-        this.liveRelayPending.delete(requestId);
-        const queue = this.liveRelayQueue.get(input.clientUuid);
-        if (queue) {
-          this.liveRelayQueue.set(
-            input.clientUuid,
-            queue.filter((item) => item.requestId !== requestId),
-          );
-        }
-        reject(new Error("Live relay request timed out"));
-      }, 20000);
-
-      const item: LiveRelayQueueItem = {
-        requestId,
-        clientUuid: input.clientUuid,
-        localSessionId: input.localSessionId,
-        type: input.type,
-        payload: input.payload,
-        createdAtMs: Date.now(),
-        timeout,
-        resolve: (value: unknown) => resolve(value as T),
-        reject,
-      };
-
-      const queue = this.liveRelayQueue.get(input.clientUuid) ?? [];
-      queue.push(item);
-      this.liveRelayQueue.set(input.clientUuid, queue);
-      this.liveRelayPending.set(requestId, item);
-    });
-  }
-
-  private dequeueLiveRelayRequests(
-    clientUuid: string,
-    limit: number,
-  ): LiveRelayPollResponseItem[] {
-    const queue = this.liveRelayQueue.get(clientUuid) ?? [];
-    if (queue.length === 0) {
-      return [];
-    }
-
-    const count = Math.max(1, Math.min(limit, queue.length));
-    const items = queue.splice(0, count);
-    if (queue.length > 0) {
-      this.liveRelayQueue.set(clientUuid, queue);
-    } else {
-      this.liveRelayQueue.delete(clientUuid);
-    }
-
-    return items.map((item) => ({
-      request_id: item.requestId,
-      type: item.type,
-      local_session_id: item.localSessionId,
-      payload: item.payload,
-    }));
-  }
-
-  private resolveLiveRelayResponses(
-    clientUuid: string,
-    responses: unknown,
-  ): { resolved: number } {
-    if (!Array.isArray(responses)) {
-      throw new Error("responses must be an array");
-    }
-
-    let resolved = 0;
-
-    for (const response of responses) {
-      if (!response || typeof response !== "object") {
-        continue;
-      }
-
-      const requestId =
-        typeof (response as { request_id?: unknown }).request_id === "string"
-          ? (response as { request_id: string }).request_id
-          : null;
-      if (!requestId) {
-        continue;
-      }
-
-      const item = this.liveRelayPending.get(requestId);
-      if (!item || item.clientUuid !== clientUuid) {
-        continue;
-      }
-
-      clearTimeout(item.timeout);
-      this.liveRelayPending.delete(requestId);
-
-      const ok =
-        typeof (response as { ok?: unknown }).ok === "boolean"
-          ? Boolean((response as { ok: boolean }).ok)
-          : false;
-      if (ok) {
-        item.resolve((response as { result?: unknown }).result);
-      } else {
-        const errorMessage =
-          typeof (response as { error?: unknown }).error === "string"
-            ? (response as { error: string }).error
-            : "Live relay request failed";
-        item.reject(new Error(errorMessage));
-      }
-      resolved += 1;
-    }
-
-    return { resolved };
   }
 
   private extractActionErrorMessage(value: unknown, fallback: string): string {
@@ -795,192 +635,6 @@ export class GatewayHttpService {
           { meta: { internal_call: true } },
         );
         writeJson(res, 200, result);
-        return true;
-      } catch (error) {
-        writeJson(res, 400, {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return true;
-      }
-    }
-
-    if (pathname === "/gateway/deliveries/poll") {
-      if (req.method !== "POST") {
-        writeText(res, 405, "Method not allowed");
-        return true;
-      }
-
-      try {
-        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
-        const result = await this.callBroker(
-          "telegramMcp.gateway.pollDeliveries",
-          body,
-          { meta: { internal_call: true } },
-        );
-        writeJson(res, 200, result);
-        return true;
-      } catch (error) {
-        writeJson(res, 400, {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return true;
-      }
-    }
-
-    if (pathname === "/gateway/deliveries/ack") {
-      if (req.method !== "POST") {
-        writeText(res, 405, "Method not allowed");
-        return true;
-      }
-
-      try {
-        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
-        const result = await this.callBroker<Record<string, unknown>>(
-          "telegramMcp.gateway.ackDeliveries",
-          body,
-          { meta: { internal_call: true } },
-        );
-        if (Array.isArray(result.deliveries)) {
-          for (const status of result.deliveries) {
-            if (
-              !status ||
-              typeof status !== "object" ||
-              typeof (status as { source_client_uuid?: unknown }).source_client_uuid !==
-                "string"
-            ) {
-              continue;
-            }
-            await this.callBroker(
-              "telegramMcp.gatewaySocket.notifyDeliveryStatus",
-              {
-                clientUuid: (status as { source_client_uuid: string }).source_client_uuid,
-                status,
-              },
-              { meta: { internal_call: true } },
-            );
-          }
-        }
-        writeJson(res, 200, result);
-        return true;
-      } catch (error) {
-        writeJson(res, 400, {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return true;
-      }
-    }
-
-    if (pathname === "/gateway/deliveries/fail") {
-      if (req.method !== "POST") {
-        writeText(res, 405, "Method not allowed");
-        return true;
-      }
-
-      try {
-        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
-        const result = await this.callBroker<Record<string, unknown>>(
-          "telegramMcp.gateway.failDeliveries",
-          body,
-          { meta: { internal_call: true } },
-        );
-        if (Array.isArray(result.deliveries)) {
-          for (const status of result.deliveries) {
-            if (
-              !status ||
-              typeof status !== "object" ||
-              typeof (status as { source_client_uuid?: unknown }).source_client_uuid !==
-                "string"
-            ) {
-              continue;
-            }
-            await this.callBroker(
-              "telegramMcp.gatewaySocket.notifyDeliveryStatus",
-              {
-                clientUuid: (status as { source_client_uuid: string }).source_client_uuid,
-                status,
-              },
-              { meta: { internal_call: true } },
-            );
-          }
-        }
-        writeJson(res, 200, result);
-        return true;
-      } catch (error) {
-        writeJson(res, 400, {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return true;
-      }
-    }
-
-    if (pathname === "/gateway/deliveries/status") {
-      if (req.method !== "POST") {
-        writeText(res, 405, "Method not allowed");
-        return true;
-      }
-
-      try {
-        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
-        const result = await this.callBroker(
-          "telegramMcp.gateway.getDeliveryStatuses",
-          body,
-          { meta: { internal_call: true } },
-        );
-        writeJson(res, 200, result);
-        return true;
-      } catch (error) {
-        writeJson(res, 400, {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return true;
-      }
-    }
-
-    if (pathname === "/gateway/live/poll") {
-      if (req.method !== "POST") {
-        writeText(res, 405, "Method not allowed");
-        return true;
-      }
-
-      try {
-        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
-        const clientUuid =
-          typeof body.client_uuid === "string" ? body.client_uuid.trim() : "";
-        if (!clientUuid) {
-          throw new Error("client_uuid is required");
-        }
-
-        const limit =
-          typeof body.limit === "number" && Number.isFinite(body.limit)
-            ? body.limit
-            : 10;
-        writeJson(res, 200, {
-          requests: this.dequeueLiveRelayRequests(clientUuid, limit),
-        });
-        return true;
-      } catch (error) {
-        writeJson(res, 400, {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return true;
-      }
-    }
-
-    if (pathname === "/gateway/live/respond") {
-      if (req.method !== "POST") {
-        writeText(res, 405, "Method not allowed");
-        return true;
-      }
-
-      try {
-        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
-        const clientUuid =
-          typeof body.client_uuid === "string" ? body.client_uuid.trim() : "";
-        if (!clientUuid) {
-          throw new Error("client_uuid is required");
-        }
-
-        writeJson(res, 200, this.resolveLiveRelayResponses(clientUuid, body.responses));
         return true;
       } catch (error) {
         writeJson(res, 400, {

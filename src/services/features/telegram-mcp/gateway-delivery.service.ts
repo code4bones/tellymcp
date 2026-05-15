@@ -11,16 +11,8 @@ import { createInboxMessageId } from "./src/shared/lib/ids/ids";
 import { writeXchangeRelativeFile } from "./src/shared/integrations/tmux/client";
 import type { OutgoingDeliveryNotice } from "./src/shared/api/storage/contract";
 
-import CronMixin from "@r2d2bzh/moleculer-cron";
-
 export const TELEGRAM_MCP_GATEWAY_DELIVERY_SERVICE_NAME =
   "telegramMcp.gatewayDelivery";
-const TELEGRAM_MCP_GATEWAY_DELIVERY_TICK_EVENT =
-  "telegramMcp.gatewayDelivery.tick";
-
-const POLL_CRON_TIME = "*/5 * * * * *";
-const GATEWAY_POLL_TIMEOUT_MS = 15000;
-const GATEWAY_ACK_TIMEOUT_MS = 10000;
 
 type GatewayDeliveryArtifact = {
   artifact_uuid: string;
@@ -65,26 +57,11 @@ type GatewayDeliveryStatus = {
 };
 
 type RuntimeCarrier = Service & {
-  stopRequested?: boolean;
-  pollTickInFlight?: Promise<void> | null;
-  pollingEnabled?: boolean;
   runtimeService?: TelegramMcpRuntimeServiceInstance | null;
   getRuntimeOrThrow?: () => ReturnType<TelegramMcpRuntimeServiceInstance["getRuntime"]>;
   materializeIncomingDelivery?: (delivery: GatewayDelivery) => Promise<void>;
   applyOutgoingDeliveryStatus?: (status: GatewayDeliveryStatus) => Promise<void>;
-  runPollIteration?: () => Promise<void>;
 };
-
-function normalizeGatewayBaseUrl(value: string): URL {
-  const url = new URL(value);
-  url.pathname = url.pathname.replace(/\/+$/u, "");
-
-  if (!url.pathname.endsWith("/gateway")) {
-    url.pathname = `${url.pathname}/gateway`.replace(/\/{2,}/gu, "/");
-  }
-
-  return url;
-}
 
 function renderYamlArray(values: string[]): string {
   if (values.length === 0) {
@@ -267,48 +244,9 @@ function buildOutgoingFailedText(input: {
   ].join("\n");
 }
 
-function isIrrecoverableDeliveryError(error: unknown): boolean {
-  const text =
-    error instanceof Error ? `${error.message}\n${error.stack || ""}` : String(error);
-  return (
-    text.includes("Failed to resolve stored file reference") ||
-    text.includes("Failed to read stored file content") ||
-    text.includes("Not Found") ||
-    text.includes("OBJECT_NOT_FOUND") ||
-    text.includes("Uploaded object not found")
-  );
-}
-
-function isExpectedGatewayPollTimeout(error: unknown): boolean {
-  const text =
-    error instanceof Error ? `${error.name}: ${error.message}\n${error.stack || ""}` : String(error);
-  return (
-    text.includes("TimeoutError") &&
-    text.includes("The operation was aborted due to timeout")
-  );
-}
-
 const TelegramMcpGatewayDeliveryService: ServiceSchema = {
   name: TELEGRAM_MCP_GATEWAY_DELIVERY_SERVICE_NAME,
   dependencies: [TELEGRAM_MCP_RUNTIME_SERVICE_NAME],
-  mixins: [CronMixin as ServiceSchema],
-  crons: [
-    {
-      name: "GatewayDeliveryPoll",
-      cronTime: POLL_CRON_TIME,
-      onTick(this: { emit: (eventName: string, payload?: unknown) => void }) {
-        this.emit(TELEGRAM_MCP_GATEWAY_DELIVERY_TICK_EVENT);
-      },
-    },
-  ],
-
-  events: {
-    [TELEGRAM_MCP_GATEWAY_DELIVERY_TICK_EVENT]: {
-      async handler(this: RuntimeCarrier) {
-        await this.runPollIteration?.();
-      },
-    },
-  },
 
   methods: {
     getRuntimeOrThrow(this: RuntimeCarrier) {
@@ -538,207 +476,6 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
         );
       }
     },
-
-    async runPollIteration(this: RuntimeCarrier): Promise<void> {
-      if (this.stopRequested || !this.pollingEnabled) {
-        return;
-      }
-
-      if (this.pollTickInFlight) {
-        return this.pollTickInFlight;
-      }
-
-      this.pollTickInFlight = (async () => {
-        const runtime = this.getRuntimeOrThrow?.();
-        if (!runtime?.config.distributed.gatewayPublicUrl) {
-          return;
-        }
-
-        try {
-          const clientUuid = await runtime.maintenanceStore.getGatewayClientUuid();
-          if (!clientUuid) {
-            return;
-          }
-
-          const baseUrl = normalizeGatewayBaseUrl(
-            runtime.config.distributed.gatewayPublicUrl,
-          );
-          const pollUrl = new URL(baseUrl);
-          pollUrl.pathname = `${pollUrl.pathname}/deliveries/poll`.replace(
-            /\/{2,}/gu,
-            "/",
-          );
-
-          const response = await fetch(pollUrl, {
-            method: "POST",
-            signal: AbortSignal.timeout(GATEWAY_POLL_TIMEOUT_MS),
-            headers: {
-              "content-type": "application/json",
-              ...(runtime.config.distributed.gatewayAuthToken
-                ? {
-                    authorization: `Bearer ${runtime.config.distributed.gatewayAuthToken}`,
-                  }
-                : {}),
-            },
-            body: JSON.stringify({
-              client_uuid: clientUuid,
-              limit: 20,
-            }),
-          });
-
-          if (!response.ok) {
-            throw new Error(
-              `Gateway deliveries poll failed with status ${response.status}: ${await response.text()}`,
-            );
-          }
-
-          const payload = (await response.json()) as {
-            deliveries?: GatewayDelivery[];
-          };
-          const deliveries = Array.isArray(payload.deliveries)
-            ? payload.deliveries
-            : [];
-
-          for (const delivery of deliveries) {
-            try {
-              await this.materializeIncomingDelivery?.(delivery);
-
-              const ackUrl = new URL(baseUrl);
-              ackUrl.pathname = `${ackUrl.pathname}/deliveries/ack`.replace(
-                /\/{2,}/gu,
-                "/",
-              );
-              await fetch(ackUrl, {
-                method: "POST",
-                signal: AbortSignal.timeout(GATEWAY_ACK_TIMEOUT_MS),
-                headers: {
-                  "content-type": "application/json",
-                  ...(runtime.config.distributed.gatewayAuthToken
-                    ? {
-                        authorization: `Bearer ${runtime.config.distributed.gatewayAuthToken}`,
-                      }
-                    : {}),
-                },
-                body: JSON.stringify({
-                  client_uuid: clientUuid,
-                  delivery_ids: [delivery.delivery_uuid],
-                }),
-              });
-            } catch (error) {
-              if (isIrrecoverableDeliveryError(error)) {
-                const failUrl = new URL(baseUrl);
-                failUrl.pathname = `${failUrl.pathname}/deliveries/fail`.replace(
-                  /\/{2,}/gu,
-                  "/",
-                );
-                await fetch(failUrl, {
-                  method: "POST",
-                  signal: AbortSignal.timeout(GATEWAY_ACK_TIMEOUT_MS),
-                  headers: {
-                    "content-type": "application/json",
-                    ...(runtime.config.distributed.gatewayAuthToken
-                      ? {
-                          authorization: `Bearer ${runtime.config.distributed.gatewayAuthToken}`,
-                        }
-                      : {}),
-                  },
-                  body: JSON.stringify({
-                    client_uuid: clientUuid,
-                    delivery_ids: [delivery.delivery_uuid],
-                    error_text:
-                      error instanceof Error ? error.message : String(error),
-                  }),
-                });
-                runtime.logger.warn(
-                  "Gateway delivery marked as failed because artifact is irrecoverable",
-                  {
-                    deliveryUuid: delivery.delivery_uuid,
-                    shareId: delivery.share_id,
-                    error:
-                      error instanceof Error ? (error.stack ?? error.message) : String(error),
-                  },
-                );
-                continue;
-              }
-              throw error;
-            }
-          }
-
-          const outgoingNotices =
-            await runtime.maintenanceStore.listOutgoingDeliveryNotices();
-          if (outgoingNotices.length > 0) {
-            const statusUrl = new URL(baseUrl);
-            statusUrl.pathname = `${statusUrl.pathname}/deliveries/status`.replace(
-              /\/{2,}/gu,
-              "/",
-            );
-
-            const statusResponse = await fetch(statusUrl, {
-              method: "POST",
-              signal: AbortSignal.timeout(GATEWAY_POLL_TIMEOUT_MS),
-              headers: {
-                "content-type": "application/json",
-                ...(runtime.config.distributed.gatewayAuthToken
-                  ? {
-                      authorization: `Bearer ${runtime.config.distributed.gatewayAuthToken}`,
-                    }
-                  : {}),
-              },
-              body: JSON.stringify({
-                client_uuid: clientUuid,
-                delivery_ids: outgoingNotices.map((item) => item.deliveryUuid),
-              }),
-            });
-
-            if (!statusResponse.ok) {
-              throw new Error(
-                `Gateway delivery status check failed with status ${statusResponse.status}: ${await statusResponse.text()}`,
-              );
-            }
-
-            const statusPayload = (await statusResponse.json()) as {
-              deliveries?: GatewayDeliveryStatus[];
-            };
-            const statuses = Array.isArray(statusPayload.deliveries)
-              ? statusPayload.deliveries
-              : [];
-
-            for (const notice of outgoingNotices) {
-              const status = statuses.find(
-                (item) =>
-                  item.delivery_uuid === notice.deliveryUuid &&
-                  (item.status === "delivered" || item.status === "failed"),
-              );
-              if (!status) {
-                continue;
-              }
-              await this.applyOutgoingDeliveryStatus?.(status);
-            }
-          }
-        } catch (error) {
-          if (this.stopRequested) {
-            return;
-          }
-          const logPayload = {
-            gatewayUrl: runtime.config.distributed.gatewayPublicUrl,
-            error:
-              error instanceof Error ? (error.stack ?? error.message) : String(error),
-          };
-          if (isExpectedGatewayPollTimeout(error)) {
-            this.logger.debug(
-              "telegram_mcp gateway delivery poll iteration timed out",
-              logPayload,
-            );
-            return;
-          }
-          this.logger.warn("telegram_mcp gateway delivery poll iteration failed", logPayload);
-        } finally {
-          this.pollTickInFlight = null;
-        }
-      })();
-
-      return this.pollTickInFlight;
-    },
   },
 
   actions: {
@@ -763,9 +500,6 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
   },
 
   created(this: RuntimeCarrier) {
-    this.stopRequested = false;
-    this.pollTickInFlight = null;
-    this.pollingEnabled = false;
     this.runtimeService = null;
   },
 
@@ -782,37 +516,10 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
       );
     }
 
-    const runtime = runtimeService.getRuntime();
-    if (!runtime.config.distributed.gatewayPublicUrl) {
-      this.logger.info(
-        "telegram_mcp gateway delivery polling is disabled because gateway URL is not configured",
-      );
-      return;
-    }
-    if (runtime.config.distributed.gatewayWsUrl) {
-      this.logger.info(
-        "telegram_mcp gateway delivery polling is disabled because WS delivery transport is configured",
-      );
-      return;
-    }
-
-    this.stopRequested = false;
-    this.pollingEnabled = true;
-    await this.runPollIteration?.();
-
-    this.logger.info("telegram_mcp gateway delivery polling started", {
-      cronTime: POLL_CRON_TIME,
-    });
+    this.runtimeService = runtimeService;
   },
 
-  async stopped(this: RuntimeCarrier) {
-    this.stopRequested = true;
-    this.pollingEnabled = false;
-    if (this.pollTickInFlight) {
-      await this.pollTickInFlight;
-      this.pollTickInFlight = null;
-    }
-  },
+  async stopped(this: RuntimeCarrier) {},
 };
 
 export default TelegramMcpGatewayDeliveryService;

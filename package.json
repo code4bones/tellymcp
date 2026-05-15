@@ -44,7 +44,6 @@
     "@graphql-tools/schema": "^10.0.33",
     "@hapi/accept": "^6.0.3",
     "@modelcontextprotocol/sdk": "^1.18.1",
-    "@r2d2bzh/moleculer-cron": "^0.1.4",
     "apollo-server-core": "^3.13.0",
     "dataloader": "^2.2.3",
     "dotenv": "^17.4.2",

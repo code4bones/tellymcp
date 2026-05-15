@@ -12,3 +12,4 @@ tmux-proxy-go/telegram-human-tmux-proxy
 .telegram-human-mcp
 public
 logs
+.mcpsession.json

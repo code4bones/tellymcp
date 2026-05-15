@@ -213,6 +213,15 @@ type GatewaySocketCarrier = Service & {
     memberDisplayName?: string;
     memberTelegramUsername?: string;
   }) => Promise<number>;
+  isLocalGatewayClientUuid?: (clientUuid: string) => Promise<boolean>;
+  handleLocalIncomingDelivery?: (params: {
+    clientUuid: string;
+    delivery: GatewaySocketDelivery;
+  }) => Promise<boolean>;
+  handleLocalDeliveryStatus?: (params: {
+    clientUuid: string;
+    status: GatewaySocketDeliveryStatus;
+  }) => Promise<boolean>;
   notifyDeliveryQueued?: (params: {
     clientUuid: string;
     delivery: GatewaySocketDelivery;
@@ -409,6 +418,120 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       };
       this.wsHelloClientUuid = clientUuid ?? null;
       socket.send(JSON.stringify(hello));
+    },
+
+    async isLocalGatewayClientUuid(
+      this: GatewaySocketCarrier,
+      clientUuid: string,
+    ): Promise<boolean> {
+      const runtime = this.getRuntimeOrThrow!();
+      const localClientUuid = await runtime.maintenanceStore.getGatewayClientUuid();
+      return Boolean(localClientUuid && localClientUuid === clientUuid);
+    },
+
+    async handleLocalIncomingDelivery(
+      this: GatewaySocketCarrier,
+      params: {
+        clientUuid: string;
+        delivery: GatewaySocketDelivery;
+      },
+    ): Promise<boolean> {
+      if (!(await this.isLocalGatewayClientUuid?.(params.clientUuid))) {
+        return false;
+      }
+
+      try {
+        await this.broker.call(
+          "telegramMcp.gatewayDelivery.materializeIncomingDelivery",
+          {
+            delivery: params.delivery,
+          },
+          { meta: { internal_call: true } },
+        );
+      } catch (error) {
+        const result = await (this.broker.call as any)(
+          "telegramMcp.gateway.failDeliveries",
+          {
+            client_uuid: params.clientUuid,
+            delivery_ids: [params.delivery.delivery_uuid],
+            error_text: error instanceof Error ? error.message : String(error),
+          },
+          { meta: { internal_call: true } },
+        ) as {
+          deliveries?: Array<GatewaySocketDeliveryStatus & { source_client_uuid?: string }>;
+        };
+
+        for (const status of Array.isArray(result.deliveries)
+          ? result.deliveries
+          : []) {
+          if (!status.source_client_uuid) {
+            continue;
+          }
+          const published = await this.notifyDeliveryStatus?.({
+            clientUuid: status.source_client_uuid,
+            status,
+          });
+          if (!published && (await this.isLocalGatewayClientUuid?.(status.source_client_uuid))) {
+            await this.handleLocalDeliveryStatus?.({
+              clientUuid: status.source_client_uuid,
+              status,
+            });
+          }
+        }
+        throw error;
+      }
+
+      const result = await (this.broker.call as any)(
+        "telegramMcp.gateway.ackDeliveries",
+        {
+          client_uuid: params.clientUuid,
+          delivery_ids: [params.delivery.delivery_uuid],
+        },
+        { meta: { internal_call: true } },
+      ) as {
+        deliveries?: Array<GatewaySocketDeliveryStatus & { source_client_uuid?: string }>;
+      };
+
+      for (const status of Array.isArray(result.deliveries)
+        ? result.deliveries
+        : []) {
+        if (!status.source_client_uuid) {
+          continue;
+        }
+        const published = await this.notifyDeliveryStatus?.({
+          clientUuid: status.source_client_uuid,
+          status,
+        });
+        if (!published && (await this.isLocalGatewayClientUuid?.(status.source_client_uuid))) {
+          await this.handleLocalDeliveryStatus?.({
+            clientUuid: status.source_client_uuid,
+            status,
+          });
+        }
+      }
+
+      return true;
+    },
+
+    async handleLocalDeliveryStatus(
+      this: GatewaySocketCarrier,
+      params: {
+        clientUuid: string;
+        status: GatewaySocketDeliveryStatus;
+      },
+    ): Promise<boolean> {
+      if (!(await this.isLocalGatewayClientUuid?.(params.clientUuid))) {
+        return false;
+      }
+
+      await this.broker.call(
+        "telegramMcp.gatewayDelivery.applyOutgoingDeliveryStatus",
+        {
+          status: params.status,
+        },
+        { meta: { internal_call: true } },
+      );
+      return true;
     },
 
     async processLiveRequest(
@@ -906,6 +1029,14 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       };
       let delivered = 0;
       for (const clientUuid of params.clientUuids) {
+        if (await this.isLocalGatewayClientUuid?.(clientUuid)) {
+          const runtime = this.getRuntimeOrThrow!();
+          await runtime.telegramTransport.handleProjectMemberJoinedEvent(
+            message.payload,
+          );
+          delivered += 1;
+          continue;
+        }
         const socket = this.connectedClientsByUuid?.get(clientUuid);
         if (!socket || socket.readyState !== 1) {
           continue;
@@ -943,6 +1074,14 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
       let delivered = 0;
       for (const clientUuid of params.clientUuids) {
+        if (await this.isLocalGatewayClientUuid?.(clientUuid)) {
+          const runtime = this.getRuntimeOrThrow!();
+          await runtime.telegramTransport.handleProjectMemberLeftEvent(
+            message.payload,
+          );
+          delivered += 1;
+          continue;
+        }
         const socket = this.connectedClientsByUuid?.get(clientUuid);
         if (!socket || socket.readyState !== 1) {
           continue;
@@ -961,6 +1100,10 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         delivery: GatewaySocketDelivery;
       },
     ): Promise<boolean> {
+      if (await this.handleLocalIncomingDelivery?.(params)) {
+        return true;
+      }
+
       const socket = this.connectedClientsByUuid?.get(params.clientUuid);
       if (!socket || socket.readyState !== 1) {
         return false;
@@ -983,6 +1126,10 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         status: GatewaySocketDeliveryStatus;
       },
     ): Promise<boolean> {
+      if (await this.handleLocalDeliveryStatus?.(params)) {
+        return true;
+      }
+
       const socket = this.connectedClientsByUuid?.get(params.clientUuid);
       if (!socket || socket.readyState !== 1) {
         return false;

@@ -276,6 +276,15 @@ function isIrrecoverableDeliveryError(error: unknown): boolean {
   );
 }
 
+function isExpectedGatewayPollTimeout(error: unknown): boolean {
+  const text =
+    error instanceof Error ? `${error.name}: ${error.message}\n${error.stack || ""}` : String(error);
+  return (
+    text.includes("TimeoutError") &&
+    text.includes("The operation was aborted due to timeout")
+  );
+}
+
 const TelegramMcpGatewayDeliveryService: ServiceSchema = {
   name: TELEGRAM_MCP_GATEWAY_DELIVERY_SERVICE_NAME,
   dependencies: [TELEGRAM_MCP_RUNTIME_SERVICE_NAME],
@@ -663,11 +672,19 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
           if (this.stopRequested) {
             return;
           }
-          this.logger.warn("telegram_mcp gateway delivery poll iteration failed", {
+          const logPayload = {
             gatewayUrl: runtime.config.distributed.gatewayPublicUrl,
             error:
               error instanceof Error ? (error.stack ?? error.message) : String(error),
-          });
+          };
+          if (isExpectedGatewayPollTimeout(error)) {
+            this.logger.debug(
+              "telegram_mcp gateway delivery poll iteration timed out",
+              logPayload,
+            );
+            return;
+          }
+          this.logger.warn("telegram_mcp gateway delivery poll iteration failed", logPayload);
         } finally {
           this.pollTickInFlight = null;
         }

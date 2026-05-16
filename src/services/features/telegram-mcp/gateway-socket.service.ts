@@ -70,7 +70,7 @@ type GatewaySocketLiveResponse = {
 
 type GatewaySocketProjectEvent = {
   type: "project_event";
-  event: "member_joined" | "member_left";
+  event: "member_joined" | "member_left" | "project_deleted";
   payload: {
     project_uuid: string;
     project_name: string;
@@ -238,6 +238,11 @@ type GatewaySocketCarrier = Service & {
     memberDisplayName?: string;
     memberTelegramUsername?: string;
   }) => Promise<number>;
+  notifyProjectDeleted?: (params: {
+    clientUuids: string[];
+    projectUuid: string;
+    projectName: string;
+  }) => Promise<number>;
   notifyLiveApprovalRequest?: (params: {
     clientUuid: string;
     payload: GatewaySocketLiveApprovalPayload;
@@ -355,6 +360,20 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         memberTelegramUsername?: string;
       }}) {
         return await this.notifyProjectMemberLeft?.(ctx.params);
+      },
+    },
+    notifyProjectDeleted: {
+      params: {
+        clientUuids: { type: "array", items: "string" },
+        projectUuid: "string",
+        projectName: "string",
+      },
+      async handler(this: GatewaySocketCarrier, ctx: { params: {
+        clientUuids: string[];
+        projectUuid: string;
+        projectName: string;
+      }}) {
+        return await this.notifyProjectDeleted?.(ctx.params);
       },
     },
     notifyLiveApprovalRequest: {
@@ -1025,6 +1044,19 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           );
           return;
         }
+        if (
+          parsed.event === "project_deleted" &&
+          parsed.payload &&
+          typeof parsed.payload === "object"
+        ) {
+          await runtime.telegramTransport.handleProjectDeletedEvent(
+            parsed.payload as {
+              project_uuid: string;
+              project_name: string;
+            },
+          );
+          return;
+        }
       }
 
       if (parsed.type === "live_event" && parsed.payload) {
@@ -1226,6 +1258,44 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         if (await this.isLocalGatewayClientUuid?.(clientUuid)) {
           const runtime = this.getRuntimeOrThrow!();
           await runtime.telegramTransport.handleProjectMemberLeftEvent(
+            message.payload,
+          );
+          delivered += 1;
+          continue;
+        }
+        const socket = this.connectedClientsByUuid?.get(clientUuid);
+        if (!socket || socket.readyState !== 1) {
+          continue;
+        }
+        socket.send(JSON.stringify(message));
+        delivered += 1;
+      }
+
+      return delivered;
+    },
+
+    async notifyProjectDeleted(
+      this: GatewaySocketCarrier,
+      params: {
+        clientUuids: string[];
+        projectUuid: string;
+        projectName: string;
+      },
+    ): Promise<number> {
+      const message: GatewaySocketProjectEvent = {
+        type: "project_event",
+        event: "project_deleted",
+        payload: {
+          project_uuid: params.projectUuid,
+          project_name: params.projectName,
+        },
+      };
+
+      let delivered = 0;
+      for (const clientUuid of params.clientUuids) {
+        if (await this.isLocalGatewayClientUuid?.(clientUuid)) {
+          const runtime = this.getRuntimeOrThrow!();
+          await runtime.telegramTransport.handleProjectDeletedEvent(
             message.payload,
           );
           delivered += 1;

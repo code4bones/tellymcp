@@ -76,6 +76,7 @@ export type TelegramMenuPayloadRecord = {
     | "file-entry"
     | "link-target"
     | "project-entry"
+    | "project-delete-entry"
     | "project-member"
     | "live-approval"
     | "project-file-target"

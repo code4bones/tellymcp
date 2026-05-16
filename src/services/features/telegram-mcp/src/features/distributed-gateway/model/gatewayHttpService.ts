@@ -817,6 +817,57 @@ export class GatewayHttpService {
       }
     }
 
+    if (pathname === "/gateway/projects/delete") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const result = await this.callBroker<Record<string, unknown>>(
+          "telegramMcp.gateway.deleteProject",
+          body,
+          { meta: { internal_call: true } },
+        );
+        if (
+          result.deleted === true &&
+          Array.isArray(result.notify_client_uuids) &&
+          result.notify_client_uuids.length > 0 &&
+          typeof result.project_uuid === "string" &&
+          typeof result.project_name === "string"
+        ) {
+          const publishResult = await this.callBroker<{ published?: boolean }>(
+            "telegramMcp.gatewayRmq.publishProjectDeleted",
+            {
+              clientUuids: result.notify_client_uuids,
+              projectUuid: result.project_uuid,
+              projectName: result.project_name,
+            },
+            { meta: { internal_call: true } },
+          );
+          if (!publishResult?.published) {
+            await this.callBroker(
+              "telegramMcp.gatewaySocket.notifyProjectDeleted",
+              {
+                clientUuids: result.notify_client_uuids,
+                projectUuid: result.project_uuid,
+                projectName: result.project_name,
+              },
+              { meta: { internal_call: true } },
+            );
+          }
+        }
+        writeJson(res, 200, result);
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
     if (pathname === "/gateway/projects/sessions") {
       if (req.method !== "POST") {
         writeText(res, 405, "Method not allowed");

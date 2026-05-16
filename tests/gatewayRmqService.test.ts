@@ -10,7 +10,8 @@ type GatewayRmqMethods = {
       | "delivery.queued"
       | "delivery.status"
       | "project.member_joined"
-      | "project.member_left";
+      | "project.member_left"
+      | "project.deleted";
     payload: Record<string, unknown>;
   }) => Promise<void>;
   publishMessage: (message: {
@@ -18,7 +19,8 @@ type GatewayRmqMethods = {
       | "delivery.queued"
       | "delivery.status"
       | "project.member_joined"
-      | "project.member_left";
+      | "project.member_left"
+      | "project.deleted";
     payload: Record<string, unknown>;
   }) => Promise<boolean>;
 };
@@ -135,6 +137,29 @@ describe("gatewayRmq service", () => {
 
     expect(harness.broker.call).toHaveBeenCalledWith(
       "telegramMcp.gatewaySocket.notifyProjectMemberLeft",
+      {
+        clientUuids: ["client-1"],
+        projectUuid: "project-1",
+        projectName: "Project One",
+      },
+      { meta: { internal_call: true } },
+    );
+  });
+
+  it("dispatches project.deleted to gatewaySocket.notifyProjectDeleted", async () => {
+    const harness = createHarness();
+
+    await harness.dispatchMessage({
+      type: "project.deleted",
+      payload: {
+        clientUuids: ["client-1"],
+        projectUuid: "project-1",
+        projectName: "Project One",
+      },
+    });
+
+    expect(harness.broker.call).toHaveBeenCalledWith(
+      "telegramMcp.gatewaySocket.notifyProjectDeleted",
       {
         clientUuids: ["client-1"],
         projectUuid: "project-1",

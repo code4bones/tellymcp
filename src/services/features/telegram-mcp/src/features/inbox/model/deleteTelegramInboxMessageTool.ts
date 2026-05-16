@@ -25,7 +25,7 @@ export class DeleteTelegramInboxMessageTool implements ToolModule {
       {
         title: "Delete Telegram Inbox Message",
         description:
-          "Use this only after you have fully processed an ordinary human Telegram inbox message. Delete it so future inbox reads do not return it again.",
+          "Use this only after you have fully processed an ordinary human Telegram inbox message. Pass session_id explicitly after pairing; do not rely on implicit defaults unless cwd is also correct for this agent workspace. Delete the message so future inbox reads do not return it again.",
         inputSchema: deleteTelegramInboxMessageInputSchema,
         outputSchema: deleteTelegramInboxMessageOutputSchema,
       },

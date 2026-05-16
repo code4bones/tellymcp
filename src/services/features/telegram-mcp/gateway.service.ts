@@ -61,6 +61,12 @@ type GatewayServiceCarrier = Service & {
     member_display_name?: string | null;
     member_telegram_username?: string | null;
   }>;
+  deleteProjectRecord?: (input: Record<string, unknown>) => Promise<{
+    project_uuid: string;
+    deleted: boolean;
+    project_name?: string;
+    notify_client_uuids?: string[];
+  }>;
   listProjectSessionsRecord?: (input: Record<string, unknown>) => Promise<{
     sessions: Array<{
       session_uuid: string;
@@ -654,6 +660,62 @@ const TelegramMcpGatewayService: ServiceSchema = {
         ...(memberDisplayName ? { member_display_name: memberDisplayName } : {}),
         ...(memberTelegramUsername
           ? { member_telegram_username: memberTelegramUsername }
+          : {}),
+      };
+    },
+
+    async deleteProjectRecord(this: GatewayServiceCarrier, input: Record<string, unknown>) {
+      const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
+      const projectUuid = this.requireText?.(input.project_uuid, "project_uuid");
+
+      const project = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_projects")
+        .where({ project_uuid: projectUuid, is_active: true })
+        .first();
+      if (!project) {
+        throw new Error("Project was not found or is already inactive.");
+      }
+
+      const ownerMembership = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_project_members")
+        .where({
+          client_uuid: clientUuid,
+          project_uuid: projectUuid,
+          status: "active",
+          role: "owner",
+        })
+        .first();
+      if (!ownerMembership) {
+        throw new Error("Only the project owner can delete this project.");
+      }
+
+      const notifyRows = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_project_members")
+        .where({
+          project_uuid: projectUuid,
+          status: "active",
+        })
+        .distinct("client_uuid");
+
+      const deleted = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_projects")
+        .where({ project_uuid: projectUuid })
+        .del();
+
+      return {
+        project_uuid: projectUuid,
+        deleted: deleted > 0,
+        ...(project.name ? { project_name: project.name } : {}),
+        ...(notifyRows.length > 0
+          ? {
+              notify_client_uuids: notifyRows
+                .map((row) => String(row.client_uuid))
+                .filter(Boolean),
+            }
           : {}),
       };
     },
@@ -1311,6 +1373,14 @@ const TelegramMcpGatewayService: ServiceSchema = {
           throw new Error("Gateway service is disabled in client mode");
         }
         return this.leaveProjectRecord?.(ctx.params as Record<string, unknown>);
+      },
+    },
+    deleteProject: {
+      async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
+        return this.deleteProjectRecord?.(ctx.params as Record<string, unknown>);
       },
     },
     listProjectSessions: {

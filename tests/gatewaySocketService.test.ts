@@ -46,6 +46,11 @@ type GatewaySocketMethods = {
     memberDisplayName?: string;
     memberTelegramUsername?: string;
   }) => Promise<number>;
+  notifyProjectDeleted: (params: {
+    clientUuids: string[];
+    projectUuid: string;
+    projectName: string;
+  }) => Promise<number>;
   notifyLiveApprovalRequest: (params: {
     clientUuid: string;
     payload: Record<string, unknown>;
@@ -82,6 +87,7 @@ type GatewaySocketHarness = {
     telegramTransport: {
       handleProjectMemberJoinedEvent: MockFn;
       handleProjectMemberLeftEvent: MockFn;
+      handleProjectDeletedEvent: MockFn;
       handleLiveViewApprovalRequestEvent: MockFn;
       handleLiveViewApprovalResolvedEvent: MockFn;
     };
@@ -92,6 +98,7 @@ type GatewaySocketHarness = {
   handleGatewayWsClientMessage: GatewaySocketMethods["handleGatewayWsClientMessage"];
   notifyProjectMemberJoined: GatewaySocketMethods["notifyProjectMemberJoined"];
   notifyProjectMemberLeft: GatewaySocketMethods["notifyProjectMemberLeft"];
+  notifyProjectDeleted: GatewaySocketMethods["notifyProjectDeleted"];
   notifyLiveApprovalRequest: GatewaySocketMethods["notifyLiveApprovalRequest"];
   notifyLiveApprovalResolved: GatewaySocketMethods["notifyLiveApprovalResolved"];
   notifyDeliveryQueued: GatewaySocketMethods["notifyDeliveryQueued"];
@@ -146,6 +153,7 @@ function createHarness(): GatewaySocketHarness {
     telegramTransport: {
       handleProjectMemberJoinedEvent: vi.fn(async () => undefined),
       handleProjectMemberLeftEvent: vi.fn(async () => undefined),
+      handleProjectDeletedEvent: vi.fn(async () => undefined),
       handleLiveViewApprovalRequestEvent: vi.fn(async () => undefined),
       handleLiveViewApprovalResolvedEvent: vi.fn(async () => undefined),
     },
@@ -166,6 +174,7 @@ function createHarness(): GatewaySocketHarness {
     handleGatewayWsClientMessage: methods.handleGatewayWsClientMessage,
     notifyProjectMemberJoined: methods.notifyProjectMemberJoined,
     notifyProjectMemberLeft: methods.notifyProjectMemberLeft,
+    notifyProjectDeleted: methods.notifyProjectDeleted,
     notifyLiveApprovalRequest: methods.notifyLiveApprovalRequest,
     notifyLiveApprovalResolved: methods.notifyLiveApprovalResolved,
     notifyDeliveryQueued: methods.notifyDeliveryQueued,
@@ -219,6 +228,28 @@ describe("gatewaySocket service", () => {
       project_uuid: "project-1",
       project_name: "Project One",
       member_telegram_username: "dead_ragdoll",
+    });
+  });
+
+  it("dispatches project_deleted events to telegram transport", async () => {
+    const harness = createHarness();
+
+    await harness.handleGatewayWsClientMessage(
+      JSON.stringify({
+        type: "project_event",
+        event: "project_deleted",
+        payload: {
+          project_uuid: "project-1",
+          project_name: "Project One",
+        },
+      }),
+    );
+
+    expect(
+      harness.getRuntimeOrThrow().telegramTransport.handleProjectDeletedEvent,
+    ).toHaveBeenCalledWith({
+      project_uuid: "project-1",
+      project_name: "Project One",
     });
   });
 
@@ -424,6 +455,42 @@ describe("gatewaySocket service", () => {
           project_uuid: "project-1",
           project_name: "Project One",
           member_telegram_username: "dead_ragdoll",
+        },
+      }),
+    );
+  });
+
+  it("notifies deleted projects locally and over remote sockets", async () => {
+    const harness = createHarness();
+    const remoteSend = vi.fn();
+    harness.connectedClientsByUuid.set("remote-client", {
+      readyState: 1,
+      send: remoteSend,
+    });
+    harness.isLocalGatewayClientUuid.mockImplementation(
+      async (clientUuid: string) => clientUuid === "local-client",
+    );
+
+    const delivered = await harness.notifyProjectDeleted({
+      clientUuids: ["local-client", "remote-client", "offline-client"],
+      projectUuid: "project-1",
+      projectName: "Project One",
+    });
+
+    expect(delivered).toBe(2);
+    expect(
+      harness.getRuntimeOrThrow().telegramTransport.handleProjectDeletedEvent,
+    ).toHaveBeenCalledWith({
+      project_uuid: "project-1",
+      project_name: "Project One",
+    });
+    expect(remoteSend).toHaveBeenCalledWith(
+      JSON.stringify({
+        type: "project_event",
+        event: "project_deleted",
+        payload: {
+          project_uuid: "project-1",
+          project_name: "Project One",
         },
       }),
     );

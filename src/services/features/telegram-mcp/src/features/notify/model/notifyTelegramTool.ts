@@ -25,7 +25,7 @@ export class NotifyTelegramTool implements ToolModule {
       {
         title: "Notify Telegram",
         description:
-          "Use this for one-way status or progress notifications to the human linked to the session. This does not wait for a reply and does not create inbox work for the agent.",
+          "Use this for one-way status or progress notifications to the human linked to the session. Pass session_id explicitly after pairing; do not rely on implicit defaults unless cwd is also correct for this agent workspace. This does not wait for a reply and does not create inbox work for the agent.",
         inputSchema: notifyTelegramInputSchema,
         outputSchema: notifyTelegramOutputSchema,
       },

@@ -97,6 +97,32 @@ tmux display-message -p '#{session_name} #{window_name} #{window_index} #{pane_i
 
 Do not skip `cwd`. It is now the anchor for the stable session marker.
 
+After `create_session_pair_code` succeeds:
+
+- treat the returned `session_id` as the canonical session identity for this agent
+- remember it in the current task context
+- pass it explicitly to later session-scoped tools
+- do not rely on implicit session defaults unless you also know that `cwd` is already correct for this exact agent workspace
+
+Why this matters:
+
+- many MCP tools resolve `session_id` from explicit input first
+- if it is omitted, the server may derive it from `cwd`
+- if the agent did not pass the correct `cwd`, or the MCP client does not preserve it, a later tool call can hit the wrong session
+
+Mandatory rule:
+
+- after pairing, prefer:
+  - `session_id: "<returned value>"`
+- for tools like:
+  - `ask_user_telegram`
+  - `notify_telegram`
+  - `get_telegram_inbox_count`
+  - `get_telegram_inbox`
+  - `delete_telegram_inbox_message`
+  - browser/session-context tools
+- do not assume Telegram "active session" in the bot menu affects MCP tool defaults
+
 If you skip `cwd`:
 
 - the service may create or reuse the wrong `.mcpsession.json`

@@ -572,6 +572,7 @@ export class TelegramTransport implements HumanTransport {
   private readonly browserMenu: Menu<TelegramMenuContext>;
   private readonly projectsMenu: Menu<TelegramMenuContext>;
   private readonly collabToolsMenu: Menu<TelegramMenuContext>;
+  private readonly collabDeleteMenu: Menu<TelegramMenuContext>;
   private readonly localMenu: Menu<TelegramMenuContext>;
   private readonly screenshotsMenu: Menu<TelegramMenuContext>;
   private readonly linkMenu: Menu<TelegramMenuContext>;
@@ -647,6 +648,7 @@ export class TelegramTransport implements HumanTransport {
     this.browserMenu = this.createBrowserMenu();
     this.projectsMenu = this.createProjectsMenu();
     this.collabToolsMenu = this.createCollabToolsMenu();
+    this.collabDeleteMenu = this.createCollabDeleteMenu();
     this.localMenu = this.createLocalMenu();
     this.screenshotsMenu = this.createScreenshotsMenu();
     this.linkMenu = this.createLinkMenu();
@@ -666,6 +668,7 @@ export class TelegramTransport implements HumanTransport {
       this.browserMenu,
       this.projectsMenu,
       this.collabToolsMenu,
+      this.collabDeleteMenu,
       this.localMenu,
       this.screenshotsMenu,
       this.linkMenu,
@@ -722,6 +725,9 @@ export class TelegramTransport implements HumanTransport {
     });
     this.bot.callbackQuery(/^project-detail:(.+)$/u, async (ctx) => {
       await this.handleProjectDetailCallback(ctx);
+    });
+    this.bot.callbackQuery(/^project-delete:(.+)$/u, async (ctx) => {
+      await this.handleProjectDeleteCallback(ctx);
     });
     this.bot.callbackQuery(/^project-leave:(.+)$/u, async (ctx) => {
       await this.handleProjectLeaveCallback(ctx);
@@ -1320,6 +1326,41 @@ export class TelegramTransport implements HumanTransport {
           telegramUserId: binding.telegramUserId,
         },
         message: `Из проекта «${input.project_name}» вышел участник: ${memberLabel}.`,
+      });
+      notifiedChats.add(binding.telegramChatId);
+    }
+  }
+
+  public async handleProjectDeletedEvent(input: {
+    project_uuid: string;
+    project_name: string;
+  }): Promise<void> {
+    const sessions = await this.sessionStore.listSessions();
+    const notifiedChats = new Set<number>();
+
+    for (const session of sessions) {
+      if (session.activeProjectUuid === input.project_uuid) {
+        await this.sessionStore.setSession({
+          ...session,
+          activeProjectUuid: undefined,
+          activeProjectName: undefined,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+
+      const binding = await this.bindingStore.getBinding(session.sessionId);
+      if (!binding || notifiedChats.has(binding.telegramChatId)) {
+        continue;
+      }
+
+      await this.sendNotification({
+        sessionId: session.sessionId,
+        ...(session.label ? { sessionLabel: session.label } : {}),
+        recipient: {
+          telegramChatId: binding.telegramChatId,
+          telegramUserId: binding.telegramUserId,
+        },
+        message: `Проект «${input.project_name}» удалён. Локальные project bindings очищены.`,
       });
       notifiedChats.add(binding.telegramChatId);
     }
@@ -1947,10 +1988,72 @@ export class TelegramTransport implements HumanTransport {
       .text("📣 Broadcast", async (ctx) => {
         await this.beginProjectBroadcast(ctx);
       })
+      .text("🗑 Delete", async (ctx) => {
+        await ctx.answerCallbackQuery({ text: "Открываю удаление проектов." });
+        await this.showCollabDeleteMenu(ctx);
+      })
       .row()
       .text("⬅ Back", async (ctx) => {
         await ctx.answerCallbackQuery({ text: "Назад к Collab." });
         await this.showProjectsMenu(ctx);
+      });
+  }
+
+  private createCollabDeleteMenu(): Menu<TelegramMenuContext> {
+    return new Menu<TelegramMenuContext>(
+      "telegram-collab-delete-menu",
+      {
+        fingerprint: async (ctx) => this.buildProjectsFingerprint(ctx),
+        ...this.createMenuOptions((ctx) => this.showCollabDeleteMenu(ctx)),
+      },
+    )
+      .dynamic(async (ctx) => {
+        const range = new MenuRange<TelegramMenuContext>();
+        const { session, projects } = await this.loadProjectsContext(ctx);
+        if (!session || !projects) {
+          range.text("Gateway недоступен", async (innerCtx) => {
+            await innerCtx.answerCallbackQuery({
+              text: "Удаление проектов доступно только через gateway.",
+              show_alert: true,
+            });
+          });
+          return range;
+        }
+
+        if (projects.length === 0) {
+          range.text("🫥 Нет проектов", async (innerCtx) => {
+            await innerCtx.answerCallbackQuery({
+              text: "Удалять пока нечего.",
+            });
+          });
+          return range;
+        }
+
+        for (const project of projects) {
+          const isOwner = project.role === "owner";
+          range
+            .text(
+              {
+                text: `${isOwner ? "🗑" : "🔒"} ${project.name}`,
+                payload: async () =>
+                  this.createProjectDeleteMenuPayload(
+                    session.sessionId,
+                    project.project_uuid,
+                    project.name,
+                  ),
+              },
+              async (innerCtx) => {
+                await this.handleProjectDeleteSelect(innerCtx);
+              },
+            )
+            .row();
+        }
+
+        return range;
+      })
+      .text("⬅ Back", async (ctx) => {
+        await ctx.answerCallbackQuery({ text: "Назад к инструментам Collab." });
+        await this.showCollabToolsMenu(ctx);
       });
   }
 
@@ -3634,6 +3737,31 @@ export class TelegramTransport implements HumanTransport {
     return key;
   }
 
+  private async createProjectDeleteMenuPayload(
+    sessionId: string,
+    projectUuid: string,
+    title: string,
+  ): Promise<string> {
+    const key = createMenuPayloadKey();
+    const now = new Date();
+    await this.menuPayloadStore.createMenuPayload(
+      {
+        key,
+        kind: "project-delete-entry",
+        sessionId,
+        projectUuid,
+        title,
+        createdAt: now.toISOString(),
+        expiresAt: new Date(
+          now.getTime() + this.config.telegram.menuPayloadTtlSeconds * 1000,
+        ).toISOString(),
+      },
+      this.config.telegram.menuPayloadTtlSeconds,
+    );
+
+    return key;
+  }
+
   private async createProjectMemberMenuPayload(
     sessionId: string,
     projectUuid: string,
@@ -5093,6 +5221,19 @@ export class TelegramTransport implements HumanTransport {
     );
   }
 
+  private async showCollabDeleteMenu(
+    ctx: TelegramMenuContext,
+    introText?: string,
+  ): Promise<void> {
+    const text = await this.buildCollabDeleteMenuText(ctx);
+    await this.renderMenuScreen(
+      ctx,
+      introText ? `${introText}\n\n${text}` : text,
+      { kind: "menu" },
+      this.collabDeleteMenu,
+    );
+  }
+
   private async showSettingsMenu(
     ctx: TelegramMenuContext,
     introText?: string,
@@ -5912,6 +6053,33 @@ export class TelegramTransport implements HumanTransport {
       "",
       "Broadcast отправит следующее текстовое сообщение всем уникальным Collab-сессиям на ботах без дублирования.",
       "Локальные сессии получат inbox message, удалённые — gateway delivery.",
+    ].join("\n");
+  }
+
+  private async buildCollabDeleteMenuText(
+    ctx: TelegramMenuContext,
+  ): Promise<string> {
+    const { session, projects } = await this.loadProjectsContext(ctx);
+    if (!this.config.distributed.gatewayPublicUrl) {
+      return "Удаление проектов недоступно для этого запуска.";
+    }
+
+    if (!session || !projects) {
+      return "Удаление проектов недоступно для текущей сессии.";
+    }
+
+    const ownerCount = projects.filter((project) => project.role === "owner").length;
+
+    return [
+      "🗑 Delete Project",
+      "",
+      `📌 Активная сессия: ${session.label ?? session.sessionId}`,
+      `🗂 Проектов в Collab: ${projects.length}`,
+      `👑 Проектов, где ты owner: ${ownerCount}`,
+      "",
+      "Выбери проект для полного удаления.",
+      "Будут отвязаны участники, удалены project sessions и сама запись проекта.",
+      "Удалять проект может только owner.",
     ].join("\n");
   }
 
@@ -7097,6 +7265,64 @@ export class TelegramTransport implements HumanTransport {
     await this.showProjectMembers(ctx, project);
   }
 
+  private async handleProjectDeleteSelect(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const payloadKey = readMenuPayloadKey(ctx);
+    if (!payloadKey) {
+      await ctx.answerCallbackQuery({
+        text: "Данные проекта не найдены.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const payload = await this.menuPayloadStore.getMenuPayload(payloadKey);
+    if (
+      !payload ||
+      payload.kind !== "project-delete-entry" ||
+      !payload.sessionId ||
+      !payload.projectUuid
+    ) {
+      await ctx.answerCallbackQuery({
+        text: "Данные проекта устарели или некорректны.",
+        show_alert: true,
+      });
+      await ctx.deleteMessage().catch(() => undefined);
+      return;
+    }
+
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal) {
+      await ctx.answerCallbackQuery({
+        text: "Telegram identity is unavailable.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const projects = await this.listGatewayProjects(principal);
+    const project = projects.find((item) => item.project_uuid === payload.projectUuid);
+    if (!project) {
+      await ctx.answerCallbackQuery({
+        text: "Проект не найден.",
+        show_alert: true,
+      });
+      await ctx.deleteMessage().catch(() => undefined);
+      return;
+    }
+
+    if (project.role !== "owner") {
+      await ctx.answerCallbackQuery({
+        text: "Удалять проект может только owner.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    await this.handleProjectDeleteByUuid(ctx, payload.projectUuid);
+  }
+
   private async leaveActiveProject(
     ctx: TelegramMenuContext,
   ): Promise<void> {
@@ -7763,6 +7989,21 @@ export class TelegramTransport implements HumanTransport {
     await this.showProjectMembers(ctx, payload);
   }
 
+  private async handleProjectDeleteCallback(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const projectUuid = this.extractCallbackSuffix(ctx, "project-delete:");
+    if (!projectUuid) {
+      await ctx.answerCallbackQuery({
+        text: "Некорректное действие проекта.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    await this.handleProjectDeleteByUuid(ctx, projectUuid);
+  }
+
   private async handleProjectMemberOpenCallback(
     ctx: TelegramMenuContext,
   ): Promise<void> {
@@ -8111,6 +8352,71 @@ export class TelegramTransport implements HumanTransport {
 
     await ctx.answerCallbackQuery({ text: "Выход из проекта выполнен." });
     await this.showProjectsMenu(ctx, "Вы вышли из выбранного проекта.");
+  }
+
+  private async handleProjectDeleteByUuid(
+    ctx: TelegramMenuContext,
+    projectUuid: string,
+  ): Promise<void> {
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal) {
+      await ctx.answerCallbackQuery({
+        text: "Telegram identity is unavailable.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const sessionId =
+      await this.bindingStore.getActiveSessionIdForPrincipal(principal);
+    if (!sessionId) {
+      await ctx.answerCallbackQuery({
+        text: "Активная сессия не выбрана.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const projects = await this.listGatewayProjects(principal);
+    const project = projects.find((item) => item.project_uuid === projectUuid);
+    if (!project) {
+      await ctx.answerCallbackQuery({
+        text: "Проект не найден.",
+        show_alert: true,
+      });
+      await ctx.deleteMessage().catch(() => undefined);
+      return;
+    }
+
+    if (project.role !== "owner") {
+      await ctx.answerCallbackQuery({
+        text: "Удалять проект может только owner.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const clientUuid = await this.ensureGatewayClientUuid(principal);
+    await this.callGatewayJson("/projects/delete", {
+      client_uuid: clientUuid,
+      project_uuid: projectUuid,
+    });
+
+    const session = await this.sessionStore.getSession(sessionId);
+    if (session?.activeProjectUuid === projectUuid) {
+      await this.sessionStore.setSession({
+        ...session,
+        activeProjectUuid: undefined,
+        activeProjectName: undefined,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    await ctx.answerCallbackQuery({ text: "Проект удалён." });
+    await this.showCollabDeleteMenu(
+      ctx,
+      `Проект «${project.name}» удалён. Участники отвязаны, project state очищен.`,
+    );
   }
 
   private async deletePendingFileHandoffPrompt(

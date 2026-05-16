@@ -16,6 +16,12 @@ type ProjectEventPayload = {
   memberTelegramUsername?: string;
 };
 
+type ProjectDeletedPayload = {
+  clientUuids: string[];
+  projectUuid: string;
+  projectName: string;
+};
+
 type DeliveryQueuedPayload = {
   clientUuid: string;
   delivery: Record<string, unknown>;
@@ -42,6 +48,10 @@ type GatewayRmqMessage =
   | {
       type: "project.member_left";
       payload: ProjectEventPayload;
+    }
+  | {
+      type: "project.deleted";
+      payload: ProjectDeletedPayload;
     };
 
 type GatewayRmqCarrier = Service & {
@@ -147,6 +157,24 @@ const TelegramMcpGatewayRmqService: ServiceSchema = {
         return {
           published: await this.publishMessage?.({
             type: "project.member_left",
+            payload: ctx.params,
+          }),
+        };
+      },
+    },
+    publishProjectDeleted: {
+      params: {
+        clientUuids: { type: "array", items: "string" },
+        projectUuid: "string",
+        projectName: "string",
+      },
+      async handler(
+        this: GatewayRmqCarrier,
+        ctx: { params: ProjectDeletedPayload },
+      ) {
+        return {
+          published: await this.publishMessage?.({
+            type: "project.deleted",
             payload: ctx.params,
           }),
         };
@@ -266,6 +294,15 @@ const TelegramMcpGatewayRmqService: ServiceSchema = {
         return;
       }
 
+      if (message.type === "project.deleted") {
+        await this.broker.call(
+          "telegramMcp.gatewaySocket.notifyProjectDeleted",
+          message.payload,
+          { meta: { internal_call: true } },
+        );
+        return;
+      }
+
       await this.broker.call(
         "telegramMcp.gatewaySocket.notifyProjectMemberLeft",
         message.payload,
@@ -303,6 +340,7 @@ const TelegramMcpGatewayRmqService: ServiceSchema = {
         await channel.bindQueue(queue, exchange, "delivery.status");
         await channel.bindQueue(queue, exchange, "project.member_joined");
         await channel.bindQueue(queue, exchange, "project.member_left");
+        await channel.bindQueue(queue, exchange, "project.deleted");
 
         const onDisconnected = (eventName: string, error?: unknown) => {
           this.logger.warn("Gateway RMQ connection closed", {

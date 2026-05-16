@@ -25,7 +25,7 @@ export class CreateSessionPairCodeTool implements ToolModule {
       {
         title: "Create Session Pair Code",
         description:
-          "Use this when the user asks to link, pair, register, or connect the current agent/session to Telegram. Before calling it, determine the correct workspace cwd and, if tmux is available, collect current tmux attributes. Then create a short-lived Telegram pairing code for that session.",
+          "Use this when the user asks to link, pair, register, or connect the current agent/session to Telegram. Before calling it, determine the correct workspace cwd and, if tmux is available, collect current tmux attributes. Then create a short-lived Telegram pairing code for that session. After success, remember the returned session_id and pass it explicitly to later session-scoped tools.",
         inputSchema: createSessionPairCodeInputSchema,
         outputSchema: createSessionPairCodeOutputSchema,
       },

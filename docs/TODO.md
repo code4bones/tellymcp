@@ -5,83 +5,74 @@ Current state:
 - `telegram_mcp` переведён на `Moleculer`.
 - MCP работает через `${ROOT_PREFIX}/mcp`.
 - Mini App `Live` работает через `${ROOT_PREFIX}/webapp`.
-- Локальный `Local` flow работает:
+- Control plane переведён на `ws`.
+- Gateway-side `RabbitMQ` fanout подключён и работает.
+- `🏠 Local` flow работает:
   - pairing
   - link
+  - `Ask / Share / File`
   - `Передать агенту`
-  - local notes через `LOCAL_INDEX.md`
-- Remote `Collab` flow работает:
+  - `LOCAL_INDEX.md`
+- `👥 Collab` flow работает:
   - projects
   - members
   - `Ask / Share / File`
-  - `SHARED_INDEX.md`
-  - gateway delivery/status через `ws`
-- Exchange files работают напрямую без `vfs + minio`.
-- Доставка файлов между машинами и между локальными сессиями работает.
-- Gateway-side `RabbitMQ` fanout работает.
+  - `Ask -> reply` с `Reply message_uuid` / `target_session_id`
+  - delivery/status через `ws`
+  - `Live` выбранного участника через approval flow
+- `Storage` работает от файловой системы:
+  - истина — локальный `.mcp-xchange`
+  - stale meta не показываются
+  - stale meta подчищаются при открытии списка
+- Exchange files больше не зависят от `vfs/minio`.
+- Базовый regression-suite собран:
+  - `12` test files
+  - `52` tests
+  - `yarn test / build / lint` проходят
 
-Current tails:
+Next session:
 
-- [x] Переход на `ws + RabbitMQ`:
-  - [x] Поднять базовый `ws` control plane между `client` и `gateway`
-  - [x] Перевести `Live relay` с HTTP poll на `ws` request/response
-  - [x] Посадить `ws` на общий backend ingress `${ROOT_PREFIX}/gateway/ws`
-  - [x] Перевести delivery status/update push на `ws`
-  - [x] Ввести базовый `RabbitMQ` для durable gateway-side event fanout:
-    - `delivery.queued`
-    - `delivery.status`
-    - `project.member_joined`
-    - `project.member_left`
-  - [ ] Решить, нужен ли полноценный `RabbitMQ` queue flow для:
-    - retry / DLQ
-    - offline client delivery beyond DB backlog
-  - [ ] Оставить `DB` источником истины для:
-    - projects
-    - sessions
-    - deliveries
-    - statuses
+- [ ] Пройти ручной smoke-pass `Storage`:
+  - пустая сессия
+  - реальные files
+  - screenshots
+  - stale entry -> `Get`
+  - stale entry -> `Delete`
+  - nested paths `YYYY-MM-DD/HH-mm-ss`
 
-- [x] Gateway-relayed `Live View` реализован:
-  - Mini App открывается через домен gateway
-  - клиентской машине не нужен собственный публичный домен
-  - gateway релеит `bootstrap/view/action` до нужного client session
+- [ ] Пройти ручной smoke-pass `Live approval`:
+  - local partner
+  - collab member на другой машине
+  - approve
+  - deny
+  - повторный запрос после deny
+  - что происходит со старыми approval messages
 
-- [x] Причесать документацию под текущее состояние:
-  - `README.md`
-  - `TOOLS.md`
-  - `docs/DEVELOPMENT.md`
-  - убрать устаревшие упоминания `Partner`, `Link`, `SHARE_INDEX.md`, если они ещё где-то остались
+- [ ] Подчистить UX `Storage`:
+  - решить, нужен ли отдельный раздел `Files / Screenshots / Notes`
+  - решить, нужен ли bulk cleanup stale meta
+  - проверить, не нужны ли подписи по source/type в списке
 
-- [ ] Пройти полный smoke-pass `Local` flow:
-  - `Link`
-  - `Ask / Share`
-  - `Передать агенту`
-  - `LOCAL_INDEX.md`
-  - поведение после рестарта сервиса
+- [ ] Усилить `Action Required` / agent discipline:
+  - короткий и жёсткий шаблон для обязательного `send_partner_note(...)`
+  - проверить, хватает ли текущего notice без лишнего шума
+  - при необходимости сократить frontmatter note ещё сильнее
 
-- [ ] Пройти полный smoke-pass `Collab` flow между машинами:
-  - `Create / Join project`
-  - `Members`
-  - `Ask / Share`
-  - `Ask -> reply` с `Reply message_uuid` / `in_reply_to`
-  - `File`
-  - sender status:
-    - `⏳`
-    - `✅`
-    - `❌`
-  - обработка битого delivery без зацикливания
-
-- [ ] Проверить file lifecycle после handoff:
-  - удаление исходного файла после отправки
-  - повторная отправка того же файла
-  - одинаковые имена файлов
-  - dated VFS paths `YYYY-MM-DD/HH-mm-ss`
-
-- [ ] Дочистить логи:
-  - убедиться, что poll/status/gateway не шумят в `info`
-  - оставить только полезные operational logs
-
-- [ ] Подумать над следующей итерацией UX:
-  - нужен ли отдельный экран истории delivery
-  - нужен ли просмотр failed deliveries из Telegram
+- [ ] Подумать над следующей итерацией `Collab` UX:
+  - нужен ли delivery history screen
   - нужен ли manual retry для failed delivery
+  - нужен ли отдельный просмотр последних `Ask / Share / File`
+
+- [ ] Подумать над policy для `Live` approval:
+  - one-shot approve only
+  - remember approve for session/member/project
+  - revoke existing approval policy
+
+- [ ] Дочистить operational logs:
+  - оставить только полезные lifecycle logs
+  - убрать оставшийся шум из стабильных happy-path маршрутов
+
+- [ ] Решить, нужен ли полноценный `RabbitMQ` queue flow поверх fanout:
+  - retry / backoff
+  - DLQ
+  - offline delivery beyond DB backlog

@@ -1366,6 +1366,74 @@ export class TelegramTransport implements HumanTransport {
     }
   }
 
+  public async handleToolsUpdatedEvent(input: {
+    local_session_id: string;
+    session_label?: string;
+    client_tools_hash?: string;
+    gateway_tools_hash: string;
+    reason: "missing" | "outdated";
+    instruction: string;
+  }): Promise<void> {
+    const session = await this.sessionStore.getSession(input.local_session_id);
+    if (!session) {
+      this.logger.warn("Skipping tools update event because local session is unavailable", {
+        sessionId: input.local_session_id,
+        reason: input.reason,
+      });
+      return;
+    }
+
+    const inboxMessage: TelegramInboxMessage = {
+      id: createInboxMessageId(),
+      sessionId: session.sessionId,
+      telegramChatId: 0,
+      telegramUserId: 0,
+      sourceTelegramMessageId: 0,
+      text: [
+        "Gateway TOOLS.md has changed or is missing locally.",
+        `Session: ${session.label ?? input.session_label ?? session.sessionId}`,
+        `Reason: ${input.reason === "missing" ? "local TOOLS.md hash is missing" : "local TOOLS.md is outdated"}`,
+        `Gateway tools hash: ${input.gateway_tools_hash}`,
+        ...(input.client_tools_hash ? [`Local tools hash: ${input.client_tools_hash}`] : []),
+        "",
+        "# Action Required",
+        "1. Call refresh_tools_markdown for this session.",
+        "2. Re-read the local TOOLS.md.",
+        "3. Apply the updated instructions before continuing any work.",
+        "The task is not complete until the updated TOOLS.md has been read and applied.",
+      ].join("\n"),
+      receivedAt: new Date().toISOString(),
+    };
+
+    await this.inboxStore.createInboxMessage(inboxMessage);
+    await this.nudgeSessionInbox(session.sessionId);
+
+    const binding = await this.bindingStore.getBinding(session.sessionId);
+    if (!binding) {
+      return;
+    }
+
+    await this.sendNotification({
+      sessionId: session.sessionId,
+      ...(session.label ? { sessionLabel: session.label } : {}),
+      recipient: {
+        telegramChatId: binding.telegramChatId,
+        telegramUserId: binding.telegramUserId,
+      },
+      message: [
+        "TOOLS.md обновлён на шлюзе или отсутствует локально.",
+        `Сессия: ${session.label ?? input.session_label ?? session.sessionId}`,
+        "Действие обязательно: вызови refresh_tools_markdown, затем перечитай локальный TOOLS.md и применяй его перед продолжением работы.",
+      ].join("\n"),
+    });
+
+    await this.sessionStore.setSession({
+      ...session,
+      lastSeenToolsHash: input.gateway_tools_hash,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
   public async handleLiveViewApprovalRequestEvent(
     input: LiveApprovalEventPayload,
   ): Promise<void> {

@@ -88,6 +88,7 @@ type GatewaySocketHarness = {
       handleProjectMemberJoinedEvent: MockFn;
       handleProjectMemberLeftEvent: MockFn;
       handleProjectDeletedEvent: MockFn;
+      handleToolsUpdatedEvent: MockFn;
       handleLiveViewApprovalRequestEvent: MockFn;
       handleLiveViewApprovalResolvedEvent: MockFn;
     };
@@ -154,6 +155,7 @@ function createHarness(): GatewaySocketHarness {
       handleProjectMemberJoinedEvent: vi.fn(async () => undefined),
       handleProjectMemberLeftEvent: vi.fn(async () => undefined),
       handleProjectDeletedEvent: vi.fn(async () => undefined),
+      handleToolsUpdatedEvent: vi.fn(async () => undefined),
       handleLiveViewApprovalRequestEvent: vi.fn(async () => undefined),
       handleLiveViewApprovalResolvedEvent: vi.fn(async () => undefined),
     },
@@ -251,6 +253,36 @@ describe("gatewaySocket service", () => {
       project_uuid: "project-1",
       project_name: "Project One",
     });
+  });
+
+  it("dispatches tools_updated events to telegram transport", async () => {
+    const harness = createHarness();
+
+    await harness.handleGatewayWsClientMessage(
+      JSON.stringify({
+        type: "tools_event",
+        payload: {
+          local_session_id: "left-session",
+          session_label: "leftDev",
+          gateway_tools_hash: "gateway-hash",
+          client_tools_hash: "old-hash",
+          reason: "outdated",
+          instruction:
+            "Call refresh_tools_markdown for this session, then re-read the local TOOLS.md and apply it before continuing.",
+        },
+      }),
+    );
+
+    expect(
+      harness.getRuntimeOrThrow().telegramTransport.handleToolsUpdatedEvent,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        local_session_id: "left-session",
+        session_label: "leftDev",
+        gateway_tools_hash: "gateway-hash",
+        reason: "outdated",
+      }),
+    );
   });
 
   it("materializes incoming delivery and sends delivery_ack over ws", async () => {

@@ -1,6 +1,8 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import type { IncomingMessage, Server as HttpServer } from "node:http";
 import type { Socket } from "node:net";
+import { join, resolve } from "node:path";
 
 import type { Service, ServiceSchema } from "moleculer";
 
@@ -37,6 +39,13 @@ const API_SERVICE_NAME = "api";
 
 const CLIENT_RECONNECT_DELAY_MS = 3000;
 const LIVE_REQUEST_TIMEOUT_MS = 20000;
+const TOOLS_SYNC_CHECK_INTERVAL_MS = 15000;
+
+type GatewaySocketSessionTools = {
+  local_session_id: string;
+  session_label?: string;
+  tools_hash?: string;
+};
 
 type GatewaySocketHello = {
   type: "hello";
@@ -45,6 +54,7 @@ type GatewaySocketHello = {
   client_uuid?: string;
   project_name?: string;
   node_id?: string;
+  session_tools?: GatewaySocketSessionTools[];
 };
 
 type GatewaySocketHelloAck = {
@@ -152,6 +162,20 @@ type GatewaySocketLiveEvent = {
   payload: GatewaySocketLiveApprovalPayload;
 };
 
+type GatewaySocketToolsEventPayload = {
+  local_session_id: string;
+  session_label?: string;
+  client_tools_hash?: string;
+  gateway_tools_hash: string;
+  reason: "missing" | "outdated";
+  instruction: string;
+};
+
+type GatewaySocketToolsEvent = {
+  type: "tools_event";
+  payload: GatewaySocketToolsEventPayload;
+};
+
 type GatewaySocketDeliveryAck = {
   type: "delivery_ack";
   delivery_ids: string[];
@@ -169,6 +193,7 @@ type GatewaySocketMessage =
   | GatewaySocketLiveRequest
   | GatewaySocketLiveResponse
   | GatewaySocketLiveEvent
+  | GatewaySocketToolsEvent
   | GatewaySocketProjectEvent
   | GatewaySocketDeliveryEvent
   | GatewaySocketDeliveryStatusEvent
@@ -193,8 +218,10 @@ type GatewaySocketCarrier = Service & {
   wsClient?: any;
   wsReconnectTimer?: NodeJS.Timeout | null;
   wsIdentityRefreshTimer?: NodeJS.Timeout | null;
+  wsToolsSyncTimer?: NodeJS.Timeout | null;
   wsConnectionId?: string | null;
   wsHelloClientUuid?: string | null;
+  wsHelloSessionToolsSnapshot?: string | null;
   wsClientHasConnectedOnce?: boolean;
   wsUpgradeHandler?:
     | ((req: IncomingMessage, socket: Socket, head: Buffer) => void)
@@ -202,6 +229,7 @@ type GatewaySocketCarrier = Service & {
   stopRequested?: boolean;
   connectedClients?: Map<any, GatewaySocketHello>;
   connectedClientsByUuid?: Map<string, any>;
+  connectedClientToolsAlerts?: Map<any, Map<string, string>>;
   pendingLiveRequests?: Map<string, LiveRequestPending>;
   getRuntimeOrThrow?: () => ReturnType<TelegramMcpRuntimeServiceInstance["getRuntime"]>;
   getApiServerOrThrow?: () => HttpServer;
@@ -209,6 +237,15 @@ type GatewaySocketCarrier = Service & {
   startGatewayWsClient?: () => Promise<void>;
   scheduleGatewayWsReconnect?: () => void;
   closeGatewayWsResources?: () => Promise<void>;
+  collectSessionTools?: () => Promise<{
+    sessionTools: GatewaySocketSessionTools[];
+    snapshot: string;
+  }>;
+  getGatewayToolsHash?: () => string | null;
+  notifyToolsMismatchForSocket?: (
+    socket: any,
+    hello: GatewaySocketHello,
+  ) => Promise<number>;
   sendClientHello?: (socket: any) => Promise<void>;
   handleGatewayWsServerMessage?: (
     socket: any,
@@ -290,6 +327,16 @@ function formatTmuxRelayError(proxyUrl: string | undefined, error: unknown): str
   }
 
   return error instanceof Error ? error.message : String(error);
+}
+
+function computeToolsHashForDir(workspaceDir: string): string | null {
+  const toolsPath = join(resolve(workspaceDir), "TOOLS.md");
+  if (!existsSync(toolsPath)) {
+    return null;
+  }
+
+  const content = readFileSync(toolsPath, "utf8");
+  return createHash("sha256").update(content).digest("hex");
 }
 
 const TelegramMcpGatewaySocketService: ServiceSchema = {
@@ -449,13 +496,16 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
     this.wsClient = null;
     this.wsReconnectTimer = null;
     this.wsIdentityRefreshTimer = null;
+    this.wsToolsSyncTimer = null;
     this.wsConnectionId = null;
     this.wsHelloClientUuid = null;
+    this.wsHelloSessionToolsSnapshot = null;
     this.wsClientHasConnectedOnce = false;
     this.wsUpgradeHandler = null;
     this.stopRequested = false;
     this.connectedClients = new Map();
     this.connectedClientsByUuid = new Map();
+    this.connectedClientToolsAlerts = new Map();
     this.pendingLiveRequests = new Map();
   },
 
@@ -492,6 +542,96 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       return apiService.server;
     },
 
+    async collectSessionTools(this: GatewaySocketCarrier): Promise<{
+      sessionTools: GatewaySocketSessionTools[];
+      snapshot: string;
+    }> {
+      const runtime = this.getRuntimeOrThrow!();
+      const sessions = await runtime.sessionStore.listSessions();
+      const sessionTools = sessions
+        .map((session) => {
+          const toolsHash = session.cwd
+            ? computeToolsHashForDir(session.cwd)
+            : null;
+          return {
+            local_session_id: session.sessionId,
+            ...(session.label ? { session_label: session.label } : {}),
+            ...(toolsHash ? { tools_hash: toolsHash } : {}),
+          } satisfies GatewaySocketSessionTools;
+        })
+        .sort((left, right) =>
+          left.local_session_id.localeCompare(right.local_session_id),
+        );
+
+      return {
+        sessionTools,
+        snapshot: JSON.stringify(sessionTools),
+      };
+    },
+
+    getGatewayToolsHash(this: GatewaySocketCarrier): string | null {
+      return computeToolsHashForDir(process.cwd());
+    },
+
+    async notifyToolsMismatchForSocket(
+      this: GatewaySocketCarrier,
+      socket: any,
+      hello: GatewaySocketHello,
+    ): Promise<number> {
+      const gatewayToolsHash = this.getGatewayToolsHash?.();
+      if (!gatewayToolsHash || !socket || socket.readyState !== 1) {
+        return 0;
+      }
+
+      const sessionTools = Array.isArray(hello.session_tools)
+        ? hello.session_tools
+        : [];
+      if (sessionTools.length === 0) {
+        return 0;
+      }
+
+      const alerted =
+        this.connectedClientToolsAlerts?.get(socket) ?? new Map<string, string>();
+      this.connectedClientToolsAlerts?.set(socket, alerted);
+
+      let delivered = 0;
+      for (const sessionTool of sessionTools) {
+        const clientToolsHash =
+          typeof sessionTool.tools_hash === "string" && sessionTool.tools_hash.trim()
+            ? sessionTool.tools_hash.trim()
+            : null;
+        if (clientToolsHash === gatewayToolsHash) {
+          alerted.delete(sessionTool.local_session_id);
+          continue;
+        }
+
+        if (alerted.get(sessionTool.local_session_id) === gatewayToolsHash) {
+          continue;
+        }
+
+        socket.send(
+          JSON.stringify({
+            type: "tools_event",
+            payload: {
+              local_session_id: sessionTool.local_session_id,
+              ...(sessionTool.session_label
+                ? { session_label: sessionTool.session_label }
+                : {}),
+              ...(clientToolsHash ? { client_tools_hash: clientToolsHash } : {}),
+              gateway_tools_hash: gatewayToolsHash,
+              reason: clientToolsHash ? "outdated" : "missing",
+              instruction:
+                "Call refresh_tools_markdown for this session, then re-read the local TOOLS.md and apply it before continuing.",
+            },
+          } satisfies GatewaySocketToolsEvent),
+        );
+        alerted.set(sessionTool.local_session_id, gatewayToolsHash);
+        delivered += 1;
+      }
+
+      return delivered;
+    },
+
     async sendClientHello(this: GatewaySocketCarrier, socket: any): Promise<void> {
       const runtime = this.getRuntimeOrThrow!();
       if (!runtime || !socket || socket.readyState !== 1) {
@@ -499,6 +639,10 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       }
 
       const clientUuid = await runtime.maintenanceStore.getGatewayClientUuid();
+      const { sessionTools, snapshot } = await this.collectSessionTools?.() ?? {
+        sessionTools: [],
+        snapshot: "[]",
+      };
       const hello: GatewaySocketHello = {
         type: "hello",
         connection_id: this.wsConnectionId || randomUUID(),
@@ -508,8 +652,10 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           ? { project_name: runtime.config.project.name }
           : {}),
         ...(this.broker.nodeID ? { node_id: this.broker.nodeID } : {}),
+        ...(sessionTools.length > 0 ? { session_tools: sessionTools } : {}),
       };
       this.wsHelloClientUuid = clientUuid ?? null;
+      this.wsHelloSessionToolsSnapshot = snapshot;
       socket.send(JSON.stringify(hello));
     },
 
@@ -850,6 +996,45 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           ...(typeof parsed.node_id === "string" && parsed.node_id.trim()
             ? { node_id: parsed.node_id.trim() }
             : {}),
+          ...(Array.isArray(parsed.session_tools)
+            ? {
+                session_tools: parsed.session_tools
+                  .map((item) =>
+                    item && typeof item === "object"
+                      ? {
+                          local_session_id:
+                            typeof (item as { local_session_id?: unknown }).local_session_id ===
+                              "string" &&
+                            (item as { local_session_id: string }).local_session_id.trim()
+                              ? (item as { local_session_id: string }).local_session_id.trim()
+                              : null,
+                          ...(typeof (item as { session_label?: unknown }).session_label ===
+                            "string" &&
+                          (item as { session_label: string }).session_label.trim()
+                            ? {
+                                session_label: (
+                                  item as { session_label: string }
+                                ).session_label.trim(),
+                              }
+                            : {}),
+                          ...(typeof (item as { tools_hash?: unknown }).tools_hash ===
+                            "string" &&
+                          (item as { tools_hash: string }).tools_hash.trim()
+                            ? {
+                                tools_hash: (
+                                  item as { tools_hash: string }
+                                ).tools_hash.trim(),
+                              }
+                            : {}),
+                        }
+                      : null,
+                  )
+                  .filter(
+                    (item): item is GatewaySocketSessionTools =>
+                      Boolean(item?.local_session_id),
+                  ),
+              }
+            : {}),
         };
         const previous = this.connectedClients?.get(socket);
         if (previous?.client_uuid) {
@@ -866,6 +1051,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             connection_id: hello.connection_id,
           } satisfies GatewaySocketHelloAck),
         );
+        await this.notifyToolsMismatchForSocket?.(socket, hello);
         if (hello.client_uuid) {
           const queued = await (this.broker.call as any)(
             "telegramMcp.gateway.pollDeliveries",
@@ -1010,6 +1196,13 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             typeof parsed.connection_id === "string" ? parsed.connection_id : null,
           clientUuid: this.wsHelloClientUuid,
         });
+        return;
+      }
+
+      if (parsed.type === "tools_event" && parsed.payload) {
+        await runtime.telegramTransport.handleToolsUpdatedEvent(
+          parsed.payload as GatewaySocketToolsEventPayload,
+        );
         return;
       }
 
@@ -1467,6 +1660,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           if (hello?.client_uuid) {
             this.connectedClientsByUuid?.delete(hello.client_uuid);
           }
+          this.connectedClientToolsAlerts?.delete(socket);
           this.connectedClients?.delete(socket);
           runtime.logger.warn("Gateway WS client disconnected", {
             connectionId: hello?.connection_id ?? null,
@@ -1596,7 +1790,15 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           void (async () => {
             const currentClientUuid =
               await runtime.maintenanceStore.getGatewayClientUuid();
-            if ((currentClientUuid ?? null) === this.wsHelloClientUuid) {
+            const currentSessionTools =
+              await this.collectSessionTools?.() ?? {
+                sessionTools: [],
+                snapshot: "[]",
+              };
+            if (
+              (currentClientUuid ?? null) === this.wsHelloClientUuid &&
+              currentSessionTools.snapshot === this.wsHelloSessionToolsSnapshot
+            ) {
               return;
             }
 
@@ -1608,6 +1810,28 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             });
           });
         }, 5000);
+      }
+
+      if (!this.wsToolsSyncTimer) {
+        this.wsToolsSyncTimer = setInterval(() => {
+          if (this.stopRequested) {
+            return;
+          }
+
+          void (async () => {
+            for (const [clientSocket, hello] of this.connectedClients?.entries() ?? []) {
+              if (!clientSocket || clientSocket.readyState !== 1) {
+                continue;
+              }
+              await this.notifyToolsMismatchForSocket?.(clientSocket, hello);
+            }
+          })().catch((error: unknown) => {
+            runtime.logger.warn("Gateway WS tools sync check failed", {
+              error:
+                error instanceof Error ? (error.stack ?? error.message) : String(error),
+            });
+          });
+        }, TOOLS_SYNC_CHECK_INTERVAL_MS);
       }
     },
 
@@ -1622,6 +1846,11 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         this.wsIdentityRefreshTimer = null;
       }
 
+      if (this.wsToolsSyncTimer) {
+        clearInterval(this.wsToolsSyncTimer);
+        this.wsToolsSyncTimer = null;
+      }
+
       for (const pending of this.pendingLiveRequests?.values() ?? []) {
         clearTimeout(pending.timeout);
         pending.reject(new Error("Gateway WS transport is shutting down"));
@@ -1634,6 +1863,8 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         socket.removeAllListeners();
         socket.close();
       }
+
+      this.wsHelloSessionToolsSnapshot = null;
 
       if (this.wsServer) {
         const server = this.wsServer;
@@ -1653,6 +1884,8 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           });
         });
       }
+
+      this.connectedClientToolsAlerts?.clear();
     },
   },
 

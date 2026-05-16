@@ -17,6 +17,7 @@ export type SessionContext = {
   tmuxPaneIndex?: number | undefined;
   tmuxTarget?: string | undefined;
   lastTmuxNudgeAt?: string | undefined;
+  lastSeenToolsHash?: string | undefined;
   updatedAt: string;
 };
 

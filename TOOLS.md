@@ -1,6 +1,6 @@
 # Tools
 
-This MCP server currently exposes the following tools.
+This MCP server currently exposes the following tools
 
 Browser tools:
 

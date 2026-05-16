@@ -246,6 +246,8 @@ type GatewaySocketCarrier = Service & {
     socket: any,
     hello: GatewaySocketHello,
   ) => Promise<number>;
+  fetchGatewayToolsHashForClient?: () => Promise<string | null>;
+  syncLocalToolsAgainstGateway?: (sessionId?: string) => Promise<number>;
   sendClientHello?: (socket: any) => Promise<void>;
   handleGatewayWsServerMessage?: (
     socket: any,
@@ -337,6 +339,17 @@ function computeToolsHashForDir(workspaceDir: string): string | null {
 
   const content = readFileSync(toolsPath, "utf8");
   return createHash("sha256").update(content).digest("hex");
+}
+
+function normalizeGatewayBaseUrl(value: string): URL {
+  const url = new URL(value);
+  url.pathname = url.pathname.replace(/\/+$/u, "");
+
+  if (!url.pathname.endsWith("/gateway")) {
+    url.pathname = `${url.pathname}/gateway`.replace(/\/{2,}/gu, "/");
+  }
+
+  return url;
 }
 
 const TelegramMcpGatewaySocketService: ServiceSchema = {
@@ -571,6 +584,83 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
     getGatewayToolsHash(this: GatewaySocketCarrier): string | null {
       return computeToolsHashForDir(process.cwd());
+    },
+
+    async fetchGatewayToolsHashForClient(
+      this: GatewaySocketCarrier,
+    ): Promise<string | null> {
+      const runtime = this.getRuntimeOrThrow!();
+      const gatewayPublicUrl = runtime.config.distributed.gatewayPublicUrl;
+      if (!gatewayPublicUrl) {
+        return null;
+      }
+
+      const url = normalizeGatewayBaseUrl(gatewayPublicUrl);
+      url.pathname = `${url.pathname}/tools-md`.replace(/\/{2,}/gu, "/");
+
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          ...(runtime.config.distributed.gatewayAuthToken
+            ? { authorization: `Bearer ${runtime.config.distributed.gatewayAuthToken}` }
+            : {}),
+        },
+      });
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(
+          `Gateway TOOLS.md request failed with status ${response.status}: ${message || response.statusText}`,
+        );
+      }
+
+      return createHash("sha256").update(await response.text()).digest("hex");
+    },
+
+    async syncLocalToolsAgainstGateway(
+      this: GatewaySocketCarrier,
+      sessionId?: string,
+    ): Promise<number> {
+      const runtime = this.getRuntimeOrThrow!();
+      const gatewayToolsHash = await this.fetchGatewayToolsHashForClient?.();
+      if (!gatewayToolsHash) {
+        return 0;
+      }
+
+      const sessions = sessionId
+        ? [await runtime.sessionStore.getSession(sessionId)].filter(
+            (item): item is NonNullable<typeof item> => Boolean(item),
+          )
+        : await runtime.sessionStore.listSessions();
+
+      let delivered = 0;
+      for (const session of sessions) {
+        const localHash = session.cwd
+          ? computeToolsHashForDir(session.cwd)
+          : null;
+        if (localHash === gatewayToolsHash) {
+          continue;
+        }
+        if (
+          session.lastSeenToolsHash?.trim() === gatewayToolsHash ||
+          session.lastNotifiedToolsHash?.trim() === gatewayToolsHash
+        ) {
+          continue;
+        }
+
+        await runtime.telegramTransport.handleToolsUpdatedEvent({
+          local_session_id: session.sessionId,
+          ...(session.label ? { session_label: session.label } : {}),
+          ...(localHash ? { client_tools_hash: localHash } : {}),
+          gateway_tools_hash: gatewayToolsHash,
+          reason: localHash ? "outdated" : "missing",
+          instruction:
+            "Call refresh_tools_markdown for this session, then re-read the local TOOLS.md and apply it before continuing.",
+        });
+        delivered += 1;
+      }
+
+      return delivered;
     },
 
     async notifyToolsMismatchForSocket(
@@ -1196,6 +1286,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             typeof parsed.connection_id === "string" ? parsed.connection_id : null,
           clientUuid: this.wsHelloClientUuid,
         });
+        await this.syncLocalToolsAgainstGateway?.();
         return;
       }
 

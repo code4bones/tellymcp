@@ -57,6 +57,20 @@ export type RefreshToolsMarkdownOutput = {
   path?: string | undefined;
 };
 
+export type SendPartnerFileInput = {
+  session_id?: string | undefined;
+  target_session_id?: string | undefined;
+  project_uuid?: string | undefined;
+  cwd?: string | undefined;
+  file_path: string;
+  kind?: "share" | "question" | "reply" | "request" | "handoff" | undefined;
+  summary?: string | undefined;
+  message?: string | undefined;
+  expected_reply?: string | undefined;
+  requires_reply?: boolean | undefined;
+  in_reply_to?: string | undefined;
+};
+
 export type { GetTelegramInboxInput, GetTelegramInboxOutput };
 export type { GetTelegramInboxCountInput, GetTelegramInboxCountOutput };
 export type {

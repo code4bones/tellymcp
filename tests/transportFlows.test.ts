@@ -9,6 +9,9 @@ type TransportHarness = TelegramTransport & {
   sessionStore: {
     getSession: MockFn;
   };
+  inboxStore: {
+    createInboxMessage: MockFn;
+  };
   maintenanceStore: {
     setOutgoingDeliveryNotice: MockFn;
   };
@@ -19,6 +22,7 @@ type TransportHarness = TelegramTransport & {
   replyText: MockFn;
   sendPartnerNote: MockFn;
   enqueuePartnerNoteInstruction: MockFn;
+  nudgeSessionInbox: MockFn;
   ensureProjectSessionRegistered: MockFn;
   handleProjectMemberNoteCallback: (
     ctx: CallbackContext,
@@ -27,6 +31,19 @@ type TransportHarness = TelegramTransport & {
     ctx: MessageContext,
     text: string,
   ) => Promise<boolean>;
+  __enqueuePartnerNoteInstruction: (
+    input: {
+      principal: { telegramChatId: number; telegramUserId: number };
+      sessionId: string;
+      sourceTelegramMessageId: number;
+      kind: "share" | "question" | "reply" | "request" | "handoff";
+      summary: string;
+      message: string;
+      targetSessionId?: string;
+      targetSessionLabel?: string;
+      projectUuid?: string;
+    },
+  ) => Promise<void>;
 };
 
 type CallbackContext = {
@@ -50,6 +67,9 @@ function createTransportHarness(): TransportHarness {
   transport.sessionStore = {
     getSession: vi.fn(),
   };
+  transport.inboxStore = {
+    createInboxMessage: vi.fn(async () => undefined),
+  };
   transport.maintenanceStore = {
     setOutgoingDeliveryNotice: vi.fn(),
   };
@@ -60,7 +80,10 @@ function createTransportHarness(): TransportHarness {
   transport.replyText = vi.fn(async () => ({ message_id: 777 }));
   transport.sendPartnerNote = vi.fn();
   transport.enqueuePartnerNoteInstruction = vi.fn(async () => undefined);
+  transport.nudgeSessionInbox = vi.fn(async () => undefined);
   transport.ensureProjectSessionRegistered = vi.fn(async () => undefined);
+  transport.__enqueuePartnerNoteInstruction =
+    TelegramTransport.prototype["enqueuePartnerNoteInstruction"].bind(transport) as TransportHarness["__enqueuePartnerNoteInstruction"];
   return transport;
 }
 
@@ -203,5 +226,41 @@ describe("TelegramTransport collaboration flows", () => {
         projectUuid: "project-1",
       }),
     );
+  });
+
+  it("writes explicit send_partner_file guidance into Share inbox instruction", async () => {
+    const transport = createTransportHarness();
+    transport.sessionStore.getSession.mockResolvedValue({
+      sessionId: "left-session",
+      label: "leftDev",
+    });
+
+    await transport.__enqueuePartnerNoteInstruction({
+      principal: { telegramChatId: 171197806, telegramUserId: 171197806 },
+      sessionId: "left-session",
+      sourceTelegramMessageId: 1157,
+      kind: "share",
+      summary: "Отправь файл sample.txt",
+      message: "Передай sample.txt в другую сессию",
+      targetSessionId: "target-session",
+      targetSessionLabel: "backend",
+      projectUuid: "project-1",
+    });
+
+    expect(transport.inboxStore.createInboxMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining(
+          "Найди файл в локальном workspace и вызови send_partner_file.",
+        ),
+      }),
+    );
+    expect(transport.inboxStore.createInboxMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining(
+          "Не заменяй это на plain send_partner_note с упоминанием имени файла.",
+        ),
+      }),
+    );
+    expect(transport.nudgeSessionInbox).toHaveBeenCalledWith("left-session");
   });
 });

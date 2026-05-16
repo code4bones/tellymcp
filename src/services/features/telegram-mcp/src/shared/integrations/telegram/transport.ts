@@ -8835,6 +8835,10 @@ export class TelegramTransport implements HumanTransport {
         "Не используй linked partner для отправки. Передай target_session_id явно в send_partner_note.",
         "После подготовки обязательно используй send_partner_note.",
         "Задача не завершена, пока send_partner_note не отработал успешно.",
+        "Если запрос касается существующего локального файла, не ограничивайся note.",
+        "Найди файл в локальном workspace и вызови send_partner_file.",
+        "Не заменяй это на plain send_partner_note с упоминанием имени файла.",
+        "Недостаточно просто упомянуть имя файла в тексте note.",
       ].join("\n"),
       receivedAt: new Date().toISOString(),
     };

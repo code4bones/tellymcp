@@ -549,6 +549,20 @@ export const sendPartnerNoteInputSchema = z.object({
     .optional(),
 });
 
+export const sendPartnerFileInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  target_session_id: z.string().trim().min(1).optional(),
+  project_uuid: z.string().trim().min(1).optional(),
+  cwd: z.string().trim().min(1).optional(),
+  file_path: z.string().trim().min(1),
+  kind: partnerNoteKindSchema.optional(),
+  summary: z.string().trim().min(1).optional(),
+  message: z.string().trim().min(1).optional(),
+  expected_reply: z.string().trim().min(1).optional(),
+  requires_reply: z.boolean().optional(),
+  in_reply_to: z.string().trim().min(1).optional(),
+});
+
 export const sendPartnerNoteOutputSchema = z.object({
   session_id: z.string(),
   partner_session_id: z.string(),

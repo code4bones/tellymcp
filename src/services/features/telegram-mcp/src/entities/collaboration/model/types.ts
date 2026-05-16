@@ -29,6 +29,20 @@ export type SendPartnerNoteInput = {
   artifact_refs?: PartnerArtifactRef[] | undefined;
 };
 
+export type SendPartnerFileInput = {
+  session_id?: string | undefined;
+  target_session_id?: string | undefined;
+  project_uuid?: string | undefined;
+  cwd?: string | undefined;
+  file_path: string;
+  kind?: PartnerNoteKind | undefined;
+  summary?: string | undefined;
+  message?: string | undefined;
+  expected_reply?: string | undefined;
+  requires_reply?: boolean | undefined;
+  in_reply_to?: string | undefined;
+};
+
 export type SendPartnerNoteOutput = {
   session_id: string;
   partner_session_id: string;

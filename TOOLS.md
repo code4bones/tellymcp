@@ -23,6 +23,7 @@ Browser tools:
 Collaboration tools:
 
 - `send_partner_note`
+- `send_partner_file`
 
 Utility tools:
 
@@ -403,6 +404,22 @@ Minimal safe sequence:
 3. Decide the correct note kind: `question`, `reply`, `share`, `request`, or `handoff`.
 4. Call `send_partner_note`.
 
+File transfer rule:
+
+- if the requested result is an existing local file, send the actual file as an artifact
+- prefer `send_partner_file` for this
+- if you must stay on `send_partner_note`, use `artifact_refs`
+- do not treat a sentence like "I am sending sample.txt" as completed delivery
+- mentioning a filename in `message` is not enough; the receiver must get the real artifact
+
+Minimal expectation for file delivery:
+
+- include the normal text fields:
+  - `summary`
+  - `message`
+- and also attach the file in `artifact_refs`
+- if you can read the file locally, prefer embedding it immediately instead of asking the receiver to reconstruct it from text
+
 Reply rule for project asks:
 
 - when a collaboration note or `.mcp-xchange/shares/*.md` note contains:
@@ -441,6 +458,40 @@ Execution order for required replies:
 2. Do the requested inspection or work locally.
 3. Call `send_partner_note(...)` with the explicit routing params.
 4. Only after the tool succeeds, say that the reply was sent.
+
+## `send_partner_file`
+
+Purpose:
+
+- Send a real existing local workspace file to another session.
+- Wrap the normal partner note flow and attach the file artifact automatically.
+
+Input:
+
+- `session_id?`
+- `target_session_id?`
+- `project_uuid?`
+- `cwd?`
+- `file_path`
+- `kind?`
+- `summary?`
+- `message?`
+- `expected_reply?`
+- `requires_reply?`
+- `in_reply_to?`
+
+Rules:
+
+- use this when you already have a real file like `sample.txt`, `report.pdf`, `page.png`, `dump.log`
+- prefer this over trying to hand-build `artifact_refs`
+- `file_path` must point to a real file inside the current session workspace
+- do not replace this with a plain note that only mentions the filename
+
+Minimal file-delivery rule:
+
+1. Confirm the file exists in the local workspace.
+2. Call `send_partner_file(...)`.
+3. Only after the tool succeeds, say that the file was sent.
 
 Routing priority:
 

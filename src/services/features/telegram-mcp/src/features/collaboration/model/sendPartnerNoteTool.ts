@@ -27,7 +27,7 @@ export class SendPartnerNoteTool implements ToolModule {
       {
         title: "Send Partner Note",
         description:
-          "Use this for agent-to-agent collaboration: ask another session to do work, send a reply, or share results. Resolve the target explicitly for project/collab work with target_session_id and, if available, project_uuid. For required replies, the task is not complete until this tool succeeds.",
+          "Use this for agent-to-agent collaboration: ask another session to do work, send a reply, or share results. Resolve the target explicitly for project/collab work with target_session_id and, if available, project_uuid. If the result includes an existing local file, prefer send_partner_file; mentioning the filename in message text is not enough. For required replies, the task is not complete until this tool succeeds.",
         inputSchema: sendPartnerNoteInputSchema,
         outputSchema: sendPartnerNoteOutputSchema,
       },

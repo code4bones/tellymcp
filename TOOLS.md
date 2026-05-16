@@ -392,6 +392,38 @@ Reply rule for project asks:
 - do not stop after local analysis when `Action Required` says to reply
 - when `Reply Params` are present, prefer an explicit `send_partner_note(...)` call with those exact values
 
+Mandatory completion rule:
+
+- if a partner note says `requires_reply: true`, or contains `Reply Params`, or contains `Action Required` telling you to reply:
+  - your task is not complete after local analysis
+  - your task is not complete after writing an explanation into chat
+  - your task is complete only after `send_partner_note(...)` succeeds
+- if `send_partner_note(...)` fails:
+  - treat that as an active blocker
+  - report the failure
+  - retry only with corrected routing parameters
+  - do not pretend the reply was sent
+- never replace a required reply with:
+  - a local summary
+  - a chat-only explanation
+  - "I prepared the answer"
+  - "I am ready to answer"
+
+Execution order for required replies:
+
+1. Read the partner note and extract `Reply Params`.
+2. Do the requested inspection or work locally.
+3. Call `send_partner_note(...)` with the explicit routing params.
+4. Only after the tool succeeds, say that the reply was sent.
+
+Routing priority:
+
+1. explicit `Reply target_session_id`
+2. explicit `target_session_id` from the current project/task context
+3. local `linked_session_id`
+
+For project/collab traffic, step 3 is fallback only when no explicit target exists.
+
 Canonical example for a project reply:
 
 ```json
@@ -426,6 +458,7 @@ What to do after reading the note:
 
 - do not stop at summarizing the note back to the user
 - choose behavior from `kind`
+- if the note requires a reply, do the work and send the reply before declaring completion
 
 Required behavior by note kind:
 
@@ -451,6 +484,8 @@ Default rule:
 
 - if the partner note contains a concrete ask, task, or follow-up, begin executing it
 - do not merely report "I read the note" unless the user explicitly asked only for inspection
+- if the note requires a reply, do not stop at "I prepared the answer"
+- send the actual `reply` through `send_partner_note`
 
 Recommended mapping:
 

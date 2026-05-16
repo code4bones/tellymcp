@@ -144,7 +144,11 @@ function buildPartnerInboxText(input: {
       ? ["", "Artifacts:", ...input.copiedArtifacts.map((item) => `- ${item}`)]
       : []),
     ...(input.requiresReply
-      ? ["", "Reply through send_partner_note when you are ready."]
+      ? [
+          "",
+          "Reply through send_partner_note after you finish the requested work.",
+          "The task is not complete until send_partner_note succeeds.",
+        ]
       : []),
   ].join("\n");
 }
@@ -191,8 +195,10 @@ function buildNoteContent(input: {
       "",
       "# Action Required",
       "You must send a reply via send_partner_note.",
+      "Your task is not complete until send_partner_note succeeds.",
       "Do not stop after local analysis or a chat explanation.",
       "Use the current partner route for the reply.",
+      "Only after the tool succeeds may you say that the reply was sent.",
       "",
       "# Reply Tool Call Example",
       "send_partner_note(",

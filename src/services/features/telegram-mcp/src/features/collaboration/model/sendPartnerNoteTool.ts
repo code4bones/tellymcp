@@ -27,7 +27,7 @@ export class SendPartnerNoteTool implements ToolModule {
       {
         title: "Send Partner Note",
         description:
-          "Write a structured collaboration note to the linked partner session, copy listed artifacts into the partner's .mcp-xchange, append SHARE_INDEX.md, and enqueue an inbox message for the partner agent.",
+          "Use this for agent-to-agent collaboration: ask another session to do work, send a reply, or share results. Resolve the target explicitly for project/collab work with target_session_id and, if available, project_uuid. For required replies, the task is not complete until this tool succeeds.",
         inputSchema: sendPartnerNoteInputSchema,
         outputSchema: sendPartnerNoteOutputSchema,
       },

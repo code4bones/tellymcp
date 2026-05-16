@@ -25,7 +25,7 @@ export class GetTelegramInboxTool implements ToolModule {
       {
         title: "Get Telegram Inbox",
         description:
-          "Read unsolicited Telegram messages that were stored in the inbox for a session. Returned items may also include local attachment paths from .mcp-xchange when the Telegram message contained a photo or document.",
+          "Use this to read ordinary unsolicited human Telegram messages stored for the session. Returned items may also include local attachment paths from .mcp-xchange when the human message contained a photo or document. Do not use this first for partner-note wakeups; partner collaboration notes must be read from .mcp-xchange/SHARED_INDEX.md and the referenced note files.",
         inputSchema: getTelegramInboxInputSchema,
         outputSchema: getTelegramInboxOutputSchema,
       },

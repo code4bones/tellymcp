@@ -8085,7 +8085,8 @@ export class TelegramTransport implements HumanTransport {
       ].join("\n");
       const expectedReply = [
         `Подготовь результат для сессии ${sourceLabel}.`,
-        "Когда будешь готов, отправь его обратно через send_partner_note.",
+        "После подготовки обязательно отправь его обратно через send_partner_note.",
+        "Задача не завершена, пока send_partner_note не отработал успешно.",
       ].join(" ");
       const output = await this.sendPartnerNote({
         session_id: pending.sessionId,
@@ -8202,7 +8203,8 @@ export class TelegramTransport implements HumanTransport {
         input.message,
         "",
         "Не используй linked partner для отправки. Передай target_session_id явно в send_partner_note.",
-        "Когда будешь готов, используй send_partner_note.",
+        "После подготовки обязательно используй send_partner_note.",
+        "Задача не завершена, пока send_partner_note не отработал успешно.",
       ].join("\n"),
       receivedAt: new Date().toISOString(),
     };

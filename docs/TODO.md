@@ -53,11 +53,6 @@ Next session:
   - решить, нужен ли bulk cleanup stale meta
   - проверить, не нужны ли подписи по source/type в списке
 
-- [ ] Усилить `Action Required` / agent discipline:
-  - короткий и жёсткий шаблон для обязательного `send_partner_note(...)`
-  - проверить, хватает ли текущего notice без лишнего шума
-  - при необходимости сократить frontmatter note ещё сильнее
-
 - [ ] Подумать над следующей итерацией `Collab` UX:
   - нужен ли delivery history screen
   - нужен ли manual retry для failed delivery

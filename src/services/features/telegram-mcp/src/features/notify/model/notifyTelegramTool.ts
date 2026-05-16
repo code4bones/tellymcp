@@ -25,7 +25,7 @@ export class NotifyTelegramTool implements ToolModule {
       {
         title: "Notify Telegram",
         description:
-          "Send a one-way Telegram notification to the user linked to the provided session.",
+          "Use this for one-way status or progress notifications to the human linked to the session. This does not wait for a reply and does not create inbox work for the agent.",
         inputSchema: notifyTelegramInputSchema,
         outputSchema: notifyTelegramOutputSchema,
       },

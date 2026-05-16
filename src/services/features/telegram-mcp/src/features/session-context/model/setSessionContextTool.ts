@@ -27,7 +27,7 @@ export class SetSessionContextTool implements ToolModule {
       {
         title: "Set Session Context",
         description:
-          "Save compact context for a session that can be reused by later Telegram questions.",
+          "Save compact reusable context for the session: current task, summary, decisions, files, and risks. Use this to leave a short durable working state for later Telegram-driven continuation.",
         inputSchema: setSessionContextInputSchema,
         outputSchema: setSessionContextOutputSchema,
       },

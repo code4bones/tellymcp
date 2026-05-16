@@ -114,10 +114,12 @@ function buildNoteContent(input: {
       "",
       "# Action Required",
       "You must send a reply via send_partner_note.",
+      "Your task is not complete until send_partner_note succeeds.",
       "Do not stop after local analysis or a chat explanation.",
       "Do not rely on linked partner.",
       "Pass target_session_id explicitly.",
       "If possible, also pass in_reply_to=message_uuid.",
+      "Only after the tool succeeds may you say that the reply was sent.",
       "",
       "# Reply Tool Call Example",
       "send_partner_note(",
@@ -199,8 +201,10 @@ function buildPartnerInboxText(input: {
             ? [`Reply project_uuid: ${input.delivery.project_uuid}`]
             : []),
           "Обязательно отправь reply через send_partner_note.",
+          "Задача не завершена, пока send_partner_note не отработал успешно.",
           "Не останавливайся на локальном объяснении.",
           "Не используй linked partner для ответа. Передай эти параметры явно в send_partner_note.",
+          "Только после успешного tool call можно считать ответ отправленным.",
         ]
       : []),
   ].join("\n");

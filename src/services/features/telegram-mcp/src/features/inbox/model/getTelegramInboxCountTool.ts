@@ -25,7 +25,7 @@ export class GetTelegramInboxCountTool implements ToolModule {
       {
         title: "Get Telegram Inbox Count",
         description:
-          "Return only the number of pending Telegram inbox messages for a session.",
+          "Use this to cheaply check whether ordinary human Telegram messages are waiting for the session. Do not use it for partner-note wakeups; partner notes must be read from .mcp-xchange/SHARED_INDEX.md instead.",
         inputSchema: getTelegramInboxCountInputSchema,
         outputSchema: getTelegramInboxCountOutputSchema,
       },

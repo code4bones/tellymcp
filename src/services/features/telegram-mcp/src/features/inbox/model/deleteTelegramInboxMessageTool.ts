@@ -25,7 +25,7 @@ export class DeleteTelegramInboxMessageTool implements ToolModule {
       {
         title: "Delete Telegram Inbox Message",
         description:
-          "Delete a processed Telegram inbox message so future polling does not return it again.",
+          "Use this only after you have fully processed an ordinary human Telegram inbox message. Delete it so future inbox reads do not return it again.",
         inputSchema: deleteTelegramInboxMessageInputSchema,
         outputSchema: deleteTelegramInboxMessageOutputSchema,
       },

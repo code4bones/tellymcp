@@ -25,7 +25,7 @@ export class ClearSessionPairingTool implements ToolModule {
       {
         title: "Clear Session Pairing",
         description:
-          "Remove Telegram binding for a session so it can be paired again.",
+          "Use this when the user asks to unpair, unlink, detach, or reset Telegram binding for the current session. Remove Telegram binding for a session so it can be paired again.",
         inputSchema: clearSessionPairingInputSchema,
         outputSchema: clearSessionPairingOutputSchema,
       },

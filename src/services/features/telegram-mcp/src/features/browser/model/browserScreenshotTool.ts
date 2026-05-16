@@ -20,7 +20,7 @@ export class BrowserScreenshotTool implements ToolModule {
       {
         title: "Browser Screenshot",
         description:
-          "Capture a screenshot from the Playwright tab for the current session and save it into the session exchange directory.",
+          "Capture a screenshot from the Playwright tab for the current session and save it into .mcp-xchange. Use this when the user wants a visual artifact that can later be shared through Local or Collab flows.",
         inputSchema: browserScreenshotInputSchema,
         outputSchema: browserScreenshotOutputSchema,
       },

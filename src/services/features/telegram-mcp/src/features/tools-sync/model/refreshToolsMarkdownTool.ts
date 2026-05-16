@@ -27,7 +27,7 @@ export class RefreshToolsMarkdownTool implements ToolModule {
       {
         title: "Refresh TOOLS.md",
         description:
-          "Download the latest TOOLS.md from the configured gateway and overwrite the local TOOLS.md. If no gateway is configured, refresh from the local file.",
+          "Use this when the user asks to refresh or update agent instructions, tools documentation, or gateway-side working rules. Download the canonical TOOLS.md from the configured gateway, overwrite the local workspace TOOLS.md, then re-read that local TOOLS.md before continuing. If no gateway is configured, refresh from the local file.",
         inputSchema: refreshToolsMarkdownInputSchema,
         outputSchema: refreshToolsMarkdownOutputSchema,
       },

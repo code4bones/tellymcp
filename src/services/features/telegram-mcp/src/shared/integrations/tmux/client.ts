@@ -291,11 +291,33 @@ export async function listXchangeFiles(
   }
 
   const dir = await ensureXchangeDir(config, workspaceDir, exchangeDirName);
-  const entries = await readdir(dir, { withFileTypes: true });
-  return entries
-    .filter((entry) => entry.isFile())
-    .map((entry) => path.join(dir, entry.name))
-    .sort((left, right) => right.localeCompare(left));
+  return listFilesRecursively(dir);
+}
+
+async function listFilesRecursively(rootDir: string): Promise<string[]> {
+  const files: string[] = [];
+  const stack = [rootDir];
+
+  while (stack.length > 0) {
+    const currentDir = stack.pop();
+    if (!currentDir) {
+      continue;
+    }
+
+    const entries = await readdir(currentDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+        continue;
+      }
+      if (entry.isFile()) {
+        files.push(fullPath);
+      }
+    }
+  }
+
+  return files.sort((left, right) => right.localeCompare(left));
 }
 
 export async function deleteXchangeFile(

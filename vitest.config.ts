@@ -14,6 +14,5 @@ export default defineConfig({
     environment: "node",
     include: ["tests/**/*.test.ts"],
     passWithNoTests: false,
-    reporters: ["verbose"],
   },
 });

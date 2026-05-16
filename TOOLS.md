@@ -994,11 +994,12 @@ Telegram UI summary:
 - session menu uses:
   - `Live | Content | Browser`
   - `Local | Collab`
-  - `Inbox | Settings`
+  - `Inbox | Storage | Settings`
   - `Back`
 - default logical session identity comes from `.mcpsession.json` in the workspace
 - changing tmux session/window/pane does not change `session_id`
 - `Browser -> Screenshots` lists screenshots created by `browser_screenshot`
+- `Storage` browses `.mcp-xchange` for the active session and can send stored notes/files back into Telegram
 - `Settings` contains `Info`, `Rename`, `Unpair`, `Back`
 - `Link` creates a mutual partner relationship between two sessions visible to the same Telegram identity
 - `Local` is the Telegram UI wrapper over same-bot partner collaboration

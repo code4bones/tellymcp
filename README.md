@@ -319,7 +319,7 @@ Current session menu behavior:
 - title is `Session: <name>`
 - first row: `Live | Content | Browser`
 - second row: `Local | Collab`
-- third row: `Inbox | Settings`
+- third row: `Inbox | Storage | Settings`
 - final row: `Back`
 
 `Settings` contains:
@@ -333,6 +333,11 @@ Current browser menu behavior:
 
 - `Screenshots`
 - browser screenshots are separated from ordinary uploaded files
+
+Current storage behavior:
+
+- `Storage` shows `.mcp-xchange` contents for the active session
+- storage entries can be opened and sent back to Telegram as files
 
 Current file behavior:
 

@@ -497,11 +497,7 @@ async function main(): Promise<void> {
         }
 
         await mkdir(resolvedDir, { recursive: true });
-        const entries = await readdir(resolvedDir, { withFileTypes: true });
-        const files = entries
-          .filter((entry) => entry.isFile())
-          .map((entry) => path.join(resolvedDir, entry.name))
-          .sort((left, right) => right.localeCompare(left));
+        const files = await listFilesRecursively(resolvedDir);
         writeJson(res, 200, { files });
         return;
       }
@@ -582,6 +578,32 @@ async function main(): Promise<void> {
       }),
     );
   });
+}
+
+async function listFilesRecursively(rootDir: string): Promise<string[]> {
+  const files: string[] = [];
+  const stack = [rootDir];
+
+  while (stack.length > 0) {
+    const currentDir = stack.pop();
+    if (!currentDir) {
+      continue;
+    }
+
+    const entries = await readdir(currentDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+        continue;
+      }
+      if (entry.isFile()) {
+        files.push(fullPath);
+      }
+    }
+  }
+
+  return files.sort((left, right) => right.localeCompare(left));
 }
 
 void main();

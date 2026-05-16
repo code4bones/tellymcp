@@ -23,6 +23,10 @@
   - выход из проекта
   - список сессий проекта
 - Добавлен project-based remote flow между разными машинами и разными ботами.
+- Добавлен `📦 Storage` в session menu:
+  - просмотр `.mcp-xchange` по текущей сессии
+  - открытие storage entry
+  - отправка note/file обратно в Telegram
 - Добавлен `ws`-only control plane:
   - `Live`
   - delivery push

@@ -109,6 +109,21 @@ type PendingBroadcastRecord = {
   initiatedAt: string;
   promptMessageId?: number;
   menuMessageId?: number;
+  scope: "linked" | "project";
+  sessionId?: string;
+  projectUuid?: string;
+  projectName?: string;
+  localTargetSessionIds?: string[];
+  remoteTargets?: PendingProjectBroadcastRemoteTarget[];
+};
+
+type PendingProjectBroadcastRemoteTarget = {
+  sessionUuid: string;
+  sessionLabel: string;
+  clientUuid: string;
+  localSessionId: string;
+  projectUuid: string;
+  projectName?: string;
 };
 
 type LiveApprovalEventPayload = {
@@ -556,6 +571,7 @@ export class TelegramTransport implements HumanTransport {
   private readonly storageMenu: Menu<TelegramMenuContext>;
   private readonly browserMenu: Menu<TelegramMenuContext>;
   private readonly projectsMenu: Menu<TelegramMenuContext>;
+  private readonly collabToolsMenu: Menu<TelegramMenuContext>;
   private readonly localMenu: Menu<TelegramMenuContext>;
   private readonly screenshotsMenu: Menu<TelegramMenuContext>;
   private readonly linkMenu: Menu<TelegramMenuContext>;
@@ -630,6 +646,7 @@ export class TelegramTransport implements HumanTransport {
     this.storageMenu = this.createStorageMenu();
     this.browserMenu = this.createBrowserMenu();
     this.projectsMenu = this.createProjectsMenu();
+    this.collabToolsMenu = this.createCollabToolsMenu();
     this.localMenu = this.createLocalMenu();
     this.screenshotsMenu = this.createScreenshotsMenu();
     this.linkMenu = this.createLinkMenu();
@@ -648,6 +665,7 @@ export class TelegramTransport implements HumanTransport {
       this.storageMenu,
       this.browserMenu,
       this.projectsMenu,
+      this.collabToolsMenu,
       this.localMenu,
       this.screenshotsMenu,
       this.linkMenu,
@@ -1907,12 +1925,32 @@ export class TelegramTransport implements HumanTransport {
       .text("➕ Создать", async (ctx) => {
         await this.beginProjectMode(ctx, "create");
       })
+      .text("🛠 Tools", async (ctx) => {
+        await ctx.answerCallbackQuery({ text: "Открываю инструменты проекта." });
+        await this.showCollabToolsMenu(ctx);
+      })
+      .row()
       .text("🔑 Войти", async (ctx) => {
         await this.beginProjectMode(ctx, "join");
       })
       .text("⬅ Назад", async (ctx) => {
         await ctx.answerCallbackQuery({ text: "Назад к меню сессии." });
         await this.showMainMenu(ctx);
+      });
+  }
+
+  private createCollabToolsMenu(): Menu<TelegramMenuContext> {
+    return new Menu<TelegramMenuContext>(
+      "telegram-collab-tools-menu",
+      this.createMenuOptions((ctx) => this.showCollabToolsMenu(ctx)),
+    )
+      .text("📣 Broadcast", async (ctx) => {
+        await this.beginProjectBroadcast(ctx);
+      })
+      .row()
+      .text("⬅ Back", async (ctx) => {
+        await ctx.answerCallbackQuery({ text: "Назад к Collab." });
+        await this.showProjectsMenu(ctx);
       });
   }
 
@@ -5042,6 +5080,19 @@ export class TelegramTransport implements HumanTransport {
     );
   }
 
+  private async showCollabToolsMenu(
+    ctx: TelegramMenuContext,
+    introText?: string,
+  ): Promise<void> {
+    const text = await this.buildCollabToolsMenuText(ctx);
+    await this.renderMenuScreen(
+      ctx,
+      introText ? `${introText}\n\n${text}` : text,
+      { kind: "menu" },
+      this.collabToolsMenu,
+    );
+  }
+
   private async showSettingsMenu(
     ctx: TelegramMenuContext,
     introText?: string,
@@ -5819,6 +5870,51 @@ export class TelegramTransport implements HumanTransport {
     ].join("\n");
   }
 
+  private async buildCollabToolsMenuText(
+    ctx: TelegramMenuContext,
+  ): Promise<string> {
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal || !this.config.distributed.gatewayPublicUrl) {
+      return "Collab tools недоступны для этого запуска.";
+    }
+
+    const sessionId =
+      await this.bindingStore.getActiveSessionIdForPrincipal(principal);
+    if (!sessionId) {
+      return "Активная сессия не выбрана.";
+    }
+
+    const session = await this.sessionStore.getSession(sessionId);
+    const projects = await this.listGatewayProjects(principal);
+    if (projects.length === 0) {
+      return [
+        "🛠 Collab Tools",
+        "",
+        `📌 Активная сессия: ${session?.label ?? sessionId}`,
+        "",
+        "Сначала создай проект или войди в существующий.",
+      ].join("\n");
+    }
+
+    const targets = await this.collectCollabBroadcastTargets(
+      principal,
+      sessionId,
+    );
+    const uniqueCount =
+      targets.localTargetSessionIds.length + targets.remoteTargets.length;
+
+    return [
+      "🛠 Collab Tools",
+      "",
+      `📌 Активная сессия: ${session?.label ?? sessionId}`,
+      `🗂 Проектов в Collab: ${projects.length}`,
+      `👥 Уникальных сессий: ${uniqueCount}`,
+      "",
+      "Broadcast отправит следующее текстовое сообщение всем уникальным Collab-сессиям на ботах без дублирования.",
+      "Локальные сессии получат inbox message, удалённые — gateway delivery.",
+    ].join("\n");
+  }
+
   private async buildDeveloperMenuText(
     ctx: TelegramMenuContext,
   ): Promise<string> {
@@ -6273,11 +6369,147 @@ export class TelegramTransport implements HumanTransport {
 
     this.pendingBroadcasts.set(principalKey, {
       initiatedAt: new Date().toISOString(),
+      scope: "linked",
       ...(sent ? { promptMessageId: sent.message_id } : {}),
       ...(ctx.callbackQuery?.message?.message_id
         ? { menuMessageId: ctx.callbackQuery.message.message_id }
         : {}),
     });
+  }
+
+  private async beginProjectBroadcast(ctx: TelegramMenuContext): Promise<void> {
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal) {
+      await ctx.answerCallbackQuery({
+        text: "Telegram identity is unavailable.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const sessionId =
+      await this.bindingStore.getActiveSessionIdForPrincipal(principal);
+    if (!sessionId) {
+      await ctx.answerCallbackQuery({
+        text: "Активная сессия не выбрана.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const projects = await this.listGatewayProjects(principal);
+    if (projects.length === 0) {
+      await ctx.answerCallbackQuery({
+        text: "Сначала создай проект или войди в существующий.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const targets = await this.collectCollabBroadcastTargets(principal, sessionId);
+    const totalTargets =
+      targets.localTargetSessionIds.length + targets.remoteTargets.length;
+    if (totalTargets === 0) {
+      await ctx.answerCallbackQuery({
+        text: "Нет доступных Collab-сессий для broadcast.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const principalKey = buildPrincipalKey(principal);
+    this.pendingRenames.delete(principalKey);
+
+    await ctx.answerCallbackQuery({
+      text: `Broadcast to ${totalTargets} collab sessions.`,
+    });
+    const sent = await this.replyText(
+      ctx,
+      [
+        "📣 Collab Broadcast",
+        "",
+        `Collab проектов: ${projects.length}`,
+        `Уникальных сессий: ${totalTargets}`,
+        "",
+        "Отправь следующее текстовое сообщение, чтобы разослать его всем Collab-сессиям на ботах без дублирования.",
+        "Локальные сессии получат inbox message, удалённые — gateway delivery.",
+        "Команды вроде /menu или /help отменят режим broadcast.",
+      ].join("\n"),
+      { kind: "menu", sessionId },
+      {
+        reply_markup: new InlineKeyboard().text(
+          "Cancel",
+          "broadcast-cancel",
+        ),
+      },
+    );
+
+    this.pendingBroadcasts.set(principalKey, {
+      initiatedAt: new Date().toISOString(),
+      scope: "project",
+      sessionId,
+      localTargetSessionIds: targets.localTargetSessionIds,
+      remoteTargets: targets.remoteTargets,
+      ...(sent ? { promptMessageId: sent.message_id } : {}),
+      ...(ctx.callbackQuery?.message?.message_id
+        ? { menuMessageId: ctx.callbackQuery.message.message_id }
+        : {}),
+    });
+  }
+
+  private async collectCollabBroadcastTargets(
+    principal: { telegramChatId: number; telegramUserId: number },
+    _sessionId: string,
+  ): Promise<{
+    localTargetSessionIds: string[];
+    remoteTargets: PendingProjectBroadcastRemoteTarget[];
+  }> {
+    const currentClientUuid = await this.ensureGatewayClientUuid(principal);
+    const projects = await this.listGatewayProjects(principal);
+    const visibleLocalSessionIds = new Set(
+      await this.bindingStore.listBoundSessionIdsForPrincipal(principal),
+    );
+    const localTargetSessionIds: string[] = [];
+    const remoteTargets: PendingProjectBroadcastRemoteTarget[] = [];
+    const seenLogicalTargets = new Set<string>();
+
+    for (const project of projects) {
+      const projectSessions = await this.listGatewayProjectSessions(
+        principal,
+        project.project_uuid,
+      );
+
+      for (const item of projectSessions) {
+        const logicalTargetKey = `${item.client_uuid}:${item.local_session_id}`;
+        if (seenLogicalTargets.has(logicalTargetKey)) {
+          continue;
+        }
+        seenLogicalTargets.add(logicalTargetKey);
+
+        const isVisibleLocalSession =
+          item.client_uuid === currentClientUuid &&
+          visibleLocalSessionIds.has(item.local_session_id);
+
+        if (isVisibleLocalSession) {
+          localTargetSessionIds.push(item.local_session_id);
+          continue;
+        }
+
+        remoteTargets.push({
+          sessionUuid: item.session_uuid,
+          sessionLabel: item.label?.trim() || item.local_session_id,
+          clientUuid: item.client_uuid,
+          localSessionId: item.local_session_id,
+          projectUuid: item.project_uuid,
+          ...(project.name ? { projectName: project.name } : {}),
+        });
+      }
+    }
+
+    return {
+      localTargetSessionIds: [...new Set(localTargetSessionIds)].sort(),
+      remoteTargets,
+    };
   }
 
   private async deletePendingBroadcastArtifacts(
@@ -6342,6 +6574,10 @@ export class TelegramTransport implements HumanTransport {
       deleteMenuMessage: false,
     });
     await ctx.answerCallbackQuery({ text: "Broadcast cancelled." });
+    if (pending.scope === "project") {
+      await this.showCollabToolsMenu(ctx);
+      return;
+    }
     await this.showDeveloperMenu(ctx);
   }
 
@@ -6451,10 +6687,13 @@ export class TelegramTransport implements HumanTransport {
       return false;
     }
 
-    const sessionIds =
-      await this.bindingStore.listBoundSessionIdsForPrincipal(principal);
     const broadcastText = text.trim();
-    if (sessionIds.length === 0) {
+    if (
+      pending.scope === "linked" &&
+      (
+        await this.bindingStore.listBoundSessionIdsForPrincipal(principal)
+      ).length === 0
+    ) {
       this.pendingBroadcasts.delete(principalKey);
       await this.deletePendingBroadcastArtifacts(ctx, pending, {
         deleteMenuMessage: false,
@@ -6471,40 +6710,107 @@ export class TelegramTransport implements HumanTransport {
       ctx.message?.date ? ctx.message.date * 1000 : Date.now(),
     ).toISOString();
     let storedCount = 0;
+    let remoteCount = 0;
 
-    for (const sessionId of sessionIds) {
-      const inboxMessage: TelegramInboxMessage = {
-        id: createInboxMessageId(),
-        sessionId,
-        telegramChatId: principal.telegramChatId,
-        telegramUserId: principal.telegramUserId,
-        sourceTelegramMessageId: ctx.message?.message_id ?? 0,
-        text: broadcastText,
-        receivedAt,
-      };
+    if (pending.scope === "project") {
+      const parsed = this.parsePartnerNoteText(broadcastText);
+      const sourceSession = pending.sessionId
+        ? await this.sessionStore.getSession(pending.sessionId)
+        : null;
+      const sourceLabel = sourceSession?.label ?? pending.sessionId ?? "session";
 
-      await this.inboxStore.createInboxMessage(inboxMessage);
-      storedCount += 1;
-
-      this.logger.info("Telegram broadcast message stored in inbox", {
-        sessionId,
-        chatId: principal.telegramChatId,
-        userId: principal.telegramUserId,
-        inboxMessageId: inboxMessage.id,
-        text: redactSecrets(broadcastText),
-      });
-
-      const session = await this.sessionStore.getSession(sessionId);
-      try {
-        this.scheduleTmuxNudgeForInboxMessage(sessionId, session);
-      } catch (error) {
-        this.logger.error("tmux nudge failed after broadcast inbox capture", {
+      for (const sessionId of pending.localTargetSessionIds ?? []) {
+        const inboxMessage: TelegramInboxMessage = {
+          id: createInboxMessageId(),
           sessionId,
-          error:
-            error instanceof Error
-              ? (error.stack ?? error.message)
-              : String(error),
+          telegramChatId: principal.telegramChatId,
+          telegramUserId: principal.telegramUserId,
+          sourceTelegramMessageId: ctx.message?.message_id ?? 0,
+          text: [
+            "Collab broadcast from Telegram user.",
+            `Source session: ${sourceLabel}`,
+            `Summary: ${parsed.summary}`,
+            "",
+            "Message:",
+            parsed.message,
+          ].join("\n"),
+          receivedAt,
+        };
+
+        await this.inboxStore.createInboxMessage(inboxMessage);
+        storedCount += 1;
+
+        const session = await this.sessionStore.getSession(sessionId);
+        try {
+          this.scheduleTmuxNudgeForInboxMessage(sessionId, session);
+        } catch (error) {
+          this.logger.error("tmux nudge failed after project broadcast inbox capture", {
+            sessionId,
+            error:
+              error instanceof Error
+                ? (error.stack ?? error.message)
+                : String(error),
+          });
+        }
+      }
+
+      for (const target of pending.remoteTargets ?? []) {
+        await this.sendPartnerNote({
+          session_id: pending.sessionId,
+          target_session_id: target.sessionUuid,
+          project_uuid: target.projectUuid,
+          kind: "request",
+          summary: parsed.summary,
+          message: [
+            "Collab broadcast from Telegram user.",
+            ...(target.projectName ? [`Project: ${target.projectName}`] : []),
+            `Source session: ${sourceLabel}`,
+            "",
+            "Message:",
+            parsed.message,
+          ].join("\n"),
+          requires_reply: false,
         });
+        remoteCount += 1;
+      }
+    } else {
+      const sessionIds =
+        await this.bindingStore.listBoundSessionIdsForPrincipal(principal);
+
+      for (const sessionId of sessionIds) {
+        const inboxMessage: TelegramInboxMessage = {
+          id: createInboxMessageId(),
+          sessionId,
+          telegramChatId: principal.telegramChatId,
+          telegramUserId: principal.telegramUserId,
+          sourceTelegramMessageId: ctx.message?.message_id ?? 0,
+          text: broadcastText,
+          receivedAt,
+        };
+
+        await this.inboxStore.createInboxMessage(inboxMessage);
+        storedCount += 1;
+
+        this.logger.info("Telegram broadcast message stored in inbox", {
+          sessionId,
+          chatId: principal.telegramChatId,
+          userId: principal.telegramUserId,
+          inboxMessageId: inboxMessage.id,
+          text: redactSecrets(broadcastText),
+        });
+
+        const session = await this.sessionStore.getSession(sessionId);
+        try {
+          this.scheduleTmuxNudgeForInboxMessage(sessionId, session);
+        } catch (error) {
+          this.logger.error("tmux nudge failed after broadcast inbox capture", {
+            sessionId,
+            error:
+              error instanceof Error
+                ? (error.stack ?? error.message)
+                : String(error),
+          });
+        }
       }
     }
 
@@ -6515,11 +6821,29 @@ export class TelegramTransport implements HumanTransport {
     this.logger.info("Telegram broadcast completed", {
       chatId: principal.telegramChatId,
       userId: principal.telegramUserId,
+      scope: pending.scope,
       storedCount,
-      sessionCount: sessionIds.length,
+      remoteCount,
+      sessionCount:
+        storedCount + remoteCount,
       initiatedAt: pending.initiatedAt,
       text: redactSecrets(broadcastText),
     });
+    await this.replyText(
+      ctx,
+      pending.scope === "project"
+        ? [
+            "Collab broadcast completed.",
+            `Локальных inbox: ${storedCount}`,
+            `Удалённых deliveries: ${remoteCount}`,
+            `Всего сессий: ${storedCount + remoteCount}`,
+          ].join("\n")
+        : `Broadcast completed for ${storedCount} linked sessions.`,
+      {
+        kind: "menu",
+        ...(pending.sessionId ? { sessionId: pending.sessionId } : {}),
+      },
+    );
     return true;
   }
 

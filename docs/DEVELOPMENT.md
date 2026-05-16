@@ -379,6 +379,28 @@ Rule:
 - `ws` is the only active online transport between gateway and client
 - `RabbitMQ` is optional and only enhances gateway-side durability/fanout
 
+### TOOLS.md sync flow
+
+Flow:
+
+1. client computes local `TOOLS.md` hash per known session workspace
+2. client includes these hashes in `ws hello.session_tools`
+3. gateway computes canonical hash from its own `TOOLS.md`
+4. if hash is missing or differs, gateway sends `tools_event`
+5. client materializes a system inbox message and Telegram notice
+6. agent must call `refresh_tools_markdown`
+7. after successful refresh, session state stores:
+   - `lastSeenToolsHash`
+   - `lastNotifiedToolsHash`
+8. after reconnect, client also performs a self-check on `hello_ack`
+
+Invariant:
+
+- mismatch detection is state-based, not queue-based
+- identical alerts for the same hash should not loop forever
+- `message_kind = "system"` must be treated as an operational instruction, not as a human prompt
+- current presence is client-level through `ws`; there is no dedicated agent heartbeat yet
+
 ### Mini App live view flow
 
 Flow:

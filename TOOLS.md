@@ -1,6 +1,6 @@
 # Tools
 
-This MCP server currently exposes the following tools
+This MCP server currently exposes the following tools.
 
 Browser tools:
 
@@ -310,6 +310,7 @@ Behavior:
 - if `GATEWAY_PUBLIC_URL` is configured, the tool fetches `GET /api/gateway/tools-md`
 - if no gateway is configured, the tool falls back to the local file
 - on the gateway node, the local `TOOLS.md` is the canonical source and should always be kept current
+- after successful refresh, treat the local `TOOLS.md` as updated state for this session and re-read it before continuing
 
 ## `clear_session_context`
 
@@ -727,6 +728,7 @@ Meaning:
     1. call `refresh_tools_markdown`
     2. re-read the local `TOOLS.md`
     3. apply the updated rules before continuing
+  - do not answer this kind of message with a normal human-facing reply unless the instruction explicitly says to notify the user
 - process the batch one message at a time
 - move to the next inbox item only if the current one did not create a blocker
 - if the current message leads to a clarification wait or another blocking condition, stop batch processing there and leave the remaining inbox items pending
@@ -1155,6 +1157,11 @@ Distributed mode scaffold:
 - in `DISTRIBUTED_MODE=both`, same-bot local delivery should still go through the gateway path transparently
 - gateway/client online transport now uses `ws`
 - optional gateway-side `RabbitMQ` fanout can be enabled through `RMQ_*`
+- `TOOLS.md` sync is hash-based:
+  - client sends `session_tools` in `ws hello`
+  - gateway compares them with canonical gateway `TOOLS.md`
+  - mismatch produces `tools_event`
+  - client also self-checks after `hello_ack`
 - once linked, agents should use `.mcp-xchange/SHARED_INDEX.md` plus separate files in `.mcp-xchange/shares/` for collaboration
 - recommended collaboration note kinds are:
   - `share`
@@ -1249,6 +1256,22 @@ Do not add extra diagnostic calls in that path:
 - do not call `get_tmux_target` before `get_telegram_inbox`
 - do not call `get_session_context` before `get_telegram_inbox`
 - do not call `get_telegram_inbox_count` before `get_telegram_inbox` when the wake-up already came from tmux
+
+## Presence model
+
+Current truth:
+
+- gateway can know whether a client node is online through active `ws`
+- gateway also stores `gateway_clients.last_seen_at`
+- this is not the same thing as a live coding-agent heartbeat inside each session
+
+Rule:
+
+- do not claim that a session agent is definitely `offline` unless a dedicated agent heartbeat exists
+- today the honest distinction is:
+  - client node `online/offline`
+  - session bound/unbound
+  - tmux target configured/not configured
 
 If no tmux target is configured, use passive inbox checks:
 

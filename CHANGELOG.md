@@ -51,6 +51,13 @@
   - отправитель
   - список файлов
 - Добавлены `LOCAL_INDEX.md` и `SHARED_INDEX.md` для унифицированного note-based обмена.
+- Добавлен `send_partner_file` для реальной передачи локального файла через partner delivery.
+- Добавлена `TOOLS.md` hash-синхронизация между gateway и client:
+  - `session_tools` в `ws hello`
+  - `tools_event` при mismatch
+  - client-side self-check после `hello_ack`
+  - периодический recheck online клиентов на gateway
+- Добавлены system inbox messages с `message_kind = "system"` для operational инструкций.
 
 ### Changed
 - Полностью убран `stdio`-режим. `telegram_mcp` работает только через REST/MCP over HTTP.
@@ -82,6 +89,9 @@
   - `Live` добавлен второй строкой под `Ask | Share`
   - `Live` теперь требует подтверждения выбранной target-сессии
   - file upload в member screen остаётся прямой доставкой в target session
+- Состояние `TOOLS.md` по сессии теперь разделено:
+  - `lastSeenToolsHash` = реально применённый локально hash
+  - `lastNotifiedToolsHash` = hash, про который уже отправляли уведомление
 
 ### Fixed
 - Исправлен `Headers have already sent` при работе MCP/WebApp через `moleculer-web`.
@@ -112,3 +122,9 @@
   - во входящих notes/уведомлениях добавлены `Reply Params` и `Reply message_uuid`
 - Исправлен loopback delivery для режима `both` на gateway-машине.
 - Устаревшие Telegram member-menu сообщения теперь удаляются при клике по stale payload.
+- Исправлена валидация `get_telegram_inbox` для системных сообщений с `telegram_message_id = 0`.
+- Исправлены повторные холостые `TOOLS.md` alerts по одному и тому же hash.
+- Исправлен reconnect-case для `TOOLS.md` sync:
+  - если server-side push был пропущен, client сам сверяет hash после `hello_ack`
+- Исправлен self-check `TOOLS.md` в `DISTRIBUTED_MODE=both`:
+  - локальный gateway hash берётся без лишнего `fetch`

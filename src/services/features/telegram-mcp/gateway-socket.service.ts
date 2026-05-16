@@ -590,6 +590,13 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       this: GatewaySocketCarrier,
     ): Promise<string | null> {
       const runtime = this.getRuntimeOrThrow!();
+      if (
+        runtime.config.distributed.mode === "gateway" ||
+        runtime.config.distributed.mode === "both"
+      ) {
+        return this.getGatewayToolsHash?.() ?? null;
+      }
+
       const gatewayPublicUrl = runtime.config.distributed.gatewayPublicUrl;
       if (!gatewayPublicUrl) {
         return null;
@@ -598,23 +605,31 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       const url = normalizeGatewayBaseUrl(gatewayPublicUrl);
       url.pathname = `${url.pathname}/tools-md`.replace(/\/{2,}/gu, "/");
 
-      const response = await fetch(url, {
-        method: "GET",
-        headers: {
-          ...(runtime.config.distributed.gatewayAuthToken
-            ? { authorization: `Bearer ${runtime.config.distributed.gatewayAuthToken}` }
-            : {}),
-        },
-      });
+      try {
+        const response = await fetch(url, {
+          method: "GET",
+          headers: {
+            ...(runtime.config.distributed.gatewayAuthToken
+              ? { authorization: `Bearer ${runtime.config.distributed.gatewayAuthToken}` }
+              : {}),
+          },
+        });
 
-      if (!response.ok) {
-        const message = await response.text();
-        throw new Error(
-          `Gateway TOOLS.md request failed with status ${response.status}: ${message || response.statusText}`,
-        );
+        if (!response.ok) {
+          const message = await response.text();
+          throw new Error(
+            `Gateway TOOLS.md request failed with status ${response.status}: ${message || response.statusText}`,
+          );
+        }
+
+        return createHash("sha256").update(await response.text()).digest("hex");
+      } catch (error) {
+        runtime.logger.debug("Gateway TOOLS.md self-check skipped", {
+          gatewayPublicUrl,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
       }
-
-      return createHash("sha256").update(await response.text()).digest("hex");
     },
 
     async syncLocalToolsAgainstGateway(

@@ -26,9 +26,14 @@ Current state:
   - stale meta подчищаются при открытии списка
 - Exchange files больше не зависят от `vfs/minio`.
 - Базовый regression-suite собран:
-  - `12` test files
-  - `52` tests
+  - `14` test files
+  - `61` tests
   - `yarn test / build / lint` проходят
+- `TOOLS.md` sync работает:
+  - gateway/client сверяют `tools_hash`
+  - online клиенты получают `tools_event`
+  - reconnect-case закрыт через self-check после `hello_ack`
+  - system inbox messages используют `message_kind = "system"`
 
 Next session:
 
@@ -62,6 +67,11 @@ Next session:
   - one-shot approve only
   - remember approve for session/member/project
   - revoke existing approval policy
+
+- [ ] Продумать session presence/status screen:
+  - что показываем как `client online/offline`
+  - нужен ли отдельный heartbeat самого агента
+  - как не путать живой бот, живой сервис и закрытый агент
 
 - [ ] Дочистить operational logs:
   - оставить только полезные lifecycle logs

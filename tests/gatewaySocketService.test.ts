@@ -31,6 +31,7 @@ type GatewaySocketDeliveryStatus = {
 };
 
 type GatewaySocketMethods = {
+  fetchGatewayToolsHashForClient: () => Promise<string | null>;
   handleGatewayWsClientMessage: (raw: unknown) => Promise<void>;
   notifyProjectMemberJoined: (params: {
     clientUuids: string[];
@@ -96,6 +97,7 @@ type GatewaySocketHarness = {
   isLocalGatewayClientUuid: MockFn;
   handleLocalIncomingDelivery: MockFn;
   handleLocalDeliveryStatus: MockFn;
+  fetchGatewayToolsHashForClient: GatewaySocketMethods["fetchGatewayToolsHashForClient"];
   handleGatewayWsClientMessage: GatewaySocketMethods["handleGatewayWsClientMessage"];
   notifyProjectMemberJoined: GatewaySocketMethods["notifyProjectMemberJoined"];
   notifyProjectMemberLeft: GatewaySocketMethods["notifyProjectMemberLeft"];
@@ -173,6 +175,7 @@ function createHarness(): GatewaySocketHarness {
     isLocalGatewayClientUuid: vi.fn(async () => false),
     handleLocalIncomingDelivery: vi.fn(async () => false),
     handleLocalDeliveryStatus: vi.fn(async () => false),
+    fetchGatewayToolsHashForClient: methods.fetchGatewayToolsHashForClient,
     handleGatewayWsClientMessage: methods.handleGatewayWsClientMessage,
     notifyProjectMemberJoined: methods.notifyProjectMemberJoined,
     notifyProjectMemberLeft: methods.notifyProjectMemberLeft,
@@ -283,6 +286,24 @@ describe("gatewaySocket service", () => {
         reason: "outdated",
       }),
     );
+  });
+
+  it("uses local gateway TOOLS hash in both mode without remote fetch", async () => {
+    const harness = createHarness();
+    const hash = await harness.fetchGatewayToolsHashForClient.call({
+      ...harness,
+      getGatewayToolsHash: () => "local-gateway-hash",
+      getRuntimeOrThrow: () => ({
+        ...harness.getRuntimeOrThrow(),
+        config: {
+          distributed: {
+            mode: "both",
+          },
+        },
+      }),
+    });
+
+    expect(hash).toBe("local-gateway-hash");
   });
 
   it("materializes incoming delivery and sends delivery_ack over ws", async () => {

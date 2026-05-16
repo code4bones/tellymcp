@@ -32,7 +32,9 @@ Current tools:
 - `browser_computed_style`
 - `browser_screenshot`
 - `browser_close`
+- `refresh_tools_markdown`
 - `send_partner_note`
+- `send_partner_file`
 
 ## What it does
 
@@ -189,6 +191,12 @@ Current implementation status:
 - in `DISTRIBUTED_MODE=both`, this also covers same-bot local delivery transparently
 - remote project messaging and delivery status go through the gateway DB and `ws`
 - gateway-relayed `Live View` goes through `ws` for client nodes without their own public domain
+- `TOOLS.md` sync is state-based:
+  - client sends per-session `tools_hash` in `ws hello`
+  - gateway compares against canonical gateway `TOOLS.md`
+  - mismatch triggers `tools_event`
+  - client also self-checks on `hello_ack`
+  - gateway periodically rechecks online sockets for changed gateway `TOOLS.md`
 
 Mode-specific runtime requirements:
 
@@ -209,6 +217,15 @@ Current file model:
 - exchange files and screenshots live directly in local `.mcp-xchange`
 - remote delivery sends payloads through gateway delivery events
 - `vfs/minio` are no longer part of the active Telegram file exchange path
+- if an agent must send a real local file to a partner, prefer `send_partner_file`
+  over plain `send_partner_note`
+
+Current presence model:
+
+- gateway knows whether a client node is online through active `ws`
+- gateway also updates `gateway_clients.last_seen_at`
+- there is no separate heartbeat of the coding agent process inside each session yet
+- because of that, a status screen can honestly show client `online/offline`, but not guaranteed agent `online/offline`
 
 ## Mini App
 

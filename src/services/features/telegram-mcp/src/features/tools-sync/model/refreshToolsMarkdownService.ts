@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -19,6 +20,10 @@ function normalizeGatewayBaseUrl(value: string): URL {
   }
 
   return url;
+}
+
+function computeContentHash(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
 }
 
 export class RefreshToolsMarkdownService {
@@ -81,6 +86,46 @@ export class RefreshToolsMarkdownService {
 
     if (saveLocally) {
       writeFileSync(toolsPath, content, "utf8");
+      const appliedHash = computeContentHash(content);
+      await this.sessionStore.setSession({
+        sessionId: resolved.sessionId,
+        ...(session?.label ? { label: session.label } : {}),
+        ...(session?.cwd ? { cwd: session.cwd } : { cwd: workspaceDir }),
+        ...(session?.linkedSessionId
+          ? { linkedSessionId: session.linkedSessionId }
+          : {}),
+        ...(session?.activeProjectUuid
+          ? { activeProjectUuid: session.activeProjectUuid }
+          : {}),
+        ...(session?.activeProjectName
+          ? { activeProjectName: session.activeProjectName }
+          : {}),
+        ...(session?.task ? { task: session.task } : {}),
+        ...(session?.summary ? { summary: session.summary } : {}),
+        ...(session?.files ? { files: session.files } : {}),
+        ...(session?.decisions ? { decisions: session.decisions } : {}),
+        ...(session?.risks ? { risks: session.risks } : {}),
+        ...(session?.tmuxSessionName
+          ? { tmuxSessionName: session.tmuxSessionName }
+          : {}),
+        ...(session?.tmuxWindowName
+          ? { tmuxWindowName: session.tmuxWindowName }
+          : {}),
+        ...(typeof session?.tmuxWindowIndex === "number"
+          ? { tmuxWindowIndex: session.tmuxWindowIndex }
+          : {}),
+        ...(session?.tmuxPaneId ? { tmuxPaneId: session.tmuxPaneId } : {}),
+        ...(typeof session?.tmuxPaneIndex === "number"
+          ? { tmuxPaneIndex: session.tmuxPaneIndex }
+          : {}),
+        ...(session?.tmuxTarget ? { tmuxTarget: session.tmuxTarget } : {}),
+        ...(session?.lastTmuxNudgeAt
+          ? { lastTmuxNudgeAt: session.lastTmuxNudgeAt }
+          : {}),
+        lastSeenToolsHash: appliedHash,
+        lastNotifiedToolsHash: appliedHash,
+        updatedAt: new Date().toISOString(),
+      });
     }
 
     this.logger.info("TOOLS.md refreshed", {

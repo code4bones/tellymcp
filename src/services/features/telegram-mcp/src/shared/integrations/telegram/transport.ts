@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 
@@ -1366,6 +1367,50 @@ export class TelegramTransport implements HumanTransport {
     }
   }
 
+  private async computeSessionToolsHash(sessionId: string): Promise<string | null> {
+    const session = await this.sessionStore.getSession(sessionId);
+    const workspaceDir = session?.cwd?.trim();
+    if (!workspaceDir) {
+      return null;
+    }
+
+    try {
+      const content = await readFile(path.join(workspaceDir, "TOOLS.md"), "utf8");
+      return createHash("sha256").update(content).digest("hex");
+    } catch {
+      return null;
+    }
+  }
+
+  private async maybeNotifyToolsMismatchForSession(
+    sessionId: string,
+  ): Promise<void> {
+    const session = await this.sessionStore.getSession(sessionId);
+    const expectedGatewayHash = session?.lastNotifiedToolsHash?.trim();
+    if (!session || !expectedGatewayHash) {
+      return;
+    }
+
+    const localHash = await this.computeSessionToolsHash(sessionId);
+    if (localHash === expectedGatewayHash) {
+      return;
+    }
+
+    if (session.lastSeenToolsHash?.trim() === expectedGatewayHash) {
+      return;
+    }
+
+    await this.handleToolsUpdatedEvent({
+      local_session_id: sessionId,
+      ...(session.label ? { session_label: session.label } : {}),
+      ...(localHash ? { client_tools_hash: localHash } : {}),
+      gateway_tools_hash: expectedGatewayHash,
+      reason: localHash ? "outdated" : "missing",
+      instruction:
+        "Call refresh_tools_markdown for this session, then re-read the local TOOLS.md and apply it before continuing.",
+    });
+  }
+
   public async handleToolsUpdatedEvent(input: {
     local_session_id: string;
     session_label?: string;
@@ -1429,7 +1474,7 @@ export class TelegramTransport implements HumanTransport {
 
     await this.sessionStore.setSession({
       ...session,
-      lastSeenToolsHash: input.gateway_tools_hash,
+      lastNotifiedToolsHash: input.gateway_tools_hash,
       updatedAt: new Date().toISOString(),
     });
   }
@@ -4729,6 +4774,8 @@ export class TelegramTransport implements HumanTransport {
       chatId: ctx.chat?.id,
       userId: ctx.from?.id,
     });
+
+    await this.maybeNotifyToolsMismatchForSession(payload.sessionId);
 
     await ctx.answerCallbackQuery({
       text: session?.label

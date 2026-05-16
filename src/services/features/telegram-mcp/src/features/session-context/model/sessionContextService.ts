@@ -93,6 +93,12 @@ export class SessionContextService {
       ...(existing?.lastTmuxNudgeAt
         ? { lastTmuxNudgeAt: existing.lastTmuxNudgeAt }
         : {}),
+      ...(existing?.lastSeenToolsHash
+        ? { lastSeenToolsHash: existing.lastSeenToolsHash }
+        : {}),
+      ...(existing?.lastNotifiedToolsHash
+        ? { lastNotifiedToolsHash: existing.lastNotifiedToolsHash }
+        : {}),
       updatedAt,
     });
     this.projectIdentityResolver.persistSessionMarker({
@@ -162,6 +168,12 @@ export class SessionContextService {
       ...(existing?.tmuxTarget ? { tmuxTarget: existing.tmuxTarget } : {}),
       ...(existing?.lastTmuxNudgeAt
         ? { lastTmuxNudgeAt: existing.lastTmuxNudgeAt }
+        : {}),
+      ...(existing?.lastSeenToolsHash
+        ? { lastSeenToolsHash: existing.lastSeenToolsHash }
+        : {}),
+      ...(existing?.lastNotifiedToolsHash
+        ? { lastNotifiedToolsHash: existing.lastNotifiedToolsHash }
         : {}),
       updatedAt,
     });

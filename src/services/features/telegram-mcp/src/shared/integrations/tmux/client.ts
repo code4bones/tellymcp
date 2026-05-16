@@ -21,7 +21,9 @@ export type AllowedTmuxAction =
   | "down"
   | "enter"
   | "slash"
-  | "delete";
+  | "delete"
+  | "tab"
+  | "escape";
 
 const ENTER_AFTER_PASTE_DELAY_MS = 75;
 const SUBMIT_LINE_KEY = "C-m";
@@ -531,7 +533,11 @@ export async function sendAllowedTmuxAction(
           ? "/"
           : action === "delete"
             ? "BSpace"
-            : "Enter";
+            : action === "tab"
+              ? "Tab"
+              : action === "escape"
+                ? "Escape"
+                : "Enter";
   await execFileAsync("tmux", buildTmuxArgs(config, ["send-keys", "-t", target, key]));
 }
 

@@ -88,7 +88,7 @@ function readTarget(body: unknown): string {
 }
 
 function isAllowedAction(value: string): value is AllowedTmuxAction {
-  return ["up", "down", "enter", "slash", "delete"].includes(value);
+  return ["up", "down", "enter", "slash", "delete", "tab", "escape"].includes(value);
 }
 
 function sanitizeFileName(fileName: string): string {

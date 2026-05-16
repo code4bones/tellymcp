@@ -43,6 +43,10 @@ type GatewayServiceCarrier = Service & {
     created: boolean;
     updated_at: string;
   }>;
+  unregisterSessionRecord?: (input: Record<string, unknown>) => Promise<{
+    local_session_id: string;
+    deleted: number;
+  }>;
   listProjectsRecord?: (input: Record<string, unknown>) => Promise<{
     projects: Array<{
       project_uuid: string;
@@ -569,6 +573,28 @@ const TelegramMcpGatewayService: ServiceSchema = {
         session_uuid: sessionUuid,
         created: true,
         updated_at: now,
+      };
+    },
+
+    async unregisterSessionRecord(
+      this: GatewayServiceCarrier,
+      input: Record<string, unknown>,
+    ) {
+      const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
+      const localSessionId = this.requireText?.(input.local_session_id, "local_session_id");
+
+      const deleted = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_sessions")
+        .where({
+          client_uuid: clientUuid,
+          local_session_id: localSessionId,
+        })
+        .del();
+
+      return {
+        local_session_id: localSessionId,
+        deleted,
       };
     },
 
@@ -1460,6 +1486,14 @@ const TelegramMcpGatewayService: ServiceSchema = {
           throw new Error("Gateway service is disabled in client mode");
         }
         return this.registerSessionRecord?.(ctx.params as Record<string, unknown>);
+      },
+    },
+    unregisterSession: {
+      async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
+        return this.unregisterSessionRecord?.(ctx.params as Record<string, unknown>);
       },
     },
     listProjects: {

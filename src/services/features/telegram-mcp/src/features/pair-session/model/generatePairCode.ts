@@ -7,6 +7,7 @@ import type {
   PairCodeRecord,
 } from "../../../entities/auth/model/types";
 import type {
+  MaintenanceStore,
   SessionStore,
   SessionBindingStore,
 } from "../../../shared/api/storage/contract";
@@ -21,9 +22,51 @@ export class PairSessionService {
     private readonly config: AppConfig,
     private readonly sessionStore: SessionStore,
     private readonly bindingStore: SessionBindingStore,
+    private readonly maintenanceStore: MaintenanceStore,
     private readonly logger: Logger,
     private readonly projectIdentityResolver: ProjectIdentityResolver,
   ) {}
+
+  private async unregisterGatewaySession(
+    localSessionId: string,
+  ): Promise<void> {
+    if (!this.config.distributed.gatewayPublicUrl) {
+      return;
+    }
+
+    const clientUuid = await this.maintenanceStore.getGatewayClientUuid();
+    if (!clientUuid) {
+      return;
+    }
+
+    const url = new URL(this.config.distributed.gatewayPublicUrl);
+    url.pathname = url.pathname.replace(/\/+$/u, "");
+    if (!url.pathname.endsWith("/gateway")) {
+      url.pathname = `${url.pathname}/gateway`.replace(/\/{2,}/gu, "/");
+    }
+    url.pathname = `${url.pathname}/sessions/unregister`.replace(/\/{2,}/gu, "/");
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(this.config.distributed.gatewayAuthToken
+          ? { authorization: `Bearer ${this.config.distributed.gatewayAuthToken}` }
+          : {}),
+      },
+      body: JSON.stringify({
+        client_uuid: clientUuid,
+        local_session_id: localSessionId,
+      }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(
+        `Gateway session unregister failed with status ${response.status}: ${text || response.statusText}`,
+      );
+    }
+  }
 
   public async createPairCode(
     input: CreateSessionPairCodeInput,
@@ -174,6 +217,16 @@ export class PairSessionService {
     input: ClearSessionPairingInput,
   ): Promise<ClearSessionPairingOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const existingSession = await this.sessionStore.getSession(resolved.sessionId);
+    if (existingSession) {
+      await this.unregisterGatewaySession(resolved.sessionId);
+      await this.sessionStore.setSession({
+        ...existingSession,
+        activeProjectUuid: undefined,
+        activeProjectName: undefined,
+        updatedAt: new Date().toISOString(),
+      });
+    }
     await this.bindingStore.clearBinding(resolved.sessionId);
 
     this.logger.info("Session pairing cleared", {

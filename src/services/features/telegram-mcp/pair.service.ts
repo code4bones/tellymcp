@@ -56,6 +56,7 @@ const TelegramMcpPairService: ServiceSchema = {
       runtime.config,
       runtime.stateStore,
       runtime.stateStore,
+      runtime.stateStore,
       runtime.logger,
       runtime.projectIdentityResolver,
     );

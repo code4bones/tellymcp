@@ -1,5 +1,6 @@
 type RenderWebAppHtmlInput = {
   basePath: string;
+  launchMode: "default" | "expand" | "fullscreen";
 };
 
 export const WEBAPP_STYLES_CSS = `
@@ -37,16 +38,18 @@ body {
 
 .toolbar {
   position: fixed;
-  top: 12px;
-  right: 12px;
+  left: 0;
+  right: 0;
+  bottom: calc(42px + env(safe-area-inset-bottom, 0px));
   z-index: 30;
   display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
   gap: 8px;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--panel);
-  box-shadow: 0 18px 40px var(--shadow);
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: rgba(16, 20, 28, 0.68);
+  box-shadow: 0 -18px 40px var(--shadow);
   backdrop-filter: blur(14px);
 }
 
@@ -109,7 +112,7 @@ body {
 
 .terminal {
   margin: 0;
-  padding: 18px 14px calc(66px + env(safe-area-inset-bottom, 0px)) 14px;
+  padding: 18px 14px calc(122px + env(safe-area-inset-bottom, 0px)) 14px;
   min-height: 100vh;
   overflow: auto;
   white-space: pre-wrap;
@@ -131,11 +134,9 @@ body {
 
 @media (max-width: 680px) {
   .toolbar {
-    top: auto;
-    right: 10px;
-    bottom: calc(54px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(46px + env(safe-area-inset-bottom, 0px));
     gap: 6px;
-    padding: 7px;
+    padding: 8px 10px;
   }
 
   .btn.compact {
@@ -148,7 +149,7 @@ body {
   }
 
   .terminal {
-    padding: 14px 12px calc(112px + env(safe-area-inset-bottom, 0px)) 12px;
+    padding: 14px 12px calc(146px + env(safe-area-inset-bottom, 0px)) 12px;
   }
 }
 `;
@@ -169,7 +170,8 @@ const elements = {
   session: document.querySelector("[data-role=session]"),
   status: document.querySelector("[data-role=status]"),
   updated: document.querySelector("[data-role=updated]"),
-  refresh: document.querySelector("[data-role=refresh]"),
+  esc: document.querySelector("[data-role=escape]"),
+  tab: document.querySelector("[data-role=tab]"),
   slash: document.querySelector("[data-role=slash]"),
   del: document.querySelector("[data-role=delete]"),
   up: document.querySelector("[data-role=up]"),
@@ -187,6 +189,26 @@ function setStatus(text, isError = false) {
 
 function setUpdated(text) {
   elements.updated.textContent = text;
+}
+
+function formatCapturedAt(value) {
+  if (!value) {
+    return "never";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(date);
 }
 
 function escapeHtml(text) {
@@ -553,7 +575,7 @@ async function sendAction(action) {
 async function refreshVisibleBuffer() {
   const payload = await fetchVisibleBuffer();
   elements.terminal.innerHTML = renderAnsiToHtml(payload.content || "");
-  setUpdated("Updated: " + payload.captured_at);
+  setUpdated("Updated: " + formatCapturedAt(payload.captured_at));
 }
 
 function stopPolling() {
@@ -577,10 +599,12 @@ function startPolling() {
 }
 
 function bindUi() {
-  elements.refresh.addEventListener("click", () => {
-    refreshVisibleBuffer().catch((error) => {
-      setStatus(error.message || String(error), true);
-    });
+  elements.esc.addEventListener("click", () => {
+    sendAction("escape").catch((error) => setStatus(error.message || String(error), true));
+  });
+
+  elements.tab.addEventListener("click", () => {
+    sendAction("tab").catch((error) => setStatus(error.message || String(error), true));
   });
 
   elements.slash.addEventListener("click", () => {
@@ -604,10 +628,34 @@ function bindUi() {
   });
 }
 
+async function applyLaunchMode() {
+  tg?.ready?.();
+
+  if (!tg) {
+    return;
+  }
+
+  const launchMode = config?.launchMode || "default";
+  if (launchMode === "fullscreen") {
+    if (typeof tg.requestFullscreen === "function") {
+      try {
+        await tg.requestFullscreen();
+        return;
+      } catch (_error) {
+      }
+    }
+    tg.expand?.();
+    return;
+  }
+
+  if (launchMode === "expand") {
+    tg.expand?.();
+  }
+}
+
 async function main() {
   try {
-    tg?.ready();
-    tg?.expand();
+    await applyLaunchMode();
     bindUi();
     setStatus("Authorizing Mini App...");
     const bootstrapPayload = await bootstrap();
@@ -618,6 +666,8 @@ async function main() {
       bootstrapPayload.session_label || bootstrapPayload.session_id;
 
     if (!bootstrapPayload.tmux_target) {
+      elements.esc.disabled = true;
+      elements.tab.disabled = true;
       elements.slash.disabled = true;
       elements.del.disabled = true;
       elements.up.disabled = true;
@@ -657,7 +707,8 @@ export function renderWebAppHtml(input: RenderWebAppHtmlInput): string {
   <body>
     <div class="app">
       <div class="toolbar">
-        <button class="btn compact" data-role="refresh" type="button">⟳</button>
+        <button class="btn compact" data-role="escape" type="button">Esc</button>
+        <button class="btn compact" data-role="tab" type="button">Tab</button>
         <button class="btn compact" data-role="slash" type="button">/</button>
         <button class="btn compact" data-role="delete" type="button">⌫</button>
         <button class="btn compact" data-role="up" type="button">↑</button>
@@ -678,6 +729,7 @@ export function renderWebAppHtml(input: RenderWebAppHtmlInput): string {
     <script>
       window.__TELEGRAM_MCP_WEBAPP__ = ${JSON.stringify({
         basePath: input.basePath,
+        launchMode: input.launchMode,
       })};
     </script>
     <script>

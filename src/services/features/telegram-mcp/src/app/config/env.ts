@@ -85,6 +85,9 @@ const envSchema = z.object({
     .int()
     .positive()
     .default(900),
+  WEBAPP_LAUNCH_MODE: z
+    .enum(["default", "expand", "fullscreen"])
+    .default("fullscreen"),
   WEBAPP_VISIBLE_SCREENS: z.coerce.number().int().positive().default(2),
   WEBAPP_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
   WEBAPP_ACTION_COOLDOWN_MS: z.coerce.number().int().nonnegative().default(150),
@@ -196,6 +199,7 @@ export type AppConfig = {
     publicUrl?: string;
     initDataTtlSeconds: number;
     sessionTtlSeconds: number;
+    launchMode: "default" | "expand" | "fullscreen";
     visibleScreens: number;
     pollIntervalMs: number;
     actionCooldownMs: number;
@@ -348,6 +352,7 @@ export function loadConfig(): AppConfig {
       ...(parsed.WEBAPP_PUBLIC_URL ? { publicUrl: parsed.WEBAPP_PUBLIC_URL } : {}),
       initDataTtlSeconds: parsed.WEBAPP_INITDATA_TTL_SECONDS,
       sessionTtlSeconds: parsed.WEBAPP_SESSION_TTL_SECONDS,
+      launchMode: parsed.WEBAPP_LAUNCH_MODE,
       visibleScreens: parsed.WEBAPP_VISIBLE_SCREENS,
       pollIntervalMs: parsed.WEBAPP_POLL_INTERVAL_MS,
       actionCooldownMs: parsed.WEBAPP_ACTION_COOLDOWN_MS,

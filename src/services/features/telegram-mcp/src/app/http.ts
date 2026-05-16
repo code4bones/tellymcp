@@ -292,6 +292,7 @@ export function createMcpHttpHandler(
           200,
           renderWebAppHtml({
             basePath: publicWebAppBasePath,
+            launchMode: runtime.config.webapp.launchMode,
           }),
         );
         return;
@@ -674,7 +675,7 @@ export function createMcpHttpHandler(
           typeof Reflect.get(body, "action") === "string"
             ? String(Reflect.get(body, "action"))
             : "";
-        if (!["up", "down", "enter", "slash", "delete"].includes(action)) {
+        if (!["up", "down", "enter", "slash", "delete", "tab", "escape"].includes(action)) {
           writeText(res, 400, "Unsupported action");
           return;
         }
@@ -694,7 +695,14 @@ export function createMcpHttpHandler(
             await runtime.gatewayHttpService.requestLiveRelayAction({
               clientUuid: relayTarget.clientUuid,
               localSessionId: relayTarget.localSessionId,
-              action: action as "up" | "down" | "enter" | "slash" | "delete",
+              action: action as
+                | "up"
+                | "down"
+                | "enter"
+                | "slash"
+                | "delete"
+                | "tab"
+                | "escape",
             });
             webAppSessions.touchAction(webAppSession.token, nowMs);
             writeJson(res, 200, {
@@ -743,7 +751,14 @@ export function createMcpHttpHandler(
           await sendAllowedTmuxAction(
             runtime.config.tmux,
             session.tmuxTarget,
-            action as "up" | "down" | "enter" | "slash" | "delete",
+            action as
+              | "up"
+              | "down"
+              | "enter"
+              | "slash"
+              | "delete"
+              | "tab"
+              | "escape",
           );
           webAppSessions.touchAction(webAppSession.token, nowMs);
           runtime.logger.info("Telegram WebApp action sent to tmux", {

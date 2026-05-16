@@ -130,6 +130,7 @@ Important variables:
 - `WEBAPP_PUBLIC_URL=https://builder.undoo.ru/webapp` required for direct Telegram Mini App launcher on gateway/both nodes
 - `WEBAPP_INITDATA_TTL_SECONDS=300`
 - `WEBAPP_SESSION_TTL_SECONDS=900`
+- `WEBAPP_LAUNCH_MODE=default|expand|fullscreen`
 - `WEBAPP_VISIBLE_SCREENS=2`
 - `WEBAPP_POLL_INTERVAL_MS=2000`
 - `WEBAPP_ACTION_COOLDOWN_MS=150`
@@ -248,6 +249,10 @@ The Mini App:
 - in `client` mode can also be opened through the shared gateway domain
 - uses vanilla JS and reads the visible tmux pane area through gateway/client relay
 - validates Telegram `initData` server-side using the official hash check
+- can auto-apply launch mode from env:
+  - `default`
+  - `expand`
+  - `fullscreen` with fallback to `expand` when the Telegram client does not support fullscreen
 - requires the Telegram user from `initData` to match the bound session user
 - resolves the active session from the bound Telegram user, so a session id in the URL is not required for normal use
 - deletes the temporary `Open Live View` launcher message after successful Mini App bootstrap

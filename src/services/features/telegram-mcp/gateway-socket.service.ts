@@ -561,7 +561,16 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
     }> {
       const runtime = this.getRuntimeOrThrow!();
       const sessions = await runtime.sessionStore.listSessions();
-      const sessionTools = sessions
+      const boundSessions = (
+        await Promise.all(
+          sessions.map(async (session) =>
+            (await runtime.bindingStore.getBinding(session.sessionId))
+              ? session
+              : null,
+          ),
+        )
+      ).filter((session): session is (typeof sessions)[number] => Boolean(session));
+      const sessionTools = boundSessions
         .map((session) => {
           const toolsHash = session.cwd
             ? computeToolsHashForDir(session.cwd)
@@ -647,9 +656,18 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             (item): item is NonNullable<typeof item> => Boolean(item),
           )
         : await runtime.sessionStore.listSessions();
+      const boundSessions = (
+        await Promise.all(
+          sessions.map(async (session) =>
+            (await runtime.bindingStore.getBinding(session.sessionId))
+              ? session
+              : null,
+          ),
+        )
+      ).filter((session): session is (typeof sessions)[number] => Boolean(session));
 
       let delivered = 0;
-      for (const session of sessions) {
+      for (const session of boundSessions) {
         const localHash = session.cwd
           ? computeToolsHashForDir(session.cwd)
           : null;
@@ -1040,7 +1058,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             typeof request.payload?.action === "string"
               ? request.payload.action
               : "";
-          if (!["up", "down", "enter", "slash", "delete"].includes(action)) {
+          if (!["up", "down", "enter", "slash", "delete", "tab", "escape"].includes(action)) {
             throw new Error("Unsupported action");
           }
 
@@ -1053,7 +1071,14 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           await sendAllowedTmuxAction(
             runtime.config.tmux,
             session.tmuxTarget,
-            action as "up" | "down" | "enter" | "slash" | "delete",
+            action as
+              | "up"
+              | "down"
+              | "enter"
+              | "slash"
+              | "delete"
+              | "tab"
+              | "escape",
           );
           return {
             type: "live_response",

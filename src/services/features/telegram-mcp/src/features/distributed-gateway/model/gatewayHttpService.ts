@@ -302,7 +302,14 @@ export class GatewayHttpService {
   public async requestLiveRelayAction(input: {
     clientUuid: string;
     localSessionId: string;
-    action: "up" | "down" | "enter" | "slash" | "delete";
+    action:
+      | "up"
+      | "down"
+      | "enter"
+      | "slash"
+      | "delete"
+      | "tab"
+      | "escape";
   }): Promise<LiveRelayActionResult> {
     const rawResponse = await this.callBroker<LiveRelayActionResult>(
       "telegramMcp.gatewaySocket.requestLiveRelay",
@@ -714,6 +721,29 @@ export class GatewayHttpService {
         const body = (await this.readJsonBody(req)) as Record<string, unknown>;
         const result = await this.callBroker(
           "telegramMcp.gateway.registerSession",
+          body,
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, result);
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/sessions/unregister") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const result = await this.callBroker(
+          "telegramMcp.gateway.unregisterSession",
           body,
           { meta: { internal_call: true } },
         );

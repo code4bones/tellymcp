@@ -5704,13 +5704,7 @@ export class TelegramTransport implements HumanTransport {
     await ctx.answerCallbackQuery({ text: "Открываю Live View." });
     const sent = await this.replyText(
       ctx,
-      [
-        "🖥 Live View",
-        "",
-        `Сессия: ${session?.label ?? activeSessionId}`,
-        ...(useGatewayRelay ? ["Режим: relay через gateway"] : []),
-        "Открой Mini App, чтобы видеть текущий tmux-экран и отправлять Up/Down/Enter.",
-      ].join("\n"),
+      `🖥 Live: ${session?.label ?? activeSessionId}`,
       { kind: "menu", sessionId: activeSessionId },
       {
         reply_markup: new InlineKeyboard().webApp(
@@ -6680,6 +6674,21 @@ export class TelegramTransport implements HumanTransport {
     }
 
     const session = await this.sessionStore.getSession(sessionId);
+    if (session && this.config.distributed.gatewayPublicUrl) {
+      const clientUuid = await this.maintenanceStore.getGatewayClientUuid();
+      if (clientUuid) {
+        await this.callGatewayJson("/sessions/unregister", {
+          client_uuid: clientUuid,
+          local_session_id: sessionId,
+        });
+      }
+      await this.sessionStore.setSession({
+        ...session,
+        activeProjectUuid: undefined,
+        activeProjectName: undefined,
+        updatedAt: new Date().toISOString(),
+      });
+    }
     await this.bindingStore.clearBinding(sessionId);
 
     this.logger.info("Telegram active session unpaired from menu", {
@@ -7721,18 +7730,14 @@ export class TelegramTransport implements HumanTransport {
     const selectableMembers = sessions.filter(
       (item) => item.local_session_id !== activeSessionId,
     );
-    const currentMember = sessions.find(
-      (item) => item.local_session_id === activeSessionId,
-    );
 
     const lines = [
-      "👥 Участники проекта",
+      `👥 Участники ${escapeHtml(input.projectName)}`,
       "",
-      `Проект: ${input.projectName}`,
       `UUID: ${input.projectUuid}`,
-      `Invite: <i>${escapeHtml(input.inviteToken)}</i>`,
+      `Invite: <code>${escapeHtml(input.inviteToken)}</code>`,
       "",
-      `Ваш клиент: ${currentMember?.client_label ?? currentMember?.bot_username ?? "текущий бот"}`,
+      `Сессия: ${escapeHtml(session?.label ?? input.sessionId)}`,
       `Других сессий: ${selectableMembers.length}`,
       "",
       selectableMembers.length > 0

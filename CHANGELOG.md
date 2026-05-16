@@ -58,6 +58,11 @@
   - client-side self-check после `hello_ack`
   - периодический recheck online клиентов на gateway
 - Добавлены system inbox messages с `message_kind = "system"` для operational инструкций.
+- В `TOOLS.md` введён явный human-readable version marker.
+- Добавлен `Collab -> Tools -> History`:
+  - one-shot export `.md`
+  - последние 5 Collab-событий текущей активной сессии
+  - без отдельного submenu и без новой таблицы
 
 ### Changed
 - Полностью убран `stdio`-режим. `telegram_mcp` работает только через REST/MCP over HTTP.

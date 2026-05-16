@@ -82,6 +82,22 @@ type GatewayServiceCarrier = Service & {
       updated_at?: string;
     }>;
   }>;
+  listSessionHistoryRecord?: (input: Record<string, unknown>) => Promise<{
+    history: Array<{
+      message_uuid: string;
+      kind: string;
+      summary: string;
+      created_at: string;
+      direction: "outgoing" | "incoming";
+      project_uuid?: string;
+      project_name?: string;
+      from_session_id: string;
+      from_label: string;
+      to_session_id: string;
+      to_label: string;
+      delivery_status?: string;
+    }>;
+  }>;
   sendPartnerNoteRecord?: (
     input: Record<string, unknown>,
   ) => Promise<SendPartnerNoteOutput>;
@@ -1324,6 +1340,93 @@ const TelegramMcpGatewayService: ServiceSchema = {
         })),
       };
     },
+
+    async listSessionHistoryRecord(
+      this: GatewayServiceCarrier,
+      input: Record<string, unknown>,
+    ) {
+      const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
+      const localSessionId = this.requireText?.(
+        input.local_session_id,
+        "local_session_id",
+      );
+      const limit =
+        typeof input.limit === "number" && Number.isFinite(input.limit)
+          ? Math.max(1, Math.min(20, Math.trunc(input.limit)))
+          : 5;
+
+      const sessionRows = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_sessions")
+        .where({
+          client_uuid: clientUuid,
+          local_session_id: localSessionId,
+          status: "active",
+        })
+        .select("session_uuid");
+
+      const sessionUuids = sessionRows
+        .map((row) => this.normalizeOptionalText?.(row.session_uuid))
+        .filter((row): row is string => Boolean(row));
+
+      if (sessionUuids.length === 0) {
+        return { history: [] };
+      }
+
+      const rows = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_messages as m")
+        .join("gateway_sessions as s_from", "s_from.session_uuid", "m.from_session_uuid")
+        .join("gateway_sessions as s_to", "s_to.session_uuid", "m.to_session_uuid")
+        .leftJoin("gateway_projects as p", "p.project_uuid", "m.project_uuid")
+        .leftJoin("gateway_deliveries as d", "d.message_uuid", "m.message_uuid")
+        .where((builder) => {
+          builder
+            .whereIn("m.from_session_uuid", sessionUuids)
+            .orWhereIn("m.to_session_uuid", sessionUuids);
+        })
+        .select(
+          "m.message_uuid",
+          "m.kind",
+          "m.summary",
+          "m.created_at",
+          "p.project_uuid",
+          "p.name as project_name",
+          "s_from.session_uuid as from_session_uuid",
+          "s_from.local_session_id as from_local_session_id",
+          "s_from.label as from_session_label",
+          "s_to.session_uuid as to_session_uuid",
+          "s_to.local_session_id as to_local_session_id",
+          "s_to.label as to_session_label",
+          "d.status as delivery_status",
+        )
+        .orderBy("m.created_at", "desc")
+        .limit(limit);
+
+      const currentSessionSet = new Set(sessionUuids);
+
+      return {
+        history: rows.map((row) => {
+          const outgoing = currentSessionSet.has(String(row.from_session_uuid));
+          return {
+            message_uuid: String(row.message_uuid),
+            kind: String(row.kind),
+            summary: String(row.summary || ""),
+            created_at: String(row.created_at),
+            direction: outgoing ? "outgoing" : "incoming",
+            ...(row.project_uuid ? { project_uuid: String(row.project_uuid) } : {}),
+            ...(row.project_name ? { project_name: String(row.project_name) } : {}),
+            from_session_id: String(row.from_local_session_id),
+            from_label: String(row.from_session_label || row.from_local_session_id),
+            to_session_id: String(row.to_local_session_id),
+            to_label: String(row.to_session_label || row.to_local_session_id),
+            ...(row.delivery_status
+              ? { delivery_status: String(row.delivery_status) }
+              : {}),
+          };
+        }),
+      };
+    },
   },
 
   actions: {
@@ -1389,6 +1492,14 @@ const TelegramMcpGatewayService: ServiceSchema = {
           throw new Error("Gateway service is disabled in client mode");
         }
         return this.listProjectSessionsRecord?.(ctx.params as Record<string, unknown>);
+      },
+    },
+    listSessionHistory: {
+      async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
+        return this.listSessionHistoryRecord?.(ctx.params as Record<string, unknown>);
       },
     },
     sendPartnerNote: {

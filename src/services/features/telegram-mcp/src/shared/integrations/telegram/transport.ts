@@ -882,6 +882,49 @@ export class TelegramTransport implements HumanTransport {
     return response.sessions;
   }
 
+  private async listGatewaySessionHistory(
+    principal: { telegramChatId: number; telegramUserId: number },
+    localSessionId: string,
+  ): Promise<
+    Array<{
+      message_uuid: string;
+      kind: string;
+      summary: string;
+      created_at: string;
+      direction: "outgoing" | "incoming";
+      project_uuid?: string;
+      project_name?: string;
+      from_session_id: string;
+      from_label: string;
+      to_session_id: string;
+      to_label: string;
+      delivery_status?: string;
+    }>
+  > {
+    const clientUuid = await this.ensureGatewayClientUuid(principal);
+    const response = await this.callGatewayJson<{
+      history: Array<{
+        message_uuid: string;
+        kind: string;
+        summary: string;
+        created_at: string;
+        direction: "outgoing" | "incoming";
+        project_uuid?: string;
+        project_name?: string;
+        from_session_id: string;
+        from_label: string;
+        to_session_id: string;
+        to_label: string;
+        delivery_status?: string;
+      }>;
+    }>("/history/list", {
+      client_uuid: clientUuid,
+      local_session_id: localSessionId,
+      limit: 5,
+    });
+    return Array.isArray(response.history) ? response.history : [];
+  }
+
   private async ensureProjectSessionRegistered(input: {
     principal: { telegramChatId: number; telegramUserId: number };
     sessionId: string;
@@ -2101,6 +2144,10 @@ export class TelegramTransport implements HumanTransport {
       .text("📣 Broadcast", async (ctx) => {
         await this.beginProjectBroadcast(ctx);
       })
+      .text("🕘 History", async (ctx) => {
+        await this.handleCollabHistoryExport(ctx);
+      })
+      .row()
       .text("🗑 Delete", async (ctx) => {
         await ctx.answerCallbackQuery({ text: "Открываю удаление проектов." });
         await this.showCollabDeleteMenu(ctx);
@@ -5336,6 +5383,93 @@ export class TelegramTransport implements HumanTransport {
     );
   }
 
+  private buildCollabHistoryMarkdown(input: {
+    sessionLabel: string;
+    history: Array<{
+      kind: string;
+      summary: string;
+      created_at: string;
+      direction: "outgoing" | "incoming";
+      project_name?: string;
+      from_label: string;
+      to_label: string;
+      delivery_status?: string;
+    }>;
+  }): string {
+    const lines = [
+      "# Collab History",
+      "",
+      `Session: ${input.sessionLabel}`,
+      `Generated at: ${new Date().toISOString()}`,
+      "",
+    ];
+
+    if (input.history.length === 0) {
+      lines.push("No recent Collab events.");
+      lines.push("");
+      return lines.join("\n");
+    }
+
+    lines.push("Last 5 events:");
+    lines.push("");
+
+    for (const item of input.history) {
+      lines.push(`## ${item.kind}`);
+      lines.push(`- Time: ${item.created_at}`);
+      lines.push(`- Direction: ${item.direction}`);
+      lines.push(`- Route: ${item.from_label} -> ${item.to_label}`);
+      if (item.project_name) {
+        lines.push(`- Project: ${item.project_name}`);
+      }
+      if (item.delivery_status) {
+        lines.push(`- Status: ${item.delivery_status}`);
+      }
+      lines.push(`- Summary: ${item.summary || "(empty)"}`);
+      lines.push("");
+    }
+
+    return lines.join("\n");
+  }
+
+  private async handleCollabHistoryExport(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const { principal, session } = await this.loadProjectsContext(ctx);
+    if (!this.config.distributed.gatewayPublicUrl || !principal || !session) {
+      await ctx.answerCallbackQuery({
+        text: "История Collab недоступна для этой сессии.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const history = await this.listGatewaySessionHistory(
+      principal,
+      session.sessionId,
+    );
+    const markdown = this.buildCollabHistoryMarkdown({
+      sessionLabel: session.label ?? session.sessionId,
+      history,
+    });
+    const fileName = `collab-history-${slugifyFilenamePart(
+      session.label ?? session.sessionId,
+    ) || "session"}.md`;
+
+    await this.replyDocumentWithRetry(
+      ctx,
+      new InputFile(Buffer.from(markdown, "utf8"), fileName),
+      {
+        caption: `Collab history for ${session.label ?? session.sessionId}`,
+      },
+      {
+        kind: "menu",
+        sessionId: session.sessionId,
+      },
+    );
+
+    await ctx.answerCallbackQuery({ text: "История отправлена в Telegram." });
+  }
+
   private async showCollabDeleteMenu(
     ctx: TelegramMenuContext,
     introText?: string,
@@ -6167,6 +6301,7 @@ export class TelegramTransport implements HumanTransport {
       `👥 Уникальных сессий: ${uniqueCount}`,
       "",
       "Broadcast отправит следующее текстовое сообщение всем уникальным Collab-сессиям на ботах без дублирования.",
+      "History отправит .md с последними 5 Collab-событиями текущей сессии.",
       "Локальные сессии получат inbox message, удалённые — gateway delivery.",
     ].join("\n");
   }

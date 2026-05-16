@@ -65,6 +65,15 @@ Telegram is implemented as the first transport backend. Tool orchestration does 
 
 For maintainers and future extension work, see [DEVELOPMENT.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/docs/DEVELOPMENT.md).
 
+Canonical instructions:
+
+- gateway `TOOLS.md` is the canonical instruction source
+- `TOOLS.md` now carries a human-readable version marker near the top of the file
+- gateway/client sync still relies on content hash, not on the version string
+- when behavior changes materially, bump both:
+  - the `TOOLS.md` version marker
+  - the file content itself
+
 ## Requirements
 
 - Node.js 24+
@@ -191,6 +200,8 @@ Current implementation status:
 - in `DISTRIBUTED_MODE=both`, this also covers same-bot local delivery transparently
 - remote project messaging and delivery status go through the gateway DB and `ws`
 - gateway-relayed `Live View` goes through `ws` for client nodes without their own public domain
+- `Collab -> Tools -> History` sends a markdown export of the last 5 Collab events
+  for the current active session
 - `TOOLS.md` sync is state-based:
   - client sends per-session `tools_hash` in `ws hello`
   - gateway compares against canonical gateway `TOOLS.md`

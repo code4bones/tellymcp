@@ -59,7 +59,7 @@ Next session:
   - проверить, не нужны ли подписи по source/type в списке
 
 - [ ] Подумать над следующей итерацией `Collab` UX:
-  - нужен ли delivery history screen
+  - нужен ли более глубокий delivery history beyond current `.md` export
   - нужен ли manual retry для failed delivery
   - нужен ли отдельный просмотр последних `Ask / Share / File`
 

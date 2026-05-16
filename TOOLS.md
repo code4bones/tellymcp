@@ -1,5 +1,7 @@
 # Tools
 
+Version: `2026-05-16.1`
+
 This MCP server currently exposes the following tools.
 
 Browser tools:
@@ -1171,6 +1173,11 @@ Distributed mode scaffold:
   - `handoff`
 - useful collaboration content includes API summaries, what changed, current errors, sample payloads, and relevant git changes from the agent workspace
 - `Tools` contains `Broadcast` and `Prune all`
+- `Collab -> Tools` contains:
+  - `Broadcast`
+  - `History`
+  - `Delete`
+- `History` sends a markdown export of the last 5 Collab events for the current active session
 
 Current remaining operational gaps are tracked in [docs/TODO.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/docs/TODO.md).
 

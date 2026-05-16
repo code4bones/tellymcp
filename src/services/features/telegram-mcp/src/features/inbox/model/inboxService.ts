@@ -67,6 +67,8 @@ export class InboxService {
       messages: messages.map((message) => ({
         message_id: message.id,
         source: "telegram",
+        message_kind:
+          message.sourceTelegramMessageId > 0 ? "human" : "system",
         telegram_chat_id: message.telegramChatId,
         telegram_user_id: message.telegramUserId,
         telegram_message_id: message.sourceTelegramMessageId,

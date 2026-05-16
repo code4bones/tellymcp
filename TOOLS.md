@@ -122,7 +122,7 @@ Mandatory rule:
   - `get_telegram_inbox`
   - `delete_telegram_inbox_message`
   - browser/session-context tools
-- do not assume Telegram "active session" in the bot menu affects MCP tool defaults
+- do not assume Telegram "active session" in the bot menu affects MCP tool defaults.
 
 If you skip `cwd`:
 
@@ -705,6 +705,9 @@ Per-message fields:
 
 - `message_id`
 - `source = "telegram"`
+- `message_kind`
+  - `human`
+  - `system`
 - `telegram_message_id`
 - `telegram_chat_id`
 - `telegram_user_id`
@@ -716,6 +719,14 @@ Meaning:
 
 - when a task starts from one of these inbox items, treat it as a Telegram-originated task
 - use `notify_telegram` for progress updates and `ask_user_telegram` for clarifications during that task
+- if `message_kind = "system"`:
+  - treat it as an operational instruction from the service
+  - do not reinterpret it as a normal user request
+  - if it contains `Action Required`, follow that operational flow first
+  - for example, a `TOOLS.md updated` system message means:
+    1. call `refresh_tools_markdown`
+    2. re-read the local `TOOLS.md`
+    3. apply the updated rules before continuing
 - process the batch one message at a time
 - move to the next inbox item only if the current one did not create a blocker
 - if the current message leads to a clarification wait or another blocking condition, stop batch processing there and leave the remaining inbox items pending

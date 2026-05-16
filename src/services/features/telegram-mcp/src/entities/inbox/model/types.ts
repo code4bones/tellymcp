@@ -39,6 +39,7 @@ export type GetTelegramInboxOutput = {
   messages: Array<{
     message_id: string;
     source: "telegram";
+    message_kind: "human" | "system";
     telegram_chat_id: number;
     telegram_user_id: number;
     telegram_message_id: number;

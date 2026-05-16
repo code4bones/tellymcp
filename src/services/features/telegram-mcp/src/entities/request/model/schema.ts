@@ -69,9 +69,10 @@ export const getTelegramInboxOutputSchema = z.object({
     z.object({
       message_id: z.string(),
       source: z.literal("telegram"),
+      message_kind: z.enum(["human", "system"]),
       telegram_chat_id: z.number(),
       telegram_user_id: z.number(),
-      telegram_message_id: z.number().int().positive(),
+      telegram_message_id: z.number().int().nonnegative(),
       text: z.string(),
       attachments: z.array(z.string()).optional(),
       received_at: z.string(),

@@ -1,6 +1,6 @@
 {
   "name": "@deadragdoll/tellymcp",
-  "version": "0.1.1",
+  "version": "0.0.1",
   "description": "TellyMCP - Telegram Human-in-the-Loop MCP Server",
   "main": "dist/services/features/telegram-mcp/runtime.service.js",
   "bin": {

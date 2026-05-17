@@ -122,6 +122,10 @@ Use short, meaningful names such as:
 
 If you run multiple agents, put each one in its own tmux session or pane and pair them separately.
 
+If a tmux pane is recreated and its pane id changes, TellyMCP now tries to recover the live pane target automatically from saved tmux session, window, and pane hints.
+
+If auto-recovery fails, Telegram sends an operational warning so the problem is visible to the human user, not only in backend logs.
+
 ## Quick start
 
 ### Standalone client node
@@ -490,6 +494,8 @@ Current file model:
 - `vfs/minio` are no longer part of the active Telegram file exchange path
 - if an agent must send a real local file to a partner, prefer `send_partner_file`
   over plain `send_partner_note`
+- for `Share`, the current session must do the work itself and send only the result
+- `Share` must not forward the original task into the target session as a new assignment
 
 Current presence model:
 

@@ -26,8 +26,8 @@ Current state:
   - stale meta подчищаются при открытии списка
 - Exchange files больше не зависят от `vfs/minio`.
 - Базовый regression-suite собран:
-  - `15` test files
-  - `68` tests
+  - `17` test files
+  - `74` tests
   - `yarn test / build / lint` проходят
 - `TOOLS.md` sync работает:
   - gateway/client сверяют `tools_hash`
@@ -39,6 +39,18 @@ Current state:
   - gateway отвечает verdict `ok|warn|reject`
   - `protocol major mismatch` блокирует `ws` transport
   - локальные сессии получают system inbox / Telegram notice на `warn` и `reject`
+- `tmux target` теперь умеет auto-recovery:
+  - stale pane id после пересоздания tmux больше не требует немедленной ручной перепривязки
+  - сервис пытается найти новый pane по tmux hints и обновить Redis сам
+  - если это не удалось, пользователь получает Telegram notice
+- `Share` inbox semantics ужесточены:
+  - текущая сессия выполняет работу сама
+  - target-сессии отправляется только результат
+  - исходное поручение не должно пересылаться дальше как новая задача
+- Логирование сведено к единой модели:
+  - `pino-pretty` в консоль
+  - optional JSONL sink через `LOG_FILE_ENABLED/LOG_FILE_PATH`
+  - optional `LogFeed` для UI/диагностики
 
 Next session:
 
@@ -68,6 +80,11 @@ Next session:
   - нужен ли manual retry для failed delivery
   - нужен ли отдельный просмотр последних `Ask / Share / File`
 
+- [ ] Подумать над следующей итерацией `tmux target` recovery:
+  - нужно ли обновлять target не только на nudge, но и на `Live` open/action path
+  - нужно ли пробовать auto-refresh target при `set_session_context`
+  - нужен ли отдельный tool/command для “repair tmux target”
+
 - [ ] Подумать над policy для `Live` approval:
   - one-shot approve only
   - remember approve for session/member/project
@@ -79,8 +96,7 @@ Next session:
   - как не путать живой бот, живой сервис и закрытый агент
 
 - [ ] Доделать packaging/publish polish:
-  - решить, оставляем ли `1.0.0` или откатываемся на `0.1.0`
-  - проверить первый публичный `npm publish`
+  - проверить publish/upgrade flow для `0.0.8`
   - проверить install/smoke на чистой машине
 
 - [ ] Дочистить operational logs:

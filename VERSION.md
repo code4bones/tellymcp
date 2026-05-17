@@ -4,6 +4,35 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.8
+
+### Added
+- Unified logging model based on `pino`:
+  - pretty console output by default
+  - optional JSONL file sink for Alloy or other collectors
+  - `LOG_FILE_ENABLED=true`
+  - `LOG_FILE_PATH=.tellymcp/log.jsonl`
+- Better tmux recovery behavior:
+  - when a saved pane target becomes stale after tmux recreation, TellyMCP now tries to recover the live pane automatically from stored tmux session/window/pane hints
+  - if auto-recovery fails, Telegram sends a clear operational warning instead of leaving the problem only in logs
+- Stronger `Share` execution guidance:
+  - the current session must do the work itself
+  - it must send only the result
+  - it must not forward the original task to the target session as a new assignment
+
+### Changed
+- Runtime identity and service labels now use `tellymcp` naming consistently instead of older `telegram-human-mcp` tags.
+- MCP server metadata now reports the current package version and `tellymcp` service name.
+- Logging config is now simpler:
+  - one console logging model
+  - one optional JSON file sink
+  - optional `LogFeed` buffer for UI diagnostics
+
+### Fixed
+- Stale tmux pane ids like `%1 -> %2` no longer require manual user understanding before the service can try to wake the session again.
+- Broken tmux nudge targets are now visible to the user in Telegram, not only in backend logs.
+- `Share` inbox instructions are now explicit enough to reduce the chance that one agent re-delegates the task back into the collaboration graph.
+
 ## 0.0.3
 
 ### Added

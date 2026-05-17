@@ -7,16 +7,31 @@
 [![node >= 24](https://img.shields.io/badge/node-%3E%3D24-339933)](https://nodejs.org/)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-TellyMCP — это Telegram Human-in-the-Loop MCP server для coding agents.
+TellyMCP — это self-hosted Telegram control plane для coding agents.
 
-Он позволяет агенту:
+Он привязывает реальные agent-сессии к Telegram, делает их доступными с телефона и даёт им работать вместе между локальными и удалёнными машинами.
+
+Ключевые идеи продукта:
+
+- `Live` tmux view и управление внутри Telegram Mini App
+- `Collab`-сценарии для локальных и удалённых agent-сессий
+- `.mcp-xchange` как workspace-level handoff шина для note, файлов и скриншотов
+- MCP-native pairing сессий и session-scoped tools
+- optional gateway mode для multi-machine и multi-bot проектов
+
+Human-in-the-loop здесь тоже есть, но это только один слой системы:
 
 - задавать человеку уточняющие вопросы через Telegram
 - получать несвязанные входящие сообщения позже через inbox
-- привязывать несколько agent-сессий
-- работать с локальными и удалёнными партнёрскими сессиями
-- открывать Live tmux view внутри Telegram Mini App
-- обмениваться note, скриншотами и файлами через `.mcp-xchange`
+- уведомлять человека о прогрессе, blockers и approvals
+
+Что отличает TellyMCP от простого Telegram bot bridge:
+
+- он завязан на сессии, а не только на чат
+- он понимает локальные и удалённые collaboration targets
+- у него есть live terminal surface, а не только обмен сообщениями
+- он передаёт файлы через workspace-aware exchange paths, а не просто через ad hoc upload
+- он может работать как standalone node или как gateway-backed control plane
 
 ## Prerequisites
 

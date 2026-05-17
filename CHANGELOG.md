@@ -63,6 +63,11 @@
   - one-shot export `.md`
   - последние 5 Collab-событий текущей активной сессии
   - без отдельного submenu и без новой таблицы
+- Добавлен publish-ready npm/CLI контур:
+  - package name `@deadragdoll/tellymcp`
+  - bin `tellymcp`
+  - команды `init` и `run`
+  - безопасные packaged templates для `.env`
 
 ### Changed
 - Полностью убран `stdio`-режим. `telegram_mcp` работает только через REST/MCP over HTTP.
@@ -97,6 +102,11 @@
 - Состояние `TOOLS.md` по сессии теперь разделено:
   - `lastSeenToolsHash` = реально применённый локально hash
   - `lastNotifiedToolsHash` = hash, про который уже отправляли уведомление
+- Основная install-модель смещена на:
+  - `npm install -g @deadragdoll/tellymcp`
+  - `tellymcp init <client|gateway|both>`
+  - `tellymcp run`
+- `docker` и `go tmux-proxy` переведены в optional/legacy deployment path, а не в основной user flow
 
 ### Fixed
 - Исправлен `Headers have already sent` при работе MCP/WebApp через `moleculer-web`.
@@ -133,3 +143,6 @@
   - если server-side push был пропущен, client сам сверяет hash после `hello_ack`
 - Исправлен self-check `TOOLS.md` в `DISTRIBUTED_MODE=both`:
   - локальный gateway hash берётся без лишнего `fetch`
+- Исправлен build-контур для npm publish:
+  - `dist` теперь всегда очищается перед сборкой
+  - stale legacy build artifacts больше не попадают в пакет

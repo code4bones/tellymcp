@@ -80,6 +80,32 @@ Canonical instructions:
 - Redis
 - a Telegram bot token from BotFather
 
+## Quick start
+
+Default install flow is now:
+
+```bash
+npm install -g @deadragdoll/tellymcp
+```
+
+Initialize a node:
+
+```bash
+tellymcp init client
+```
+
+or
+
+```bash
+tellymcp init gateway
+```
+
+Then edit the generated `.env` and run:
+
+```bash
+tellymcp run
+```
+
 ## Telegram setup
 
 1. Open BotFather in Telegram.
@@ -89,7 +115,13 @@ Canonical instructions:
 
 ## Environment
 
-Copy `.env.example` to `.env` and fill in the values.
+If you run the published package, prefer:
+
+- `tellymcp init client`
+- `tellymcp init gateway`
+- `tellymcp init both`
+
+If you run directly from this repository, copy `.env.example.client` or `.env.example.gateway` to `.env` and fill in the values.
 
 Important variables:
 
@@ -135,7 +167,7 @@ Important variables:
 - `WEBAPP_POLL_INTERVAL_MS=2000`
 - `WEBAPP_ACTION_COOLDOWN_MS=150`
 - `TMUX_NUDGE_ENABLED`
-- `TMUX_PROXY_URL` optional, used when tmux stays on the host and the main service runs elsewhere
+- `TMUX_PROXY_URL` optional, only for special host/container split setups
 - `TMUX_PROXY_TOKEN` optional bearer for the host tmux proxy
 - `TMUX_SOCKET_PATH` optional explicit tmux socket path
 - `TMUX_NUDGE_DEBOUNCE_SECONDS`
@@ -143,7 +175,7 @@ Important variables:
 - `TMUX_NUDGE_MESSAGE`
 - `LOG_LEVEL`
 - `BROWSER_ENABLED=true`
-- `BROWSER_HEADLESS=false` for local dev visibility, `true` for Docker/headless usage
+- `BROWSER_HEADLESS=false` for local dev visibility, `true` for headless or container usage
 - `BROWSER_DEVTOOLS=false`
 - `BROWSER_ADDRESS=http://localhost:5173` optional default base URL for the dev server
 - `BROWSER_TIMEOUT_MS=20000`
@@ -215,7 +247,7 @@ Mode-specific runtime requirements:
 - `client`
   - local Redis
   - `GATEWAY_PUBLIC_URL`
-  - optional local tmux proxy when the service runs in Docker
+  - optional local tmux proxy only when tmux is not directly reachable
   - no gateway Postgres bootstrap is performed
 - `gateway`
   - Postgres is required for gateway persistence
@@ -257,6 +289,8 @@ The Mini App:
 - resolves the active session from the bound Telegram user, so a session id in the URL is not required for normal use
 - deletes the temporary `Open Live View` launcher message after successful Mini App bootstrap
 - allows only a fixed control set:
+  - `Esc`
+  - `Tab`
   - `/`
   - `Backspace`
   - `Up`
@@ -525,19 +559,19 @@ The derived `session_id` is built from that title plus a short stable hash of th
 
 This means you can call session-oriented tools without explicitly passing `session_id` when working in a single project context.
 
-## Install
+## Repository development
 
 ```bash
 yarn install
 ```
 
-## Build
+### Build
 
 ```bash
 yarn build
 ```
 
-## Run
+### Run
 
 Development:
 
@@ -552,7 +586,9 @@ yarn build
 yarn start:gw
 ```
 
-After startup you should see readiness logs in the console. The HTTP service exposes:
+After startup you should see readiness logs in the console.
+
+In repository dev mode, the HTTP service exposes:
 
 - MCP endpoint at `http://127.0.0.1:8787/mcp` by default
 - health check at `http://127.0.0.1:8787/healthz`
@@ -565,6 +601,15 @@ If `MCP_HTTP_BEARER_TOKEN` is configured:
 
 `yarn dev:gw:telegram` is still available, but it only starts the `telegram_mcp` feature node.
 It does not expose HTTP by itself anymore. `/mcp`, `/webapp`, and `/healthz` are now served only through the Moleculer API gateway aliases in the full `dev:gw` / `start:gw` runtime, or through a separate gateway node in the same namespace.
+
+## Optional host tmux proxy
+
+You do not need the host-side tmux proxy for the normal `tellymcp` install flow.
+
+Use it only when:
+
+- `tellymcp` runs in a container or isolated environment
+- but `tmux` itself stays on the host
 
 If tmux stays on the host but the main service runs in Docker or elsewhere, run the lightweight host-side tmux proxy.
 
@@ -609,9 +654,11 @@ The host-side proxy exposes only a tiny tmux HTTP surface for:
 - fixed control actions
 - wake-up line pasting
 
-## Docker deployment
+## Optional Docker deployment
 
-This repository includes a single-container deployment path without an internal nginx layer.
+Docker is no longer required for the default product install flow.
+
+This repository still includes a single-container deployment path without an internal nginx layer for ops/self-hosted scenarios.
 
 Inside the container:
 

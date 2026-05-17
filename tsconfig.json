@@ -22,6 +22,7 @@
     "types": ["node"]
   },
   "include": [
+    "src/cli.ts",
     "src/index.ts",
     "src/moleculer.config.ts",
     "src/services/features/telegram-mcp/**/*.ts",

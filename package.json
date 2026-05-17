@@ -1,10 +1,29 @@
 {
-  "name": "telegram_mcp",
+  "name": "@deadragdoll/tellymcp",
   "version": "1.0.0",
-  "description": "Telegram Human-in-the-Loop MCP Server",
+  "description": "TellyMCP - Telegram Human-in-the-Loop MCP Server",
   "main": "dist/services/features/telegram-mcp/runtime.service.js",
+  "bin": {
+    "tellymcp": "dist/cli.js"
+  },
   "files": [
-    "dist"
+    "dist",
+    "config/templates",
+    "README.md",
+    "CHANGELOG.md",
+    "TOOLS.md",
+    ".env.example.client",
+    ".env.example.gateway"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "telegram",
+    "mcp",
+    "human-in-the-loop",
+    "bot",
+    "agent"
   ],
   "_moduleAliases": {
     "@src": "src",
@@ -20,7 +39,7 @@
     "dev:watch": "yarn dev:gw",
     "dev:service": "yarn dev:gw",
     "dev:tmux-proxy": "tsx watch src/services/features/telegram-mcp/src/app/tmux-proxy.ts",
-    "build": "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
+    "build": "rm -rf dist && tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
     "start": "yarn start:gw",
     "start:gw": "node ./node_modules/moleculer/bin/moleculer-runner.js dist/services --config dist/moleculer.config.js --mask \"**/*.service.js\"",
     "start:gw:telegram": "node ./node_modules/moleculer/bin/moleculer-runner.js dist/services/features/telegram-mcp --config dist/moleculer.config.js --mask \"**/*.service.js\"",
@@ -31,8 +50,15 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "repository": "gitlab:prj/mcp/telegram_mcp.git",
-  "author": "code4bones <p.olesov@code4bones.online>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/code4bones/tellymcp.git"
+  },
+  "homepage": "https://www.npmjs.com/package/@deadragdoll/tellymcp",
+  "bugs": {
+    "url": "https://github.com/code4bones/tellymcp/issues"
+  },
+  "author": "code4bones <code4bones@gmail.com>",
   "license": "MIT",
   "engines": {
     "node": ">=24.0.0"

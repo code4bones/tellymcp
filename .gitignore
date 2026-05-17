@@ -13,3 +13,9 @@ tmux-proxy-go/telegram-human-tmux-proxy
 public
 logs
 .mcpsession.json
+.env-*
+.env-builder
+.env-client
+.env-prod
+.env-dev
+.resume

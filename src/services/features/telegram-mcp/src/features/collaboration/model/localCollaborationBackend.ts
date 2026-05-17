@@ -458,16 +458,10 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     };
   }
 
-  private resolveWorkspaceDir(session: SessionContext, sessionId: string): string {
+  private resolveWorkspaceDir(session: SessionContext, _sessionId: string): string {
     const workspaceDir = session.cwd?.trim();
     if (workspaceDir) {
       return workspaceDir;
-    }
-
-    if (this.config.tmux.proxyUrl) {
-      throw new Error(
-        `Session ${sessionId} does not have cwd configured, so host-side collaboration files cannot be written.`,
-      );
     }
 
     return process.cwd();

@@ -11,8 +11,6 @@ import {
 import path from "node:path";
 
 export type TmuxRuntimeConfig = {
-  proxyUrl?: string;
-  proxyToken?: string;
   socketPath?: string;
 };
 
@@ -159,52 +157,11 @@ function buildTmuxArgs(
   return resolvedSocketPath ? ["-S", resolvedSocketPath, ...args] : args;
 }
 
-async function proxyJsonRequest<T>(
-  config: TmuxRuntimeConfig,
-  path: string,
-  payload: unknown,
-): Promise<T> {
-  if (!config.proxyUrl) {
-    throw new Error("TMUX proxy URL is not configured.");
-  }
-
-  const url = new URL(path, config.proxyUrl.endsWith("/") ? config.proxyUrl : `${config.proxyUrl}/`);
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(config.proxyToken
-        ? { authorization: `Bearer ${config.proxyToken}` }
-        : {}),
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `TMUX proxy request failed with ${response.status}`);
-  }
-
-  return (await response.json()) as T;
-}
-
 export async function ensureXchangeDir(
   config: TmuxRuntimeConfig,
   workspaceDir: string,
   exchangeDirName: string,
 ): Promise<string> {
-  if (config.proxyUrl) {
-    const response = await proxyJsonRequest<{ dir: string }>(
-      config,
-      "/xchange/ensure",
-      {
-        workspaceDir,
-        exchangeDirName,
-      },
-    );
-    return response.dir;
-  }
-
   const resolvedDir = path.resolve(workspaceDir, exchangeDirName);
   await mkdir(resolvedDir, { recursive: true });
   return resolvedDir;
@@ -217,20 +174,6 @@ export async function writeXchangeFile(
   fileName: string,
   content: Uint8Array,
 ): Promise<string> {
-  if (config.proxyUrl) {
-    const response = await proxyJsonRequest<{ path: string }>(
-      config,
-      "/xchange/write",
-      {
-        workspaceDir,
-        exchangeDirName,
-        fileName,
-        contentBase64: Buffer.from(content).toString("base64"),
-      },
-    );
-    return response.path;
-  }
-
   const dir = await ensureXchangeDir(config, workspaceDir, exchangeDirName);
   const outputPath = await allocateAvailableFilePath(dir, fileName);
   await writeFile(outputPath, content);
@@ -247,21 +190,6 @@ export async function writeXchangeRelativeFile(
     append?: boolean;
   },
 ): Promise<string> {
-  if (config.proxyUrl) {
-    const response = await proxyJsonRequest<{ path: string }>(
-      config,
-      "/xchange/write-relative",
-      {
-        workspaceDir,
-        exchangeDirName,
-        relativePath,
-        contentBase64: Buffer.from(content).toString("base64"),
-        append: options?.append === true,
-      },
-    );
-    return response.path;
-  }
-
   const dir = await ensureXchangeDir(config, workspaceDir, exchangeDirName);
   const outputPath = resolvePathInsideRoot(dir, relativePath);
   await mkdir(path.dirname(outputPath), { recursive: true });
@@ -280,18 +208,6 @@ export async function listXchangeFiles(
   workspaceDir: string,
   exchangeDirName: string,
 ): Promise<string[]> {
-  if (config.proxyUrl) {
-    const response = await proxyJsonRequest<{ files: string[] }>(
-      config,
-      "/xchange/list",
-      {
-        workspaceDir,
-        exchangeDirName,
-      },
-    );
-    return response.files;
-  }
-
   const dir = await ensureXchangeDir(config, workspaceDir, exchangeDirName);
   return listFilesRecursively(dir);
 }
@@ -328,19 +244,6 @@ export async function deleteXchangeFile(
   exchangeDirName: string,
   filePath: string,
 ): Promise<boolean> {
-  if (config.proxyUrl) {
-    const response = await proxyJsonRequest<{ deleted: boolean }>(
-      config,
-      "/xchange/delete",
-      {
-        workspaceDir,
-        exchangeDirName,
-        filePath,
-      },
-    );
-    return response.deleted;
-  }
-
   const dir = await ensureXchangeDir(config, workspaceDir, exchangeDirName);
   const resolvedFilePath = path.resolve(filePath);
   const relative = path.relative(dir, resolvedFilePath);
@@ -361,18 +264,6 @@ export async function readWorkspaceFile(
   workspaceDir: string,
   filePath: string,
 ): Promise<Uint8Array> {
-  if (config.proxyUrl) {
-    const response = await proxyJsonRequest<{ contentBase64: string }>(
-      config,
-      "/workspace/read",
-      {
-        workspaceDir,
-        filePath,
-      },
-    );
-    return Buffer.from(response.contentBase64, "base64");
-  }
-
   const resolvedFilePath = resolvePathInsideWorkspace(workspaceDir, filePath);
   return readFile(resolvedFilePath);
 }
@@ -392,18 +283,6 @@ export async function getTmuxWindowHeight(
   config: TmuxRuntimeConfig,
   target: string,
 ): Promise<number | null> {
-  if (config.proxyUrl) {
-    const response = await proxyJsonRequest<{ height: number | null }>(
-      config,
-      "/window-height",
-      {
-        target,
-        ...(config.socketPath ? { socketPath: config.socketPath } : {}),
-      },
-    );
-    return typeof response.height === "number" ? response.height : null;
-  }
-
   const { stdout: heightRaw } = await execFileOutputAsync(
     "tmux",
     buildTmuxArgs(config, ["display-message", "-p", "-t", target, "#{window_height}"]),
@@ -418,20 +297,6 @@ export async function captureTmuxPaneRange(
   start: string,
   includeEscapes: boolean,
 ): Promise<string> {
-  if (config.proxyUrl) {
-    const response = await proxyJsonRequest<{ content: string }>(
-      config,
-      "/capture-range",
-      {
-        target,
-        start,
-        includeEscapes,
-        ...(config.socketPath ? { socketPath: config.socketPath } : {}),
-      },
-    );
-    return response.content.replaceAll("\u0000", "");
-  }
-
   const args = [
     "capture-pane",
     "-p",
@@ -451,20 +316,6 @@ export async function captureVisibleTmuxPane(
   fallbackLines: number,
   visibleScreens: number,
 ): Promise<string> {
-  if (config.proxyUrl) {
-    const response = await proxyJsonRequest<{ content: string }>(
-      config,
-      "/capture-visible",
-      {
-        target,
-        fallbackLines,
-        visibleScreens,
-        ...(config.socketPath ? { socketPath: config.socketPath } : {}),
-      },
-    );
-    return response.content.replaceAll("\u0000", "");
-  }
-
   const height = await getTmuxWindowHeight(config, target);
   const baseLines =
     typeof height === "number" && height > 0 ? height : Math.max(1, fallbackLines);
@@ -515,15 +366,6 @@ export async function sendAllowedTmuxAction(
   target: string,
   action: AllowedTmuxAction,
 ): Promise<void> {
-  if (config.proxyUrl) {
-    await proxyJsonRequest<{ ok: true }>(config, "/send-action", {
-      target,
-      action,
-      ...(config.socketPath ? { socketPath: config.socketPath } : {}),
-    });
-    return;
-  }
-
   const key =
     action === "up"
       ? "Up"
@@ -547,15 +389,6 @@ export async function sendTmuxLiteralLine(
   text: string,
 ): Promise<void> {
   const normalized = text.replace(/\r?\n/g, " ").trim();
-
-  if (config.proxyUrl) {
-    await proxyJsonRequest<{ ok: true }>(config, "/send-line", {
-      target,
-      text: normalized,
-      ...(config.socketPath ? { socketPath: config.socketPath } : {}),
-    });
-    return;
-  }
 
   const bufferName = `telegram-mcp-${Date.now().toString(36)}`;
   if (normalized.length > 0) {

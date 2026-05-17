@@ -230,24 +230,16 @@ Rule:
 Files:
 
 - [src/shared/integrations/tmux/client.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/shared/integrations/tmux/client.ts)
-- [src/app/tmux-proxy.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/app/tmux-proxy.ts)
-- [tmux-proxy-go/main.go](/home/code4bones/Devs/coding/mcp/telegram_mcp/tmux-proxy-go/main.go)
-- [Dockerfile.tmux-proxy](/home/code4bones/Devs/coding/mcp/telegram_mcp/Dockerfile.tmux-proxy)
-- [docs/tmux-proxy.service](/home/code4bones/Devs/coding/mcp/telegram_mcp/docs/tmux-proxy.service)
 
 Responsibilities:
 
 - abstract tmux operations behind one client
-- support both direct local tmux access and host-side HTTP proxy mode
-- keep the proxy minimal and dependency-free
-- keep the proxy HTTP contract stable so the host implementation can be swapped
+- use direct local tmux access only
 
 Rule:
 
 - all new tmux operations should go through the shared tmux client
 - do not scatter raw `tmux` shell calls around the codebase again
-- if the service is containerized but tmux stays on the host, use `TMUX_PROXY_URL`
-- prefer the Go proxy for host deployment; keep the Node proxy as a development/reference implementation
 
 ### Tool registration
 

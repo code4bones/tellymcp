@@ -362,9 +362,9 @@ function normalizeWebSocketUrl(value: string, defaultPath: string): string {
   return url.toString();
 }
 
-function formatTmuxRelayError(proxyUrl: string | undefined, error: unknown): string {
+function formatTmuxRelayError(error: unknown): string {
   if (isTmuxUnavailableError(error)) {
-    return proxyUrl ? "TMUX bridge is unavailable" : "tmux is unavailable";
+    return "tmux is unavailable";
   }
 
   return error instanceof Error ? error.message : String(error);
@@ -1159,7 +1159,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           type: "live_response",
           request_id: request.request_id,
           ok: false,
-          error: formatTmuxRelayError(runtime?.config.tmux.proxyUrl, error),
+          error: formatTmuxRelayError(error),
         };
       }
     },

@@ -38,15 +38,9 @@ function normalizeRelativePath(relativePath: string): string {
 
 function resolveWorkspaceDir(
   session: SessionContext | null,
-  tmuxConfig: TmuxRuntimeConfig,
+  _tmuxConfig: TmuxRuntimeConfig,
 ): string {
   const workspaceDir = session?.cwd?.trim() || "";
-  if (tmuxConfig.proxyUrl && !workspaceDir) {
-    throw new Error(
-      `Session ${session?.sessionId || "unknown"} has no cwd configured for host bridge file exchange.`,
-    );
-  }
-
   return workspaceDir || process.cwd();
 }
 

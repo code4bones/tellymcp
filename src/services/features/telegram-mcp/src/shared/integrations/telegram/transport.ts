@@ -205,11 +205,6 @@ type GatewayActorProfile = {
   telegramDisplayName?: string;
 };
 
-type TmuxProxyStatusCacheEntry = {
-  checkedAtMs: number;
-  statusLine: string;
-};
-
 type TmuxCaptureScope =
   | { mode: "visible" }
   | { mode: "lines"; lines: number }
@@ -235,8 +230,6 @@ type StoredAttachmentRecord = {
 };
 
 const LOCAL_INDEX_FILE_NAME = "LOCAL_INDEX.md";
-
-const TMUX_PROXY_STATUS_CACHE_MS = 5000;
 
 function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/u, "");
@@ -313,18 +306,12 @@ function buildPrincipalKey(principal: {
 }
 
 function formatTmuxBridgeError(
-  config: AppConfig,
+  _config: AppConfig,
   error: unknown,
   fallback: string,
 ): string {
   if (isTmuxUnavailableError(error)) {
-    return config.tmux.proxyUrl
-      ? "TMUX bridge is unavailable right now."
-      : "tmux is unavailable right now."
-  }
-
-  if (config.tmux.proxyUrl && error instanceof Error) {
-    return `TMUX bridge error: ${error.message}`;
+    return "tmux is unavailable right now.";
   }
 
   return fallback;
@@ -598,7 +585,6 @@ export class TelegramTransport implements HumanTransport {
     string,
     CurrentAttachmentTargetRecord
   >();
-  private tmuxProxyStatusCache?: TmuxProxyStatusCacheEntry;
   private started = false;
   private pollingTask: Promise<void> | undefined;
   private collaborationService?: CollaborationService;
@@ -3646,45 +3632,8 @@ export class TelegramTransport implements HumanTransport {
     ].join("\n");
   }
 
-  private async getTmuxProxyStatusLine(): Promise<string> {
-    if (!this.config.tmux.proxyUrl) {
-      return "🖧 TMUX mode: direct";
-    }
-
-    const now = Date.now();
-    if (
-      this.tmuxProxyStatusCache &&
-      now - this.tmuxProxyStatusCache.checkedAtMs < TMUX_PROXY_STATUS_CACHE_MS
-    ) {
-      return this.tmuxProxyStatusCache.statusLine;
-    }
-
-    let statusLine = "🖧 TMUX bridge error: unknown";
-    try {
-      const url = new URL(
-        "/healthz",
-        this.config.tmux.proxyUrl.endsWith("/")
-          ? this.config.tmux.proxyUrl
-          : `${this.config.tmux.proxyUrl}/`,
-      );
-      const response = await fetch(url);
-      if (response.ok) {
-        statusLine = "🟢 TMUX bridge running";
-      } else {
-        statusLine = `🔴 TMUX bridge error: HTTP ${response.status}`;
-      }
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : String(error);
-      statusLine = `🔴 TMUX bridge error: ${message}`;
-    }
-
-    this.tmuxProxyStatusCache = {
-      checkedAtMs: now,
-      statusLine,
-    };
-
-    return statusLine;
+  private async getTmuxStatusLine(): Promise<string> {
+    return "🖧 TMUX mode: direct";
   }
 
   private async buildMainMenuFingerprint(
@@ -4162,10 +4111,6 @@ export class TelegramTransport implements HumanTransport {
   ): Promise<string[]> {
     const session = await this.sessionStore.getSession(sessionId);
     const workspaceDir = session?.cwd?.trim() || "";
-    if (this.config.tmux.proxyUrl && !workspaceDir) {
-      return [];
-    }
-
     const resolvedWorkspaceDir = workspaceDir || process.cwd();
     const files = await listXchangeFiles(
       this.config.tmux,
@@ -4779,17 +4724,15 @@ export class TelegramTransport implements HumanTransport {
     );
 
     let deleted = false;
-    if (session?.cwd?.trim() || !this.config.tmux.proxyUrl) {
-      try {
-        deleted = await deleteXchangeFile(
-          this.config.tmux,
-          session?.cwd?.trim() || process.cwd(),
-          this.config.exchange.dir,
-          payload.filePath,
-        );
-      } catch {
-        deleted = false;
-      }
+    try {
+      deleted = await deleteXchangeFile(
+        this.config.tmux,
+        session?.cwd?.trim() || process.cwd(),
+        this.config.exchange.dir,
+        payload.filePath,
+      );
+    } catch {
+      deleted = false;
     }
 
     await this.objectStore.deleteStoredFile({
@@ -6052,7 +5995,7 @@ export class TelegramTransport implements HumanTransport {
       lines.push("");
     }
 
-    lines.push(`<i>${escapeHtml(await this.getTmuxProxyStatusLine())}</i>`);
+    lines.push(`<i>${escapeHtml(await this.getTmuxStatusLine())}</i>`);
     lines.push("");
     return lines.join("\n");
   }

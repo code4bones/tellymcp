@@ -1,6 +1,22 @@
-# Telegram Human-in-the-Loop MCP Server
+# TellyMCP
 
-This project is a local MCP server that lets a coding agent ask a human user for clarification through Telegram and wait for a reply.
+[English](README.md) | [Русский](README-ru.md)
+
+[![npm version](https://img.shields.io/npm/v/%40deadragdoll%2Ftellymcp)](https://www.npmjs.com/package/@deadragdoll/tellymcp)
+[![npm downloads](https://img.shields.io/npm/dm/%40deadragdoll%2Ftellymcp)](https://www.npmjs.com/package/@deadragdoll/tellymcp)
+[![node >= 24](https://img.shields.io/badge/node-%3E%3D24-339933)](https://nodejs.org/)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+TellyMCP is a Telegram Human-in-the-Loop MCP server for coding agents.
+
+It lets an agent:
+
+- ask a human for clarification through Telegram
+- receive unsolicited Telegram messages later through an inbox
+- pair multiple agent sessions
+- collaborate across local and remote sessions
+- open a live tmux view inside Telegram Mini App
+- exchange notes, screenshots, and files through `.mcp-xchange`
 
 Current tools:
 
@@ -36,6 +52,226 @@ Current tools:
 - `send_partner_note`
 - `send_partner_file`
 
+## Prerequisites
+
+- Node.js 24+
+- `tmux`
+- Redis
+- a Telegram bot token from BotFather
+- for `gateway` / `both`: Postgres
+- optional for durable fanout on gateway: RabbitMQ
+
+## Quick start
+
+### Standalone client node
+
+This is the simplest setup. No shared gateway, no Postgres, no RabbitMQ.
+
+1. Install:
+
+```bash
+npm install -g @deadragdoll/tellymcp
+```
+
+2. Create a client config:
+
+```bash
+tellymcp init client
+```
+
+3. Edit the generated `.env` and set at minimum:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_BOT_USERNAME`
+- `REDIS_HOST`
+- `MCP_HTTP_BEARER_TOKEN`
+
+4. Validate the setup:
+
+```bash
+tellymcp doctor --env .env
+```
+
+5. Run the node:
+
+```bash
+tellymcp run --env .env
+```
+
+6. Add MCP to your agent:
+
+```bash
+tellymcp mcp --help
+```
+
+Typical local MCP endpoint in `client` mode:
+
+- `http://127.0.0.1:8787/mcp`
+
+### Shared gateway or combined `both` node
+
+Use this when you want:
+
+- cross-machine collaboration
+- cross-bot projects
+- gateway-relayed Live View
+- persistent gateway-side project and delivery state
+
+1. Create a gateway or combined config:
+
+```bash
+tellymcp init gateway
+```
+
+or
+
+```bash
+tellymcp init both
+```
+
+2. Edit `.env` and configure:
+
+- `DISTRIBUTED_MODE=gateway|both`
+- `PORT`
+- `ROOT_PREFIX=/api`
+- `TELEGRAM_BOT_TOKEN`
+- `REDIS_*`
+- `DB_*`
+- `WEBAPP_PUBLIC_URL`
+- `GATEWAY_PUBLIC_URL`
+- `GATEWAY_WS_URL`
+- optional `RMQ_*`
+
+3. Put the node behind nginx or another reverse proxy on the same prefix:
+
+- `/api/mcp`
+- `/api/webapp`
+- `/api/gateway`
+- `/api/healthz`
+
+4. Validate the setup:
+
+```bash
+tellymcp doctor --env .env
+```
+
+5. Run it:
+
+```bash
+tellymcp run --env .env
+```
+
+Typical public MCP endpoint in `gateway` / `both` mode:
+
+- `https://your-host.example/api/mcp`
+
+### Telegram setup
+
+1. Open BotFather in Telegram.
+2. Create a bot with `/newbot`.
+3. Save the bot token.
+4. Set `TELEGRAM_BOT_USERNAME` if you want deep-link pairing hints.
+
+## MCP configuration helper
+
+TellyMCP does not modify your agent config automatically.
+
+Use:
+
+```bash
+tellymcp mcp --help
+```
+
+This prints ready-to-paste MCP JSON snippets for:
+
+- local standalone client
+- shared gateway endpoint
+- optional bearer token usage
+
+## Doctor
+
+`doctor` is mode-aware.
+
+`client` checks:
+
+- `tmux`
+- `.env`
+- Redis
+- local MCP bind
+- external gateway `healthz` when `GATEWAY_PUBLIC_URL` is configured
+- `GATEWAY_WS_URL`
+- `WEBAPP_PUBLIC_URL`
+
+`gateway` / `both` checks:
+
+- `tmux`
+- `.env`
+- Redis
+- local `healthz`
+- public `healthz`
+- public `ws`
+- public `webapp`
+- Postgres
+- RabbitMQ when `RMQ_*` is configured
+
+## Important configuration
+
+Common:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_BOT_USERNAME`
+- `REDIS_HOST`
+- `REDIS_PORT`
+- `REDIS_DB`
+- `MODE=queue|reject`
+- `PAIR_CODE_TTL_SECONDS`
+- `MCP_HTTP_HOST`
+- `MCP_HTTP_PORT`
+- `MCP_HTTP_PATH`
+- `MCP_HTTP_BEARER_TOKEN`
+- `TMUX_SOCKET_PATH`
+- `TMUX_NUDGE_ENABLED`
+- `TMUX_NUDGE_DEBOUNCE_SECONDS`
+- `TMUX_NUDGE_COOLDOWN_SECONDS`
+- `WEBAPP_ENABLED`
+- `WEBAPP_BASE_PATH`
+- `WEBAPP_LAUNCH_MODE=default|expand|fullscreen`
+- `MCP_XCHANGE_DIR`
+- `PROXY_USE=http|socks5`
+- `HTTP_PROXY`
+- `SOCKS5_PROXY`
+
+Client-only:
+
+- `DISTRIBUTED_MODE=client`
+- `GATEWAY_PUBLIC_URL` optional
+- `GATEWAY_WS_URL` optional
+- `GATEWAY_WS_PATH`
+- `GATEWAY_AUTH_TOKEN` optional
+
+Gateway / both:
+
+- `DISTRIBUTED_MODE=gateway|both`
+- `PORT`
+- `ROOT_PREFIX=/api`
+- `DB_HOST`
+- `DB_PORT`
+- `DB_USER`
+- `DB_PASSWORD`
+- `DB_NAME`
+- optional `RMQ_HOST`
+- optional `RMQ_PORT`
+- optional `RMQ_USER`
+- optional `RMQ_PASSWORD`
+- optional `RMQ_VHOST`
+- optional `RMQ_EXCHANGE`
+
+For ready-to-edit templates, use:
+
+- `.env.example.client`
+- `.env.example.gateway`
+- `tellymcp init client|gateway|both`
+
 ## What it does
 
 Flow:
@@ -63,7 +299,7 @@ Flow:
 
 Telegram is implemented as the first transport backend. Tool orchestration does not depend on Telegram-specific APIs directly.
 
-For maintainers and future extension work, see [DEVELOPMENT.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/docs/DEVELOPMENT.md).
+For maintainers and future extension work, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 Canonical instructions:
 
@@ -75,143 +311,6 @@ Canonical instructions:
 - when behavior changes materially, bump both:
   - the `TOOLS.md` version marker
   - the file content itself
-
-## Requirements
-
-- Node.js 24+
-- Redis
-- a Telegram bot token from BotFather
-
-## Quick start
-
-Default install flow is now:
-
-```bash
-npm install -g @deadragdoll/tellymcp
-```
-
-Initialize a node:
-
-```bash
-tellymcp init client
-```
-
-or
-
-```bash
-tellymcp init gateway
-```
-
-Then edit the generated `.env` and run:
-
-```bash
-tellymcp run
-```
-
-Check the node before pairing or adding MCP:
-
-```bash
-tellymcp doctor
-```
-
-## Telegram setup
-
-1. Open BotFather in Telegram.
-2. Create a bot with `/newbot`.
-3. Save the bot token.
-4. If you want deep-link hints in tool output, also set `TELEGRAM_BOT_USERNAME`.
-
-## Environment
-
-If you run the published package, prefer:
-
-- `tellymcp init client`
-- `tellymcp init gateway`
-- `tellymcp init both`
-
-If you run directly from this repository, copy `.env.example.client` or `.env.example.gateway` to `.env` and fill in the values.
-
-`doctor` is mode-aware:
-
-- `client`
-  - checks `tmux`
-  - checks `.env`
-  - checks Redis
-  - checks external gateway `healthz`
-  - checks `GATEWAY_WS_URL`
-  - checks `WEBAPP_PUBLIC_URL`
-- `gateway` / `both`
-  - checks `tmux`
-  - checks `.env`
-  - checks Redis
-  - checks local `healthz`
-  - checks external public `healthz`
-  - checks public `ws`
-  - checks public `webapp`
-  - checks Postgres
-  - checks RabbitMQ
-
-Important variables:
-
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_BOT_USERNAME` optional, used for `https://t.me/<bot>?start=<code>` hints
-- `PROJECT_NAME` optional, used as the preferred default project/session title
-- `TELEGRAM_MENU_PAYLOAD_TTL_SECONDS` default `300` seconds
-- `TELEGRAM_INBOX_BATCH_SIZE`
-- `PROXY_USE=http|socks5` optional
-- `HTTP_PROXY` required when `PROXY_USE=http`
-- `SOCKS5_PROXY` required when `PROXY_USE=socks5`
-- `REDIS_HOST`
-- `REDIS_PORT`
-- `REDIS_DB`
-- `MODE=queue|reject`
-- `PAIR_CODE_TTL_SECONDS`
-- `MCP_HTTP_HOST`
-- `MCP_HTTP_PORT`
-- `MCP_HTTP_PATH`
-- `MCP_HTTP_BEARER_TOKEN` optional
-- `MCP_HTTP_ENABLE_DEBUG_ROUTES=false` enables HTTP `/sessions`
-- `MCP_HTTP_ENABLE_PRUNE_ROUTE=false` enables HTTP `POST /prune`
-- `DISTRIBUTED_MODE=client|gateway|both`
-- `GATEWAY_PUBLIC_URL` optional relay URL for client mode; if set, partner-note delivery goes through the gateway HTTP surface
-- `GATEWAY_BIND_HOST`
-- `GATEWAY_BIND_PORT`
-- `GATEWAY_WS_URL` optional websocket control-plane URL for client mode
-- `GATEWAY_WS_PATH`
-- `GATEWAY_AUTH_TOKEN`
-- `GATEWAY_DATABASE_URL`
-- `GATEWAY_S3_ENDPOINT`
-- `GATEWAY_S3_BUCKET`
-- `GATEWAY_S3_ACCESS_KEY`
-- `GATEWAY_S3_SECRET_KEY`
-- `ENABLE_LOGFEED=0` disables logfeed logger noise
-- `WEBAPP_ENABLED=false`
-- `WEBAPP_BASE_PATH=/webapp`
-- `WEBAPP_PUBLIC_URL=https://builder.undoo.ru/webapp` required for direct Telegram Mini App launcher on gateway/both nodes
-- `WEBAPP_INITDATA_TTL_SECONDS=300`
-- `WEBAPP_SESSION_TTL_SECONDS=900`
-- `WEBAPP_LAUNCH_MODE=default|expand|fullscreen`
-- `WEBAPP_VISIBLE_SCREENS=2`
-- `WEBAPP_POLL_INTERVAL_MS=2000`
-- `WEBAPP_ACTION_COOLDOWN_MS=150`
-- `TMUX_NUDGE_ENABLED`
-- `TMUX_PROXY_URL` optional, only for special host/container split setups
-- `TMUX_PROXY_TOKEN` optional bearer for the host tmux proxy
-- `TMUX_SOCKET_PATH` optional explicit tmux socket path
-- `TMUX_NUDGE_DEBOUNCE_SECONDS`
-- `TMUX_NUDGE_COOLDOWN_SECONDS`
-- `TMUX_NUDGE_MESSAGE`
-- `LOG_LEVEL`
-- `BROWSER_ENABLED=true`
-- `BROWSER_HEADLESS=false` for local dev visibility, `true` for headless or container usage
-- `BROWSER_DEVTOOLS=false`
-- `BROWSER_ADDRESS=http://localhost:5173` optional default base URL for the dev server
-- `BROWSER_TIMEOUT_MS=20000`
-- `BROWSER_MAX_EVENTS=200`
-- `BROWSER_WAIT_UNTIL=load`
-- `BROWSER_EXECUTABLE_PATH` optional explicit browser binary path
-- `BROWSER_CHANNEL=chrome|chromium|msedge` optional system browser channel
-- `BROWSER_SLOW_MO_MS=0`
 
 Logs are written in two places at the same time:
 
@@ -569,8 +668,7 @@ When a photo or document arrives:
 
 Runtime note:
 
-- in local mode, the main service writes these files directly
-- in Docker mode with `TMUX_PROXY_URL`, the host bridge creates the exchange directory and writes the files on the host side
+- the main service writes these files directly in the local workspace
 
 ## Default session identity
 
@@ -630,58 +728,6 @@ If `MCP_HTTP_BEARER_TOKEN` is configured:
 `yarn dev:gw:telegram` is still available, but it only starts the `telegram_mcp` feature node.
 It does not expose HTTP by itself anymore. `/mcp`, `/webapp`, and `/healthz` are now served only through the Moleculer API gateway aliases in the full `dev:gw` / `start:gw` runtime, or through a separate gateway node in the same namespace.
 
-## Optional host tmux proxy
-
-You do not need the host-side tmux proxy for the normal `tellymcp` install flow.
-
-Use it only when:
-
-- `tellymcp` runs in a container or isolated environment
-- but `tmux` itself stays on the host
-
-If tmux stays on the host but the main service runs in Docker or elsewhere, run the lightweight host-side tmux proxy.
-
-Recommended host deployment is the Go binary built inside Docker and exported to the host:
-
-```bash
-./build-tmux-proxy.sh
-TMUX_PROXY_HOST=0.0.0.0 TMUX_PROXY_TOKEN=your-token ./artifacts/tmux-proxy-go
-```
-
-The Go proxy reads the same local `.env` file by default, so `TMUX_PROXY_HOST`, `TMUX_PROXY_PORT`, `TMUX_PROXY_TOKEN`, and `TMUX_SOCKET_PATH` can live in the shared project configuration.
-
-`build-tmux-proxy.sh` accepts an optional target platform:
-
-```bash
-./build-tmux-proxy.sh linux/amd64
-./build-tmux-proxy.sh darwin/arm64
-./build-tmux-proxy.sh darwin/amd64
-```
-
-Default target is `linux/amd64`. For non-default targets, the script exports into `./artifacts/<os>-<arch>/` unless you pass an explicit output directory as the second argument.
-
-For a Linux host, a minimal `systemd` example is included at [docs/tmux-proxy.service](/home/code4bones/Devs/coding/mcp/telegram_mcp/docs/tmux-proxy.service).
-
-If you need a development fallback, the repository also keeps the tiny Node-based proxy:
-
-```bash
-npm run build
-TMUX_PROXY_HOST=0.0.0.0 TMUX_PROXY_TOKEN=your-token npm run start:tmux-proxy
-```
-
-Then point the main service at it:
-
-```env
-TMUX_PROXY_URL=http://host.docker.internal:8788
-TMUX_PROXY_TOKEN=your-token
-```
-
-The host-side proxy exposes only a tiny tmux HTTP surface for:
-
-- visible buffer capture
-- fixed control actions
-- wake-up line pasting
-
 ## Optional Docker deployment
 
 Docker is no longer required for the default product install flow.
@@ -725,7 +771,7 @@ The compose file:
 - injects `.env`
 - overrides runtime networking so the app talks to local in-container Redis and listens on `0.0.0.0:8787`
 - publishes only `8787:8787`
-- adds `host.docker.internal` so the container can reach a host-side tmux proxy
+- keeps `host.docker.internal` available for optional host-side development integrations
 - persists Redis state in `./data/redis`
 
 After startup:
@@ -740,24 +786,7 @@ Recommended external reverse proxy pattern:
 - external proxy forwards `/webapp/` to `http://<container-host>:8787/webapp/`
 - or, if you prefer, the external proxy can forward a wider prefix directly to `http://<container-host>:8787`
 - no direct external access is needed to in-container Redis
-
-If tmux-driven features are required in Docker mode:
-
-1. Build and run the host-side tmux proxy on the host:
-
-```bash
-./build-tmux-proxy.sh
-TMUX_PROXY_HOST=0.0.0.0 TMUX_PROXY_TOKEN=your-token ./artifacts/tmux-proxy-go
-```
-
-2. Set in `.env` for the containerized service:
-
-```env
-TMUX_PROXY_URL=http://host.docker.internal:8788
-TMUX_PROXY_TOKEN=your-token
-```
-
-This keeps Redis inside the container, while tmux access remains on the host through a minimal HTTP bridge.
+- `tmux` access is expected to be direct from the running `tellymcp` process
 
 Important:
 
@@ -769,13 +798,10 @@ Important:
 
 are all stored in Redis. In the Docker deployment they survive restarts because `./data/redis` is mounted into the container and Redis AOF is enabled.
 
-Optional if the host tmux server uses a non-default socket:
+Optional if the local tmux server uses a non-default socket:
 
 ```bash
-TMUX_SOCKET_PATH=/tmp/tmux-1000/default \
-TMUX_PROXY_HOST=0.0.0.0 \
-TMUX_PROXY_TOKEN=your-token \
-./artifacts/tmux-proxy-go
+TMUX_SOCKET_PATH=/tmp/tmux-1000/default tellymcp run
 ```
 
 ## MCP usage

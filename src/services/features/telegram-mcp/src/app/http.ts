@@ -41,17 +41,9 @@ export type McpHttpHandler = {
   close: () => Promise<void>;
 };
 
-function formatTmuxHttpError(
-  proxyUrl: string | undefined,
-  error: unknown,
-  fallback: string,
-): string {
+function formatTmuxHttpError(error: unknown, fallback: string): string {
   if (isTmuxUnavailableError(error)) {
-    return proxyUrl ? "TMUX bridge is unavailable" : "tmux is unavailable";
-  }
-
-  if (proxyUrl && error instanceof Error) {
-    return `TMUX bridge error: ${error.message}`;
+    return "tmux is unavailable";
   }
 
   return fallback;
@@ -217,10 +209,7 @@ function normalizeBasePath(value: string): string {
 
 function isRelayTmuxUnavailableMessage(error: unknown): boolean {
   const text = error instanceof Error ? error.message : String(error);
-  return (
-    text.includes("TMUX bridge is unavailable") ||
-    text.includes("tmux is unavailable")
-  );
+  return text.includes("tmux is unavailable");
 }
 
 export function createMcpHttpHandler(
@@ -645,11 +634,7 @@ export function createMcpHttpHandler(
           writeText(
             res,
             isTmuxUnavailableError(error) ? 503 : 500,
-            formatTmuxHttpError(
-              runtime.config.tmux.proxyUrl,
-              error,
-              "Failed to capture visible tmux pane",
-            ),
+            formatTmuxHttpError(error, "Failed to capture visible tmux pane"),
           );
         }
         return;
@@ -782,11 +767,7 @@ export function createMcpHttpHandler(
           writeText(
             res,
             isTmuxUnavailableError(error) ? 503 : 500,
-            formatTmuxHttpError(
-              runtime.config.tmux.proxyUrl,
-              error,
-              "Failed to send tmux action",
-            ),
+            formatTmuxHttpError(error, "Failed to send tmux action"),
           );
         }
         return;

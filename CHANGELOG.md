@@ -110,7 +110,7 @@
   - `npm install -g @deadragdoll/tellymcp`
   - `tellymcp init <client|gateway|both>`
   - `tellymcp run`
-- `docker` и `go tmux-proxy` переведены в optional/legacy deployment path, а не в основной user flow
+- старый `go/node tmux-proxy` path полностью удалён, поддерживается только прямой локальный `tmux`
 
 ### Fixed
 - Исправлен `Headers have already sent` при работе MCP/WebApp через общий HTTP runtime.

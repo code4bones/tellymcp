@@ -20,7 +20,6 @@
  - telegram_mcp перенесён под feature-root:
    - код живёт в `src/services/features/telegram-mcp/src/{app,entities,features,processes,shared}`
    - `runtime.service.ts` остаётся core runtime service для этой feature
-   - `tmux-proxy` остаётся отдельным host utility entrypoint
  - Moleculer bootstrap для telegram_mcp подключен:
    - standalone `stdio` удалён
    - HTTP runtime обслуживается самим `telegram_mcp`

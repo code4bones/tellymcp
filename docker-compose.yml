@@ -1,23 +1,76 @@
 services:
-  telegram-human-mcp:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mydb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    restart: unless-stopped
+    profiles: ["rmq"]
+    environment:
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: password
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  tellymcp-gateway:
     build:
       context: .
-      dockerfile: Dockerfile
-    image: telegram-human-mcp:local
+      dockerfile: Dockerfile.gateway
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     env_file:
-      - .env
+      - .env-gateway
     environment:
-      REDIS_HOST: 127.0.0.1
-      REDIS_PORT: 6379
-      REDIS_DB: 0
+      ENV_FILE: /app/.env-gateway
       MCP_HTTP_HOST: 0.0.0.0
-      MCP_HTTP_PORT: 8787
-      MCP_HTTP_PATH: /mcp
+      REDIS_HOST: redis
+      DB_HOST: postgres
     ports:
-      - "8787:8787"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "8080:8080"
     volumes:
-      - ./data/logs:/var/log/telegram-human-mcp
-      - ./data/redis:/var/lib/redis
+      - ./.env-gateway:/app/.env-gateway:ro
+
+volumes:
+  redis_data:
+  postgres_data:
+  rabbitmq_data:

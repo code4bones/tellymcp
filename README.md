@@ -552,10 +552,10 @@ Recommended local dev settings:
 - install browser binaries once with `npx playwright install chromium`
 - install browser binaries once with `tellymcp browser install`
 
-Recommended Docker settings:
+Recommended headless server settings:
 
 - `BROWSER_HEADLESS=true`
-- target the host dev server through `http://host.docker.internal:3000`
+- target the app through a reachable host or LAN address, for example `http://127.0.0.1:3000` or `http://192.168.x.x:3000`
 
 Current browser tools:
 
@@ -829,75 +829,111 @@ If `MCP_HTTP_BEARER_TOKEN` is configured:
 `yarn dev:gw:telegram` is still available, but it only starts the `telegram_mcp` feature node.
 It does not expose HTTP by itself anymore. `/mcp`, `/webapp`, and `/healthz` are now served only through the Moleculer API gateway aliases in the full `dev:gw` / `start:gw` runtime, or through a separate gateway node in the same namespace.
 
-## Optional Docker deployment
+## Optional Docker infrastructure
 
-Docker is no longer required for the default product install flow.
+Docker is no longer the default way to run TellyMCP, but there is one supported container path:
 
-This repository still includes a single-container deployment path without an internal nginx layer for ops/self-hosted scenarios.
+- `gateway`-only container deployment
 
-Inside the container:
+This is intended for a pure control-plane node:
 
-- `node` runs the MCP HTTP service on `0.0.0.0:8787`
-- `redis-server` runs on `127.0.0.1:6379`
-- the application itself serves:
-  - `/mcp`
-  - `/webapp`
-  - `/healthz`
-  - `/sessions`
-  - `/prune`
+- no local agent sessions
+- no local `tmux`
+- no `client` mode
+- no `both` mode
 
-This means an external reverse proxy can forward directly to container port `8787`, while all app routing stays inside the Node service.
+The repository also keeps Docker for local infrastructure:
 
-Build the image fully inside Docker:
+- `redis` for all modes
+- `postgres` for `gateway` / `both`
+- `rabbitmq` only if you want durable fanout on the gateway
+
+Start Redis only, for `standalone` or `client` mode:
 
 ```bash
-docker compose build
+docker compose up -d redis
 ```
 
-Run it:
+Start Redis + Postgres, for `gateway` or `both` mode:
+
+```bash
+docker compose --profile gateway up -d
+```
+
+Add RabbitMQ only when you need it:
+
+```bash
+docker compose --profile gateway --profile rmq up -d
+```
+
+Run a full gateway container stack with Redis and Postgres:
+
+1. Copy the example:
+
+```bash
+cp .env.example.gateway .env-gateway
+```
+
+2. Edit `.env-gateway` and set at minimum:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_BOT_USERNAME`
+- `WEBAPP_PUBLIC_URL`
+- `GATEWAY_PUBLIC_URL`
+- `GATEWAY_WS_URL`
+- `MCP_HTTP_BEARER_TOKEN`
+
+3. Start the stack:
 
 ```bash
 docker compose up -d
 ```
 
-Stop it:
+This starts:
+
+- `redis`
+- `postgres`
+- `tellymcp-gateway`
+
+Inside Docker, compose overrides:
+
+- `MCP_HTTP_HOST=0.0.0.0`
+- `REDIS_HOST=redis`
+- `DB_HOST=postgres`
+
+Public endpoint expectations stay the same:
+
+- `http://127.0.0.1:8080/api/healthz`
+- `http://127.0.0.1:8080/api/mcp`
+- `http://127.0.0.1:8080/api/webapp`
+- `http://127.0.0.1:8080/api/gateway`
+
+Stop everything:
 
 ```bash
 docker compose down
 ```
 
-The compose file:
+Default published ports:
 
-- builds the image from this repository
-- injects `.env`
-- overrides runtime networking so the app talks to local in-container Redis and listens on `0.0.0.0:8787`
-- publishes only `8787:8787`
-- keeps `host.docker.internal` available for optional host-side development integrations
-- persists Redis state in `./data/redis`
+- Redis: `6379`
+- Postgres: `5432`
+- RabbitMQ AMQP: `5672`
+- RabbitMQ UI: `15672`
 
-After startup:
+The TellyMCP process itself should run directly on the host:
 
-- MCP is reachable at `http://<host>:8787/mcp`
-- Mini App static/API routes are reachable under `http://<host>:8787/webapp/`
-- health check is at `http://<host>:8787/healthz`
+```bash
+tellymcp run --env .env
+```
 
-Recommended external reverse proxy pattern:
+This keeps:
 
-- external proxy forwards `/mcp` to `http://<container-host>:8787/mcp`
-- external proxy forwards `/webapp/` to `http://<container-host>:8787/webapp/`
-- or, if you prefer, the external proxy can forward a wider prefix directly to `http://<container-host>:8787`
-- no direct external access is needed to in-container Redis
-- `tmux` access is expected to be direct from the running `tellymcp` process
+- direct `tmux` access
+- simpler debugging
+- the same runtime model for `standalone`, `client`, `gateway`, and `both`
 
-Important:
-
-- pairing state
-- active session bindings
-- inbox messages
-- menu payload buffers
-- WebApp launch/session state
-
-are all stored in Redis. In the Docker deployment they survive restarts because `./data/redis` is mounted into the container and Redis AOF is enabled.
+For `client` and `both`, host execution is still the recommended model.
 
 Optional if the local tmux server uses a non-default socket:
 

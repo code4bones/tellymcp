@@ -236,7 +236,10 @@ export type AppConfig = {
 };
 
 export function loadConfig(): AppConfig {
-  if (existsSync(".env")) {
+  const explicitEnvFile = process.env.ENV_FILE?.trim();
+  if (explicitEnvFile) {
+    process.loadEnvFile(explicitEnvFile);
+  } else if (existsSync(".env")) {
     process.loadEnvFile(".env");
   }
 

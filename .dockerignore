@@ -4,6 +4,14 @@ dist
 .telegram-human-mcp
 *.log
 .env
-xvfb-test.png
+.env-client
+.env-builder
+.env-dev
+.env-prod
 .codex
 .agents
+.mcp-xchange
+artifacts
+logs
+data
+deadragdoll-tellymcp-*.tgz

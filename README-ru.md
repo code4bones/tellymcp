@@ -229,6 +229,99 @@ tellymcp run --env .env
 
 - `https://your-host.example/api/mcp`
 
+## Docker: только для инфраструктуры или для `gateway`-only
+
+Docker больше не является основным способом запуска TellyMCP, но один container path поддерживается:
+
+- запуск только `gateway`-ноды в контейнере
+
+Это вариант именно для чистого control-plane узла:
+
+- без локальных agent sessions
+- без локального `tmux`
+- не для `client`
+- не для `both`
+
+Плюс `docker-compose.yml` по-прежнему может поднимать локальную инфраструктуру:
+
+- `redis` для всех режимов
+- `postgres` для `gateway` / `both`
+- `rabbitmq` только если нужен durable fanout на шлюзе
+
+Только Redis, для `standalone` или `client`:
+
+```bash
+docker compose up -d redis
+```
+
+Redis + Postgres, для `gateway` или `both`:
+
+```bash
+docker compose --profile gateway up -d
+```
+
+Добавить RabbitMQ при необходимости:
+
+```bash
+docker compose --profile gateway --profile rmq up -d
+```
+
+Полный gateway stack в Docker:
+
+1. Скопировать пример:
+
+```bash
+cp .env.example.gateway .env-gateway
+```
+
+2. Отредактировать `.env-gateway` и задать минимум:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_BOT_USERNAME`
+- `WEBAPP_PUBLIC_URL`
+- `GATEWAY_PUBLIC_URL`
+- `GATEWAY_WS_URL`
+- `MCP_HTTP_BEARER_TOKEN`
+
+3. Запустить:
+
+```bash
+docker compose up -d
+```
+
+Это поднимет:
+
+- `redis`
+- `postgres`
+- `tellymcp-gateway`
+
+Внутри Docker compose сам переопределяет:
+
+- `MCP_HTTP_HOST=0.0.0.0`
+- `REDIS_HOST=redis`
+- `DB_HOST=postgres`
+
+Ожидаемые endpoint'ы:
+
+- `http://127.0.0.1:8080/api/healthz`
+- `http://127.0.0.1:8080/api/mcp`
+- `http://127.0.0.1:8080/api/webapp`
+- `http://127.0.0.1:8080/api/gateway`
+
+Остановить всё:
+
+```bash
+docker compose down
+```
+
+Сам TellyMCP при этом запускается напрямую на хосте:
+
+```bash
+tellymcp run --env .env
+```
+
+Для `client` и `both` по-прежнему рекомендуется именно хостовый запуск.
+
 ## Как начать работу с ботом изнутри агента
 
 После подключения MCP можно просто написать агенту обычной фразой, что нужно привязаться к Telegram.

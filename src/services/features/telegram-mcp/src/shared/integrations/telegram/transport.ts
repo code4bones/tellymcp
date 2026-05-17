@@ -58,9 +58,11 @@ import {
   captureTmuxPaneRange,
   deleteXchangeFile,
   getTmuxWindowHeight,
+  isTmuxTargetInvalidError,
   isTmuxUnavailableError,
   listXchangeFiles,
   readWorkspaceFile,
+  resolveTmuxTargetFromHint,
   sendTmuxLiteralLine,
   writeXchangeRelativeFile,
 } from "../tmux/client";
@@ -234,6 +236,7 @@ type StoredAttachmentRecord = {
 };
 
 const LOCAL_INDEX_FILE_NAME = "LOCAL_INDEX.md";
+const TMUX_NUDGE_FAILURE_NOTICE_COOLDOWN_MS = 5 * 60 * 1000;
 
 function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/u, "");
@@ -591,6 +594,7 @@ export class TelegramTransport implements HumanTransport {
   private readonly screenshotMessageMenu: Menu<TelegramMenuContext>;
   private readonly waiters = new Map<string, WaiterRecord>();
   private readonly tmuxNudgeDebounceTimers = new Map<string, NodeJS.Timeout>();
+  private readonly tmuxNudgeFailureNoticeAt = new Map<string, number>();
   private readonly pendingRenames = new Map<string, PendingRenameRecord>();
   private readonly pendingBroadcasts = new Map<string, PendingBroadcastRecord>();
   private readonly pendingPartnerNotes = new Map<string, PendingPartnerNoteRecord>();
@@ -3624,27 +3628,145 @@ export class TelegramTransport implements HumanTransport {
     }
 
     await this.sendTypingForSession(sessionId);
-    await sendTmuxLiteralLine(
-      this.config.tmux,
-      session.tmuxTarget,
-      input.message,
-    );
+
+    let tmuxTarget = session.tmuxTarget;
+
+    try {
+      await sendTmuxLiteralLine(this.config.tmux, tmuxTarget, input.message);
+    } catch (error) {
+      if (isTmuxTargetInvalidError(error)) {
+        const recoveredTarget = await this.tryRecoverTmuxTarget(
+          sessionId,
+          session,
+        );
+
+        if (recoveredTarget) {
+          tmuxTarget = recoveredTarget;
+          await sendTmuxLiteralLine(
+            this.config.tmux,
+            recoveredTarget,
+            input.message,
+          );
+        } else {
+          await this.notifyTmuxTargetInvalid(sessionId, session, error);
+          throw error;
+        }
+      } else {
+        throw error;
+      }
+    }
 
     const lastTmuxNudgeAt = new Date(nowMs).toISOString();
     await this.sessionStore.setSession({
       ...session,
+      tmuxTarget,
+      ...(tmuxTarget ? { tmuxPaneId: tmuxTarget } : {}),
       lastTmuxNudgeAt,
     });
+    this.tmuxNudgeFailureNoticeAt.delete(sessionId);
 
     this.logger.info("tmux nudge sent", {
       sessionId,
       reason: input.reason,
       message: input.message,
       tmuxSessionName: session.tmuxSessionName,
-      tmuxTarget: session.tmuxTarget,
+      tmuxTarget,
       inboxCount,
       lastTmuxNudgeAt,
     });
+  }
+
+  private async tryRecoverTmuxTarget(
+    sessionId: string,
+    session: NonNullable<Awaited<ReturnType<SessionStore["getSession"]>>>,
+  ): Promise<string | null> {
+    const recoveredTarget = await resolveTmuxTargetFromHint(this.config.tmux, {
+      tmuxSessionName: session.tmuxSessionName,
+      tmuxWindowName: session.tmuxWindowName,
+      tmuxWindowIndex: session.tmuxWindowIndex,
+      tmuxPaneId: session.tmuxPaneId,
+      tmuxPaneIndex: session.tmuxPaneIndex,
+      tmuxTarget: session.tmuxTarget,
+    });
+
+    if (!recoveredTarget || recoveredTarget === session.tmuxTarget) {
+      return recoveredTarget;
+    }
+
+    await this.sessionStore.setSession({
+      ...session,
+      tmuxTarget: recoveredTarget,
+      tmuxPaneId: recoveredTarget,
+      updatedAt: new Date().toISOString(),
+    });
+
+    this.logger.warn("tmux target auto-recovered", {
+      sessionId,
+      previousTmuxTarget: session.tmuxTarget,
+      recoveredTmuxTarget: recoveredTarget,
+      tmuxSessionName: session.tmuxSessionName,
+      tmuxWindowName: session.tmuxWindowName,
+      tmuxWindowIndex: session.tmuxWindowIndex,
+      tmuxPaneIndex: session.tmuxPaneIndex,
+    });
+
+    return recoveredTarget;
+  }
+
+  private async notifyTmuxTargetInvalid(
+    sessionId: string,
+    session: NonNullable<Awaited<ReturnType<SessionStore["getSession"]>>>,
+    error: unknown,
+  ): Promise<void> {
+    const binding = await this.bindingStore.getBinding(sessionId);
+    if (!binding) {
+      return;
+    }
+
+    const nowMs = Date.now();
+    const lastNoticeAt = this.tmuxNudgeFailureNoticeAt.get(sessionId);
+    if (
+      lastNoticeAt &&
+      nowMs - lastNoticeAt < TMUX_NUDGE_FAILURE_NOTICE_COOLDOWN_MS
+    ) {
+      return;
+    }
+
+    this.tmuxNudgeFailureNoticeAt.set(sessionId, nowMs);
+
+    const sessionLabel = session.label ?? sessionId;
+    const tmuxTarget = session.tmuxTarget ?? "unknown";
+    const errorMessage =
+      error instanceof Error ? error.message : String(error);
+
+    try {
+      await this.sendNotification({
+        sessionId,
+        sessionLabel: "TellyMCP",
+        recipient: {
+          telegramChatId: binding.telegramChatId,
+          telegramUserId: binding.telegramUserId,
+        },
+        message: [
+          `⚠️ Автоматический tmux nudge для сессии ${sessionLabel} не сработал.`,
+          `Сохранённый tmux target больше недействителен: ${tmuxTarget}`,
+          `Ошибка: ${errorMessage}`,
+          "Обычно это значит, что pane/window/session был пересоздан.",
+          "Перепривяжи tmux target для этой сессии.",
+        ].join("\n"),
+      });
+    } catch (notifyError) {
+      this.logger.warn("Failed to deliver tmux target failure notification", {
+        sessionId,
+        tmuxTarget,
+        telegramChatId: binding.telegramChatId,
+        telegramUserId: binding.telegramUserId,
+        notifyError:
+          notifyError instanceof Error
+            ? (notifyError.stack ?? notifyError.message)
+            : String(notifyError),
+      });
+    }
   }
 
   private async sendTypingForSession(sessionId: string): Promise<void> {
@@ -9226,7 +9348,7 @@ export class TelegramTransport implements HumanTransport {
       telegramUserId: input.principal.telegramUserId,
       sourceTelegramMessageId: input.sourceTelegramMessageId,
       text: [
-        "Пользователь просит текущую сессию подготовить сообщение для другой сессии.",
+        "Пользователь просит текущую сессию выполнить работу и отправить результат другой сессии.",
         `Маршрут отправки: ${sourceLabel} -> ${targetLabel}`,
         `Тип: ${input.kind}`,
         `Кратко: ${input.summary}`,
@@ -9238,6 +9360,9 @@ export class TelegramTransport implements HumanTransport {
         "Содержимое для отправки:",
         input.message,
         "",
+        "Не пересылай это как новую задачу в target-сессию.",
+        "Сначала выполни работу в текущей сессии сам.",
+        "Через send_partner_note или send_partner_file отправляй только результат, а не исходное поручение.",
         "Не используй linked partner для отправки. Передай target_session_id явно в send_partner_note.",
         "После подготовки обязательно используй send_partner_note.",
         "Задача не завершена, пока send_partner_note не отработал успешно.",

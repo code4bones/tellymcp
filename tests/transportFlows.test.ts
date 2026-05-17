@@ -250,6 +250,27 @@ describe("TelegramTransport collaboration flows", () => {
     expect(transport.inboxStore.createInboxMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         text: expect.stringContaining(
+          "Не пересылай это как новую задачу в target-сессию.",
+        ),
+      }),
+    );
+    expect(transport.inboxStore.createInboxMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining(
+          "Сначала выполни работу в текущей сессии сам.",
+        ),
+      }),
+    );
+    expect(transport.inboxStore.createInboxMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining(
+          "Через send_partner_note или send_partner_file отправляй только результат, а не исходное поручение.",
+        ),
+      }),
+    );
+    expect(transport.inboxStore.createInboxMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining(
           "Найди файл в локальном workspace и вызови send_partner_file.",
         ),
       }),

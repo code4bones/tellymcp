@@ -24,6 +24,15 @@ export type AllowedTmuxAction =
   | "escape"
   | "interrupt";
 
+export type TmuxTargetHint = {
+  tmuxSessionName?: string | undefined;
+  tmuxWindowName?: string | undefined;
+  tmuxWindowIndex?: number | undefined;
+  tmuxPaneId?: string | undefined;
+  tmuxPaneIndex?: number | undefined;
+  tmuxTarget?: string | undefined;
+};
+
 const ENTER_AFTER_PASTE_DELAY_MS = 75;
 const SUBMIT_LINE_KEY = "C-m";
 
@@ -158,6 +167,14 @@ function buildTmuxArgs(
   return resolvedSocketPath ? ["-S", resolvedSocketPath, ...args] : args;
 }
 
+type TmuxPaneRecord = {
+  sessionName: string;
+  windowName: string;
+  windowIndex: number;
+  paneId: string;
+  paneIndex: number;
+};
+
 export async function ensureXchangeDir(
   config: TmuxRuntimeConfig,
   workspaceDir: string,
@@ -278,6 +295,116 @@ export function isTmuxUnavailableError(error: unknown): boolean {
     message.includes("ENOENT") ||
     message.includes("tmux is unavailable")
   );
+}
+
+export function isTmuxTargetInvalidError(error: unknown): boolean {
+  const message =
+    error instanceof Error ? (error.stack ?? error.message) : String(error);
+  return (
+    message.includes("can't find pane") ||
+    message.includes("can't find window") ||
+    message.includes("can't find session")
+  );
+}
+
+async function listTmuxPanes(
+  config: TmuxRuntimeConfig,
+): Promise<TmuxPaneRecord[]> {
+  const { stdout } = await execFileOutputAsync(
+    "tmux",
+    buildTmuxArgs(config, [
+      "list-panes",
+      "-a",
+      "-F",
+      "#{session_name}\t#{window_name}\t#{window_index}\t#{pane_id}\t#{pane_index}",
+    ]),
+  );
+
+  return stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const [sessionName = "", windowName = "", windowIndexRaw = "", paneId = "", paneIndexRaw = ""] =
+        line.split("\t");
+      return {
+        sessionName,
+        windowName,
+        windowIndex: Number.parseInt(windowIndexRaw, 10),
+        paneId,
+        paneIndex: Number.parseInt(paneIndexRaw, 10),
+      };
+    })
+    .filter(
+      (pane) =>
+        pane.sessionName &&
+        pane.paneId &&
+        Number.isFinite(pane.windowIndex) &&
+        Number.isFinite(pane.paneIndex),
+    );
+}
+
+export async function resolveTmuxTargetFromHint(
+  config: TmuxRuntimeConfig,
+  hint: TmuxTargetHint,
+): Promise<string | null> {
+  const panes = await listTmuxPanes(config);
+
+  const byPaneId = hint.tmuxPaneId
+    ? panes.find((pane) => pane.paneId === hint.tmuxPaneId)
+    : null;
+  if (byPaneId) {
+    return byPaneId.paneId;
+  }
+
+  const exactMatch = panes.find((pane) => {
+    if (!hint.tmuxSessionName) {
+      return false;
+    }
+
+    if (pane.sessionName !== hint.tmuxSessionName) {
+      return false;
+    }
+
+    if (
+      typeof hint.tmuxWindowIndex === "number" &&
+      pane.windowIndex !== hint.tmuxWindowIndex
+    ) {
+      return false;
+    }
+
+    if (
+      typeof hint.tmuxPaneIndex === "number" &&
+      pane.paneIndex !== hint.tmuxPaneIndex
+    ) {
+      return false;
+    }
+
+    if (
+      hint.tmuxWindowName &&
+      pane.windowName !== hint.tmuxWindowName
+    ) {
+      return false;
+    }
+
+    return true;
+  });
+  if (exactMatch) {
+    return exactMatch.paneId;
+  }
+
+  const fallbackBySessionAndPane = panes.find((pane) => {
+    if (!hint.tmuxSessionName || typeof hint.tmuxPaneIndex !== "number") {
+      return false;
+    }
+
+    return (
+      pane.sessionName === hint.tmuxSessionName &&
+      pane.paneIndex === hint.tmuxPaneIndex
+    );
+  });
+
+  return fallbackBySessionAndPane?.paneId ?? null;
 }
 
 export async function getTmuxWindowHeight(

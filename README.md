@@ -11,6 +11,8 @@ TellyMCP is a self-hosted Telegram control plane for coding agents.
 
 It pairs real agent sessions with Telegram, keeps them reachable from mobile, and lets them collaborate across local and remote machines.
 
+It is not tied to one vendor or one coding assistant. If your agent can talk to an MCP server, it can use TellyMCP.
+
 ## Why it exists
 
 Coding agents are useful until they leave the terminal:
@@ -26,6 +28,7 @@ TellyMCP gives each session a mobile control surface and a collaboration layer:
 - session-scoped inbox and notifications
 - workspace-aware file and note handoffs
 - local and remote session collaboration
+- support for mixed agent setups, as long as they speak MCP
 
 ## Core ideas
 
@@ -54,6 +57,7 @@ Telegram HITL is still supported, but it is not the whole story:
 ## Typical use cases
 
 - keep a long-running agent reachable from your phone
+- run different agents side by side, as long as each one can connect over MCP
 - steer a tmux-based session without opening a laptop
 - route work between `frontend`, `backend`, `review`, or other local sessions
 - collaborate with remote sessions through a gateway-backed project

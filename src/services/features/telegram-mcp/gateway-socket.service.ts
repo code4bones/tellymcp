@@ -19,6 +19,7 @@ import {
   captureVisibleTmuxPane,
   isTmuxUnavailableError,
   sendAllowedTmuxAction,
+  sendTmuxLiteralText,
 } from "./src/app/webapp/tmux";
 import {
   hasLocalTargetSession,
@@ -1121,8 +1122,15 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             typeof request.payload?.action === "string"
               ? request.payload.action
               : "";
-          if (!["up", "down", "enter", "slash", "delete", "tab", "escape", "interrupt"].includes(action)) {
+          const text =
+            typeof request.payload?.text === "string"
+              ? request.payload.text
+              : "";
+          if (!["up", "down", "enter", "slash", "delete", "tab", "escape", "interrupt", "text"].includes(action)) {
             throw new Error("Unsupported action");
+          }
+          if (action === "text" && (!text || text.length > 4000)) {
+            throw new Error("Text payload is required and must be <= 4000 characters");
           }
 
           const sessionId = request.local_session_id.trim();
@@ -1131,19 +1139,27 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             throw new Error("tmux target is not configured for this session");
           }
 
-          await sendAllowedTmuxAction(
-            runtime.config.tmux,
-            session.tmuxTarget,
-            action as
-              | "up"
-              | "down"
-              | "enter"
-              | "slash"
-              | "delete"
-              | "tab"
-              | "escape"
-              | "interrupt",
-          );
+          if (action === "text") {
+            await sendTmuxLiteralText(
+              runtime.config.tmux,
+              session.tmuxTarget,
+              text,
+            );
+          } else {
+            await sendAllowedTmuxAction(
+              runtime.config.tmux,
+              session.tmuxTarget,
+              action as
+                | "up"
+                | "down"
+                | "enter"
+                | "slash"
+                | "delete"
+                | "tab"
+                | "escape"
+                | "interrupt",
+            );
+          }
           return {
             type: "live_response",
             request_id: request.request_id,

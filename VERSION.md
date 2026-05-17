@@ -21,6 +21,15 @@ For detailed engineering history, refactors, and internal development notes, see
   - [README.md](README.md)
   - [README-ru.md](README-ru.md)
 - Human-readable release notes in this file.
+- Telegram startup notice:
+  - version
+  - protocol
+  - mode
+  - paired sessions
+  - MCP/WebApp/Gateway endpoints
+- Live text input button:
+  - `[txt]`
+  - sends literal text to tmux without pressing `Enter`
 
 ### Changed
 - Default installation path is now npm-first:
@@ -32,6 +41,7 @@ For detailed engineering history, refactors, and internal development notes, see
   - direct terminal control from Telegram
 - Environment examples were split into dedicated client and gateway variants.
 - Package build/publish flow now validates itself before packing/publishing.
+- CLI now shows package version directly in banners and startup output.
 
 ### Collaboration
 - Project collaboration works across local and remote sessions.
@@ -55,6 +65,18 @@ For detailed engineering history, refactors, and internal development notes, see
   - `Down`
   - `Enter`
 - Live approval flow was added for remote project sessions.
+- Live toolbar now includes:
+  - `/`
+  - `↑`
+  - `↓`
+  - `Enter`
+  - `⌫`
+  - `[txt]`
+  - `Tab`
+  - `Esc`
+  - `Ctrl+C`
+- `Ctrl+C` now asks for confirmation before sending an interrupt to the agent.
+- Mobile toolbar layout now wraps cleanly into two rows instead of collapsing into a centered stack.
 
 ### Browser
 - Browser tools use Playwright Chromium.

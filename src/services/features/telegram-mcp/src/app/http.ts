@@ -24,6 +24,7 @@ import {
   captureVisibleTmuxPane,
   isTmuxUnavailableError,
   sendAllowedTmuxAction,
+  sendTmuxLiteralText,
 } from "./webapp/tmux";
 
 type SessionEntry = {
@@ -660,8 +661,18 @@ export function createMcpHttpHandler(
           typeof Reflect.get(body, "action") === "string"
             ? String(Reflect.get(body, "action"))
             : "";
-        if (!["up", "down", "enter", "slash", "delete", "tab", "escape", "interrupt"].includes(action)) {
+        const text =
+          body &&
+          typeof body === "object" &&
+          typeof Reflect.get(body, "text") === "string"
+            ? String(Reflect.get(body, "text"))
+            : "";
+        if (!["up", "down", "enter", "slash", "delete", "tab", "escape", "interrupt", "text"].includes(action)) {
           writeText(res, 400, "Unsupported action");
+          return;
+        }
+        if (action === "text" && (!text || text.length > 4000)) {
+          writeText(res, 400, "Text payload is required and must be <= 4000 characters");
           return;
         }
 
@@ -688,7 +699,9 @@ export function createMcpHttpHandler(
                 | "delete"
                 | "tab"
                 | "escape"
-                | "interrupt",
+                | "interrupt"
+                | "text",
+              ...(action === "text" ? { text } : {}),
             });
             webAppSessions.touchAction(webAppSession.token, nowMs);
             writeJson(res, 200, {
@@ -734,24 +747,33 @@ export function createMcpHttpHandler(
         }
 
         try {
-          await sendAllowedTmuxAction(
-            runtime.config.tmux,
-            session.tmuxTarget,
-            action as
-              | "up"
-              | "down"
-              | "enter"
-              | "slash"
-              | "delete"
-              | "tab"
-              | "escape"
-              | "interrupt",
-          );
+          if (action === "text") {
+            await sendTmuxLiteralText(
+              runtime.config.tmux,
+              session.tmuxTarget,
+              text,
+            );
+          } else {
+            await sendAllowedTmuxAction(
+              runtime.config.tmux,
+              session.tmuxTarget,
+              action as
+                | "up"
+                | "down"
+                | "enter"
+                | "slash"
+                | "delete"
+                | "tab"
+                | "escape"
+                | "interrupt",
+            );
+          }
           webAppSessions.touchAction(webAppSession.token, nowMs);
           runtime.logger.info("Telegram WebApp action sent to tmux", {
             sessionId: webAppSession.sessionId,
             telegramUserId: webAppSession.telegramUserId,
             action,
+            ...(action === "text" ? { textLength: text.length } : {}),
           });
           writeJson(res, 200, {
             ok: true,

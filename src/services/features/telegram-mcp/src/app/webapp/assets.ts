@@ -43,7 +43,7 @@ body {
   bottom: calc(42px + env(safe-area-inset-bottom, 0px));
   z-index: 30;
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
   flex-wrap: wrap;
   gap: 8px;
   padding: 10px 14px;
@@ -51,6 +51,11 @@ body {
   background: rgba(16, 20, 28, 0.68);
   box-shadow: 0 -18px 40px var(--shadow);
   backdrop-filter: blur(14px);
+}
+
+.toolbar-spacer {
+  flex: 1 1 auto;
+  min-width: 12px;
 }
 
 .btn {
@@ -73,6 +78,28 @@ body {
 .btn:hover { border-color: var(--accent); }
 .btn:disabled { cursor: not-allowed; opacity: 0.55; }
 .btn.danger:hover { border-color: var(--danger); }
+
+.btn.danger {
+  border-color: rgba(255, 116, 116, 0.55);
+  background: linear-gradient(180deg, rgba(78, 18, 24, 0.96) 0%, rgba(50, 14, 18, 0.98) 100%);
+  color: #ffd7d7;
+  box-shadow: inset 0 0 0 1px rgba(255, 116, 116, 0.12);
+}
+
+.btn.danger:hover {
+  border-color: rgba(255, 116, 116, 0.9);
+}
+
+.btn.primary {
+  border-color: rgba(87, 193, 255, 0.45);
+  background: linear-gradient(180deg, rgba(17, 45, 66, 0.96) 0%, rgba(12, 33, 48, 0.98) 100%);
+  color: #d9f3ff;
+  box-shadow: inset 0 0 0 1px rgba(87, 193, 255, 0.1);
+}
+
+.btn.primary:hover {
+  border-color: rgba(87, 193, 255, 0.8);
+}
 
 .statusbar {
   position: fixed;
@@ -139,6 +166,11 @@ body {
     padding: 8px 10px;
   }
 
+  .toolbar-spacer {
+    flex: 1 1 auto;
+    min-width: 12px;
+  }
+
   .btn.compact {
     min-width: 42px;
     padding: 8px 10px;
@@ -171,6 +203,7 @@ const elements = {
   status: document.querySelector("[data-role=status]"),
   updated: document.querySelector("[data-role=updated]"),
   interrupt: document.querySelector("[data-role=interrupt]"),
+  type: document.querySelector("[data-role=type]"),
   esc: document.querySelector("[data-role=escape]"),
   tab: document.querySelector("[data-role=tab]"),
   slash: document.querySelector("[data-role=slash]"),
@@ -573,6 +606,47 @@ async function sendAction(action) {
   }
 }
 
+async function sendTextInput(text) {
+  if (state.actionBusy || !state.token) {
+    return;
+  }
+
+  state.actionBusy = true;
+  try {
+    const response = await fetch(config.basePath + "/api/action", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + state.token,
+      },
+      body: JSON.stringify({ action: "text", text }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || "Failed to send text.");
+    }
+
+    setStatus("Text sent");
+    await refreshVisibleBuffer();
+  } finally {
+    state.actionBusy = false;
+  }
+}
+
+function confirmInterrupt() {
+  return new Promise((resolve) => {
+    if (tg && typeof tg.showConfirm === "function") {
+      tg.showConfirm("Send Ctrl+C to the tmux session? This can stop the running agent.", (ok) => {
+        resolve(Boolean(ok));
+      });
+      return;
+    }
+
+    resolve(window.confirm("Send Ctrl+C to the tmux session? This can stop the running agent."));
+  });
+}
+
 async function refreshVisibleBuffer() {
   const payload = await fetchVisibleBuffer();
   elements.terminal.innerHTML = renderAnsiToHtml(payload.content || "");
@@ -601,7 +675,22 @@ function startPolling() {
 
 function bindUi() {
   elements.interrupt.addEventListener("click", () => {
-    sendAction("interrupt").catch((error) => setStatus(error.message || String(error), true));
+    confirmInterrupt()
+      .then((ok) => {
+        if (!ok) {
+          return;
+        }
+        return sendAction("interrupt");
+      })
+      .catch((error) => setStatus(error.message || String(error), true));
+  });
+
+  elements.type.addEventListener("click", () => {
+    const value = window.prompt("Send text to tmux without Enter:", "");
+    if (value === null || value.length === 0) {
+      return;
+    }
+    sendTextInput(value).catch((error) => setStatus(error.message || String(error), true));
   });
 
   elements.esc.addEventListener("click", () => {
@@ -672,6 +761,7 @@ async function main() {
 
     if (!bootstrapPayload.tmux_target) {
       elements.interrupt.disabled = true;
+      elements.type.disabled = true;
       elements.esc.disabled = true;
       elements.tab.disabled = true;
       elements.slash.disabled = true;
@@ -713,14 +803,16 @@ export function renderWebAppHtml(input: RenderWebAppHtmlInput): string {
   <body>
     <div class="app">
       <div class="toolbar">
-        <button class="btn compact danger" data-role="interrupt" type="button">Ctrl+C</button>
-        <button class="btn compact" data-role="escape" type="button">Esc</button>
-        <button class="btn compact" data-role="tab" type="button">Tab</button>
         <button class="btn compact" data-role="slash" type="button">/</button>
-        <button class="btn compact" data-role="delete" type="button">⌫</button>
         <button class="btn compact" data-role="up" type="button">↑</button>
         <button class="btn compact" data-role="down" type="button">↓</button>
-        <button class="btn compact" data-role="enter" type="button">↵</button>
+        <button class="btn compact primary" data-role="enter" type="button">Enter</button>
+        <button class="btn compact" data-role="delete" type="button">⌫</button>
+        <button class="btn compact" data-role="type" type="button" title="Type text">🔤</button>
+        <button class="btn compact" data-role="tab" type="button">Tab</button>
+        <button class="btn compact" data-role="escape" type="button">Esc</button>
+        <span class="toolbar-spacer" aria-hidden="true"></span>
+        <button class="btn compact danger" data-role="interrupt" type="button">Ctrl+C</button>
       </div>
       <pre class="terminal" data-role="terminal">Waiting for tmux buffer…</pre>
       <div class="statusbar">

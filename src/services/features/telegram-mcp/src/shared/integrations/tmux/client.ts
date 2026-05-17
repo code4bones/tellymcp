@@ -386,12 +386,12 @@ export async function sendAllowedTmuxAction(
   await execFileAsync("tmux", buildTmuxArgs(config, ["send-keys", "-t", target, key]));
 }
 
-export async function sendTmuxLiteralLine(
+export async function sendTmuxLiteralText(
   config: TmuxRuntimeConfig,
   target: string,
   text: string,
 ): Promise<void> {
-  const normalized = text.replace(/\r?\n/g, " ").trim();
+  const normalized = text.replace(/\r?\n/g, " ");
 
   const bufferName = `telegram-mcp-${Date.now().toString(36)}`;
   if (normalized.length > 0) {
@@ -417,7 +417,16 @@ export async function sendTmuxLiteralLine(
         buildTmuxArgs(config, ["delete-buffer", "-b", bufferName]),
       ).catch(() => undefined);
     }
+  }
+}
 
+export async function sendTmuxLiteralLine(
+  config: TmuxRuntimeConfig,
+  target: string,
+  text: string,
+): Promise<void> {
+  await sendTmuxLiteralText(config, target, text);
+  if (text.length > 0) {
     await delay(ENTER_AFTER_PASTE_DELAY_MS);
   }
   await execFileAsync(

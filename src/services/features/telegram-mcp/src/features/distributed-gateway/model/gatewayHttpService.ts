@@ -310,7 +310,9 @@ export class GatewayHttpService {
       | "delete"
       | "tab"
       | "escape"
-      | "interrupt";
+      | "interrupt"
+      | "text";
+    text?: string;
   }): Promise<LiveRelayActionResult> {
     const rawResponse = await this.callBroker<LiveRelayActionResult>(
       "telegramMcp.gatewaySocket.requestLiveRelay",
@@ -320,6 +322,7 @@ export class GatewayHttpService {
         requestType: "action",
         payload: {
           action: input.action,
+          ...(input.action === "text" ? { text: input.text ?? "" } : {}),
         },
       },
       { meta: { internal_call: true } },

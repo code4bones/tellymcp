@@ -11,7 +11,23 @@ TellyMCP — это self-hosted Telegram control plane для coding agents.
 
 Он привязывает реальные agent-сессии к Telegram, делает их доступными с телефона и даёт им работать вместе между локальными и удалёнными машинами.
 
-Ключевые идеи продукта:
+## Зачем он нужен
+
+Coding agents полезны ровно до того момента, пока они не остаются одни в терминале:
+
+- им нужно уточнение, пока тебя нет за компьютером
+- им нужен approval перед рискованным действием
+- им нужно передать скриншот, файл или note между сессиями
+- им нужно быстро подключить человека или другого агента, не ломая общий workflow
+
+TellyMCP даёт каждой сессии мобильную панель управления и collaboration layer:
+
+- `Live` tmux view и лёгкое управление из Telegram
+- session-scoped inbox и уведомления
+- workspace-aware handoff для файлов и note
+- локальную и удалённую коллаборацию между сессиями
+
+## Ключевые идеи продукта
 
 - `Live` tmux view и управление внутри Telegram Mini App
 - `Collab`-сценарии для локальных и удалённых agent-сессий
@@ -19,19 +35,41 @@ TellyMCP — это self-hosted Telegram control plane для coding agents.
 - MCP-native pairing сессий и session-scoped tools
 - optional gateway mode для multi-machine и multi-bot проектов
 
-Human-in-the-loop здесь тоже есть, но это только один слой системы:
+## Human-in-the-loop — это только один слой системы
+
+Telegram HITL здесь тоже есть, но он не исчерпывает продукт:
 
 - задавать человеку уточняющие вопросы через Telegram
 - получать несвязанные входящие сообщения позже через inbox
 - уведомлять человека о прогрессе, blockers и approvals
 
-Что отличает TellyMCP от простого Telegram bot bridge:
+## Что отличает TellyMCP от простого Telegram bot bridge
 
 - он завязан на сессии, а не только на чат
 - он понимает локальные и удалённые collaboration targets
 - у него есть live terminal surface, а не только обмен сообщениями
 - он передаёт файлы через workspace-aware exchange paths, а не просто через ad hoc upload
 - он может работать как standalone node или как gateway-backed control plane
+
+## Типовые сценарии
+
+- держать долгоживущего агента доступным с телефона
+- подруливать tmux-сессией без ноутбука
+- маршрутизировать работу между `frontend`, `backend`, `review` и другими локальными сессиями
+- работать с удалёнными сессиями через gateway-backed project
+- передавать note, скриншоты и реальные файлы через `.mcp-xchange`
+- проверять локальный веб-интерфейс через `browser_*` tools и отправлять результат обратно в Telegram
+
+## Группы инструментов
+
+- pairing и session context
+- Telegram ask/notify/inbox
+- `Live` tmux control
+- browser inspection и screenshots
+- partner notes и partner files
+- tools sync и version checks
+
+Полный список MCP tools лучше держать ниже по README и в самом MCP server, а не на первом экране.
 
 ## Prerequisites
 

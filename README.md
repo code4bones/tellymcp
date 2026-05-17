@@ -11,7 +11,23 @@ TellyMCP is a self-hosted Telegram control plane for coding agents.
 
 It pairs real agent sessions with Telegram, keeps them reachable from mobile, and lets them collaborate across local and remote machines.
 
-Core product ideas:
+## Why it exists
+
+Coding agents are useful until they leave the terminal:
+
+- they need clarification while you are away from the desk
+- they need approval before doing something risky
+- they need screenshots, files, or notes passed between sessions
+- they need a human or another agent to unblock work without breaking flow
+
+TellyMCP gives each session a mobile control surface and a collaboration layer:
+
+- `Live` tmux view and light control from Telegram
+- session-scoped inbox and notifications
+- workspace-aware file and note handoffs
+- local and remote session collaboration
+
+## Core ideas
 
 - `Live` tmux view and control inside Telegram Mini App
 - `Collab` flows for local and remote agent sessions
@@ -19,13 +35,15 @@ Core product ideas:
 - MCP-native session pairing and session-scoped tools
 - optional gateway mode for cross-machine and cross-bot projects
 
-Human-in-the-loop is still part of the product, but it is only one layer of the system:
+## Human-in-the-loop is one layer, not the whole product
+
+Telegram HITL is still supported, but it is not the whole story:
 
 - ask a human for clarification through Telegram
 - receive unsolicited Telegram messages later through an inbox
 - notify a human about progress, blockers, and approvals
 
-What makes TellyMCP different from a simple Telegram bot bridge:
+## What makes it different from a simple Telegram bot bridge
 
 - it is session-based, not just chat-based
 - it understands local and remote collaboration targets
@@ -33,39 +51,25 @@ What makes TellyMCP different from a simple Telegram bot bridge:
 - it moves files through workspace-aware exchange paths, not just ad hoc uploads
 - it can run as a standalone node or as a gateway-backed control plane
 
-Current tools:
+## Typical use cases
 
-- `create_session_pair_code`
-- `clear_session_pairing`
-- `set_session_context`
-- `set_tmux_target`
-- `get_tmux_target`
-- `get_session_context`
-- `clear_session_context`
-- `rename_session`
-- `notify_telegram`
-- `get_telegram_inbox_count`
-- `get_telegram_inbox`
-- `delete_telegram_inbox_message`
-- `ask_user_telegram`
-- `browser_open`
-- `browser_reload`
-- `browser_click`
-- `browser_fill`
-- `browser_press`
-- `browser_wait_for`
-- `browser_wait_for_url`
-- `browser_console`
-- `browser_errors`
-- `browser_network_failures`
-- `browser_clear_logs`
-- `browser_dom`
-- `browser_computed_style`
-- `browser_screenshot`
-- `browser_close`
-- `refresh_tools_markdown`
-- `send_partner_note`
-- `send_partner_file`
+- keep a long-running agent reachable from your phone
+- steer a tmux-based session without opening a laptop
+- route work between `frontend`, `backend`, `review`, or other local sessions
+- collaborate with remote sessions through a gateway-backed project
+- send notes, screenshots, and real files through `.mcp-xchange`
+- inspect or screenshot a local web app with `browser_*` tools and send results back to Telegram
+
+## Tool groups
+
+- session pairing and context
+- Telegram ask/notify/inbox
+- `Live` tmux control
+- browser inspection and screenshots
+- partner notes and partner files
+- tools sync and version checks
+
+The full MCP tool surface is documented later in this README and through the MCP server itself.
 
 ## Prerequisites
 

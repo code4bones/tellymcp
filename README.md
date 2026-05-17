@@ -32,7 +32,9 @@ Current tools:
 - `browser_computed_style`
 - `browser_screenshot`
 - `browser_close`
+- `refresh_tools_markdown`
 - `send_partner_note`
+- `send_partner_file`
 
 ## What it does
 
@@ -46,8 +48,8 @@ Flow:
 5. The MCP client calls `ask_user_telegram` with the linked `session_id`.
 6. The server sends a redacted Telegram message and waits for the answer.
 7. The answer is returned as structured MCP tool output.
-8. Unsolicited Telegram messages are stored in a per-session inbox for later polling by the agent.
-9. If the Telegram message contains a photo or document, the file is downloaded into `.mcp-xchange/` and exposed to the agent through the inbox item.
+8. Unsolicited Telegram messages are stored in a per-session inbox for later agent processing.
+9. If the Telegram message contains a photo or document, the file is written into the session `.mcp-xchange/` and delivered according to the currently open session or collaboration target.
 
 ## Architecture
 
@@ -63,11 +65,46 @@ Telegram is implemented as the first transport backend. Tool orchestration does 
 
 For maintainers and future extension work, see [DEVELOPMENT.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/docs/DEVELOPMENT.md).
 
+Canonical instructions:
+
+- gateway `TOOLS.md` is the canonical instruction source
+- `TOOLS.md` now carries a human-readable version marker near the top of the file
+- gateway/client sync still relies on content hash, not on the version string
+- when behavior changes materially, bump both:
+  - the `TOOLS.md` version marker
+  - the file content itself
+
 ## Requirements
 
 - Node.js 24+
 - Redis
 - a Telegram bot token from BotFather
+
+## Quick start
+
+Default install flow is now:
+
+```bash
+npm install -g @deadragdoll/tellymcp
+```
+
+Initialize a node:
+
+```bash
+tellymcp init client
+```
+
+or
+
+```bash
+tellymcp init gateway
+```
+
+Then edit the generated `.env` and run:
+
+```bash
+tellymcp run
+```
 
 ## Telegram setup
 
@@ -78,14 +115,20 @@ For maintainers and future extension work, see [DEVELOPMENT.md](/home/code4bones
 
 ## Environment
 
-Copy `.env.example` to `.env` and fill in the values.
+If you run the published package, prefer:
+
+- `tellymcp init client`
+- `tellymcp init gateway`
+- `tellymcp init both`
+
+If you run directly from this repository, copy `.env.example.client` or `.env.example.gateway` to `.env` and fill in the values.
 
 Important variables:
 
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_BOT_USERNAME` optional, used for `https://t.me/<bot>?start=<code>` hints
 - `PROJECT_NAME` optional, used as the preferred default project/session title
-- `TELEGRAM_MENU_PAYLOAD_TTL_SECONDS`
+- `TELEGRAM_MENU_PAYLOAD_TTL_SECONDS` default `300` seconds
 - `TELEGRAM_INBOX_BATCH_SIZE`
 - `PROXY_USE=http|socks5` optional
 - `HTTP_PROXY` required when `PROXY_USE=http`
@@ -102,34 +145,37 @@ Important variables:
 - `MCP_HTTP_ENABLE_DEBUG_ROUTES=false` enables HTTP `/sessions`
 - `MCP_HTTP_ENABLE_PRUNE_ROUTE=false` enables HTTP `POST /prune`
 - `DISTRIBUTED_MODE=client|gateway|both`
-- `GATEWAY_PUBLIC_URL` optional future relay URL for client mode
+- `GATEWAY_PUBLIC_URL` optional relay URL for client mode; if set, partner-note delivery goes through the gateway HTTP surface
 - `GATEWAY_BIND_HOST`
 - `GATEWAY_BIND_PORT`
+- `GATEWAY_WS_URL` optional websocket control-plane URL for client mode
+- `GATEWAY_WS_PATH`
 - `GATEWAY_AUTH_TOKEN`
 - `GATEWAY_DATABASE_URL`
 - `GATEWAY_S3_ENDPOINT`
 - `GATEWAY_S3_BUCKET`
 - `GATEWAY_S3_ACCESS_KEY`
 - `GATEWAY_S3_SECRET_KEY`
+- `ENABLE_LOGFEED=0` disables logfeed logger noise
 - `WEBAPP_ENABLED=false`
 - `WEBAPP_BASE_PATH=/webapp`
-- `WEBAPP_PUBLIC_URL=https://builder.undoo.ru/webapp` required for Telegram Mini App launcher
+- `WEBAPP_PUBLIC_URL=https://builder.undoo.ru/webapp` required for direct Telegram Mini App launcher on gateway/both nodes
 - `WEBAPP_INITDATA_TTL_SECONDS=300`
 - `WEBAPP_SESSION_TTL_SECONDS=900`
+- `WEBAPP_LAUNCH_MODE=default|expand|fullscreen`
 - `WEBAPP_VISIBLE_SCREENS=2`
 - `WEBAPP_POLL_INTERVAL_MS=2000`
 - `WEBAPP_ACTION_COOLDOWN_MS=150`
 - `TMUX_NUDGE_ENABLED`
-- `TMUX_PROXY_URL` optional, used when tmux stays on the host and the main service runs elsewhere
+- `TMUX_PROXY_URL` optional, only for special host/container split setups
 - `TMUX_PROXY_TOKEN` optional bearer for the host tmux proxy
 - `TMUX_SOCKET_PATH` optional explicit tmux socket path
 - `TMUX_NUDGE_DEBOUNCE_SECONDS`
 - `TMUX_NUDGE_COOLDOWN_SECONDS`
 - `TMUX_NUDGE_MESSAGE`
 - `LOG_LEVEL`
-- `LOG_FILE_PATH`
 - `BROWSER_ENABLED=true`
-- `BROWSER_HEADLESS=false` for local dev visibility, `true` for Docker/headless usage
+- `BROWSER_HEADLESS=false` for local dev visibility, `true` for headless or container usage
 - `BROWSER_DEVTOOLS=false`
 - `BROWSER_ADDRESS=http://localhost:5173` optional default base URL for the dev server
 - `BROWSER_TIMEOUT_MS=20000`
@@ -142,13 +188,7 @@ Important variables:
 Logs are written in two places at the same time:
 
 - pretty console output to `stderr`
-- JSONL file at `LOG_FILE_PATH`
-
-Default file path:
-
-```text
-.telegram-human-mcp/log.jsonl
-```
+- JSONL file at `.telegram-human-mcp/log.jsonl`
 
 If Telegram access requires a proxy, the bot transport can use:
 
@@ -171,33 +211,86 @@ The service now has a role-oriented distributed scaffold:
 - `DISTRIBUTED_MODE=client`
   - current default
   - full local Telegram/MCP/tmux/browser flow
-  - collaboration currently uses the local linked-session backend
+  - local `🏠 Local` flow works directly
+  - remote `👥 Collab` flow goes through gateway when `GATEWAY_PUBLIC_URL` is configured
 - `DISTRIBUTED_MODE=gateway`
   - enables `/gateway/*` HTTP surface
-  - intended future relay role for multi-developer / multi-bot setups
+  - serves as the shared relay/control plane
 - `DISTRIBUTED_MODE=both`
   - exposes both local service behavior and gateway HTTP surface in one process
 
 Current implementation status:
 
-- gateway routes are scaffolded
 - `GET /gateway/healthz` works
-- relay delivery through Postgres/S3 is not implemented yet
-- current collaboration delivery still uses the local linked-session backend
+- `POST /gateway/client/register` works
+- `POST /gateway/projects/create` works
+- `POST /gateway/projects/join` works
+- `POST /gateway/sessions/register` works
+- `POST /gateway/partner-note` works
+- `ws` control-plane is active
+- optional `RabbitMQ` exchange can be enabled for durable gateway-side event fanout
+- if `GATEWAY_PUBLIC_URL` is configured, partner-note delivery goes through the gateway HTTP surface
+- in `DISTRIBUTED_MODE=both`, this also covers same-bot local delivery transparently
+- remote project messaging and delivery status go through the gateway DB and `ws`
+- gateway-relayed `Live View` goes through `ws` for client nodes without their own public domain
+- `Collab -> Tools -> History` sends a markdown export of the last 5 Collab events
+  for the current active session
+- `TOOLS.md` sync is state-based:
+  - client sends per-session `tools_hash` in `ws hello`
+  - gateway compares against canonical gateway `TOOLS.md`
+  - mismatch triggers `tools_event`
+  - client also self-checks on `hello_ack`
+  - gateway periodically rechecks online sockets for changed gateway `TOOLS.md`
+
+Mode-specific runtime requirements:
+
+- `client`
+  - local Redis
+  - `GATEWAY_PUBLIC_URL`
+  - optional local tmux proxy only when tmux is not directly reachable
+  - no gateway Postgres bootstrap is performed
+- `gateway`
+  - Postgres is required for gateway persistence
+  - optional `RMQ_*` enables durable gateway-side event dispatch
+- `both`
+  - Postgres is required because the gateway role is active
+  - optional `RMQ_*` enables durable gateway-side event dispatch
+
+Current file model:
+
+- exchange files and screenshots live directly in local `.mcp-xchange`
+- remote delivery sends payloads through gateway delivery events
+- `vfs/minio` are no longer part of the active Telegram file exchange path
+- if an agent must send a real local file to a partner, prefer `send_partner_file`
+  over plain `send_partner_note`
+
+Current presence model:
+
+- gateway knows whether a client node is online through active `ws`
+- gateway also updates `gateway_clients.last_seen_at`
+- there is no separate heartbeat of the coding agent process inside each session yet
+- because of that, a status screen can honestly show client `online/offline`, but not guaranteed agent `online/offline`
 
 ## Mini App
 
-If `WEBAPP_ENABLED=true` and `WEBAPP_PUBLIC_URL` is configured, the session menu exposes `🖥 Live`.
+If `WEBAPP_ENABLED=true`, the session menu exposes `🖥 Live`.
 
 The Mini App:
 
 - is served by this same Node service under `WEBAPP_BASE_PATH`
-- uses vanilla JS and polls the visible tmux pane area
+- in `client` mode can also be opened through the shared gateway domain
+- uses vanilla JS and reads the visible tmux pane area through gateway/client relay
 - validates Telegram `initData` server-side using the official hash check
+- can auto-apply launch mode from env:
+  - `default`
+  - `expand`
+  - `fullscreen` with fallback to `expand` when the Telegram client does not support fullscreen
 - requires the Telegram user from `initData` to match the bound session user
 - resolves the active session from the bound Telegram user, so a session id in the URL is not required for normal use
 - deletes the temporary `Open Live View` launcher message after successful Mini App bootstrap
 - allows only a fixed control set:
+  - `Esc`
+  - `Tab`
   - `/`
   - `Backspace`
   - `Up`
@@ -205,6 +298,8 @@ The Mini App:
   - `Enter`
 
 `WEBAPP_VISIBLE_SCREENS` controls how much content the live viewport captures relative to the visible tmux height. The default `2` means about two visible screens of content.
+
+`WEBAPP_PUBLIC_URL` is only required when the node exposes its own public Mini App URL directly. In `DISTRIBUTED_MODE=client` with `GATEWAY_PUBLIC_URL` configured, `🖥 Live` can be opened through the gateway domain instead.
 
 ## Browser feedback
 
@@ -219,6 +314,7 @@ Current browser model:
   - page runtime errors
   - failed or HTTP-error network requests
 - screenshots are written into the same `.mcp-xchange` flow as Telegram file exchange
+- exchange files use the same local `.mcp-xchange` handoff model as Telegram uploads
 
 Recommended local dev settings:
 
@@ -288,22 +384,39 @@ Current root menu behavior:
 Current session menu behavior:
 
 - title is `Session: <name>`
-- primary actions are `Live`, `Content`, `Browser`, `Files`, and `Inbox`
-- collaboration/maintenance actions are `Info`, `Rename`, `Link` or `Unlink`, `Unpair`, `Refresh`, `Back`
-- when a partner session is linked, the menu also shows a short teammate hint in the session text
-- when a partner is linked, the session menu also exposes `Partner`
+- first row: `Live | Content | Browser`
+- second row: `Local | Collab`
+- third row: `Inbox | Storage | Settings`
+- final row: `Back`
+
+`Settings` contains:
+
+- `Info`
+- `Rename`
+- `Unpair`
+- `Back`
 
 Current browser menu behavior:
 
 - `Screenshots`
 - browser screenshots are separated from ordinary uploaded files
 
-File separation rules:
+Current storage behavior:
 
-- `Files` shows only files uploaded from Telegram
-- `Browser -> Screenshots` shows only files created by `browser_screenshot`
+- `Storage` shows `.mcp-xchange` contents for the active session
+- storage entries can be opened and sent back to Telegram as files
 
-Partner link behavior:
+Current file behavior:
+
+- top-level `Files` menu is removed
+- `Browser -> Screenshots` still shows screenshots created by `browser_screenshot`
+- if the user is inside:
+  - the current session
+  - `🏠 Local -> Напарник`
+  - `👥 Collab -> Project -> Member`
+  then the next uploaded file is delivered directly into that target
+
+Local link behavior:
 
 - `Link` opens a list of other sessions visible to the same Telegram identity
 - choosing one creates a mutual partner link between the two sessions
@@ -311,14 +424,12 @@ Partner link behavior:
 - this link is intended for backend/frontend or similar agent collaboration
 - linked agents should use `send_partner_note` for structured collaboration
 
-Partner menu behavior:
+Local partner menu behavior:
 
-- `Partner` opens a linked-session collaboration menu
+- `Local` opens a linked-session collaboration menu
 - available actions are:
   - `Ask`
   - `Share`
-  - `Reply`
-  - `Handoff`
   - `Unlink`
 - the Telegram prompt format is:
   - first line = short summary
@@ -326,14 +437,15 @@ Partner menu behavior:
   - remaining text = full message body
 - partner wake-up semantics:
   - `TMUX_PARTNER_NUDGE_MESSAGE` is for collaboration notes, not for human Telegram inbox
-  - the receiving agent should read `.mcp-xchange/SHARE_INDEX.md` and the newest note first
+  - the receiving agent should read `.mcp-xchange/SHARED_INDEX.md` and the newest note first
 
 Linked-session collaboration contract:
 
 - `send_partner_note` writes one note per event into the partner workspace
 - collaborative notes live under `.mcp-xchange/shares/`
 - copied artifacts live under `.mcp-xchange/shares/files/<share_id>/`
-- `.mcp-xchange/SHARE_INDEX.md` acts as the append-only index of partner-facing notes
+- `.mcp-xchange/SHARED_INDEX.md` acts as the append-only index of partner-facing notes
+- `.mcp-xchange/LOCAL_INDEX.md` acts as the append-only index of local agent-facing handoffs
 - supported note kinds are:
   - `share`
   - `question`
@@ -353,7 +465,24 @@ Linked-session collaboration contract:
   - `share` for one-way status updates
   - `request` for explicit teammate actions
   - `handoff` for transferring results or artifacts
-- before sending a partner note, the agent should call `get_session_context` and verify that `linked_session_id` exists
+- before sending a local partner note, the agent should call `get_session_context` and verify that `linked_session_id` exists
+
+Collab project behavior:
+
+- `👥 Collab` is the project-based multi-machine and multi-bot collaboration flow
+- target session is chosen from `Projects -> <project> -> <member>`
+- member screen layout is:
+  - first row: `Ask | Share`
+  - second row: `Live`
+- semantics inside `Project -> Member` depend on the action:
+  - `Ask` sends a task to the selected member session
+  - expected reply route is `member -> current session`
+  - `Share` creates a task for the current session
+  - expected send route is `current session -> member`
+- `Live` now uses an approval flow before opening the selected member session
+- after approval, the requester receives a fresh `Open Live View` button through the existing webapp relay path
+- direct file uploads still go to that exact target session when a member screen is open
+- if an old member-menu message becomes stale, clicking it deletes that outdated Telegram message instead of leaving a dead keyboard
 
 Recommended share-note structure:
 
@@ -403,13 +532,12 @@ Ordinary Telegram messages may include:
 - photo with optional caption
 - document with optional caption
 
-When a photo or document arrives for the active session:
+When a photo or document arrives:
 
 - the file is downloaded into `MCP_XCHANGE_DIR`, default `.mcp-xchange`, under the paired agent workspace
-- files are written directly into that exchange directory with safe generated names
-- the upload itself does not wake the agent
-- the file appears in the `Files` menu for that session
-- `Передать агенту` creates the inbox item that tells the agent to read that file
+- if the user is already inside a concrete target context, the upload itself is the handoff action
+- otherwise the file is delivered into the currently open session as a local session handoff
+- there is no separate `Files` confirmation screen anymore
 
 Runtime note:
 
@@ -431,46 +559,36 @@ The derived `session_id` is built from that title plus a short stable hash of th
 
 This means you can call session-oriented tools without explicitly passing `session_id` when working in a single project context.
 
-## Install
+## Repository development
 
 ```bash
-npm install
+yarn install
 ```
 
-## Build
+### Build
 
 ```bash
-npm run build
+yarn build
 ```
 
-## Run
+### Run
 
 Development:
 
 ```bash
-npm run dev:service
-```
-
-Legacy stdio development:
-
-```bash
-npm run dev
+yarn dev:gw
 ```
 
 Production build:
 
 ```bash
-npm run build
-npm start
+yarn build
+yarn start:gw
 ```
 
-Legacy stdio mode is still available:
+After startup you should see readiness logs in the console.
 
-```bash
-npm run dev:stdio
-```
-
-After startup you should see readiness logs in the console. The HTTP service exposes:
+In repository dev mode, the HTTP service exposes:
 
 - MCP endpoint at `http://127.0.0.1:8787/mcp` by default
 - health check at `http://127.0.0.1:8787/healthz`
@@ -480,6 +598,18 @@ If `MCP_HTTP_BEARER_TOKEN` is configured:
 - `/mcp` requires `Authorization: Bearer ...`
 - `/sessions` and `/prune` also require the same bearer when enabled
 - Telegram Mini App does not use this bearer directly; it has its own `initData` bootstrap and a short-lived WebApp session token
+
+`yarn dev:gw:telegram` is still available, but it only starts the `telegram_mcp` feature node.
+It does not expose HTTP by itself anymore. `/mcp`, `/webapp`, and `/healthz` are now served only through the Moleculer API gateway aliases in the full `dev:gw` / `start:gw` runtime, or through a separate gateway node in the same namespace.
+
+## Optional host tmux proxy
+
+You do not need the host-side tmux proxy for the normal `tellymcp` install flow.
+
+Use it only when:
+
+- `tellymcp` runs in a container or isolated environment
+- but `tmux` itself stays on the host
 
 If tmux stays on the host but the main service runs in Docker or elsewhere, run the lightweight host-side tmux proxy.
 
@@ -524,9 +654,11 @@ The host-side proxy exposes only a tiny tmux HTTP surface for:
 - fixed control actions
 - wake-up line pasting
 
-## Docker deployment
+## Optional Docker deployment
 
-This repository includes a single-container deployment path without an internal nginx layer.
+Docker is no longer required for the default product install flow.
+
+This repository still includes a single-container deployment path without an internal nginx layer for ops/self-hosted scenarios.
 
 Inside the container:
 
@@ -896,13 +1028,13 @@ Recommended long-running service flow:
 1. Start the service:
 
 ```bash
-npm run dev:service
+yarn dev:gw
 ```
 
 2. Register the already-running MCP endpoint in Codex:
 
 ```bash
-codex mcp add telegramHuman --url http://127.0.0.1:8787/mcp
+codex mcp add telegramHuman --url http://127.0.0.1:8080/api/mcp
 ```
 
 If you enable bearer auth with `MCP_HTTP_BEARER_TOKEN`, register it like this:
@@ -910,7 +1042,7 @@ If you enable bearer auth with `MCP_HTTP_BEARER_TOKEN`, register it like this:
 ```bash
 export TELEGRAM_MCP_BEARER_TOKEN="your-token"
 codex mcp add telegramHuman \
-  --url http://127.0.0.1:8787/mcp \
+  --url http://127.0.0.1:8080/api/mcp \
   --bearer-token-env-var TELEGRAM_MCP_BEARER_TOKEN
 ```
 
@@ -920,18 +1052,20 @@ For externally exposed deployments:
 - keep `/sessions` and `/prune` disabled unless you actively need them
 - leave WebApp access to Telegram `initData` validation plus its short-lived session token flow
 
-Legacy stdio registration remains available:
+This project no longer uses stdio mode. MCP access is exposed only through the HTTP endpoint.
 
-```bash
-chmod +x /home/code4bones/Devs/coding/mcp/telegram_mcp/run-mcp.sh
-codex mcp add telegramHuman -- /home/code4bones/Devs/coding/mcp/telegram_mcp/run-mcp.sh
-```
+Current Moleculer feature services:
 
-Then verify inside Codex with:
-
-```text
-/mcp
-```
+- `telegramMcp.runtime`
+- `telegramMcp.pair`
+- `telegramMcp.sessionContext`
+- `telegramMcp.notify`
+- `telegramMcp.inbox`
+- `telegramMcp.approval`
+- `telegramMcp.browser`
+- `telegramMcp.collaboration`
+- `telegramMcp.mcpServer`
+- `telegramMcp.http`
 
 ## Example AGENTS.md snippet
 

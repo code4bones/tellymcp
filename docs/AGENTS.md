@@ -137,12 +137,12 @@ How to react on the receiving side:
 
 - a partner collaboration wake-up is not the same as a Telegram inbox wake-up
 - if the tmux wake-up mentions:
-  - `SHARE_INDEX.md`
+  - `SHARED_INDEX.md`
   - `partner note`
   - `partner notes`
   then do not start with `get_telegram_inbox`
 - instead:
-  1. open `.mcp-xchange/SHARE_INDEX.md`
+  1. open `.mcp-xchange/SHARED_INDEX.md`
   2. find the newest collaboration note
   3. open that note
   4. read any referenced artifacts
@@ -252,7 +252,7 @@ TELEGRAM_DEFAULT_TIMEOUT_SECONDS=900
 TELEGRAM_MAX_CONTEXT_CHARS=3000
 TELEGRAM_MAX_QUESTION_CHARS=1000
 TELEGRAM_MAX_MESSAGE_CHARS=3900
-TELEGRAM_MENU_PAYLOAD_TTL_SECONDS=86400
+TELEGRAM_MENU_PAYLOAD_TTL_SECONDS=300
 ```
 
 Never hardcode secrets.

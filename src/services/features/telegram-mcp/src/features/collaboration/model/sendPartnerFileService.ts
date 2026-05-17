@@ -1,0 +1,133 @@
+import path from "node:path";
+
+import { lookup as lookupMimeType } from "mime-types";
+
+import type { AppConfig } from "../../../app/config/env";
+import type {
+  SendPartnerFileInput,
+  SendPartnerNoteOutput,
+} from "../../../entities/collaboration/model/types";
+import type { SessionStore } from "../../../shared/api/storage/contract";
+import type { Logger } from "../../../shared/lib/logger/logger";
+import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
+import { readWorkspaceFile } from "../../../shared/integrations/tmux/client";
+import { CollaborationService } from "./collaborationService";
+
+function resolveWorkspaceDir(input: {
+  inputCwd?: string | undefined;
+  sessionCwd?: string | undefined;
+  resolvedCwd: string;
+}): string {
+  if (input.inputCwd?.trim()) {
+    return path.resolve(input.inputCwd.trim());
+  }
+
+  if (input.sessionCwd?.trim()) {
+    return path.resolve(input.sessionCwd.trim());
+  }
+
+  return path.resolve(input.resolvedCwd);
+}
+
+function normalizeWorkspaceRelativePath(
+  workspaceDir: string,
+  filePath: string,
+): string {
+  const trimmed = filePath.trim();
+  if (!trimmed) {
+    throw new Error("file_path is required.");
+  }
+
+  const resolvedWorkspaceDir = path.resolve(workspaceDir);
+  const resolvedFilePath = path.isAbsolute(trimmed)
+    ? path.resolve(trimmed)
+    : path.resolve(resolvedWorkspaceDir, trimmed);
+  const relative = path.relative(resolvedWorkspaceDir, resolvedFilePath);
+
+  if (
+    relative.startsWith("..") ||
+    path.isAbsolute(relative) ||
+    relative.trim() === ""
+  ) {
+    throw new Error("File path is outside the workspace directory.");
+  }
+
+  return relative.split(path.sep).join("/");
+}
+
+export class SendPartnerFileService {
+  public constructor(
+    private readonly config: AppConfig,
+    private readonly sessionStore: SessionStore,
+    private readonly logger: Logger,
+    private readonly projectIdentityResolver: ProjectIdentityResolver,
+    private readonly collaborationService: CollaborationService,
+  ) {}
+
+  public async send(
+    input: SendPartnerFileInput,
+  ): Promise<SendPartnerNoteOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const session = await this.sessionStore.getSession(resolved.sessionId);
+    const workspaceDir = resolveWorkspaceDir({
+      inputCwd: input.cwd,
+      sessionCwd: session?.cwd,
+      resolvedCwd: resolved.cwd,
+    });
+    const relativeFilePath = normalizeWorkspaceRelativePath(
+      workspaceDir,
+      input.file_path,
+    );
+    const fileContent = await readWorkspaceFile(
+      this.config.tmux,
+      workspaceDir,
+      relativeFilePath,
+    );
+    const originalName = path.basename(relativeFilePath);
+    const mimeType = lookupMimeType(originalName) || "application/octet-stream";
+
+    const output = await this.collaborationService.sendPartnerNote({
+      session_id: resolved.sessionId,
+      ...(input.target_session_id?.trim()
+        ? { target_session_id: input.target_session_id.trim() }
+        : {}),
+      ...(input.project_uuid?.trim()
+        ? { project_uuid: input.project_uuid.trim() }
+        : {}),
+      kind: input.kind ?? "handoff",
+      summary:
+        input.summary?.trim() || `Передача файла: ${originalName}`,
+      message:
+        input.message?.trim() || `Передаю файл \`${originalName}\`.`,
+      ...(input.expected_reply?.trim()
+        ? { expected_reply: input.expected_reply.trim() }
+        : {}),
+      ...(typeof input.requires_reply === "boolean"
+        ? { requires_reply: input.requires_reply }
+        : {}),
+      ...(input.in_reply_to?.trim()
+        ? { in_reply_to: input.in_reply_to.trim() }
+        : {}),
+      artifacts: [relativeFilePath],
+      artifact_refs: [
+        {
+          file_path: relativeFilePath,
+          original_name: originalName,
+          mime_type: mimeType,
+          size_bytes: fileContent.byteLength,
+          content_base64: Buffer.from(fileContent).toString("base64"),
+        },
+      ],
+    });
+
+    this.logger.info("Partner file sent through send_partner_file", {
+      sessionId: output.session_id,
+      partnerSessionId: output.partner_session_id,
+      filePath: relativeFilePath,
+      kind: output.kind,
+      shareId: output.share_id,
+    });
+
+    return output;
+  }
+}

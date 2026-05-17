@@ -1,56 +1,122 @@
 {
-  "name": "telegram_mcp",
+  "name": "@deadragdoll/tellymcp",
   "version": "1.0.0",
-  "description": "Telegram Human-in-the-Loop MCP Server",
-  "type": "module",
-  "main": "dist/app/index.js",
+  "description": "TellyMCP - Telegram Human-in-the-Loop MCP Server",
+  "main": "dist/services/features/telegram-mcp/runtime.service.js",
+  "bin": {
+    "tellymcp": "dist/cli.js"
+  },
   "files": [
-    "dist"
+    "dist",
+    "config/templates",
+    "README.md",
+    "CHANGELOG.md",
+    "TOOLS.md",
+    ".env.example.client",
+    ".env.example.gateway"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "telegram",
+    "mcp",
+    "human-in-the-loop",
+    "bot",
+    "agent"
+  ],
+  "_moduleAliases": {
+    "@src": "src",
+    "@core": "src/services/features/core"
+  },
   "scripts": {
-    "dev": "tsx src/app/stdio.ts",
-    "dev:watch": "tsx watch src/app/stdio.ts",
-    "dev:service": "tsx watch src/app/http.ts",
-    "dev:tmux-proxy": "tsx watch src/app/tmux-proxy.ts",
-    "dev:stdio": "tsx src/app/stdio.ts",
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/app/http.js",
-    "start:tmux-proxy": "node dist/app/tmux-proxy.js",
-    "start:stdio": "node dist/app/stdio.js",
+    "mcp:local": "codex mcp add telegramHuman --url http://127.0.0.1:8080/api/mcp",
+    "dev:gw": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_EXPERIMENTAL_RESOLVER=1 NODE_OPTIONS=--openssl-legacy-provider ts-node ./node_modules/moleculer/bin/moleculer-runner.js src/services --config src/moleculer.config.ts --envfile ./.env-dev --hot --mask \"**/*.service.ts\"",
+    "dev:builder": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_EXPERIMENTAL_RESOLVER=1 NODE_OPTIONS=--openssl-legacy-provider ts-node ./node_modules/moleculer/bin/moleculer-runner.js src/services --config src/moleculer.config.ts --envfile ./.env-builder --hot --mask \"**/*.service.ts\"",
+    "dev:gw:telegram": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_EXPERIMENTAL_RESOLVER=1 NODE_OPTIONS=--openssl-legacy-provider ts-node ./node_modules/moleculer/bin/moleculer-runner.js src/services/features/telegram-mcp --config src/moleculer.config.ts --envfile ./.env-dev --hot --mask \"**/*.service.ts\"",
+    "dev:client": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_EXPERIMENTAL_RESOLVER=1 NODE_OPTIONS=--openssl-legacy-provider ts-node ./node_modules/moleculer/bin/moleculer-runner.js src/services --config src/moleculer.config.ts --envfile ./.env-client --hot --mask \"**/*.service.ts\"",
+    "dev": "yarn dev:gw",
+    "dev:watch": "yarn dev:gw",
+    "dev:service": "yarn dev:gw",
+    "dev:tmux-proxy": "tsx watch src/services/features/telegram-mcp/src/app/tmux-proxy.ts",
+    "build": "rm -rf dist && tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
+    "start": "yarn start:gw",
+    "start:gw": "node ./node_modules/moleculer/bin/moleculer-runner.js dist/services --config dist/moleculer.config.js --mask \"**/*.service.js\"",
+    "start:gw:telegram": "node ./node_modules/moleculer/bin/moleculer-runner.js dist/services/features/telegram-mcp --config dist/moleculer.config.js --mask \"**/*.service.js\"",
+    "start:tmux-proxy": "node dist/services/features/telegram-mcp/src/app/tmux-proxy.js",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "node -e \"console.log('No tests configured yet')\"",
-    "test:watch": "node -e \"console.log('No tests configured yet')\""
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
-  "repository": "gitlab:prj/mcp/telegram_mcp.git",
-  "author": "code4bones <p.olesov@code4bones.online>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/code4bones/tellymcp.git"
+  },
+  "homepage": "https://www.npmjs.com/package/@deadragdoll/tellymcp",
+  "bugs": {
+    "url": "https://github.com/code4bones/tellymcp/issues"
+  },
+  "author": "code4bones <code4bones@gmail.com>",
   "license": "MIT",
   "engines": {
     "node": ">=24.0.0"
   },
   "dependencies": {
+    "@apollo/server": "4.3.1",
     "@grammyjs/menu": "^1.3.1",
     "@grammyjs/storage-redis": "^2.5.1",
+    "@graphql-tools/schema": "^10.0.33",
+    "@hapi/accept": "^6.0.3",
     "@modelcontextprotocol/sdk": "^1.18.1",
+    "amqplib": "^2.0.1",
+    "apollo-server-core": "^3.13.0",
+    "dataloader": "^2.2.3",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
     "grammy": "^1.38.3",
+    "graphql": "^16.14.0",
+    "graphql-redis-subscriptions": "2.6.0",
+    "graphql-scalars": "^1.25.0",
+    "graphql-subscriptions": "^2.0.0",
+    "graphql-type-json": "^0.3.2",
+    "graphql-ws": "5.11.2",
     "https-proxy-agent": "^7.0.6",
-    "ioredis": "^5.10.1",
+    "ioredis": "5.3.1",
+    "knex": "^3.2.10",
+    "lodash": "^4.18.1",
+    "mime-types": "^3.0.2",
+    "module-alias": "^2.3.4",
+    "moleculer": "0.14.27",
+    "moleculer-web": "0.10.5",
     "node-fetch": "^3.3.2",
+    "object-hash": "^3.0.0",
+    "pg": "^8.20.0",
     "pino": "^10.3.1",
     "pino-pretty": "^13.1.3",
     "playwright": "^1.60.0",
+    "redis": "5.10.0",
     "socks-proxy-agent": "^8.0.5",
+    "ws": "8.12.0",
     "zod": "^4.1.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.34.0",
+    "@types/amqplib": "^0.10.8",
+    "@types/mime-types": "^3.0.1",
     "@types/node": "^24.3.0",
     "eslint": "^9.34.0",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "eslint-plugin-import": "^2.32.0",
     "globals": "^16.3.0",
     "prettier": "^3.6.2",
+    "ts-node": "^10.9.2",
+    "tsc-alias": "^1.8.17",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
-    "typescript-eslint": "^8.41.0"
+    "typescript-eslint": "^8.41.0",
+    "vitest": "^4.1.6"
   }
 }

@@ -10,3 +10,12 @@ data
 tmux-proxy-go/telegram-human-tmux-proxy
 .mcp-xchange
 .telegram-human-mcp
+public
+logs
+.mcpsession.json
+.env-*
+.env-builder
+.env-client
+.env-prod
+.env-dev
+.resume

@@ -1,0 +1,742 @@
+import { createHash } from "node:crypto";
+
+import { RedisAdapter } from "@grammyjs/storage-redis";
+
+import type {
+  PairCodeRecord,
+  SessionBinding,
+  TelegramPrincipal,
+} from "../../../entities/auth/model/types";
+import type {
+  TelegramInboxMessage,
+  TelegramMenuPayloadRecord,
+  TelegramXchangeFileMeta,
+} from "../../../entities/inbox/model/types";
+import type {
+  PendingRequestRecord,
+  PendingResolution,
+} from "../../../entities/request/model/types";
+import type { SessionContext } from "../../../entities/session/model/types";
+import type {
+  MaintenanceStore,
+  OutgoingDeliveryNotice,
+  ProjectMenuViewState,
+  PendingRequestStore,
+  SessionBindingStore,
+  SessionStore,
+  TelegramInboxStore,
+  TelegramXchangeFileMetaStore,
+  TelegramMenuPayloadStore,
+} from "../../api/storage/contract";
+import { redactSecrets } from "../../lib/redact-secrets/redactSecrets";
+import type { RedisClient } from "../../../app/providers/redis/client";
+
+const KEY_PREFIX = "telegram-mcp";
+
+function sessionKey(sessionId: string): string {
+  return `${KEY_PREFIX}:session:${sessionId}`;
+}
+
+function bindingKey(sessionId: string): string {
+  return `${KEY_PREFIX}:binding:${sessionId}`;
+}
+
+function pairCodeKey(code: string): string {
+  return `${KEY_PREFIX}:pair-code:${code}`;
+}
+
+function requestKey(requestId: string): string {
+  return `${KEY_PREFIX}:request:${requestId}`;
+}
+
+function principalSessionsKey(principal: TelegramPrincipal): string {
+  return `${KEY_PREFIX}:principal:${principal.telegramChatId}:${principal.telegramUserId}:sessions`;
+}
+
+function principalActiveSessionKey(principal: TelegramPrincipal): string {
+  return `${KEY_PREFIX}:principal:${principal.telegramChatId}:${principal.telegramUserId}:active-session`;
+}
+
+function principalActiveSessionMatchPattern(telegramUserId: number): string {
+  return `${KEY_PREFIX}:principal:*:${telegramUserId}:active-session`;
+}
+
+function inboxListKey(sessionId: string): string {
+  return `${KEY_PREFIX}:inbox:${sessionId}`;
+}
+
+function inboxMessageKey(sessionId: string, messageId: string): string {
+  return `${KEY_PREFIX}:inbox-message:${sessionId}:${messageId}`;
+}
+
+function menuPayloadKey(key: string): string {
+  return `${KEY_PREFIX}:menu-payload:${key}`;
+}
+
+function gatewayClientUuidKey(): string {
+  return `${KEY_PREFIX}:gateway:client-uuid`;
+}
+
+function outgoingDeliveryNoticeKey(deliveryUuid: string): string {
+  return `${KEY_PREFIX}:gateway:outgoing-delivery:${deliveryUuid}`;
+}
+
+function projectMenuViewStateKey(projectUuid: string, sessionId: string): string {
+  return `${KEY_PREFIX}:project-menu-view:${projectUuid}:${sessionId}`;
+}
+
+function xchangeFileMetaKey(sessionId: string, filePath: string): string {
+  const fingerprint = createHash("sha1").update(filePath).digest("hex");
+  return `${KEY_PREFIX}:xchange-file:${sessionId}:${fingerprint}`;
+}
+
+function activeRequestKey(): string {
+  return `${KEY_PREFIX}:pending:active`;
+}
+
+function queueKey(): string {
+  return `${KEY_PREFIX}:pending:queue`;
+}
+
+function parseJson<T>(raw: string | null): T | null {
+  if (!raw) {
+    return null;
+  }
+
+  return JSON.parse(raw) as T;
+}
+
+export class RedisStateStore
+  implements
+    SessionStore,
+    SessionBindingStore,
+    PendingRequestStore,
+    TelegramInboxStore,
+    TelegramXchangeFileMetaStore,
+    TelegramMenuPayloadStore,
+    MaintenanceStore
+{
+  private readonly sessionAdapter: RedisAdapter<SessionContext>;
+
+  public constructor(private readonly redis: RedisClient) {
+    this.sessionAdapter = new RedisAdapter<SessionContext>({ instance: redis });
+  }
+
+  public async getSession(sessionId: string): Promise<SessionContext | null> {
+    const session = await this.sessionAdapter.read(sessionKey(sessionId));
+    return session ?? null;
+  }
+
+  public async listSessions(): Promise<SessionContext[]> {
+    const sessions: SessionContext[] = [];
+    let cursor = "0";
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        `${KEY_PREFIX}:session:*`,
+        "COUNT",
+        100,
+      );
+      cursor = nextCursor;
+
+      if (keys.length === 0) {
+        continue;
+      }
+
+      const rows = await this.redis.mget(...keys);
+      for (const row of rows) {
+        const session = parseJson<SessionContext>(row);
+        if (session) {
+          sessions.push(session);
+        }
+      }
+    } while (cursor !== "0");
+
+    return sessions;
+  }
+
+  public async setSession(session: SessionContext): Promise<void> {
+    await this.sessionAdapter.write(sessionKey(session.sessionId), session);
+  }
+
+  public async clearSession(sessionId: string): Promise<void> {
+    await this.unlinkPartnerSession(sessionId);
+    await this.clearInboxMessages(sessionId);
+    await this.clearXchangeFileMetas(sessionId);
+    await this.clearProjectMenuViewStates(sessionId);
+    await this.clearOutgoingDeliveryNoticesForSession(sessionId);
+    await this.sessionAdapter.delete(sessionKey(sessionId));
+  }
+
+  public async createPairCode(
+    record: PairCodeRecord,
+    ttlSeconds: number,
+  ): Promise<boolean> {
+    const result = await this.redis.set(
+      pairCodeKey(record.code),
+      JSON.stringify(record),
+      "EX",
+      ttlSeconds,
+      "NX",
+    );
+    return result === "OK";
+  }
+
+  public async consumePairCode(code: string): Promise<PairCodeRecord | null> {
+    const raw = await this.redis.getdel(pairCodeKey(code));
+    return parseJson<PairCodeRecord>(raw);
+  }
+
+  public async getBinding(sessionId: string): Promise<SessionBinding | null> {
+    const raw = await this.redis.get(bindingKey(sessionId));
+    return parseJson<SessionBinding>(raw);
+  }
+
+  public async setBinding(binding: SessionBinding): Promise<void> {
+    const previous = await this.getBinding(binding.sessionId);
+    if (
+      previous &&
+      (previous.telegramChatId !== binding.telegramChatId ||
+        previous.telegramUserId !== binding.telegramUserId)
+    ) {
+      await this.detachSessionFromPrincipal(previous, binding.sessionId);
+    }
+
+    await this.redis.set(
+      bindingKey(binding.sessionId),
+      JSON.stringify(binding),
+    );
+    await this.redis.sadd(principalSessionsKey(binding), binding.sessionId);
+    await this.redis.set(principalActiveSessionKey(binding), binding.sessionId);
+  }
+
+  public async clearBinding(sessionId: string): Promise<void> {
+    await this.unlinkPartnerSession(sessionId);
+    const existing = await this.getBinding(sessionId);
+    await this.redis.del(bindingKey(sessionId));
+    if (existing) {
+      await this.detachSessionFromPrincipal(existing, sessionId);
+    }
+  }
+
+  public async getActiveSessionIdForPrincipal(
+    principal: TelegramPrincipal,
+  ): Promise<string | null> {
+    return (await this.redis.get(principalActiveSessionKey(principal))) ?? null;
+  }
+
+  public async getActiveSessionIdForTelegramUser(
+    telegramUserId: number,
+  ): Promise<string | null> {
+    let cursor = "0";
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        principalActiveSessionMatchPattern(telegramUserId),
+        "COUNT",
+        50,
+      );
+      cursor = nextCursor;
+
+      if (keys.length === 0) {
+        continue;
+      }
+
+      for (const key of keys) {
+        const sessionId = await this.redis.get(key);
+        if (sessionId) {
+          return sessionId;
+        }
+      }
+    } while (cursor !== "0");
+
+    return null;
+  }
+
+  public async setActiveSessionIdForPrincipal(
+    principal: TelegramPrincipal,
+    sessionId: string,
+  ): Promise<void> {
+    const isBound = await this.redis.sismember(
+      principalSessionsKey(principal),
+      sessionId,
+    );
+    if (!isBound) {
+      await this.redis.sadd(principalSessionsKey(principal), sessionId);
+    }
+    await this.redis.set(principalActiveSessionKey(principal), sessionId);
+  }
+
+  public async listBoundSessionIdsForPrincipal(
+    principal: TelegramPrincipal,
+  ): Promise<string[]> {
+    return this.redis.smembers(principalSessionsKey(principal));
+  }
+
+  public async resetRuntimeState(): Promise<void> {
+    await this.redis.del(activeRequestKey());
+    await this.redis.del(queueKey());
+  }
+
+  public async getActive(): Promise<PendingRequestRecord | null> {
+    const activeId = await this.redis.get(activeRequestKey());
+    if (!activeId) {
+      return null;
+    }
+
+    const raw = await this.redis.get(requestKey(activeId));
+    return parseJson<PendingRequestRecord>(raw);
+  }
+
+  public async createPending(request: PendingRequestRecord): Promise<void> {
+    await this.redis.set(activeRequestKey(), request.requestId);
+    await this.redis.set(
+      requestKey(request.requestId),
+      JSON.stringify(request),
+    );
+  }
+
+  public async updatePending(request: PendingRequestRecord): Promise<void> {
+    await this.redis.set(
+      requestKey(request.requestId),
+      JSON.stringify(request),
+    );
+  }
+
+  public async resolvePending(
+    requestId: string,
+    resolution: PendingResolution,
+  ): Promise<void> {
+    const raw = await this.redis.get(requestKey(requestId));
+    const current = parseJson<PendingRequestRecord>(raw);
+
+    if (!current) {
+      await this.redis.del(activeRequestKey());
+      return;
+    }
+
+    const next: PendingRequestRecord = {
+      ...current,
+      status: resolution.status,
+      ...(resolution.answer
+        ? { answer: redactSecrets(resolution.answer) }
+        : {}),
+      ...(resolution.receivedAt ? { receivedAt: resolution.receivedAt } : {}),
+      ...(resolution.fallbackUsed
+        ? { fallbackIfTimeout: resolution.fallbackUsed }
+        : {}),
+    };
+
+    await this.redis.set(requestKey(requestId), JSON.stringify(next));
+    await this.redis.del(activeRequestKey());
+  }
+
+  public async enqueue(request: PendingRequestRecord): Promise<void> {
+    await this.redis.set(
+      requestKey(request.requestId),
+      JSON.stringify(request),
+    );
+    await this.redis.rpush(queueKey(), request.requestId);
+  }
+
+  public async dequeueNext(): Promise<PendingRequestRecord | null> {
+    const requestId = await this.redis.lpop(queueKey());
+    if (!requestId) {
+      return null;
+    }
+
+    const raw = await this.redis.get(requestKey(requestId));
+    return parseJson<PendingRequestRecord>(raw);
+  }
+
+  public async createInboxMessage(
+    message: TelegramInboxMessage,
+  ): Promise<void> {
+    await this.redis.set(
+      inboxMessageKey(message.sessionId, message.id),
+      JSON.stringify(message),
+    );
+    await this.redis.lpush(inboxListKey(message.sessionId), message.id);
+  }
+
+  public async listInboxMessages(
+    sessionId: string,
+    limit: number,
+  ): Promise<TelegramInboxMessage[]> {
+    const ids = await this.redis.lrange(inboxListKey(sessionId), 0, limit - 1);
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const rows = await this.redis.mget(
+      ...ids.map((messageId) => inboxMessageKey(sessionId, messageId)),
+    );
+
+    return rows
+      .map((row) => parseJson<TelegramInboxMessage>(row))
+      .filter((row): row is TelegramInboxMessage => row !== null);
+  }
+
+  public async countInboxMessages(sessionId: string): Promise<number> {
+    return this.redis.llen(inboxListKey(sessionId));
+  }
+
+  public async getInboxMessage(
+    sessionId: string,
+    messageId: string,
+  ): Promise<TelegramInboxMessage | null> {
+    const raw = await this.redis.get(inboxMessageKey(sessionId, messageId));
+    return parseJson<TelegramInboxMessage>(raw);
+  }
+
+  public async deleteInboxMessage(
+    sessionId: string,
+    messageId: string,
+  ): Promise<boolean> {
+    const deletedCount = await this.redis.del(
+      inboxMessageKey(sessionId, messageId),
+    );
+    await this.redis.lrem(inboxListKey(sessionId), 0, messageId);
+    return deletedCount > 0;
+  }
+
+  public async createMenuPayload(
+    record: TelegramMenuPayloadRecord,
+    ttlSeconds: number,
+  ): Promise<void> {
+    await this.redis.set(
+      menuPayloadKey(record.key),
+      JSON.stringify(record),
+      "EX",
+      ttlSeconds,
+    );
+  }
+
+  public async getMenuPayload(
+    key: string,
+  ): Promise<TelegramMenuPayloadRecord | null> {
+    const raw = await this.redis.get(menuPayloadKey(key));
+    return parseJson<TelegramMenuPayloadRecord>(raw);
+  }
+
+  public async setXchangeFileMeta(meta: TelegramXchangeFileMeta): Promise<void> {
+    await this.redis.set(
+      xchangeFileMetaKey(meta.sessionId, meta.filePath),
+      JSON.stringify(meta),
+    );
+  }
+
+  public async listXchangeFileMetas(
+    sessionId: string,
+  ): Promise<TelegramXchangeFileMeta[]> {
+    const records: TelegramXchangeFileMeta[] = [];
+    let cursor = "0";
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        `${KEY_PREFIX}:xchange-file:${sessionId}:*`,
+        "COUNT",
+        200,
+      );
+      cursor = nextCursor;
+
+      if (keys.length === 0) {
+        continue;
+      }
+
+      const rows = await this.redis.mget(...keys);
+      for (const row of rows) {
+        const meta = parseJson<TelegramXchangeFileMeta>(row);
+        if (meta) {
+          records.push(meta);
+        }
+      }
+    } while (cursor !== "0");
+
+    return records.sort((left, right) =>
+      right.uploadedAt.localeCompare(left.uploadedAt),
+    );
+  }
+
+  public async getXchangeFileMeta(
+    sessionId: string,
+    filePath: string,
+  ): Promise<TelegramXchangeFileMeta | null> {
+    const raw = await this.redis.get(xchangeFileMetaKey(sessionId, filePath));
+    return parseJson<TelegramXchangeFileMeta>(raw);
+  }
+
+  public async deleteXchangeFileMeta(
+    sessionId: string,
+    filePath: string,
+  ): Promise<boolean> {
+    const deletedCount = await this.redis.del(
+      xchangeFileMetaKey(sessionId, filePath),
+    );
+    return deletedCount > 0;
+  }
+
+  public async pruneAll(): Promise<{ deletedKeys: number }> {
+    let cursor = "0";
+    let deletedKeys = 0;
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        `${KEY_PREFIX}:*`,
+        "COUNT",
+        200,
+      );
+      cursor = nextCursor;
+
+      if (keys.length === 0) {
+        continue;
+      }
+
+      deletedKeys += await this.redis.del(...keys);
+    } while (cursor !== "0");
+
+    return { deletedKeys };
+  }
+
+  public async getGatewayClientUuid(): Promise<string | null> {
+    return (await this.redis.get(gatewayClientUuidKey())) ?? null;
+  }
+
+  public async setGatewayClientUuid(clientUuid: string): Promise<void> {
+    await this.redis.set(gatewayClientUuidKey(), clientUuid);
+  }
+
+  public async setProjectMenuViewState(state: ProjectMenuViewState): Promise<void> {
+    await this.redis.set(
+      projectMenuViewStateKey(state.projectUuid, state.sessionId),
+      JSON.stringify(state),
+    );
+  }
+
+  public async listProjectMenuViewStates(projectUuid: string): Promise<ProjectMenuViewState[]> {
+    const states: ProjectMenuViewState[] = [];
+    let cursor = "0";
+    const pattern = `${KEY_PREFIX}:project-menu-view:${projectUuid}:*`;
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        pattern,
+        "COUNT",
+        100,
+      );
+      cursor = nextCursor;
+
+      if (keys.length === 0) {
+        continue;
+      }
+
+      const rows = await this.redis.mget(...keys);
+      for (const row of rows) {
+        const state = parseJson<ProjectMenuViewState>(row);
+        if (state) {
+          states.push(state);
+        }
+      }
+    } while (cursor !== "0");
+
+    return states;
+  }
+
+  public async deleteProjectMenuViewState(
+    sessionId: string,
+    projectUuid: string,
+  ): Promise<boolean> {
+    return (
+      (await this.redis.del(projectMenuViewStateKey(projectUuid, sessionId))) > 0
+    );
+  }
+
+  public async setOutgoingDeliveryNotice(
+    notice: OutgoingDeliveryNotice,
+  ): Promise<void> {
+    await this.redis.set(
+      outgoingDeliveryNoticeKey(notice.deliveryUuid),
+      JSON.stringify(notice),
+    );
+  }
+
+  public async listOutgoingDeliveryNotices(): Promise<OutgoingDeliveryNotice[]> {
+    const notices: OutgoingDeliveryNotice[] = [];
+    let cursor = "0";
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        `${KEY_PREFIX}:gateway:outgoing-delivery:*`,
+        "COUNT",
+        100,
+      );
+      cursor = nextCursor;
+
+      if (keys.length === 0) {
+        continue;
+      }
+
+      const rows = await this.redis.mget(...keys);
+      for (const row of rows) {
+        const notice = parseJson<OutgoingDeliveryNotice>(row);
+        if (notice) {
+          notices.push(notice);
+        }
+      }
+    } while (cursor !== "0");
+
+    return notices;
+  }
+
+  public async deleteOutgoingDeliveryNotice(
+    deliveryUuid: string,
+  ): Promise<boolean> {
+    const deleted = await this.redis.del(outgoingDeliveryNoticeKey(deliveryUuid));
+    return deleted > 0;
+  }
+
+  private async detachSessionFromPrincipal(
+    principal: TelegramPrincipal,
+    sessionId: string,
+  ): Promise<void> {
+    const sessionsKey = principalSessionsKey(principal);
+    const activeKey = principalActiveSessionKey(principal);
+
+    await this.redis.srem(sessionsKey, sessionId);
+
+    const activeSessionId = await this.redis.get(activeKey);
+    if (activeSessionId !== sessionId) {
+      return;
+    }
+
+    const remaining = await this.redis.smembers(sessionsKey);
+    const nextSessionId = remaining[0];
+    if (nextSessionId) {
+      await this.redis.set(activeKey, nextSessionId);
+      return;
+    }
+
+    await this.redis.del(activeKey);
+  }
+
+  private async unlinkPartnerSession(sessionId: string): Promise<void> {
+    const sourceSession = await this.getSession(sessionId);
+    if (!sourceSession?.linkedSessionId) {
+      return;
+    }
+
+    const { linkedSessionId: partnerId } = sourceSession;
+    const { linkedSessionId: _linkedSessionId, ...restSource } = sourceSession;
+    await this.setSession({
+      ...restSource,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const partnerSession = await this.getSession(partnerId);
+    if (!partnerSession || partnerSession.linkedSessionId !== sessionId) {
+      return;
+    }
+
+    const { linkedSessionId: _partnerLinkedSessionId, ...restPartner } =
+      partnerSession;
+    await this.setSession({
+      ...restPartner,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  private async clearInboxMessages(sessionId: string): Promise<void> {
+    const listKey = inboxListKey(sessionId);
+    const messageKeys: string[] = [];
+    let cursor = "0";
+    const pattern = `${KEY_PREFIX}:inbox-message:${sessionId}:*`;
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        pattern,
+        "COUNT",
+        200,
+      );
+      cursor = nextCursor;
+      messageKeys.push(...keys);
+    } while (cursor !== "0");
+
+    if (messageKeys.length > 0) {
+      await this.redis.del(...messageKeys);
+    }
+    await this.redis.del(listKey);
+  }
+
+  private async clearXchangeFileMetas(sessionId: string): Promise<void> {
+    let cursor = "0";
+    const pattern = `${KEY_PREFIX}:xchange-file:${sessionId}:*`;
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        pattern,
+        "COUNT",
+        200,
+      );
+      cursor = nextCursor;
+
+      if (keys.length > 0) {
+        await this.redis.del(...keys);
+      }
+    } while (cursor !== "0");
+  }
+
+  private async clearProjectMenuViewStates(sessionId: string): Promise<void> {
+    let cursor = "0";
+    const pattern = `${KEY_PREFIX}:project-menu-view:*:${sessionId}`;
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        pattern,
+        "COUNT",
+        100,
+      );
+      cursor = nextCursor;
+
+      if (keys.length > 0) {
+        await this.redis.del(...keys);
+      }
+    } while (cursor !== "0");
+  }
+
+  private async clearOutgoingDeliveryNoticesForSession(
+    sessionId: string,
+  ): Promise<void> {
+    const notices = await this.listOutgoingDeliveryNotices();
+    const deliveryUuids = notices
+      .filter((item) => item.sessionId === sessionId)
+      .map((item) => item.deliveryUuid);
+
+    if (deliveryUuids.length === 0) {
+      return;
+    }
+
+    await this.redis.del(
+      ...deliveryUuids.map((deliveryUuid) =>
+        outgoingDeliveryNoticeKey(deliveryUuid),
+      ),
+    );
+  }
+}

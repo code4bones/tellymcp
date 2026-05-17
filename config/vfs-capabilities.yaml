@@ -1,0 +1,63 @@
+vfs:
+  default_scope: fs
+  scope_visible: true
+
+ui:
+  tree_toolbar: true
+  content_toolbar: true
+
+capabilities:
+  scope_create:
+    roles: [admin]
+
+  create:
+    roles: [admin, manager]
+
+  upload:
+    roles: [admin, manager]
+
+  rename:
+    roles: [admin, manager]
+
+  move:
+    roles: [admin, manager]
+
+  delete:
+    roles: [admin, manager]
+
+  access:
+    roles: [admin, manager]
+
+  acl_index:
+    roles: [admin, manager]
+
+  tiles_index:
+    roles: [admin, manager]
+
+  tiles_delete:
+    roles: [admin, manager]
+
+  tools_inspect:
+    roles: [admin, manager]
+
+  file_inspector:
+    link:
+      roles: [admin, manager]
+    name:
+      roles: [admin, manager]
+    mime:
+      roles: [admin, manager]
+    size:
+      roles: [admin, manager]
+    visibility:
+      roles: [admin, manager]
+    created:
+      roles: [admin, manager]
+    devel:
+      roles: [admin, manager]
+    open:
+      roles: [admin, manager]
+    download:
+      roles: [admin, manager]
+    preview:
+      roles: [admin, manager]

@@ -16,6 +16,30 @@ type StandaloneHttpCarrier = Service & {
   httpServer?: Server | null;
 };
 
+function resolveStandaloneBind(runtime: TelegramMcpRuntimeServiceInstance["getRuntime"] extends () => infer TRuntime ? TRuntime : never): {
+  host: string;
+  port: number;
+  publicRootPrefix: string;
+} {
+  const mode = runtime.config.distributed.mode;
+  const publicRootPrefix = process.env.ROOT_PREFIX || "/api";
+
+  if (mode === "gateway" || mode === "both") {
+    const port = Number(process.env.PORT ?? runtime.config.mcp.httpPort);
+    return {
+      host: runtime.config.mcp.httpHost,
+      port,
+      publicRootPrefix,
+    };
+  }
+
+  return {
+    host: runtime.config.mcp.httpHost,
+    port: runtime.config.mcp.httpPort,
+    publicRootPrefix: "/",
+  };
+}
+
 const TelegramMcpStandaloneHttpService: ServiceSchema = {
   name: TELEGRAM_MCP_STANDALONE_HTTP_SERVICE_NAME,
   dependencies: [
@@ -56,8 +80,7 @@ const TelegramMcpStandaloneHttpService: ServiceSchema = {
     }
 
     const runtime = runtimeService.getRuntime();
-    const host = runtime.config.mcp.httpHost;
-    const port = runtime.config.mcp.httpPort;
+    const { host, port, publicRootPrefix } = resolveStandaloneBind(runtime);
 
     this.httpServer = createServer(
       async (req: IncomingMessage, res: ServerResponse) => {
@@ -98,9 +121,18 @@ const TelegramMcpStandaloneHttpService: ServiceSchema = {
     this.logger.info("telegram_mcp standalone HTTP server is ready", {
       host,
       port,
-      mcpPath: runtime.config.mcp.httpPath,
-      webappBasePath: runtime.config.webapp.basePath,
-      gatewayPath: "/gateway",
+      mode: runtime.config.distributed.mode,
+      rootPrefix: publicRootPrefix,
+      mcpPath:
+        publicRootPrefix === "/"
+          ? runtime.config.mcp.httpPath
+          : `${publicRootPrefix}${runtime.config.mcp.httpPath}`,
+      webappBasePath:
+        publicRootPrefix === "/"
+          ? runtime.config.webapp.basePath
+          : `${publicRootPrefix}${runtime.config.webapp.basePath}`,
+      gatewayPath:
+        publicRootPrefix === "/" ? "/gateway" : `${publicRootPrefix}/gateway`,
     });
   },
 

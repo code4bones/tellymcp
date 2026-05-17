@@ -15,13 +15,15 @@ function printHelp(): void {
 
 Usage:
   tellymcp init <client|gateway|both> [directory]
-  tellymcp run
+  tellymcp run [--env <file>]
+  tellymcp run --env=<file>
   tellymcp help
 
 Examples:
   tellymcp init client
   tellymcp init gateway ./gateway-node
   tellymcp run
+  tellymcp run --env .env.client
 `);
 }
 
@@ -75,10 +77,31 @@ function initWorkspace(mode: InitMode, directoryArg?: string): void {
   process.stdout.write(`Next: edit .env, then run: cd ${targetDir} && tellymcp run\n`);
 }
 
-function runRuntime(): void {
-  const envPath = path.resolve(process.cwd(), ".env");
+function resolveRunEnvPath(args: string[]): string {
+  const [firstArg, secondArg] = args;
+
+  if (firstArg?.startsWith("--env=")) {
+    const value = firstArg.slice("--env=".length).trim();
+    if (!value) {
+      fail("Expected a file path after --env=");
+    }
+    return path.resolve(process.cwd(), value);
+  }
+
+  if (firstArg === "--env") {
+    if (!secondArg?.trim()) {
+      fail("Expected a file path after --env");
+    }
+    return path.resolve(process.cwd(), secondArg);
+  }
+
+  return path.resolve(process.cwd(), ".env");
+}
+
+function runRuntime(args: string[]): void {
+  const envPath = resolveRunEnvPath(args);
   if (!existsSync(envPath)) {
-    fail(`Missing ${envPath}. Run 'tellymcp init <client|gateway|both>' first.`);
+    fail(`Missing ${envPath}. Run 'tellymcp init <client|gateway|both>' first or pass --env <file>.`);
   }
 
   const runnerPath = path.join(
@@ -147,7 +170,7 @@ function main(argv: string[]): void {
     return;
   }
 
-  runRuntime();
+  runRuntime(argv.slice(1));
 }
 
 main(process.argv.slice(2));

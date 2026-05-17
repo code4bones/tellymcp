@@ -19,3 +19,4 @@ logs
 .env-prod
 .env-dev
 .resume
+*.tgz

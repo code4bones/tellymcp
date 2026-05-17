@@ -9,7 +9,7 @@ import pc from "picocolors";
 import WebSocket from "ws";
 
 type InitMode = "client" | "gateway" | "both";
-type CliCommand = "help" | "init" | "run" | "mcp" | "doctor";
+type CliCommand = "help" | "init" | "run" | "mcp" | "doctor" | "browser";
 
 const distDir = __dirname;
 const packageRoot = path.resolve(distDir, "..");
@@ -17,6 +17,11 @@ const packageRoot = path.resolve(distDir, "..");
 type TmuxStatus =
   | { found: true; version: string }
   | { found: false };
+
+type PlaywrightBrowserStatus =
+  | { enabled: false }
+  | { enabled: true; installed: true; executablePath: string }
+  | { enabled: true; installed: false; message: string };
 
 function getTmuxStatus(): TmuxStatus {
   const result = spawnSync("tmux", ["-V"], {
@@ -62,6 +67,39 @@ function getTmuxInstallHints(): string[] {
   ];
 }
 
+async function getPlaywrightBrowserStatus(
+  browserEnabled: boolean,
+): Promise<PlaywrightBrowserStatus> {
+  if (!browserEnabled) {
+    return { enabled: false };
+  }
+
+  try {
+    const playwright = await import("playwright");
+    const executablePath = playwright.chromium.executablePath();
+
+    if (executablePath && existsSync(executablePath)) {
+      return {
+        enabled: true,
+        installed: true,
+        executablePath,
+      };
+    }
+
+    return {
+      enabled: true,
+      installed: false,
+      message: "Chromium browser binaries are missing.",
+    };
+  } catch (error) {
+    return {
+      enabled: true,
+      installed: false,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 function printHelp(): void {
   const tmux = getTmuxStatus();
 
@@ -71,6 +109,7 @@ function printHelp(): void {
     "  tellymcp run [--env <file>]",
     "  tellymcp run --env=<file>",
     "  tellymcp doctor [--env <file>]",
+    "  tellymcp browser install",
     "  tellymcp mcp [--url <url>] [--bearer <token>] [--format claude|legacy]",
     "  tellymcp help",
   ]);
@@ -80,6 +119,7 @@ function printHelp(): void {
     "  tellymcp run",
     "  tellymcp run --env .env.client",
     "  tellymcp doctor --env .env.client",
+    "  tellymcp browser install",
     "  tellymcp mcp --help",
   ]);
   if (tmux.found) {
@@ -157,6 +197,18 @@ function printMcpHelp(): void {
     "  tellymcp mcp --url https://builder.undoo.ru/api/mcp",
     "  tellymcp mcp --url https://builder.undoo.ru/api/mcp --bearer YOUR_TOKEN",
     "  tellymcp mcp --url https://builder.undoo.ru/api/mcp --format legacy",
+  ]);
+}
+
+function printBrowserHelp(): void {
+  printBanner("browser helper", "Manage Playwright browser binaries used by browser_* tools");
+  printSection("Usage", [
+    "  tellymcp browser install",
+  ]);
+  printSection("What this command does", [
+    "  Installs the bundled Playwright Chromium browser.",
+    "  Uses the Playwright dependency shipped with TellyMCP.",
+    "  Avoids generic npx warnings about missing local project dependencies.",
   ]);
 }
 
@@ -513,6 +565,8 @@ async function runDoctor(args: string[]): Promise<void> {
   const gatewayWsUrl = parsed.GATEWAY_WS_URL?.trim();
   const publicWebappUrl = parsed.WEBAPP_PUBLIC_URL?.trim();
   const mcpBearerToken = parsed.MCP_HTTP_BEARER_TOKEN?.trim();
+  const browserEnabled =
+    (parsed.BROWSER_ENABLED || "true").trim().toLowerCase() !== "false";
   const externalHealthUrl =
     deriveGatewayHealthUrlFromPublicUrl(publicGatewayUrl || "") ??
     deriveGatewayHealthUrlFromPublicUrl(publicWebappUrl || "");
@@ -532,6 +586,22 @@ async function runDoctor(args: string[]): Promise<void> {
 
   const checks: string[] = [];
   const capabilities: string[] = [];
+
+  const playwrightStatus = await getPlaywrightBrowserStatus(browserEnabled);
+  if (!playwrightStatus.enabled) {
+    checks.push(`${pc.dim("  SKIP")} playwright: browser tools are disabled`);
+    capabilities.push(`${pc.dim("  SKIP")} browser tools: disabled`);
+  } else if (playwrightStatus.installed) {
+    checks.push(
+      `${pc.green("  OK")} playwright chromium: ${playwrightStatus.executablePath}`,
+    );
+    capabilities.push(`${pc.green("  OK")} browser tools: available`);
+  } else {
+    checks.push(
+      `${pc.red("  ERROR")} playwright chromium: ${playwrightStatus.message}`,
+    );
+    capabilities.push(`${pc.red("  ERROR")} browser tools: browsers are not installed`);
+  }
 
   const redisHost = (parsed.REDIS_HOST || "127.0.0.1").trim();
   const redisPort = Number(parsed.REDIS_PORT || 6379);
@@ -681,6 +751,45 @@ async function runDoctor(args: string[]): Promise<void> {
   } else {
     printSection("notes", [`${pc.green("  OK")} No obvious local config issues detected.`]);
   }
+
+  if (browserEnabled && (!playwrightStatus.enabled || !playwrightStatus.installed)) {
+    printSection("playwright", [
+      `${pc.yellow("  ACTION")} Install browser binaries before using browser_* tools:`,
+      "    tellymcp browser install",
+    ]);
+  }
+}
+
+function runBrowserCommand(args: string[]): void {
+  const [subcommand] = args;
+  if (!subcommand || subcommand === "--help" || subcommand === "-h") {
+    printBrowserHelp();
+    return;
+  }
+
+  if (subcommand !== "install") {
+    fail("Supported browser subcommands: install");
+  }
+
+  const cliPath = path.join(packageRoot, "node_modules", "playwright", "cli.js");
+  if (!existsSync(cliPath)) {
+    fail(`Missing bundled Playwright CLI: ${cliPath}`);
+  }
+
+  printBanner("browser install", "Installing bundled Playwright Chromium");
+  const child = spawn(process.execPath, [cliPath, "install", "chromium"], {
+    cwd: process.cwd(),
+    stdio: "inherit",
+    env: process.env,
+  });
+
+  child.on("exit", (code, signal) => {
+    if (signal) {
+      process.kill(process.pid, signal);
+      return;
+    }
+    process.exit(code ?? 0);
+  });
 }
 
 function runRuntime(args: string[]): void {
@@ -749,7 +858,7 @@ function runRuntime(args: string[]): void {
 
 async function main(argv: string[]): Promise<void> {
   const [rawCommand, firstArg, secondArg] = argv;
-  const command: CliCommand = rawCommand === "init" || rawCommand === "run" || rawCommand === "help" || rawCommand === "mcp" || rawCommand === "doctor"
+  const command: CliCommand = rawCommand === "init" || rawCommand === "run" || rawCommand === "help" || rawCommand === "mcp" || rawCommand === "doctor" || rawCommand === "browser"
     ? rawCommand
     : "help";
 
@@ -770,6 +879,11 @@ async function main(argv: string[]): Promise<void> {
 
   if (command === "doctor") {
     await runDoctor(argv.slice(1));
+    return;
+  }
+
+  if (command === "browser") {
+    runBrowserCommand(argv.slice(1));
     return;
   }
 

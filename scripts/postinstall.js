@@ -54,6 +54,11 @@ if (tmux.found) {
 }
 
 line();
+line(`${pc.yellow("INFO")} Browser tools need Playwright browser binaries.`);
+line("If you plan to use browser_* tools, run:");
+line(`  ${pc.bold("tellymcp browser install")}`);
+
+line();
 line(`Check your local setup: ${pc.bold("tellymcp doctor")}`);
 line(`General help: ${pc.bold("tellymcp help")}`);
 line(`MCP setup examples: ${pc.bold("tellymcp mcp --help")}`);

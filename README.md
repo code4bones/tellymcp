@@ -60,6 +60,7 @@ Current tools:
 - a Telegram bot token from BotFather
 - for `gateway` / `both`: Postgres
 - optional for durable fanout on gateway: RabbitMQ
+- for `browser_*` tools: Playwright Chromium browser binaries
 
 ## tmux is strongly recommended
 
@@ -144,6 +145,12 @@ tellymcp mcp --help
 Typical local MCP endpoint in `client` mode:
 
 - `http://127.0.0.1:8787/mcp`
+
+If you plan to use `browser_*` tools, install Chromium once:
+
+```bash
+tellymcp browser install
+```
 
 Detailed step-by-step guide:
 
@@ -519,6 +526,8 @@ Recommended local dev settings:
 - `BROWSER_ADDRESS=http://localhost:5173`
 - start your SPA dev server on `0.0.0.0:5173`
 - open it through `browser_open`
+- install browser binaries once with `npx playwright install chromium`
+- install browser binaries once with `tellymcp browser install`
 
 Recommended Docker settings:
 

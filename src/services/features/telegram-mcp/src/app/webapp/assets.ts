@@ -170,6 +170,7 @@ const elements = {
   session: document.querySelector("[data-role=session]"),
   status: document.querySelector("[data-role=status]"),
   updated: document.querySelector("[data-role=updated]"),
+  interrupt: document.querySelector("[data-role=interrupt]"),
   esc: document.querySelector("[data-role=escape]"),
   tab: document.querySelector("[data-role=tab]"),
   slash: document.querySelector("[data-role=slash]"),
@@ -599,6 +600,10 @@ function startPolling() {
 }
 
 function bindUi() {
+  elements.interrupt.addEventListener("click", () => {
+    sendAction("interrupt").catch((error) => setStatus(error.message || String(error), true));
+  });
+
   elements.esc.addEventListener("click", () => {
     sendAction("escape").catch((error) => setStatus(error.message || String(error), true));
   });
@@ -666,6 +671,7 @@ async function main() {
       bootstrapPayload.session_label || bootstrapPayload.session_id;
 
     if (!bootstrapPayload.tmux_target) {
+      elements.interrupt.disabled = true;
       elements.esc.disabled = true;
       elements.tab.disabled = true;
       elements.slash.disabled = true;
@@ -707,6 +713,7 @@ export function renderWebAppHtml(input: RenderWebAppHtmlInput): string {
   <body>
     <div class="app">
       <div class="toolbar">
+        <button class="btn compact danger" data-role="interrupt" type="button">Ctrl+C</button>
         <button class="btn compact" data-role="escape" type="button">Esc</button>
         <button class="btn compact" data-role="tab" type="button">Tab</button>
         <button class="btn compact" data-role="slash" type="button">/</button>

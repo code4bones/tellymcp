@@ -660,7 +660,7 @@ export function createMcpHttpHandler(
           typeof Reflect.get(body, "action") === "string"
             ? String(Reflect.get(body, "action"))
             : "";
-        if (!["up", "down", "enter", "slash", "delete", "tab", "escape"].includes(action)) {
+        if (!["up", "down", "enter", "slash", "delete", "tab", "escape", "interrupt"].includes(action)) {
           writeText(res, 400, "Unsupported action");
           return;
         }
@@ -687,7 +687,8 @@ export function createMcpHttpHandler(
                 | "slash"
                 | "delete"
                 | "tab"
-                | "escape",
+                | "escape"
+                | "interrupt",
             });
             webAppSessions.touchAction(webAppSession.token, nowMs);
             writeJson(res, 200, {
@@ -743,7 +744,8 @@ export function createMcpHttpHandler(
               | "slash"
               | "delete"
               | "tab"
-              | "escape",
+              | "escape"
+              | "interrupt",
           );
           webAppSessions.touchAction(webAppSession.token, nowMs);
           runtime.logger.info("Telegram WebApp action sent to tmux", {

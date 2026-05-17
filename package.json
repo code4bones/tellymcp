@@ -1,6 +1,6 @@
 {
   "name": "@deadragdoll/tellymcp",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "TellyMCP - Telegram Human-in-the-Loop MCP Server",
   "main": "dist/services/features/telegram-mcp/runtime.service.js",
   "bin": {
@@ -34,6 +34,8 @@
   },
   "scripts": {
     "postinstall": "node ./scripts/postinstall.js",
+    "prepack": "yarn build",
+    "prepublishOnly": "yarn build && yarn lint && yarn test",
     "mcp:local": "codex mcp add telegramHuman --url http://127.0.0.1:8787/mcp",
     "dev:gw": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_EXPERIMENTAL_RESOLVER=1 NODE_OPTIONS=--openssl-legacy-provider ts-node ./node_modules/moleculer/bin/moleculer-runner.js src/services --config src/moleculer.config.ts --envfile ./.env-dev --hot --mask \"**/*.service.ts\"",
     "dev:builder": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_EXPERIMENTAL_RESOLVER=1 NODE_OPTIONS=--openssl-legacy-provider ts-node ./node_modules/moleculer/bin/moleculer-runner.js src/services --config src/moleculer.config.ts --envfile ./.env-builder --hot --mask \"**/*.service.ts\"",

@@ -20,6 +20,7 @@
 2. `tmux`
 3. Redis
 4. Telegram bot token из BotFather
+5. опционально для `browser_*` tools: Playwright Chromium browser binaries
 
 Зачем это нужно:
 
@@ -45,6 +46,12 @@ redis-cli ping
 - Node версии `24.x` или новее
 - `tmux -V` показывает версию
 - `redis-cli ping` возвращает `PONG`
+
+Если планируешь использовать browser automation tools, один раз выполни ещё:
+
+```bash
+tellymcp browser install
+```
 
 ## Шаг 2. Создать Telegram-бота
 
@@ -156,6 +163,7 @@ tellymcp doctor --env .env
 - `.env`
 - Redis
 - локальный MCP bind
+- Playwright Chromium, если browser tools включены
 
 ## Шаг 8. Запустить сервис
 

@@ -1121,7 +1121,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             typeof request.payload?.action === "string"
               ? request.payload.action
               : "";
-          if (!["up", "down", "enter", "slash", "delete", "tab", "escape"].includes(action)) {
+          if (!["up", "down", "enter", "slash", "delete", "tab", "escape", "interrupt"].includes(action)) {
             throw new Error("Unsupported action");
           }
 
@@ -1141,7 +1141,8 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
               | "slash"
               | "delete"
               | "tab"
-              | "escape",
+              | "escape"
+              | "interrupt",
           );
           return {
             type: "live_response",

@@ -20,6 +20,7 @@ Before installation, make sure you have:
 2. `tmux`
 3. Redis
 4. a Telegram bot token from BotFather
+5. optional for `browser_*` tools: Playwright Chromium browser binaries
 
 Why these matter:
 
@@ -45,6 +46,12 @@ Expected:
 - Node version is `24.x` or newer
 - `tmux -V` prints a version
 - `redis-cli ping` returns `PONG`
+
+If you plan to use browser automation tools later, also run:
+
+```bash
+tellymcp browser install
+```
 
 ## Step 2. Create a Telegram bot
 
@@ -156,6 +163,7 @@ In standalone `client` mode it should verify:
 - `.env`
 - Redis
 - local MCP bind
+- Playwright Chromium when browser tools are enabled
 
 ## Step 8. Run the service
 

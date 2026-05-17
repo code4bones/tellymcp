@@ -30,6 +30,12 @@ Browser tools:
 - `browser_screenshot`
 - `browser_close`
 
+Browser runtime rule:
+
+- Browser tools use Playwright Chromium.
+- If browser tools fail because the Playwright browser runtime is missing, install it with `tellymcp browser install`.
+- Do not stop at the installation error itself. Install the browser runtime first, then retry the browser tool.
+
 Collaboration tools:
 
 - `send_partner_note`
@@ -701,6 +707,9 @@ Input:
 - `session_id?`
 
 Notes:
+
+- Browser tools require Playwright Chromium browser binaries.
+- If the runtime is missing, run `tellymcp browser install`, then retry `browser_open`.
 
 - the server always uses `TELEGRAM_INBOX_BATCH_SIZE`
 - the agent should not try to choose its own batch size

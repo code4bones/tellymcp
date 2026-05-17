@@ -373,33 +373,6 @@
   resolved "https://registry.npmjs.org/@pinojs/redact/-/redact-0.4.0.tgz"
   integrity sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==
 
-"@redis/bloom@5.12.1":
-  version "5.12.1"
-  resolved "https://registry.yarnpkg.com/@redis/bloom/-/bloom-5.12.1.tgz#047dbfce93cfa7e5879fb58ad1b2afe87ebb2dc4"
-  integrity sha512-PUUfv+ms7jgPSBVoo/DN4AkPHj4D5TZSd6SbJX7egzBplkYUcKmHRE8RKia7UtZ8bSQbLguLvxVO+asKtQfZWA==
-
-"@redis/client@5.12.1":
-  version "5.12.1"
-  resolved "https://registry.yarnpkg.com/@redis/client/-/client-5.12.1.tgz#a35a2bac546c727d7915d2d91b63a77111e51ebd"
-  integrity sha512-7aPGWeqA3uFm43o19umzdl16CEjK/JQGtSXVPevplTaOU3VJA/rseBC1QvYUz9lLDIMBimc4SW/zrW4S89BaCA==
-  dependencies:
-    cluster-key-slot "1.1.2"
-
-"@redis/json@5.12.1":
-  version "5.12.1"
-  resolved "https://registry.yarnpkg.com/@redis/json/-/json-5.12.1.tgz#52aff987abe4d41ec9644857fb00f16c7a97fdb7"
-  integrity sha512-eOze75esLve4vfqDel7aMX08CNaiLLQS2fV8mpRN9NxPe1rVR4vQyYiW/OgtGUysF6QOr9ANhfxABKNOJfXdKg==
-
-"@redis/search@5.12.1":
-  version "5.12.1"
-  resolved "https://registry.yarnpkg.com/@redis/search/-/search-5.12.1.tgz#b7a738be918c8a7af91e39c5bd2023f30f392981"
-  integrity sha512-ItlxbxC9cKI6IU1TLWoczwJCRb6TdmkEpWv05UrPawqaAnWGRu3rcIqsc5vN483T2fSociuyV1UkWIL5I4//2w==
-
-"@redis/time-series@5.12.1":
-  version "5.12.1"
-  resolved "https://registry.yarnpkg.com/@redis/time-series/-/time-series-5.12.1.tgz#15b6deaaf3716bc2633311c0ed18201c9299392d"
-  integrity sha512-c6JL6E3EcZJuNqKFz+KM+l9l5mpcQiKvTwgA3blt5glWJ8hjDk0yeHN3beE/MpqYIQ8UEX44ItQzgkE/gCBELQ==
-
 "@rolldown/binding-android-arm64@1.0.1":
   version "1.0.1"
   resolved "https://registry.yarnpkg.com/@rolldown/binding-android-arm64/-/binding-android-arm64-1.0.1.tgz#7b250c89f16d74affd581dbe38f702e8c2c644d3"
@@ -1177,7 +1150,7 @@ chokidar@^3.5.3:
   optionalDependencies:
     fsevents "~2.3.2"
 
-cluster-key-slot@1.1.2, cluster-key-slot@^1.1.0:
+cluster-key-slot@^1.1.0:
   version "1.1.2"
   resolved "https://registry.npmjs.org/cluster-key-slot/-/cluster-key-slot-1.1.2.tgz"
   integrity sha512-RMr0FhtfXemyinomL4hrWcYJxmX6deFdCxpJzhDttxgO1+bcCnkk+9drydLVDmAMG7NE6aN/fl4F7ucU/90gAA==
@@ -2118,11 +2091,6 @@ grammy@1.43.0:
     abort-controller "^3.0.0"
     debug "^4.4.3"
     node-fetch "^2.7.0"
-
-graphql@^16.14.0:
-  version "16.14.0"
-  resolved "https://registry.npmjs.org/graphql/-/graphql-16.14.0.tgz"
-  integrity sha512-BBvQ/406p+4CZbTpCbVPSxfzrZrbnuWSP1ELYgyS6B+hNeKzgrdB4JczCa5VZUBQrDa9hUngm0KnexY6pJRN5Q==
 
 has-bigints@^1.0.2:
   version "1.1.0"
@@ -3345,17 +3313,6 @@ redis-parser@^3.0.0:
   integrity sha512-DJnGAeenTdpMEH6uAJRK/uiyEIH9WVsUmoLwzudwGJUwZPp80PDBWPHXSAGNPwNvIXAbe7MSUB1zQFugFml66A==
   dependencies:
     redis-errors "^1.0.0"
-
-redis@5.12.1:
-  version "5.12.1"
-  resolved "https://registry.yarnpkg.com/redis/-/redis-5.12.1.tgz#f95297e01eca8b87a109601a2418647e05f16bee"
-  integrity sha512-LDsoVvb/CpoV9EN3FXvgvSHNJWuCIzl9MiO3ppOevuGLpSGJhwfQjpEwfFJcQvNSddHADDdZaWx0HnmMxRXG7g==
-  dependencies:
-    "@redis/bloom" "5.12.1"
-    "@redis/client" "5.12.1"
-    "@redis/json" "5.12.1"
-    "@redis/search" "5.12.1"
-    "@redis/time-series" "5.12.1"
 
 reflect.getprototypeof@^1.0.6, reflect.getprototypeof@^1.0.9:
   version "1.0.10"

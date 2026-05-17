@@ -1,16 +1,22 @@
-import { GraphQLError } from "graphql";
+export class BackendError extends Error {
+	statusCode: number;
+	code: string;
+	data?: unknown;
 
-export class BackendError extends GraphQLError {
-	constructor(message: string, code?: number, type?: string, data?: any) {
-		super(message, {
-			extensions: {
-				code: code,
-				type: type || code,
-				data,
-			},
-		});
+	constructor(message: string, statusCode: number = 500, code?: string, data?: unknown) {
+		super(message);
+		this.name = "BackendError";
+		this.statusCode = statusCode;
+		this.code = code || String(statusCode);
+		this.data = data;
 	}
 }
+
+export const buildUnhandledBackendErrorCode = (rawName: string): string =>
+	`XC_${rawName.toUpperCase()}`;
+
+export const wrapUnhandledBackendError = (err: Error, rawName: string): BackendError =>
+	new BackendError(err.message, 502, buildUnhandledBackendErrorCode(rawName));
 
 export class UnauthorizedError extends BackendError {
 	constructor(message: string = "Unauthorized", data?: any) {

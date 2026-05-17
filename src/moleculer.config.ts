@@ -8,9 +8,7 @@ import "module-alias/register";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { LogFeedLogger } from "./lib/mixins/logfeed";
-import { BackendError } from "./lib/mixins/session.errors";
-import { GraphQLError } from "graphql";
-import { createTracerMiddleware } from "./lib/middlewares/tracer";
+import { BackendError, wrapUnhandledBackendError } from "./lib/mixins/session.errors";
 
 env.config({ path: process.env.ENV_FILE ?? ".env" });
 
@@ -241,18 +239,15 @@ const brokerConfig: any = {
 		err: unknown,
 		{ ctx, service }: { ctx: unknown; service: unknown }
 	) => {
-		// ctx.service.logger.error("errorHandler", err);
 		if (err instanceof BackendError) {
-			// ctx.meta.$statusCode = err.extensions.code;
 			return err;
 		} else if (err instanceof Error) {
-			// ctx.meta.$statusCode = 502;
 			const rawName =
 				(ctx as any)?.action?.rawName ||
 				(ctx as any)?.action?.name ||
 				(service as any)?.name ||
 				"UNKNOWN";
-			return new BackendError(err.message, 502, `XC_${String(rawName).toUpperCase()}`);
+			return wrapUnhandledBackendError(err, String(rawName));
 		}
 		return err;
 	},
@@ -297,18 +292,13 @@ const brokerConfig: any = {
 	},
 
 	// Register custom middlewares
-	middlewares: [createTracerMiddleware()],
+	middlewares: [],
 
 	// Register custom REPL commands.
 	replCommands: null,
 
 	// Called after broker created.
 	// created(broker: ServiceBroker): void {},
-
-	// Called after broker started.
-	started() {
-		console.log("ALLOWED ORIGINS", (process.env.ORIGINS ?? "").split(","));
-	},
 
 	// Called after broker stopped.
 	// async stopped(broker: ServiceBroker): Promise<void> {},

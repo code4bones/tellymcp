@@ -388,7 +388,7 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     await this.inboxStore.createInboxMessage(inboxMessage);
     await this.telegramTransport.sendNotification({
       sessionId: targetSession.sessionId,
-      ...(targetSession.label ? { sessionLabel: targetSession.label } : {}),
+      sessionLabel: sourceLabel,
       recipient: {
         telegramChatId: targetBinding.telegramChatId,
         telegramUserId: targetBinding.telegramUserId,

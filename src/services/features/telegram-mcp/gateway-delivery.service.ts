@@ -452,7 +452,7 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
       try {
         await runtime.telegramTransport.sendNotification({
           sessionId: targetSession.sessionId,
-          ...(targetSession.label ? { sessionLabel: targetSession.label } : {}),
+          sessionLabel: delivery.source_session_label,
           recipient: {
             telegramChatId: targetBinding.telegramChatId,
             telegramUserId: targetBinding.telegramUserId,

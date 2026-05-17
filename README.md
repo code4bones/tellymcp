@@ -412,10 +412,11 @@ Canonical instructions:
   - the `TOOLS.md` version marker
   - the file content itself
 
-Logs are written in two places at the same time:
+Logs use one runtime model:
 
-- pretty console output to `stderr`
-- JSONL file at `.telegram-human-mcp/log.jsonl`
+- `pino-pretty` console output to `stderr`
+- optional JSONL file sink via `LOG_FILE_ENABLED=true` and `LOG_FILE_PATH=...`
+- optional in-app `LogFeed` buffer for Telegram/UI diagnostics when `ENABLE_LOGFEED=1`
 
 If Telegram access requires a proxy, the bot transport can use:
 

@@ -425,6 +425,9 @@ tellymcp mcp --help
 - `PROXY_USE=http|socks5`
 - `HTTP_PROXY`
 - `SOCKS5_PROXY`
+- `LOG_LEVEL`
+- `LOG_FILE_ENABLED`
+- `LOG_FILE_PATH`
 
 Только client:
 

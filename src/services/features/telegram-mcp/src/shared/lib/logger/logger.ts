@@ -1,12 +1,9 @@
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-
 import pino from "pino";
 
 import type { AppConfig } from "../../../app/config/env";
+import { createPinoTargets } from "../../../../../../../lib/pinoTargets";
 
 type LogMeta = Record<string, unknown>;
-const DEFAULT_LOG_FILE_PATH = ".telegram-human-mcp/log.jsonl";
 
 export interface Logger {
   trace(message: string, meta?: LogMeta): void;
@@ -32,35 +29,17 @@ function write(
 }
 
 export function createLogger(config: AppConfig): Logger {
-  mkdirSync(dirname(DEFAULT_LOG_FILE_PATH), { recursive: true });
-
   const transport = pino.transport({
-    targets: [
-      {
-        target: "pino/file",
-        level: config.logging.level,
-        options: {
-          destination: DEFAULT_LOG_FILE_PATH,
-          mkdir: true,
-        },
-      },
-      {
-        target: "pino-pretty",
-        level: config.logging.level,
-        options: {
-          destination: 2,
-          colorize: true,
-          translateTime: "SYS:standard",
-          ignore: "pid,hostname",
-          singleLine: false,
-        },
-      },
-    ],
+    targets: createPinoTargets({
+      level: config.logging.level,
+      fileEnabled: config.logging.fileEnabled,
+      filePath: config.logging.filePath,
+    }),
   });
 
   const baseLogger = pino(
     {
-      name: "telegram-human-mcp",
+      name: "tellymcp",
       level: config.logging.level,
       timestamp: pino.stdTimeFunctions.isoTime,
     },

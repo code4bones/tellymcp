@@ -414,7 +414,7 @@ export class GatewayHttpService {
     if (pathname === "/gateway/healthz") {
       writeJson(res, 200, {
         ok: true,
-        service: "telegram-human-mcp-gateway",
+        service: "tellymcp-gateway",
         mode: this.config.distributed.mode,
         databaseConfigured: Boolean(process.env.DB_HOST && process.env.DB_NAME),
         s3Configured: Boolean(this.config.distributed.gatewayS3Bucket),

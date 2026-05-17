@@ -250,7 +250,7 @@ export function createMcpHttpHandler(
     if (requestUrl.pathname === "/healthz") {
       writeJson(res, 200, {
         ok: true,
-        service: "telegram-human-mcp",
+        service: "tellymcp",
         transport: "streamable-http",
       });
       return;

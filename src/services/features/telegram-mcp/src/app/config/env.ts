@@ -133,6 +133,11 @@ const envSchema = z.object({
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
+  LOG_FILE_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
+  LOG_FILE_PATH: z.string().min(1).default(".tellymcp/log.jsonl"),
 });
 
 export type AppConfig = {
@@ -232,6 +237,8 @@ export type AppConfig = {
   };
   logging: {
     level: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
+    fileEnabled: boolean;
+    filePath: string;
   };
 };
 
@@ -388,6 +395,8 @@ export function loadConfig(): AppConfig {
     },
     logging: {
       level: parsed.LOG_LEVEL,
+      fileEnabled: parsed.LOG_FILE_ENABLED,
+      filePath: parsed.LOG_FILE_PATH,
     },
   };
 }

@@ -36,8 +36,8 @@ import { registerTools } from "../../../shared/api/tool-registry/registry";
 
 export function createMcpServer(tools: ToolModule[]): McpServer {
   const server = new McpServer({
-    name: "telegram-human-mcp",
-    version: "1.0.0",
+    name: "tellymcp",
+    version: "0.0.6",
   });
 
   registerTools(server, tools);

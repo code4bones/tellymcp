@@ -5,10 +5,10 @@ import type { MetricRegistry } from "moleculer";
 import { Errors } from "moleculer";
 import env from "dotenv";
 import "module-alias/register";
-import fs from "node:fs/promises";
-import path from "node:path";
+import pino from "pino";
 import { LogFeedLogger } from "./lib/mixins/logfeed";
 import { BackendError, wrapUnhandledBackendError } from "./lib/mixins/session.errors";
+import { createPinoTargets } from "./lib/pinoTargets";
 
 env.config({ path: process.env.ENV_FILE ?? ".env" });
 
@@ -40,15 +40,26 @@ env.config({ path: process.env.ENV_FILE ?? ".env" });
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
+const pinoTransport = pino.transport({
+	targets: createPinoTargets({
+		level: process.env.LOG_LEVEL || "info",
+		fileEnabled: process.env.LOG_FILE_ENABLED === "true",
+		filePath: process.env.LOG_FILE_PATH || ".tellymcp/log.jsonl",
+	}),
+});
+
 const logger: any = [
 	{
-		type: "Console",
+		type: "Pino",
 		options: {
-			colors: true,
-			moduleColors: true,
-			formatter: process.env.LOGFORMATTER ?? "short",
-			objectPrinter: null,
-			autoPadding: false,
+			pino: {
+				options: {
+					name: "tellymcp-broker",
+					level: process.env.LOG_LEVEL || "info",
+					timestamp: pino.stdTimeFunctions.isoTime,
+				},
+				destination: pinoTransport,
+			},
 		},
 	},
 ];
@@ -56,65 +67,10 @@ const logger: any = [
 const metricsEnabled = process.env.MOLECULER_METRICS === "true";
 const metricsPort = +(process.env.METRICS_PORT || 3030);
 const metricsPath = process.env.METRICS_PATH || "/metrics";
-const logFileEnabled = process.env.LOG_FILE_ENABLED === "true";
 const logFeedEnabled =
 	process.env.ENABLE_LOGFEED != null
 		? !["0", "false", "no", "off"].includes(process.env.ENABLE_LOGFEED.toLowerCase())
 		: process.env.LOGFEED_ENABLED !== "false";
-const logFileFolder = process.env.LOG_FILE_FOLDER || "./logs";
-const logFileName = process.env.LOG_FILE_NAME || "moleculer-{date}.log";
-const logFileRetentionDays = +(process.env.LOG_FILE_RETENTION_DAYS || 14);
-
-const cleanupLogFiles = async () => {
-	if (!logFileEnabled || !Number.isFinite(logFileRetentionDays) || logFileRetentionDays <= 0) {
-		return;
-	}
-
-	const logFolder = path.resolve(logFileFolder);
-	const now = Date.now();
-	const maxAgeMs = logFileRetentionDays * 24 * 60 * 60 * 1000;
-	const filenamePattern = new RegExp(
-		`^${logFileName
-			.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-			.replace(/\\\{date\\\}/g, "\\d{4}-\\d{2}-\\d{2}")
-			.replace(/\\\{nodeID\\\}/g, "[^/]+")
-			.replace(/\\\{namespace\\\}/g, "[^/]+")}$`
-	);
-
-	try {
-		const entries = await fs.readdir(logFolder, { withFileTypes: true });
-		await Promise.all(
-			entries
-				.filter(entry => entry.isFile() && filenamePattern.test(entry.name))
-				.map(async entry => {
-					const filePath = path.join(logFolder, entry.name);
-					const stats = await fs.stat(filePath);
-					if (now - stats.mtimeMs > maxAgeMs) {
-						await fs.unlink(filePath);
-					}
-				})
-		);
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-			console.warn("LOG_FILE cleanup failed:", error);
-		}
-	}
-};
-
-if (logFileEnabled) {
-	void cleanupLogFiles();
-	logger.push({
-		type: "File",
-		options: {
-			level: process.env.LOG_FILE_LEVEL || process.env.LOG_LEVEL || "info",
-			folder: logFileFolder,
-			filename: logFileName,
-			formatter: process.env.LOG_FILE_FORMATTER || "json",
-			eol: "\n",
-			interval: +(process.env.LOG_FILE_INTERVAL_MS || 1000),
-		},
-	});
-}
 
 if (logFeedEnabled) {
 	logger.push(

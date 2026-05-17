@@ -107,7 +107,7 @@ async function getPlaywrightBrowserStatus(
 function printHelp(): void {
   const tmux = getTmuxStatus();
 
-  printBanner("CLI", "Telegram Human-in-the-Loop MCP server");
+  printBanner("CLI", "Telegram control plane for MCP-connected coding agents");
   printSection("Usage", [
     "  tellymcp init <client|gateway|both> [directory]",
     "  tellymcp run [--env <file>]",

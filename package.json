@@ -12,6 +12,8 @@
     "config/templates",
     "README.md",
     "README-ru.md",
+    "STANDALONE.md",
+    "STANDALONE-ru.md",
     "CHANGELOG.md",
     "TOOLS.md",
     ".env.example.client",

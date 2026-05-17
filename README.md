@@ -61,6 +61,43 @@ Current tools:
 - for `gateway` / `both`: Postgres
 - optional for durable fanout on gateway: RabbitMQ
 
+## tmux is strongly recommended
+
+TellyMCP works best when the agent itself runs inside `tmux`.
+
+Without `tmux`, the service can still run, but you lose the full interactive path:
+
+- no Live View
+- no tmux nudges
+- no direct tmux control from Telegram Mini App
+
+Typical start:
+
+```bash
+tmux new -s backend
+```
+
+or attach later:
+
+```bash
+tmux attach -t backend
+```
+
+Why the tmux session name matters:
+
+- it helps you distinguish running agents
+- it appears in tmux-related UI and diagnostics
+- it makes Telegram session switching and Live targeting easier to understand
+
+Use short, meaningful names such as:
+
+- `backend`
+- `frontend`
+- `review`
+- `ops`
+
+If you run multiple agents, put each one in its own tmux session or pane and pair them separately.
+
 ## Quick start
 
 ### Standalone client node
@@ -107,6 +144,11 @@ tellymcp mcp --help
 Typical local MCP endpoint in `client` mode:
 
 - `http://127.0.0.1:8787/mcp`
+
+Detailed step-by-step guide:
+
+- [STANDALONE.md](STANDALONE.md)
+- [STANDALONE-ru.md](STANDALONE-ru.md)
 
 ### Shared gateway or combined `both` node
 
@@ -402,7 +444,6 @@ Mode-specific runtime requirements:
 - `client`
   - local Redis
   - `GATEWAY_PUBLIC_URL`
-  - optional local tmux proxy only when tmux is not directly reachable
   - no gateway Postgres bootstrap is performed
 - `gateway`
   - Postgres is required for gateway persistence
@@ -532,7 +573,7 @@ Current root menu behavior:
 
 - shows the current active session
 - shows the last worked session and update time
-- shows tmux bridge status
+- shows tmux status
 - lists paired sessions as one button per row
 - keeps `Refresh` and `Tools` on the final row
 

@@ -2,29 +2,162 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import net from "node:net";
+import { parse as parseDotenv } from "dotenv";
+import pc from "picocolors";
+import WebSocket from "ws";
 
 type InitMode = "client" | "gateway" | "both";
-type CliCommand = "help" | "init" | "run";
+type CliCommand = "help" | "init" | "run" | "mcp" | "doctor";
 
 const distDir = __dirname;
 const packageRoot = path.resolve(distDir, "..");
 
+type TmuxStatus =
+  | { found: true; version: string }
+  | { found: false };
+
+function getTmuxStatus(): TmuxStatus {
+  const result = spawnSync("tmux", ["-V"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+
+  if (result.status === 0) {
+    return {
+      found: true,
+      version: (result.stdout || "tmux").trim(),
+    };
+  }
+
+  return { found: false };
+}
+
+function printBanner(title: string, subtitle?: string): void {
+  process.stdout.write(`${pc.bold(pc.cyan("TellyMCP"))} ${pc.dim(title)}\n`);
+  if (subtitle) {
+    process.stdout.write(`${pc.dim(subtitle)}\n`);
+  }
+  process.stdout.write("\n");
+}
+
+function printSection(title: string, lines: string[]): void {
+  process.stdout.write(`${pc.bold(title)}\n`);
+  for (const line of lines) {
+    process.stdout.write(`${line}\n`);
+  }
+  process.stdout.write("\n");
+}
+
+function getTmuxInstallHints(): string[] {
+  if (process.platform === "darwin") {
+    return ["brew install tmux"];
+  }
+
+  return [
+    "Ubuntu/Debian: sudo apt install tmux",
+    "Fedora/RHEL:   sudo dnf install tmux",
+    "Arch:          sudo pacman -S tmux",
+  ];
+}
+
 function printHelp(): void {
-  process.stdout.write(`TellyMCP CLI
+  const tmux = getTmuxStatus();
 
-Usage:
-  tellymcp init <client|gateway|both> [directory]
-  tellymcp run [--env <file>]
-  tellymcp run --env=<file>
-  tellymcp help
+  printBanner("CLI", "Telegram Human-in-the-Loop MCP server");
+  printSection("Usage", [
+    "  tellymcp init <client|gateway|both> [directory]",
+    "  tellymcp run [--env <file>]",
+    "  tellymcp run --env=<file>",
+    "  tellymcp doctor [--env <file>]",
+    "  tellymcp mcp [--url <url>] [--bearer <token>] [--format claude|legacy]",
+    "  tellymcp help",
+  ]);
+  printSection("Examples", [
+    "  tellymcp init client",
+    "  tellymcp init gateway ./gateway-node",
+    "  tellymcp run",
+    "  tellymcp run --env .env.client",
+    "  tellymcp doctor --env .env.client",
+    "  tellymcp mcp --help",
+  ]);
+  if (tmux.found) {
+    printSection("tmux", [
+      `${pc.green("  OK")} ${tmux.version}`,
+      "  Live view and session nudges are available.",
+    ]);
+  } else {
+    printSection("tmux", [
+      `${pc.yellow("  WARN")} tmux was not found on this system.`,
+      "  TellyMCP will still run, but Live view and nudges will be limited.",
+      "  Install examples:",
+      ...getTmuxInstallHints().map((line) => `    ${line}`),
+    ]);
+  }
+}
 
-Examples:
-  tellymcp init client
-  tellymcp init gateway ./gateway-node
-  tellymcp run
-  tellymcp run --env .env.client
-`);
+function printMcpHelp(): void {
+  printBanner("MCP helper", "Prints JSON snippets for Claude, Codex, and other MCP clients");
+  printSection("Usage", [
+    "  tellymcp mcp --help",
+    "  tellymcp mcp --url <url>",
+    "  tellymcp mcp --url <url> --bearer <token>",
+    "  tellymcp mcp --url <url> --format legacy",
+  ]);
+  printSection("What this command does", [
+    "  It prints a config snippet.",
+    "  It does not register MCP in your agent automatically.",
+    "  Copy the printed JSON into your agent's MCP config.",
+  ]);
+  printSection("What you need", [
+    "  1. tmux must be installed on the machine where tellymcp runs.",
+    "  2. Your MCP endpoint depends on mode:",
+    "     - client/local: http://127.0.0.1:8787/mcp",
+    "     - gateway/both behind nginx: https://your-host.example/api/mcp",
+  ]);
+  printSection("Claude / modern streamable-http example", [
+    "{",
+    '  "mcpServers": {',
+    '    "telegramHuman": {',
+    '      "transport": {',
+    '        "type": "streamable-http",',
+    '        "url": "https://builder.undoo.ru/api/mcp"',
+    "      }",
+    "    }",
+    "  }",
+    "}",
+  ]);
+  printSection("Legacy example", [
+    "{",
+    '  "mcpServers": {',
+    '    "telegramHuman": {',
+    '      "type": "streamable-http",',
+    '      "url": "https://builder.undoo.ru/api/mcp"',
+    "    }",
+    "  }",
+    "}",
+  ]);
+  printSection("With bearer token", [
+    "{",
+    '  "mcpServers": {',
+    '    "telegramHuman": {',
+    '      "transport": {',
+    '        "type": "streamable-http",',
+    '        "url": "https://builder.undoo.ru/api/mcp",',
+    '        "headers": {',
+    '          "Authorization": "Bearer YOUR_TOKEN"',
+    "        }",
+    "      }",
+    "    }",
+    "  }",
+    "}",
+  ]);
+  printSection("Examples", [
+    "  tellymcp mcp --url https://builder.undoo.ru/api/mcp",
+    "  tellymcp mcp --url https://builder.undoo.ru/api/mcp --bearer YOUR_TOKEN",
+    "  tellymcp mcp --url https://builder.undoo.ru/api/mcp --format legacy",
+  ]);
 }
 
 function fail(message: string): never {
@@ -73,8 +206,18 @@ function initWorkspace(mode: InitMode, directoryArg?: string): void {
     mkdirSync(path.join(targetDir, subdir), { recursive: true });
   }
 
-  process.stdout.write(`Created ${envPath}\n`);
-  process.stdout.write(`Next: edit .env, then run: cd ${targetDir} && tellymcp run\n`);
+  printBanner("workspace initialized");
+  printSection("Created", [
+    `  ${envPath}`,
+    `  ${path.join(targetDir, "logs")}`,
+    `  ${path.join(targetDir, "data")}`,
+    `  ${path.join(targetDir, "artifacts")}`,
+  ]);
+  printSection("Next", [
+    "  1. Edit .env",
+    `  2. cd ${targetDir}`,
+    "  3. tellymcp run",
+  ]);
 }
 
 function resolveRunEnvPath(args: string[]): string {
@@ -96,6 +239,448 @@ function resolveRunEnvPath(args: string[]): string {
   }
 
   return path.resolve(process.cwd(), ".env");
+}
+
+function joinUrlPath(left: string, right: string): string {
+  const normalizedLeft = left.endsWith("/") ? left.slice(0, -1) : left;
+  const normalizedRight = right.startsWith("/") ? right : `/${right}`;
+  return `${normalizedLeft}${normalizedRight}`.replace(/\/{2,}/gu, "/");
+}
+
+function deriveGatewayHealthUrlFromPublicUrl(rawUrl: string): string | null {
+  try {
+    const url = new URL(rawUrl);
+    const pathname = url.pathname.replace(/\/+$/u, "");
+
+    if (pathname.endsWith("/gateway")) {
+      url.pathname = `${pathname.slice(0, -"/gateway".length) || ""}/healthz`;
+      return url.toString();
+    }
+
+    if (pathname.endsWith("/webapp")) {
+      url.pathname = `${pathname.slice(0, -"/webapp".length) || ""}/healthz`;
+      return url.toString();
+    }
+
+    if (pathname.endsWith("/mcp")) {
+      url.pathname = `${pathname.slice(0, -"/mcp".length) || ""}/healthz`;
+      return url.toString();
+    }
+
+    url.pathname = joinUrlPath(pathname || "/", "/healthz");
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function readFlagValue(args: string[], flagName: string): string | null {
+  for (let index = 0; index < args.length; index += 1) {
+    const value = args[index];
+    if (value === flagName) {
+      const next = args[index + 1]?.trim();
+      if (!next) {
+        fail(`Expected a value after ${flagName}`);
+      }
+      return next;
+    }
+
+    if (value?.startsWith(`${flagName}=`)) {
+      const inlineValue = value.slice(flagName.length + 1).trim();
+      if (!inlineValue) {
+        fail(`Expected a value after ${flagName}=`);
+      }
+      return inlineValue;
+    }
+  }
+
+  return null;
+}
+
+function printMcpConfig(args: string[]): void {
+  if (
+    args.length === 0 ||
+    args.includes("--help") ||
+    args.includes("-h")
+  ) {
+    printMcpHelp();
+    return;
+  }
+
+  const url = readFlagValue(args, "--url");
+  if (!url) {
+    fail("Missing --url <mcp-endpoint>. Run 'tellymcp mcp --help' for examples.");
+  }
+
+  const bearer = readFlagValue(args, "--bearer");
+  const format = (readFlagValue(args, "--format") ?? "claude").toLowerCase();
+
+  if (format !== "claude" && format !== "legacy") {
+    fail("Supported --format values: claude, legacy.");
+  }
+
+  const config =
+    format === "legacy"
+      ? {
+          mcpServers: {
+            telegramHuman: {
+              type: "streamable-http",
+              url,
+              ...(bearer
+                ? {
+                    headers: {
+                      Authorization: `Bearer ${bearer}`,
+                    },
+                  }
+                : {}),
+            },
+          },
+        }
+      : {
+          mcpServers: {
+            telegramHuman: {
+              transport: {
+                type: "streamable-http",
+                url,
+                ...(bearer
+                  ? {
+                      headers: {
+                        Authorization: `Bearer ${bearer}`,
+                      },
+                    }
+                  : {}),
+              },
+            },
+          },
+        };
+
+  process.stdout.write(`${JSON.stringify(config, null, 2)}\n`);
+}
+
+async function checkTcpPort(
+  host: string,
+  port: number,
+  timeoutMs = 2000,
+): Promise<{ ok: boolean; message: string }> {
+  return await new Promise((resolve) => {
+    const socket = net.connect({ host, port });
+
+    const finish = (ok: boolean, message: string) => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve({ ok, message });
+    };
+
+    socket.setTimeout(timeoutMs);
+    socket.once("connect", () => finish(true, `${host}:${port} is reachable`));
+    socket.once("timeout", () => finish(false, `${host}:${port} timed out`));
+    socket.once("error", (error: NodeJS.ErrnoException) => {
+      finish(false, `${host}:${port} failed: ${error.code ?? error.message}`);
+    });
+  });
+}
+
+async function checkHttpHealth(
+  url: string,
+  timeoutMs = 3000,
+): Promise<{ ok: boolean; message: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    return {
+      ok: response.ok,
+      message: `${url} returned ${response.status}`,
+    };
+  } catch (error) {
+    clearTimeout(timer);
+    return {
+      ok: false,
+      message: `${url} failed: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+async function checkWebSocketUrl(
+  url: string,
+  timeoutMs = 3000,
+): Promise<{ ok: boolean; message: string }> {
+  return await new Promise((resolve) => {
+    let settled = false;
+    let opened = false;
+
+    const finish = (ok: boolean, message: string) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      socket.removeAllListeners();
+      try {
+        socket.close();
+      } catch {
+        // ignore
+      }
+      resolve({ ok, message });
+    };
+
+    const socket = new WebSocket(url);
+    const timer = setTimeout(() => {
+      finish(false, `${url} timed out`);
+    }, timeoutMs);
+
+    socket.once("open", () => {
+      opened = true;
+      finish(true, `${url} accepted a WebSocket connection`);
+    });
+
+    socket.once("unexpected-response", (_req: unknown, response: { statusCode?: number }) => {
+      finish(false, `${url} returned HTTP ${response.statusCode ?? "unknown"} during WebSocket upgrade`);
+    });
+
+    socket.once("error", (error: Error) => {
+      finish(false, `${url} failed: ${error.message}`);
+    });
+
+    socket.once("close", (code: number) => {
+      if (!opened) {
+        finish(false, `${url} closed before open (code ${code})`);
+      }
+    });
+  });
+}
+
+async function runDoctor(args: string[]): Promise<void> {
+  const envPath = resolveRunEnvPath(args);
+  const tmux = getTmuxStatus();
+
+  printBanner("doctor", "Local installation diagnostics");
+
+  if (tmux.found) {
+    printSection("tmux", [
+      `${pc.green("  OK")} ${tmux.version}`,
+      "  Live view and session nudges should work.",
+    ]);
+  } else {
+    printSection("tmux", [
+      `${pc.yellow("  WARN")} tmux was not found.`,
+      "  TellyMCP will still run, but Live view and nudges will be limited.",
+      "  Install examples:",
+      ...getTmuxInstallHints().map((line) => `    ${line}`),
+    ]);
+  }
+
+  if (!existsSync(envPath)) {
+    printSection("env", [
+      `${pc.red("  ERROR")} Missing env file: ${envPath}`,
+      "  Run 'tellymcp init client' or pass --env <file>.",
+    ]);
+    return;
+  }
+
+  const envContent = readFileSync(envPath, "utf8");
+  const parsed = parseDotenv(envContent);
+  const mode = (parsed.DISTRIBUTED_MODE || "client").trim();
+  const httpHost = (parsed.MCP_HTTP_HOST || "0.0.0.0").trim();
+  const httpPort =
+    mode === "gateway" || mode === "both"
+      ? (parsed.PORT || parsed.MCP_HTTP_PORT || "8080").trim()
+      : (parsed.MCP_HTTP_PORT || "8787").trim();
+  const rootPrefix =
+    mode === "gateway" || mode === "both"
+      ? (parsed.ROOT_PREFIX || "/api").trim()
+      : "";
+  const mcpPath = (parsed.MCP_HTTP_PATH || "/mcp").trim();
+  const webappPath = (parsed.WEBAPP_BASE_PATH || "/webapp").trim();
+  const mcpUrlPath =
+    mode === "gateway" || mode === "both"
+      ? joinUrlPath(rootPrefix, mcpPath)
+      : mcpPath;
+  const webappUrlPath =
+    mode === "gateway" || mode === "both"
+      ? joinUrlPath(rootPrefix, webappPath)
+      : webappPath;
+  const healthUrlPath =
+    mode === "gateway" || mode === "both"
+      ? joinUrlPath(rootPrefix, "/healthz")
+      : "/healthz";
+  const publicGatewayUrl = parsed.GATEWAY_PUBLIC_URL?.trim();
+  const gatewayWsUrl = parsed.GATEWAY_WS_URL?.trim();
+  const publicWebappUrl = parsed.WEBAPP_PUBLIC_URL?.trim();
+  const mcpBearerToken = parsed.MCP_HTTP_BEARER_TOKEN?.trim();
+  const externalHealthUrl =
+    deriveGatewayHealthUrlFromPublicUrl(publicGatewayUrl || "") ??
+    deriveGatewayHealthUrlFromPublicUrl(publicWebappUrl || "");
+
+  printSection("env", [
+    `${pc.green("  OK")} ${envPath}`,
+    `  mode: ${mode}`,
+    `  bind: http://${httpHost}:${httpPort}`,
+    `  mcp:  http://${httpHost}:${httpPort}${mcpUrlPath}`,
+    `  web:  http://${httpHost}:${httpPort}${webappUrlPath}`,
+    `  mcp auth: ${mcpBearerToken ? "bearer token required" : "disabled"}`,
+    ...(publicGatewayUrl ? [`  public gateway: ${publicGatewayUrl}`] : []),
+    ...(gatewayWsUrl ? [`  public ws:      ${gatewayWsUrl}`] : []),
+    ...(publicWebappUrl ? [`  public web:     ${publicWebappUrl}`] : []),
+    ...(externalHealthUrl ? [`  public health:  ${externalHealthUrl}`] : []),
+  ]);
+
+  const checks: string[] = [];
+  const capabilities: string[] = [];
+
+  const redisHost = (parsed.REDIS_HOST || "127.0.0.1").trim();
+  const redisPort = Number(parsed.REDIS_PORT || 6379);
+  const redisCheck = await checkTcpPort(redisHost, redisPort);
+  checks.push(
+    `${redisCheck.ok ? pc.green("  OK") : pc.red("  ERROR")} redis: ${redisCheck.message}`,
+  );
+
+  if (mode === "client") {
+    const gatewayPublicUrl = parsed.GATEWAY_PUBLIC_URL?.trim();
+    if (gatewayPublicUrl) {
+      const gatewayHealth = await checkHttpHealth(
+        `${gatewayPublicUrl.replace(/\/+$/u, "")}/healthz`,
+      );
+      checks.push(
+        `${gatewayHealth.ok ? pc.green("  OK") : pc.red("  ERROR")} gateway: ${gatewayHealth.message}`,
+      );
+      capabilities.push(
+        `${gatewayHealth.ok ? pc.green("  OK") : pc.red("  ERROR")} remote collaboration API: ${gatewayHealth.ok ? "available" : "unavailable"}`,
+      );
+    } else {
+      checks.push(`${pc.yellow("  WARN")} gateway: GATEWAY_PUBLIC_URL is empty`);
+      capabilities.push(`${pc.yellow("  WARN")} remote collaboration API: not configured`);
+    }
+
+    if (gatewayWsUrl) {
+      const gatewayWs = await checkWebSocketUrl(gatewayWsUrl);
+      checks.push(
+        `${gatewayWs.ok ? pc.green("  OK") : pc.red("  ERROR")} gateway ws: ${gatewayWs.message}`,
+      );
+      capabilities.push(
+        `${gatewayWs.ok ? pc.green("  OK") : pc.red("  ERROR")} remote live relay: ${gatewayWs.ok ? "available" : "unavailable"}`,
+      );
+    } else {
+      checks.push(`${pc.yellow("  WARN")} gateway ws: GATEWAY_WS_URL is empty`);
+      capabilities.push(`${pc.yellow("  WARN")} remote live relay: not configured`);
+    }
+
+    if (publicWebappUrl) {
+      const publicWebapp = await checkHttpHealth(publicWebappUrl);
+      checks.push(
+        `${publicWebapp.ok ? pc.green("  OK") : pc.red("  ERROR")} public webapp: ${publicWebapp.message}`,
+      );
+      capabilities.push(
+        `${publicWebapp.ok ? pc.green("  OK") : pc.red("  ERROR")} remote webapp launcher: ${publicWebapp.ok ? "available" : "unavailable"}`,
+      );
+    } else {
+      checks.push(`${pc.yellow("  WARN")} public webapp: WEBAPP_PUBLIC_URL is empty`);
+      capabilities.push(`${pc.yellow("  WARN")} remote webapp launcher: not configured`);
+    }
+  }
+
+  if (mode === "gateway" || mode === "both") {
+    const localHealth = await checkHttpHealth(
+      `http://${httpHost}:${httpPort}${healthUrlPath}`,
+    );
+    checks.push(
+      `${localHealth.ok ? pc.green("  OK") : pc.yellow("  WARN")} local healthz: ${localHealth.message}`,
+    );
+    capabilities.push(
+      `${localHealth.ok ? pc.green("  OK") : pc.red("  ERROR")} local gateway api: ${localHealth.ok ? "available" : "unavailable"}`,
+    );
+
+    if (externalHealthUrl) {
+      const externalHealth = await checkHttpHealth(externalHealthUrl);
+      checks.push(
+        `${externalHealth.ok ? pc.green("  OK") : pc.red("  ERROR")} public healthz: ${externalHealth.message}`,
+      );
+      capabilities.push(
+        `${externalHealth.ok ? pc.green("  OK") : pc.red("  ERROR")} public gateway api: ${externalHealth.ok ? "available" : "unavailable"}`,
+      );
+    } else {
+      checks.push(`${pc.yellow("  WARN")} public healthz: no public gateway/webapp URL is configured`);
+      capabilities.push(`${pc.yellow("  WARN")} public gateway api: not configured`);
+    }
+
+    if (gatewayWsUrl) {
+      const gatewayWs = await checkWebSocketUrl(gatewayWsUrl);
+      checks.push(
+        `${gatewayWs.ok ? pc.green("  OK") : pc.red("  ERROR")} public ws: ${gatewayWs.message}`,
+      );
+      capabilities.push(
+        `${gatewayWs.ok ? pc.green("  OK") : pc.red("  ERROR")} public live relay: ${gatewayWs.ok ? "available" : "unavailable"}`,
+      );
+    } else {
+      checks.push(`${pc.yellow("  WARN")} public ws: GATEWAY_WS_URL is empty`);
+      capabilities.push(`${pc.yellow("  WARN")} public live relay: not configured`);
+    }
+
+    if (publicWebappUrl) {
+      const publicWebapp = await checkHttpHealth(publicWebappUrl);
+      checks.push(
+        `${publicWebapp.ok ? pc.green("  OK") : pc.red("  ERROR")} public webapp: ${publicWebapp.message}`,
+      );
+      capabilities.push(
+        `${publicWebapp.ok ? pc.green("  OK") : pc.red("  ERROR")} public webapp launcher: ${publicWebapp.ok ? "available" : "unavailable"}`,
+      );
+    } else {
+      checks.push(`${pc.yellow("  WARN")} public webapp: WEBAPP_PUBLIC_URL is empty`);
+      capabilities.push(`${pc.yellow("  WARN")} public webapp launcher: not configured`);
+    }
+
+    const dbHost = parsed.DB_HOST?.trim();
+    if (dbHost) {
+      const dbPort = Number(parsed.DB_PORT || 5432);
+      const dbCheck = await checkTcpPort(dbHost, dbPort);
+      checks.push(
+        `${dbCheck.ok ? pc.green("  OK") : pc.red("  ERROR")} postgres: ${dbCheck.message}`,
+      );
+    } else {
+      checks.push(`${pc.yellow("  WARN")} postgres: DB_HOST is empty`);
+    }
+
+    const rmqHost = parsed.RMQ_HOST?.trim();
+    if (rmqHost) {
+      const rmqPort = Number(parsed.RMQ_PORT || 5672);
+      const rmqCheck = await checkTcpPort(rmqHost, rmqPort);
+      checks.push(
+        `${rmqCheck.ok ? pc.green("  OK") : pc.red("  ERROR")} rmq: ${rmqCheck.message}`,
+      );
+    } else {
+      checks.push(`${pc.dim("  SKIP")} rmq: RMQ_HOST is not configured`);
+    }
+  }
+
+  printSection("capabilities", capabilities);
+  printSection("checks", checks);
+
+  const notes: string[] = [];
+  if (!parsed.TELEGRAM_BOT_TOKEN?.trim()) {
+    notes.push(`${pc.yellow("  WARN")} TELEGRAM_BOT_TOKEN is empty`);
+  }
+  if (mcpBearerToken) {
+    notes.push(
+      `${pc.yellow("  WARN")} MCP_HTTP_BEARER_TOKEN is set. MCP clients must send Authorization: Bearer <token>.`,
+    );
+  }
+  if ((mode === "gateway" || mode === "both") && !parsed.ROOT_PREFIX?.trim()) {
+    notes.push(`${pc.yellow("  WARN")} ROOT_PREFIX is not set, default /api will be used`);
+  }
+  if ((mode === "gateway" || mode === "both") && !parsed.PORT?.trim()) {
+    notes.push(`${pc.yellow("  WARN")} PORT is not set, default bind port will be used`);
+  }
+
+  if (notes.length > 0) {
+    printSection("notes", notes);
+  } else {
+    printSection("notes", [`${pc.green("  OK")} No obvious local config issues detected.`]);
+  }
 }
 
 function runRuntime(args: string[]): void {
@@ -123,6 +708,14 @@ function runRuntime(args: string[]): void {
   if (!existsSync(servicesPath)) {
     fail(`Missing compiled services: ${servicesPath}`);
   }
+
+  const tmux = getTmuxStatus();
+  if (tmux.found) {
+    process.stdout.write(`${pc.green("tmux detected:")} ${tmux.version}\n`);
+  } else {
+    process.stdout.write(`${pc.yellow("tmux not found.")} Live view and nudges may be limited.\n`);
+  }
+  process.stdout.write(`${pc.cyan("Using env:")} ${envPath}\n\n`);
 
   const child = spawn(
     process.execPath,
@@ -154,9 +747,9 @@ function runRuntime(args: string[]): void {
   });
 }
 
-function main(argv: string[]): void {
+async function main(argv: string[]): Promise<void> {
   const [rawCommand, firstArg, secondArg] = argv;
-  const command: CliCommand = rawCommand === "init" || rawCommand === "run" || rawCommand === "help"
+  const command: CliCommand = rawCommand === "init" || rawCommand === "run" || rawCommand === "help" || rawCommand === "mcp" || rawCommand === "doctor"
     ? rawCommand
     : "help";
 
@@ -170,7 +763,17 @@ function main(argv: string[]): void {
     return;
   }
 
+  if (command === "mcp") {
+    printMcpConfig(argv.slice(1));
+    return;
+  }
+
+  if (command === "doctor") {
+    await runDoctor(argv.slice(1));
+    return;
+  }
+
   runRuntime(argv.slice(1));
 }
 
-main(process.argv.slice(2));
+void main(process.argv.slice(2));

@@ -26,14 +26,19 @@ Current state:
   - stale meta подчищаются при открытии списка
 - Exchange files больше не зависят от `vfs/minio`.
 - Базовый regression-suite собран:
-  - `14` test files
-  - `61` tests
+  - `15` test files
+  - `68` tests
   - `yarn test / build / lint` проходят
 - `TOOLS.md` sync работает:
   - gateway/client сверяют `tools_hash`
   - online клиенты получают `tools_event`
   - reconnect-case закрыт через self-check после `hello_ack`
   - system inbox messages используют `message_kind = "system"`
+- Версионный handshake работает:
+  - client шлёт `package_version`, `protocol_version`, `capabilities`
+  - gateway отвечает verdict `ok|warn|reject`
+  - `protocol major mismatch` блокирует `ws` transport
+  - локальные сессии получают system inbox / Telegram notice на `warn` и `reject`
 
 Next session:
 
@@ -81,6 +86,11 @@ Next session:
 - [ ] Дочистить operational logs:
   - оставить только полезные lifecycle logs
   - убрать оставшийся шум из стабильных happy-path маршрутов
+
+- [ ] Подумать над следующей итерацией version handshake:
+  - нужен ли capability-based degrade вместо простого `warn`
+  - нужен ли persist последнего `gateway package/protocol` в session state
+  - нужен ли отдельный UI-экран со статусом совместимости client <-> gateway
 
 - [ ] Решить, нужен ли полноценный `RabbitMQ` queue flow поверх fanout:
   - retry / backoff

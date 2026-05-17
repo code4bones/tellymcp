@@ -1522,6 +1522,95 @@ export class TelegramTransport implements HumanTransport {
     });
   }
 
+  public async handleGatewayVersionCompatibilityEvent(input: {
+    local_session_id: string;
+    session_label?: string;
+    compatibility: "warn" | "reject";
+    gateway_package_version: string;
+    gateway_protocol_version: string;
+    gateway_capabilities: string[];
+    client_package_version: string;
+    client_protocol_version: string;
+    client_capabilities: string[];
+    reasons: string[];
+    instruction: string;
+  }): Promise<void> {
+    const session = await this.sessionStore.getSession(input.local_session_id);
+    if (!session) {
+      this.logger.warn(
+        "Skipping gateway version compatibility event because local session is unavailable",
+        {
+          sessionId: input.local_session_id,
+          compatibility: input.compatibility,
+        },
+      );
+      return;
+    }
+
+    const title =
+      input.compatibility === "reject"
+        ? "Gateway/client protocol mismatch blocks transport."
+        : "Gateway/client version mismatch detected.";
+    const inboxMessage: TelegramInboxMessage = {
+      id: createInboxMessageId(),
+      sessionId: session.sessionId,
+      telegramChatId: 0,
+      telegramUserId: 0,
+      sourceTelegramMessageId: 0,
+      text: [
+        title,
+        `Session: ${session.label ?? input.session_label ?? session.sessionId}`,
+        `Compatibility: ${input.compatibility}`,
+        `Client package: ${input.client_package_version}`,
+        `Client protocol: ${input.client_protocol_version}`,
+        `Gateway package: ${input.gateway_package_version}`,
+        `Gateway protocol: ${input.gateway_protocol_version}`,
+        `Client capabilities: ${input.client_capabilities.join(", ") || "none"}`,
+        `Gateway capabilities: ${input.gateway_capabilities.join(", ") || "none"}`,
+        ...(input.reasons.length > 0
+          ? ["", "# Reasons", ...input.reasons.map((reason) => `- ${reason}`)]
+          : []),
+        "",
+        "# Action Required",
+        input.instruction,
+        ...(input.compatibility === "reject"
+          ? [
+              "Do not continue collaboration, delivery, or live relay work until this client is upgraded.",
+            ]
+          : [
+              "Upgrade the older side soon and verify the updated TOOLS.md before continuing sensitive work.",
+            ]),
+      ].join("\n"),
+      receivedAt: new Date().toISOString(),
+    };
+
+    await this.inboxStore.createInboxMessage(inboxMessage);
+    await this.nudgeSessionInbox(session.sessionId);
+
+    const binding = await this.bindingStore.getBinding(session.sessionId);
+    if (!binding) {
+      return;
+    }
+
+    await this.sendNotification({
+      sessionId: session.sessionId,
+      ...(session.label ? { sessionLabel: session.label } : {}),
+      recipient: {
+        telegramChatId: binding.telegramChatId,
+        telegramUserId: binding.telegramUserId,
+      },
+      message: [
+        input.compatibility === "reject"
+          ? "Шлюз и клиент несовместимы по протоколу. Транспорт этой сессии заблокирован."
+          : "Версии шлюза и клиента различаются.",
+        `Сессия: ${session.label ?? input.session_label ?? session.sessionId}`,
+        `Клиент: ${input.client_package_version} / protocol ${input.client_protocol_version}`,
+        `Шлюз: ${input.gateway_package_version} / protocol ${input.gateway_protocol_version}`,
+        input.instruction,
+      ].join("\n"),
+    });
+  }
+
   public async handleLiveViewApprovalRequestEvent(
     input: LiveApprovalEventPayload,
   ): Promise<void> {

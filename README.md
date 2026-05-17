@@ -70,6 +70,8 @@ Canonical instructions:
 - gateway `TOOLS.md` is the canonical instruction source
 - `TOOLS.md` now carries a human-readable version marker near the top of the file
 - gateway/client sync still relies on content hash, not on the version string
+- gateway/client runtime compatibility is checked separately in `ws hello/hello_ack`
+- protocol major mismatch blocks gateway transport until the older side is upgraded
 - when behavior changes materially, bump both:
   - the `TOOLS.md` version marker
   - the file content itself
@@ -106,6 +108,12 @@ Then edit the generated `.env` and run:
 tellymcp run
 ```
 
+Check the node before pairing or adding MCP:
+
+```bash
+tellymcp doctor
+```
+
 ## Telegram setup
 
 1. Open BotFather in Telegram.
@@ -122,6 +130,26 @@ If you run the published package, prefer:
 - `tellymcp init both`
 
 If you run directly from this repository, copy `.env.example.client` or `.env.example.gateway` to `.env` and fill in the values.
+
+`doctor` is mode-aware:
+
+- `client`
+  - checks `tmux`
+  - checks `.env`
+  - checks Redis
+  - checks external gateway `healthz`
+  - checks `GATEWAY_WS_URL`
+  - checks `WEBAPP_PUBLIC_URL`
+- `gateway` / `both`
+  - checks `tmux`
+  - checks `.env`
+  - checks Redis
+  - checks local `healthz`
+  - checks external public `healthz`
+  - checks public `ws`
+  - checks public `webapp`
+  - checks Postgres
+  - checks RabbitMQ
 
 Important variables:
 
@@ -1025,10 +1053,24 @@ Menu callback payloads stay short. Buttons only carry a short Redis key, while t
 
 Recommended long-running service flow:
 
-1. Start the service:
+1. Start the service.
+
+For local client mode:
 
 ```bash
-yarn dev:gw
+yarn dev:client
+```
+
+Then register:
+
+```bash
+codex mcp add telegramHuman --url http://127.0.0.1:8787/mcp
+```
+
+For gateway/both mode behind nginx:
+
+```bash
+yarn dev:builder
 ```
 
 2. Register the already-running MCP endpoint in Codex:
@@ -1045,6 +1087,11 @@ codex mcp add telegramHuman \
   --url http://127.0.0.1:8080/api/mcp \
   --bearer-token-env-var TELEGRAM_MCP_BEARER_TOKEN
 ```
+
+Why these URLs differ:
+
+- `dev:client` serves MCP directly from the local standalone listener, by default at `http://127.0.0.1:8787/mcp`
+- `dev:builder` / `both` mode serves MCP through the shared backend ingress, by default at `http://127.0.0.1:8080/api/mcp`
 
 For externally exposed deployments:
 

@@ -90,6 +90,7 @@ type GatewaySocketHarness = {
       handleProjectMemberLeftEvent: MockFn;
       handleProjectDeletedEvent: MockFn;
       handleToolsUpdatedEvent: MockFn;
+      handleGatewayVersionCompatibilityEvent: MockFn;
       handleLiveViewApprovalRequestEvent: MockFn;
       handleLiveViewApprovalResolvedEvent: MockFn;
     };
@@ -158,6 +159,7 @@ function createHarness(): GatewaySocketHarness {
       handleProjectMemberLeftEvent: vi.fn(async () => undefined),
       handleProjectDeletedEvent: vi.fn(async () => undefined),
       handleToolsUpdatedEvent: vi.fn(async () => undefined),
+      handleGatewayVersionCompatibilityEvent: vi.fn(async () => undefined),
       handleLiveViewApprovalRequestEvent: vi.fn(async () => undefined),
       handleLiveViewApprovalResolvedEvent: vi.fn(async () => undefined),
     },
@@ -286,6 +288,98 @@ describe("gatewaySocket service", () => {
         reason: "outdated",
       }),
     );
+  });
+
+  it("dispatches gateway version warnings to telegram transport on hello_ack", async () => {
+    const harness = createHarness();
+    const wsClient = {
+      send: vi.fn(),
+      close: vi.fn(),
+      terminate: vi.fn(),
+    };
+
+    await harness.handleGatewayWsClientMessage.call({
+      ...harness,
+      wsClient,
+      wsHelloClientUuid: "client-1",
+      wsHelloSessionTools: [
+        {
+          local_session_id: "left-session",
+          session_label: "leftDev",
+        },
+      ],
+      getLocalVersionInfo: () => ({
+        packageVersion: "0.1.0",
+        protocolVersion: "1.0",
+        capabilities: ["tools_sync", "version_handshake"],
+      }),
+      syncLocalToolsAgainstGateway: vi.fn(async () => 0),
+    },
+    JSON.stringify({
+      type: "hello_ack",
+      connection_id: "conn-1",
+      package_version: "0.2.0",
+      protocol_version: "1.1",
+      capabilities: ["tools_sync", "version_handshake", "live_relay"],
+      compatibility: "warn",
+      reasons: ["Package version mismatch: client 0.1.0 vs gateway 0.2.0."],
+      instruction: "Upgrade the older side.",
+    }));
+
+    expect(
+      harness.getRuntimeOrThrow().telegramTransport
+        .handleGatewayVersionCompatibilityEvent,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        local_session_id: "left-session",
+        session_label: "leftDev",
+        compatibility: "warn",
+        gateway_package_version: "0.2.0",
+        gateway_protocol_version: "1.1",
+      }),
+    );
+    expect(wsClient.close).not.toHaveBeenCalled();
+  });
+
+  it("closes ws client on rejected hello_ack compatibility", async () => {
+    const harness = createHarness();
+    const wsClient = {
+      send: vi.fn(),
+      close: vi.fn(),
+      terminate: vi.fn(),
+    };
+    const syncLocalToolsAgainstGateway = vi.fn(async () => 0);
+
+    await harness.handleGatewayWsClientMessage.call({
+      ...harness,
+      wsClient,
+      wsHelloClientUuid: "client-1",
+      wsHelloSessionTools: [
+        {
+          local_session_id: "left-session",
+          session_label: "leftDev",
+        },
+      ],
+      getLocalVersionInfo: () => ({
+        packageVersion: "0.1.0",
+        protocolVersion: "1.0",
+        capabilities: ["tools_sync", "version_handshake"],
+      }),
+      syncLocalToolsAgainstGateway,
+    },
+    JSON.stringify({
+      type: "hello_ack",
+      connection_id: "conn-1",
+      package_version: "0.2.0",
+      protocol_version: "2.0",
+      capabilities: ["tools_sync", "version_handshake"],
+      compatibility: "reject",
+      reasons: ["Protocol major mismatch: client 1.0 vs gateway 2.0."],
+      instruction: "Upgrade this client before continuing.",
+    }));
+
+    expect(wsClient.close).toHaveBeenCalledWith(4002, "version_incompatible");
+    expect(syncLocalToolsAgainstGateway).not.toHaveBeenCalled();
   });
 
   it("uses local gateway TOOLS hash in both mode without remote fetch", async () => {

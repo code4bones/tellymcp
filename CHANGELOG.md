@@ -57,6 +57,10 @@
   - `tools_event` при mismatch
   - client-side self-check после `hello_ack`
   - периодический recheck online клиентов на gateway
+- Добавлен version-handshake в `ws hello/hello_ack`:
+  - client отправляет `package_version`, `protocol_version`, `capabilities`
+  - gateway отвечает своим version/protocol/capabilities и verdict `ok|warn|reject`
+  - major protocol mismatch теперь блокирует transport до обновления старой стороны
 - Добавлены system inbox messages с `message_kind = "system"` для operational инструкций.
 - В `TOOLS.md` введён явный human-readable version marker.
 - Добавлен `Collab -> Tools -> History`:
@@ -143,6 +147,9 @@
   - если server-side push был пропущен, client сам сверяет hash после `hello_ack`
 - Исправлен self-check `TOOLS.md` в `DISTRIBUTED_MODE=both`:
   - локальный gateway hash берётся без лишнего `fetch`
+- `doctor` стал mode-aware:
+  - `client` теперь проверяет внешний gateway `healthz`, `ws`, и public webapp URL
+  - `gateway/both` теперь проверяют local/public `healthz`, public `ws/webapp`, `postgres`, `rmq`
 - Исправлен build-контур для npm publish:
   - `dist` теперь всегда очищается перед сборкой
   - stale legacy build artifacts больше не попадают в пакет

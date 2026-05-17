@@ -8,6 +8,7 @@ export default tseslint.config(
     ignores: [
       "dist/**",
       "node_modules/**",
+      "scripts/**",
       "public/**",
       "eslint.config.js",
       "src/lib/**/*.js",

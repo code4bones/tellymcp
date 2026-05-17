@@ -24,6 +24,14 @@ import {
   hasLocalTargetSession,
   hasOutgoingDeliveryNotice,
 } from "./gateway-loopback";
+import {
+  TELLYMCP_CAPABILITIES,
+  TELLYMCP_PROTOCOL_VERSION,
+  evaluateVersionCompatibility,
+  getTellyMcpPackageVersion,
+  type TellyMcpCapability,
+  type VersionCompatibility,
+} from "./src/shared/lib/version/versionHandshake";
 
 const wsLib = require("ws") as {
   WebSocket: new (
@@ -40,6 +48,7 @@ export const TELEGRAM_MCP_GATEWAY_SOCKET_SERVICE_NAME =
 const CLIENT_RECONNECT_DELAY_MS = 3000;
 const LIVE_REQUEST_TIMEOUT_MS = 20000;
 const TOOLS_SYNC_CHECK_INTERVAL_MS = 15000;
+const WS_HEARTBEAT_INTERVAL_MS = 10000;
 
 type GatewaySocketSessionTools = {
   local_session_id: string;
@@ -54,12 +63,31 @@ type GatewaySocketHello = {
   client_uuid?: string;
   project_name?: string;
   node_id?: string;
+  package_version?: string;
+  protocol_version?: string;
+  capabilities?: TellyMcpCapability[];
   session_tools?: GatewaySocketSessionTools[];
 };
 
 type GatewaySocketHelloAck = {
   type: "hello_ack";
   connection_id: string;
+  package_version: string;
+  protocol_version: string;
+  capabilities: TellyMcpCapability[];
+  compatibility: VersionCompatibility;
+  reasons: string[];
+  instruction: string;
+};
+
+type GatewaySocketHeartbeatPing = {
+  type: "heartbeat_ping";
+  ts: string;
+};
+
+type GatewaySocketHeartbeatPong = {
+  type: "heartbeat_pong";
+  ts: string;
 };
 
 type GatewaySocketLiveRequest = {
@@ -190,6 +218,8 @@ type GatewaySocketDeliveryFail = {
 type GatewaySocketMessage =
   | GatewaySocketHello
   | GatewaySocketHelloAck
+  | GatewaySocketHeartbeatPing
+  | GatewaySocketHeartbeatPong
   | GatewaySocketLiveRequest
   | GatewaySocketLiveResponse
   | GatewaySocketLiveEvent
@@ -219,8 +249,11 @@ type GatewaySocketCarrier = Service & {
   wsReconnectTimer?: NodeJS.Timeout | null;
   wsIdentityRefreshTimer?: NodeJS.Timeout | null;
   wsToolsSyncTimer?: NodeJS.Timeout | null;
+  wsHeartbeatTimer?: NodeJS.Timeout | null;
+  wsAwaitingPong?: boolean;
   wsConnectionId?: string | null;
   wsHelloClientUuid?: string | null;
+  wsHelloSessionTools?: GatewaySocketSessionTools[];
   wsHelloSessionToolsSnapshot?: string | null;
   wsClientHasConnectedOnce?: boolean;
   wsUpgradeHandler?:
@@ -237,6 +270,7 @@ type GatewaySocketCarrier = Service & {
   startGatewayWsClient?: () => Promise<void>;
   scheduleGatewayWsReconnect?: () => void;
   closeGatewayWsResources?: () => Promise<void>;
+  ensureGatewayWsClientIsReusable?: () => boolean;
   collectSessionTools?: () => Promise<{
     sessionTools: GatewaySocketSessionTools[];
     snapshot: string;
@@ -248,6 +282,11 @@ type GatewaySocketCarrier = Service & {
   ) => Promise<number>;
   fetchGatewayToolsHashForClient?: () => Promise<string | null>;
   syncLocalToolsAgainstGateway?: (sessionId?: string) => Promise<number>;
+  getLocalVersionInfo?: () => {
+    packageVersion: string;
+    protocolVersion: string;
+    capabilities: TellyMcpCapability[];
+  };
   sendClientHello?: (socket: any) => Promise<void>;
   handleGatewayWsServerMessage?: (
     socket: any,
@@ -513,6 +552,8 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
     this.wsReconnectTimer = null;
     this.wsIdentityRefreshTimer = null;
     this.wsToolsSyncTimer = null;
+    this.wsHeartbeatTimer = null;
+    this.wsAwaitingPong = false;
     this.wsConnectionId = null;
     this.wsHelloClientUuid = null;
     this.wsHelloSessionToolsSnapshot = null;
@@ -598,6 +639,14 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
     getGatewayToolsHash(this: GatewaySocketCarrier): string | null {
       return computeToolsHashForDir(process.cwd());
+    },
+
+    getLocalVersionInfo(this: GatewaySocketCarrier) {
+      return {
+        packageVersion: getTellyMcpPackageVersion(__dirname),
+        protocolVersion: TELLYMCP_PROTOCOL_VERSION,
+        capabilities: [...TELLYMCP_CAPABILITIES],
+      };
     },
 
     async fetchGatewayToolsHashForClient(
@@ -771,6 +820,11 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         sessionTools: [],
         snapshot: "[]",
       };
+      const versionInfo = this.getLocalVersionInfo?.() ?? {
+        packageVersion: "0.0.0-unknown",
+        protocolVersion: TELLYMCP_PROTOCOL_VERSION,
+        capabilities: [...TELLYMCP_CAPABILITIES],
+      };
       const hello: GatewaySocketHello = {
         type: "hello",
         connection_id: this.wsConnectionId || randomUUID(),
@@ -780,9 +834,13 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           ? { project_name: runtime.config.project.name }
           : {}),
         ...(this.broker.nodeID ? { node_id: this.broker.nodeID } : {}),
+        package_version: versionInfo.packageVersion,
+        protocol_version: versionInfo.protocolVersion,
+        capabilities: versionInfo.capabilities,
         ...(sessionTools.length > 0 ? { session_tools: sessionTools } : {}),
       };
       this.wsHelloClientUuid = clientUuid ?? null;
+      this.wsHelloSessionTools = sessionTools;
       this.wsHelloSessionToolsSnapshot = snapshot;
       socket.send(JSON.stringify(hello));
     },
@@ -1131,6 +1189,25 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           ...(typeof parsed.node_id === "string" && parsed.node_id.trim()
             ? { node_id: parsed.node_id.trim() }
             : {}),
+          ...(typeof parsed.package_version === "string" &&
+          parsed.package_version.trim()
+            ? { package_version: parsed.package_version.trim() }
+            : {}),
+          ...(typeof parsed.protocol_version === "string" &&
+          parsed.protocol_version.trim()
+            ? { protocol_version: parsed.protocol_version.trim() }
+            : {}),
+          ...(Array.isArray(parsed.capabilities)
+            ? {
+                capabilities: parsed.capabilities
+                  .map((item) =>
+                    typeof item === "string" && item.trim()
+                      ? item.trim()
+                      : null,
+                  )
+                  .filter((item): item is TellyMcpCapability => Boolean(item)),
+              }
+            : {}),
           ...(Array.isArray(parsed.session_tools)
             ? {
                 session_tools: parsed.session_tools
@@ -1180,12 +1257,60 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           this.connectedClientsByUuid?.set(hello.client_uuid, socket);
         }
         runtime.logger.info("Gateway WS hello received", hello);
+        const localVersionInfo = this.getLocalVersionInfo?.() ?? {
+          packageVersion: "0.0.0-unknown",
+          protocolVersion: TELLYMCP_PROTOCOL_VERSION,
+          capabilities: [...TELLYMCP_CAPABILITIES],
+        };
+        const compatibility = evaluateVersionCompatibility({
+          gatewayPackageVersion: localVersionInfo.packageVersion,
+          gatewayProtocolVersion: localVersionInfo.protocolVersion,
+          ...(hello.package_version
+            ? { clientPackageVersion: hello.package_version }
+            : {}),
+          ...(hello.protocol_version
+            ? { clientProtocolVersion: hello.protocol_version }
+            : {}),
+        });
+        const ackInstruction =
+          compatibility.compatibility === "reject"
+            ? "Upgrade this client before continuing. Gateway transport is blocked until protocol major versions match."
+            : compatibility.compatibility === "warn"
+              ? "Client and gateway versions differ. Upgrade the older side and verify TOOLS.md before continuing sensitive work."
+              : "Version handshake passed.";
         socket.send(
           JSON.stringify({
             type: "hello_ack",
             connection_id: hello.connection_id,
+            package_version: localVersionInfo.packageVersion,
+            protocol_version: localVersionInfo.protocolVersion,
+            capabilities: localVersionInfo.capabilities,
+            compatibility: compatibility.compatibility,
+            reasons: compatibility.reasons,
+            instruction: ackInstruction,
           } satisfies GatewaySocketHelloAck),
         );
+        if (compatibility.compatibility === "reject") {
+          runtime.logger.warn(
+            "Rejecting gateway WS client due to protocol incompatibility",
+            {
+              clientUuid: hello.client_uuid,
+              clientPackageVersion: hello.package_version ?? null,
+              clientProtocolVersion: hello.protocol_version ?? null,
+              gatewayPackageVersion: localVersionInfo.packageVersion,
+              gatewayProtocolVersion: localVersionInfo.protocolVersion,
+              reasons: compatibility.reasons,
+            },
+          );
+          setTimeout(() => {
+            try {
+              socket.close?.(4002, "version_incompatible");
+            } catch {
+              socket.terminate?.();
+            }
+          }, 50);
+          return;
+        }
         await this.notifyToolsMismatchForSocket?.(socket, hello);
         if (hello.client_uuid) {
           const queued = await (this.broker.call as any)(
@@ -1227,6 +1352,19 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             );
           }
         }
+        return;
+      }
+
+      if (parsed.type === "heartbeat_ping") {
+        socket.send(
+          JSON.stringify({
+            type: "heartbeat_pong",
+            ts:
+              typeof parsed.ts === "string" && parsed.ts.trim()
+                ? parsed.ts.trim()
+                : new Date().toISOString(),
+          } satisfies GatewaySocketHeartbeatPong),
+        );
         return;
       }
 
@@ -1326,12 +1464,86 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       const parsed = JSON.parse(String(raw)) as Partial<GatewaySocketMessage>;
 
       if (parsed.type === "hello_ack") {
+        const compatibility =
+          parsed.compatibility === "warn" || parsed.compatibility === "reject"
+            ? parsed.compatibility
+            : "ok";
+        const gatewayPackageVersion =
+          typeof parsed.package_version === "string" && parsed.package_version.trim()
+            ? parsed.package_version.trim()
+            : "0.0.0-unknown";
+        const gatewayProtocolVersion =
+          typeof parsed.protocol_version === "string" && parsed.protocol_version.trim()
+            ? parsed.protocol_version.trim()
+            : TELLYMCP_PROTOCOL_VERSION;
+        const reasons = Array.isArray(parsed.reasons)
+          ? parsed.reasons
+              .map((item) =>
+                typeof item === "string" && item.trim() ? item.trim() : null,
+              )
+              .filter((item): item is string => Boolean(item))
+          : [];
+        const gatewayCapabilities = Array.isArray(parsed.capabilities)
+          ? parsed.capabilities
+              .map((item) =>
+                typeof item === "string" && item.trim() ? item.trim() : null,
+              )
+              .filter((item): item is string => Boolean(item))
+          : [];
+        const localVersionInfo = this.getLocalVersionInfo?.() ?? {
+          packageVersion: "0.0.0-unknown",
+          protocolVersion: TELLYMCP_PROTOCOL_VERSION,
+          capabilities: [...TELLYMCP_CAPABILITIES],
+        };
         runtime.logger.info("Gateway WS hello acknowledged", {
           connectionId:
             typeof parsed.connection_id === "string" ? parsed.connection_id : null,
           clientUuid: this.wsHelloClientUuid,
+          compatibility,
+          gatewayPackageVersion,
+          gatewayProtocolVersion,
         });
+        if (compatibility !== "ok") {
+          const sessionTools = Array.isArray(this.wsHelloSessionTools)
+            ? this.wsHelloSessionTools
+            : [];
+          for (const sessionTool of sessionTools) {
+            await runtime.telegramTransport.handleGatewayVersionCompatibilityEvent({
+              local_session_id: sessionTool.local_session_id,
+              ...(sessionTool.session_label
+                ? { session_label: sessionTool.session_label }
+                : {}),
+              compatibility,
+              gateway_package_version: gatewayPackageVersion,
+              gateway_protocol_version: gatewayProtocolVersion,
+              gateway_capabilities: gatewayCapabilities,
+              client_package_version: localVersionInfo.packageVersion,
+              client_protocol_version: localVersionInfo.protocolVersion,
+              client_capabilities: localVersionInfo.capabilities,
+              reasons,
+              instruction:
+                typeof parsed.instruction === "string" && parsed.instruction.trim()
+                  ? parsed.instruction.trim()
+                  : compatibility === "reject"
+                    ? "Upgrade this client before continuing. Gateway transport is blocked until protocol major versions match."
+                    : "Client and gateway versions differ. Upgrade the older side and verify TOOLS.md before continuing sensitive work.",
+            });
+          }
+        }
+        if (compatibility === "reject") {
+          try {
+            this.wsClient?.close?.(4002, "version_incompatible");
+          } catch {
+            this.wsClient?.terminate?.();
+          }
+          return;
+        }
         await this.syncLocalToolsAgainstGateway?.();
+        return;
+      }
+
+      if (parsed.type === "heartbeat_pong") {
+        this.wsAwaitingPong = false;
         return;
       }
 
@@ -1830,6 +2042,25 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       });
     },
 
+    ensureGatewayWsClientIsReusable(this: GatewaySocketCarrier): boolean {
+      if (!this.wsClient) {
+        return true;
+      }
+
+      const readyState =
+        typeof this.wsClient.readyState === "number"
+          ? this.wsClient.readyState
+          : null;
+
+      // OPEN=1, CONNECTING=0 are still active; CLOSING=2 and CLOSED=3 are stale.
+      if (readyState === 0 || readyState === 1) {
+        return false;
+      }
+
+      this.wsClient = null;
+      return true;
+    },
+
     scheduleGatewayWsReconnect(this: GatewaySocketCarrier): void {
       if (this.stopRequested || this.wsReconnectTimer) {
         return;
@@ -1848,7 +2079,11 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
     async startGatewayWsClient(this: GatewaySocketCarrier): Promise<void> {
       const runtime = this.getRuntimeOrThrow?.();
-      if (!runtime || this.wsClient) {
+      if (!runtime) {
+        return;
+      }
+
+      if (!this.ensureGatewayWsClientIsReusable?.()) {
         return;
       }
 
@@ -1884,6 +2119,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           },
         );
         this.wsClientHasConnectedOnce = true;
+        this.wsAwaitingPong = false;
         void this.sendClientHello?.(socket);
       });
 
@@ -1902,6 +2138,11 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           error:
             error instanceof Error ? (error.stack ?? error.message) : String(error),
         });
+        this.wsAwaitingPong = false;
+        if (this.wsClient === socket && socket.readyState !== 1) {
+          this.wsClient = null;
+        }
+        this.scheduleGatewayWsReconnect?.();
       });
 
       socket.on("close", () => {
@@ -1909,6 +2150,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           url: normalizedUrl,
           clientUuid: this.wsHelloClientUuid,
         });
+        this.wsAwaitingPong = false;
         if (this.wsClient === socket) {
           this.wsClient = null;
         }
@@ -1969,6 +2211,56 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           });
         }, TOOLS_SYNC_CHECK_INTERVAL_MS);
       }
+
+      if (!this.wsHeartbeatTimer) {
+        this.wsHeartbeatTimer = setInterval(() => {
+          if (this.stopRequested) {
+            return;
+          }
+
+          const activeSocket = this.wsClient;
+          if (!activeSocket || activeSocket.readyState !== 1) {
+            this.wsAwaitingPong = false;
+            return;
+          }
+
+          if (this.wsAwaitingPong) {
+            runtime.logger.warn("Gateway WS heartbeat timed out; terminating stale client socket", {
+              url: normalizedUrl,
+              clientUuid: this.wsHelloClientUuid,
+            });
+            this.wsAwaitingPong = false;
+            if (this.wsClient === activeSocket) {
+              this.wsClient = null;
+            }
+            activeSocket.terminate?.();
+            this.scheduleGatewayWsReconnect?.();
+            return;
+          }
+
+          this.wsAwaitingPong = true;
+          try {
+            activeSocket.send?.(
+              JSON.stringify({
+                type: "heartbeat_ping",
+                ts: new Date().toISOString(),
+              } satisfies GatewaySocketHeartbeatPing),
+            );
+          } catch (error) {
+            this.wsAwaitingPong = false;
+            runtime.logger.warn("Gateway WS heartbeat ping failed", {
+              url: normalizedUrl,
+              error:
+                error instanceof Error ? (error.stack ?? error.message) : String(error),
+            });
+            if (this.wsClient === activeSocket) {
+              this.wsClient = null;
+            }
+            activeSocket.terminate?.();
+            this.scheduleGatewayWsReconnect?.();
+          }
+        }, WS_HEARTBEAT_INTERVAL_MS);
+      }
     },
 
     async closeGatewayWsResources(this: GatewaySocketCarrier): Promise<void> {
@@ -1986,6 +2278,12 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         clearInterval(this.wsToolsSyncTimer);
         this.wsToolsSyncTimer = null;
       }
+
+      if (this.wsHeartbeatTimer) {
+        clearInterval(this.wsHeartbeatTimer);
+        this.wsHeartbeatTimer = null;
+      }
+      this.wsAwaitingPong = false;
 
       for (const pending of this.pendingLiveRequests?.values() ?? []) {
         clearTimeout(pending.timeout);

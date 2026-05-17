@@ -165,6 +165,34 @@ Typical public MCP endpoint in `gateway` / `both` mode:
 
 - `https://your-host.example/api/mcp`
 
+## Start with the bot from inside an agent
+
+Once MCP is connected, you can start Telegram pairing by asking the agent in plain language.
+
+Typical phrases the agent should understand:
+
+- `pair with Telegram`
+- `link to Telegram`
+- `connect this session to Telegram`
+- `register this session in Telegram`
+- `create a Telegram pairing code`
+- `bind this agent to Telegram`
+
+Expected pairing flow:
+
+1. The agent calls `create_session_pair_code`.
+2. It returns a short code and, when possible, a deep link.
+3. You open Telegram and send `/start <code>` or `/link <code>` to the bot.
+4. After successful pairing, `/menu` opens the session menu.
+
+Recommended prompt if you want to be explicit:
+
+```text
+Pair this session with Telegram and give me the link code.
+```
+
+If the agent works inside `tmux`, it should also pass tmux attributes and `cwd` during pairing so Live View and nudges work immediately.
+
 ### Telegram setup
 
 1. Open BotFather in Telegram.

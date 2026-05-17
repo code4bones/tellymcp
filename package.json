@@ -1,6 +1,6 @@
 {
   "name": "@deadragdoll/tellymcp",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "TellyMCP - Telegram Human-in-the-Loop MCP Server",
   "main": "dist/services/features/telegram-mcp/runtime.service.js",
   "bin": {
@@ -14,6 +14,7 @@
     "README-ru.md",
     "STANDALONE.md",
     "STANDALONE-ru.md",
+    "VERSION.md",
     "CHANGELOG.md",
     "TOOLS.md",
     ".env.example.client",

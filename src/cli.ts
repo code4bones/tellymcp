@@ -7,12 +7,14 @@ import net from "node:net";
 import { parse as parseDotenv } from "dotenv";
 import pc from "picocolors";
 import WebSocket from "ws";
+import { getTellyMcpPackageVersion } from "./services/features/telegram-mcp/src/shared/lib/version/versionHandshake";
 
 type InitMode = "client" | "gateway" | "both";
 type CliCommand = "help" | "init" | "run" | "mcp" | "doctor" | "browser";
 
 const distDir = __dirname;
 const packageRoot = path.resolve(distDir, "..");
+const cliPackageVersion = getTellyMcpPackageVersion(__dirname);
 
 type TmuxStatus =
   | { found: true; version: string }
@@ -40,7 +42,9 @@ function getTmuxStatus(): TmuxStatus {
 }
 
 function printBanner(title: string, subtitle?: string): void {
-  process.stdout.write(`${pc.bold(pc.cyan("TellyMCP"))} ${pc.dim(title)}\n`);
+  process.stdout.write(
+    `${pc.bold(pc.cyan("TellyMCP"))} ${pc.bold(pc.white(`v${cliPackageVersion}`))} ${pc.dim(title)}\n`,
+  );
   if (subtitle) {
     process.stdout.write(`${pc.dim(subtitle)}\n`);
   }
@@ -818,6 +822,7 @@ function runRuntime(args: string[]): void {
     fail(`Missing compiled services: ${servicesPath}`);
   }
 
+  printBanner("run", "Starting packaged runtime");
   const tmux = getTmuxStatus();
   if (tmux.found) {
     process.stdout.write(`${pc.green("tmux detected:")} ${tmux.version}\n`);

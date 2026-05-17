@@ -4,6 +4,10 @@ import {
   createAppRuntime,
   type AppRuntime,
 } from "./src/app/bootstrap/runtime";
+import {
+  TELLYMCP_PROTOCOL_VERSION,
+  getTellyMcpPackageVersion,
+} from "./src/shared/lib/version/versionHandshake";
 
 export const TELEGRAM_MCP_RUNTIME_SERVICE_NAME = "telegramMcp.runtime";
 
@@ -35,12 +39,18 @@ const TelegramMcpRuntimeService: ServiceSchema = {
   },
 
   async started(this: RuntimeCarrier) {
-    this.logger.info("Starting telegram_mcp runtime service");
+    this.logger.info("Starting telegram_mcp runtime service", {
+      packageVersion: getTellyMcpPackageVersion(__dirname),
+      protocolVersion: TELLYMCP_PROTOCOL_VERSION,
+    });
     this.runtime = await createAppRuntime({
       callBroker: (actionName, params, options) =>
         this.broker.call(actionName, params, options),
     });
-    this.logger.info("telegram_mcp runtime service is ready");
+    this.logger.info("telegram_mcp runtime service is ready", {
+      packageVersion: getTellyMcpPackageVersion(__dirname),
+      protocolVersion: TELLYMCP_PROTOCOL_VERSION,
+    });
   },
 
   async stopped(this: RuntimeCarrier) {

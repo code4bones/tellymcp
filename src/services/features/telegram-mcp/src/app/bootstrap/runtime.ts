@@ -135,6 +135,8 @@ export async function createAppRuntime(input: {
   logger.info("Telegram transport ready");
   await telegramTransport.recoverPendingInboxNudges();
   logger.info("Startup inbox nudge recovery completed");
+  await telegramTransport.sendStartupNotifications();
+  logger.info("Startup Telegram notifications completed");
 
   const gatewayHttpService = new GatewayHttpService(config, input.callBroker);
 

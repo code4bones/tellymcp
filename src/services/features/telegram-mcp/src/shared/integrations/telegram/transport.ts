@@ -64,6 +64,10 @@ import {
   sendTmuxLiteralLine,
   writeXchangeRelativeFile,
 } from "../tmux/client";
+import {
+  TELLYMCP_PROTOCOL_VERSION,
+  getTellyMcpPackageVersion,
+} from "../../lib/version/versionHandshake";
 
 type WaiterRecord = {
   requestId: string;
@@ -238,6 +242,17 @@ function trimTrailingSlashes(value: string): string {
 function normalizeBasePath(value: string): string {
   const trimmed = trimTrailingSlashes(value.trim());
   return trimmed.startsWith("/") ? trimmed || "/" : `/${trimmed || ""}`;
+}
+
+function joinHttpPath(prefix: string, suffix: string): string {
+  const normalizedPrefix = prefix ? normalizeBasePath(prefix) : "";
+  const normalizedSuffix = normalizeBasePath(suffix);
+
+  if (!normalizedPrefix || normalizedPrefix === "/") {
+    return normalizedSuffix;
+  }
+
+  return `${normalizedPrefix}${normalizedSuffix}`.replace(/\/{2,}/gu, "/");
 }
 
 function resolveWebAppPublicBaseUrl(config: AppConfig): string | null {
@@ -1226,6 +1241,110 @@ export class TelegramTransport implements HumanTransport {
       scannedSessions: sessions.length,
       recoveredSessions: recoveredCount,
     });
+  }
+
+  public async sendStartupNotifications(): Promise<void> {
+    const packageVersion = getTellyMcpPackageVersion(__dirname);
+    const sessions = await this.sessionStore.listSessions();
+    const groupedRecipients = new Map<
+      string,
+      {
+        binding: { telegramChatId: number; telegramUserId: number };
+        sessionIds: string[];
+        sessionLabels: string[];
+      }
+    >();
+
+    for (const session of sessions) {
+      const binding = await this.bindingStore.getBinding(session.sessionId);
+      if (!binding) {
+        continue;
+      }
+
+      const key = `${binding.telegramChatId}:${binding.telegramUserId}`;
+      const current = groupedRecipients.get(key);
+      if (current) {
+        current.sessionIds.push(session.sessionId);
+        current.sessionLabels.push(session.label ?? session.sessionId);
+        continue;
+      }
+
+      groupedRecipients.set(key, {
+        binding: {
+          telegramChatId: binding.telegramChatId,
+          telegramUserId: binding.telegramUserId,
+        },
+        sessionIds: [session.sessionId],
+        sessionLabels: [session.label ?? session.sessionId],
+      });
+    }
+
+    if (groupedRecipients.size === 0) {
+      this.logger.info("Skipping startup notifications because no Telegram sessions are paired");
+      return;
+    }
+
+    const runtimePort =
+      this.config.distributed.mode === "gateway" || this.config.distributed.mode === "both"
+        ? Number(process.env.PORT || this.config.mcp.httpPort)
+        : this.config.mcp.httpPort;
+    const rootPrefix =
+      this.config.distributed.mode === "gateway" || this.config.distributed.mode === "both"
+        ? normalizeBasePath(process.env.ROOT_PREFIX || "/api")
+        : "";
+    const localMcpPath =
+      this.config.distributed.mode === "gateway" || this.config.distributed.mode === "both"
+        ? joinHttpPath(rootPrefix, this.config.mcp.httpPath)
+        : this.config.mcp.httpPath;
+    const localWebappPath =
+      this.config.distributed.mode === "gateway" || this.config.distributed.mode === "both"
+        ? joinHttpPath(rootPrefix, this.config.webapp.basePath)
+        : this.config.webapp.basePath;
+    const localMcpUrl = `http://${this.config.mcp.httpHost}:${runtimePort}${localMcpPath}`;
+    const localWebappUrl = `http://${this.config.mcp.httpHost}:${runtimePort}${localWebappPath}`;
+
+    for (const recipientGroup of groupedRecipients.values()) {
+      const primarySessionId = recipientGroup.sessionIds[0];
+      if (!primarySessionId) {
+        continue;
+      }
+      const uniqueSessionLabels = Array.from(new Set(recipientGroup.sessionLabels)).sort();
+      const startupMessage = [
+        "✅ TellyMCP запущен.",
+        `Версия: ${packageVersion}`,
+        `Протокол: ${TELLYMCP_PROTOCOL_VERSION}`,
+        `Режим: ${this.config.distributed.mode}`,
+        ...(this.config.telegram.botUsername
+          ? [`Бот: @${this.config.telegram.botUsername.replace(/^@/u, "")}`]
+          : []),
+        `Сессии: ${uniqueSessionLabels.join(", ")}`,
+        `MCP: ${localMcpUrl}`,
+        ...(this.config.webapp.enabled ? [`WebApp: ${localWebappUrl}`] : []),
+        ...(this.config.distributed.gatewayPublicUrl
+          ? [`Gateway: ${this.config.distributed.gatewayPublicUrl}`]
+          : []),
+        ...(this.config.distributed.gatewayWsUrl
+          ? [`Gateway WS: ${this.config.distributed.gatewayWsUrl}`]
+          : []),
+        `Browser: ${this.config.browser.enabled ? (this.config.browser.headless ? "enabled, headless" : "enabled, headed") : "disabled"}`,
+        "Напиши /menu, чтобы открыть меню сессий.",
+      ].join("\n");
+
+      try {
+        await this.sendNotification({
+          sessionId: primarySessionId,
+          sessionLabel: "TellyMCP",
+          recipient: recipientGroup.binding,
+          message: startupMessage,
+        });
+      } catch (error) {
+        this.logger.warn("Failed to deliver Telegram startup notification", {
+          telegramChatId: recipientGroup.binding.telegramChatId,
+          telegramUserId: recipientGroup.binding.telegramUserId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   public async sendRequest(

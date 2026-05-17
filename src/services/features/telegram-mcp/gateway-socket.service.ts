@@ -10,6 +10,7 @@ import {
   TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
   type TelegramMcpRuntimeServiceInstance,
 } from "./runtime.service";
+import { TELEGRAM_MCP_STANDALONE_HTTP_SERVICE_NAME } from "./standalone-http.service";
 import {
   type TelegramWebAppInitDataUnsafe,
   validateTelegramWebAppInitData,
@@ -35,7 +36,6 @@ const WebSocketServer = wsLib.WebSocketServer;
 
 export const TELEGRAM_MCP_GATEWAY_SOCKET_SERVICE_NAME =
   "telegramMcp.gatewaySocket";
-const API_SERVICE_NAME = "api";
 
 const CLIENT_RECONNECT_DELAY_MS = 3000;
 const LIVE_REQUEST_TIMEOUT_MS = 20000;
@@ -207,13 +207,13 @@ type LiveRequestPending = {
   timeout: NodeJS.Timeout;
 };
 
-type ApiServiceCarrier = Service & {
-  server?: HttpServer;
+type StandaloneHttpServiceCarrier = Service & {
+  httpServer?: HttpServer | null;
 };
 
 type GatewaySocketCarrier = Service & {
   runtimeService?: TelegramMcpRuntimeServiceInstance | null;
-  apiService?: ApiServiceCarrier | null;
+  standaloneHttpService?: StandaloneHttpServiceCarrier | null;
   wsServer?: any;
   wsClient?: any;
   wsReconnectTimer?: NodeJS.Timeout | null;
@@ -232,7 +232,7 @@ type GatewaySocketCarrier = Service & {
   connectedClientToolsAlerts?: Map<any, Map<string, string>>;
   pendingLiveRequests?: Map<string, LiveRequestPending>;
   getRuntimeOrThrow?: () => ReturnType<TelegramMcpRuntimeServiceInstance["getRuntime"]>;
-  getApiServerOrThrow?: () => HttpServer;
+  getHttpServerOrThrow?: () => HttpServer;
   startGatewayWsServer?: () => Promise<void>;
   startGatewayWsClient?: () => Promise<void>;
   scheduleGatewayWsReconnect?: () => void;
@@ -354,7 +354,10 @@ function normalizeGatewayBaseUrl(value: string): URL {
 
 const TelegramMcpGatewaySocketService: ServiceSchema = {
   name: TELEGRAM_MCP_GATEWAY_SOCKET_SERVICE_NAME,
-  dependencies: [TELEGRAM_MCP_RUNTIME_SERVICE_NAME, API_SERVICE_NAME],
+  dependencies: [
+    TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
+    TELEGRAM_MCP_STANDALONE_HTTP_SERVICE_NAME,
+  ],
 
   actions: {
     requestLiveRelay: {
@@ -504,7 +507,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
   created(this: GatewaySocketCarrier) {
     this.runtimeService = null;
-    this.apiService = null;
+    this.standaloneHttpService = null;
     this.wsServer = null;
     this.wsClient = null;
     this.wsReconnectTimer = null;
@@ -540,19 +543,21 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       return runtimeService.getRuntime();
     },
 
-    getApiServerOrThrow(this: GatewaySocketCarrier): HttpServer {
-      const apiService =
-        this.apiService ??
-        (this.broker.getLocalService(API_SERVICE_NAME) as ApiServiceCarrier | null);
+    getHttpServerOrThrow(this: GatewaySocketCarrier): HttpServer {
+      const standaloneHttpService =
+        this.standaloneHttpService ??
+        (this.broker.getLocalService(
+          TELEGRAM_MCP_STANDALONE_HTTP_SERVICE_NAME,
+        ) as StandaloneHttpServiceCarrier | null);
 
-      if (!apiService?.server) {
+      if (!standaloneHttpService?.httpServer) {
         throw new Error(
-          `Local Moleculer service '${API_SERVICE_NAME}' HTTP server is unavailable`,
+          `Local Moleculer service '${TELEGRAM_MCP_STANDALONE_HTTP_SERVICE_NAME}' HTTP server is unavailable`,
         );
       }
 
-      this.apiService = apiService;
-      return apiService.server;
+      this.standaloneHttpService = standaloneHttpService;
+      return standaloneHttpService.httpServer;
     },
 
     async collectSessionTools(this: GatewaySocketCarrier): Promise<{
@@ -1755,7 +1760,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         return;
       }
 
-      const httpServer = this.getApiServerOrThrow?.();
+      const httpServer = this.getHttpServerOrThrow?.();
       const wsPath =
         runtime.config.distributed.gatewayWsPath.replace(/\/+$/u, "") || "/";
       const wsServer = new WebSocketServer({ noServer: true });
@@ -2000,7 +2005,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       if (this.wsServer) {
         const server = this.wsServer;
         this.wsServer = null;
-        const httpServer = this.apiService?.server;
+        const httpServer = this.standaloneHttpService?.httpServer;
         if (httpServer && this.wsUpgradeHandler) {
           httpServer.removeListener("upgrade", this.wsUpgradeHandler);
         }

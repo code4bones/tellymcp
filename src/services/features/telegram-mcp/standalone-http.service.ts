@@ -52,7 +52,7 @@ const TelegramMcpStandaloneHttpService: ServiceSchema = {
   },
 
   async started(this: StandaloneHttpCarrier) {
-    if (process.env.TELLYMCP_STANDALONE_HTTP !== "true") {
+    if (process.env.TELLYMCP_STANDALONE_HTTP === "false") {
       return;
     }
 

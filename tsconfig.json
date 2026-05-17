@@ -6,8 +6,7 @@
     "baseUrl": ".",
     "paths": {
       "lib/*": ["src/lib/*"],
-      "@src/*": ["src/*"],
-      "@core/*": ["src/services/features/core/*"]
+      "@src/*": ["src/*"]
     },
     "outDir": "dist",
     "rootDir": "src",

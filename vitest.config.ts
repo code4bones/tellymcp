@@ -6,7 +6,6 @@ export default defineConfig({
   resolve: {
     alias: {
       "@src": path.resolve(__dirname, "src"),
-      "@core": path.resolve(__dirname, "src/services/features/core"),
       lib: path.resolve(__dirname, "src/lib"),
     },
   },

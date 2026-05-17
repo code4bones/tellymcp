@@ -95,7 +95,7 @@ Main layers:
 
 - [mcp-http.service.ts](/home/code4bones/Devs/coding/mcp/telegram_mcp/src/services/features/telegram-mcp/mcp-http.service.ts)
   - MCP/WebApp HTTP handling service
-  - served through `moleculer-web` aliases in the `api` gateway
+  - served through the current standalone HTTP layer under `${ROOT_PREFIX}`
 
 Shared runtime assembly lives in:
 
@@ -104,8 +104,8 @@ Shared runtime assembly lives in:
 Important:
 
 - `stdio` mode is removed
-- `telegram_mcp` no longer opens its own standalone HTTP listener
-- `${ROOT_PREFIX}/mcp`, `${ROOT_PREFIX}/webapp`, and `${ROOT_PREFIX}/healthz` are routed by the core `api` gateway through Moleculer action aliases
+- `telegram_mcp` owns the active HTTP runtime
+- in `gateway/both` mode it binds to `PORT` and serves `${ROOT_PREFIX}/mcp`, `${ROOT_PREFIX}/webapp`, `${ROOT_PREFIX}/healthz`, and `${ROOT_PREFIX}/gateway`
 
 ## Gateway DB bootstrap
 

@@ -11,7 +11,7 @@
   - `telegramMcp.gateway`
   - `telegramMcp.gatewayDelivery`
   - `telegramMcp.ensuredb`
-- MCP и WebApp теперь работают через `moleculer-web` и общий API gateway под `${ROOT_PREFIX}`:
+- MCP и WebApp теперь работают через общий HTTP runtime под `${ROOT_PREFIX}`:
   - `${ROOT_PREFIX}/mcp`
   - `${ROOT_PREFIX}/webapp`
   - `${ROOT_PREFIX}/healthz`
@@ -109,10 +109,10 @@
 - `docker` и `go tmux-proxy` переведены в optional/legacy deployment path, а не в основной user flow
 
 ### Fixed
-- Исправлен `Headers have already sent` при работе MCP/WebApp через `moleculer-web`.
+- Исправлен `Headers have already sent` при работе MCP/WebApp через общий HTTP runtime.
 - Исправлены route/alias проблемы после перехода под `${ROOT_PREFIX}`.
 - Исправлены зависания Mini App bootstrap и проблемы с relative WebApp routes.
-- Исправлены wildcard routes после отката версий `moleculer`/`moleculer-web`.
+- Исправлены wildcard routes после стабилизации общего HTTP runtime.
 - Исправлен рекурсивный `logfeed -> graphql.publish -> logfeed` loop.
 - Исправлены ошибки duplicate SSE stream и приглушён лишний шум в логах.
 - Исправлены скрытые попытки инициализации Postgres в `client` режиме:

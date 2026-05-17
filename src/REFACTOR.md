@@ -23,9 +23,9 @@
    - `tmux-proxy` остаётся отдельным host utility entrypoint
  - Moleculer bootstrap для telegram_mcp подключен:
    - standalone `stdio` удалён
-   - standalone internal HTTP bootstrap удалён
-   - рабочий режим только через Moleculer services
-   - `${ROOT_PREFIX}/mcp`, `${ROOT_PREFIX}/webapp`, `${ROOT_PREFIX}/healthz` обслуживаются через `moleculer-web` aliases core `api` gateway
+   - HTTP runtime обслуживается самим `telegram_mcp`
+   - в `gateway/both` режиме listener садится на общий `PORT` и `${ROOT_PREFIX}`
+   - `${ROOT_PREFIX}/mcp`, `${ROOT_PREFIX}/webapp`, `${ROOT_PREFIX}/healthz`, `${ROOT_PREFIX}/gateway` обслуживаются текущим standalone HTTP слоем
    - текущая сервисная схема:
      - `telegramMcp.runtime` — config, redis, state store, telegram transport, shared runtime dependencies
      - `telegramMcp.pair` — pair-code and pairing lifecycle

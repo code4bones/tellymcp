@@ -49,7 +49,7 @@ const TelegramMcpInboxService: ServiceSchema = {
       );
     }
 
-    const runtime = runtimeService.getRuntime();
+    const runtime = await runtimeService.waitUntilReady();
 
     this.logger.info("Starting telegram_mcp inbox service");
     this.inboxService = new InboxService(

@@ -73,7 +73,7 @@ const TelegramMcpCollaborationService: ServiceSchema = {
       );
     }
 
-    const runtime = runtimeService.getRuntime();
+    const runtime = await runtimeService.waitUntilReady();
 
     this.logger.info("Starting telegram_mcp collaboration service");
     const localBackend = new LocalCollaborationBackend(

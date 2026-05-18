@@ -51,7 +51,7 @@ const TelegramMcpToolsSyncService: ServiceSchema = {
       );
     }
 
-    const runtime = runtimeService.getRuntime();
+    const runtime = await runtimeService.waitUntilReady();
 
     this.logger.info("Starting telegram_mcp tools sync service");
     this.refreshToolsMarkdownService = new RefreshToolsMarkdownService(

@@ -53,7 +53,7 @@ const TelegramMcpApprovalService: ServiceSchema = {
       );
     }
 
-    const runtime = runtimeService.getRuntime();
+    const runtime = await runtimeService.waitUntilReady();
 
     this.logger.info("Starting telegram_mcp approval service");
     this.approvalOrchestrator = new HumanApprovalOrchestrator(

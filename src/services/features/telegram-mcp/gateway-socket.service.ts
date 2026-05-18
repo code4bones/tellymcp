@@ -2341,8 +2341,21 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
   },
 
   async started(this: GatewaySocketCarrier) {
-    const runtime = this.getRuntimeOrThrow?.();
-    const mode = runtime?.config.distributed.mode;
+    await this.broker.waitForServices([TELEGRAM_MCP_RUNTIME_SERVICE_NAME]);
+
+    const runtimeService = this.broker.getLocalService(
+      TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
+    ) as TelegramMcpRuntimeServiceInstance | null;
+
+    if (!runtimeService) {
+      throw new Error(
+        `Local Moleculer service '${TELEGRAM_MCP_RUNTIME_SERVICE_NAME}' is unavailable`,
+      );
+    }
+
+    this.runtimeService = runtimeService;
+    const runtime = await runtimeService.waitUntilReady();
+    const mode = runtime.config.distributed.mode;
     const gatewayEnabled = mode === "gateway" || mode === "both";
     const clientEnabled = mode === "client" || mode === "both";
 

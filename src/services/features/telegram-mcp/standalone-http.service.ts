@@ -79,7 +79,7 @@ const TelegramMcpStandaloneHttpService: ServiceSchema = {
       );
     }
 
-    const runtime = runtimeService.getRuntime();
+    const runtime = await runtimeService.waitUntilReady();
     const { host, port, publicRootPrefix } = resolveStandaloneBind(runtime);
 
     this.httpServer = createServer(

@@ -447,11 +447,12 @@ const TelegramMcpGatewayRmqService: ServiceSchema = {
     }
 
     this.runtimeService = runtimeService;
+    const runtime = await runtimeService.waitUntilReady();
 
     if (!this.isEnabled?.()) {
       this.logger.info("Gateway RMQ is disabled", {
-        distributedMode: runtimeService.getRuntime().config.distributed.mode,
-        rmqConfigured: Boolean(runtimeService.getRuntime().config.distributed.rmq?.host),
+        distributedMode: runtime.config.distributed.mode,
+        rmqConfigured: Boolean(runtime.config.distributed.rmq?.host),
       });
       return;
     }

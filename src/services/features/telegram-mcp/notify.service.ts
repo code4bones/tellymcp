@@ -49,7 +49,7 @@ const TelegramMcpNotifyService: ServiceSchema = {
       );
     }
 
-    const runtime = runtimeService.getRuntime();
+    const runtime = await runtimeService.waitUntilReady();
 
     this.logger.info("Starting telegram_mcp notify service");
     this.notifyService = new NotifyService(

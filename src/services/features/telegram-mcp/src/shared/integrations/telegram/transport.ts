@@ -26,6 +26,7 @@ import type {
   SessionBindingStore,
   TelegramInboxStore,
   TelegramMenuPayloadStore,
+  TelegramUserLocaleStore,
   TelegramXchangeFileMetaStore,
   MaintenanceStore,
 } from "../../api/storage/contract";
@@ -70,6 +71,11 @@ import {
   TELLYMCP_PROTOCOL_VERSION,
   getTellyMcpPackageVersion,
 } from "../../lib/version/versionHandshake";
+import {
+  normalizeLocale,
+  translate,
+  type SupportedLocale,
+} from "../../i18n";
 
 type WaiterRecord = {
   requestId: string;
@@ -620,7 +626,7 @@ export class TelegramTransport implements HumanTransport {
           menuId: ctx.callbackQuery?.data ?? "unknown",
         });
         await ctx.answerCallbackQuery({
-          text: "Menu refreshed.",
+          text: await this.tForContext(ctx, "common:menu.refreshed"),
         });
         await handler(ctx);
       },
@@ -633,6 +639,7 @@ export class TelegramTransport implements HumanTransport {
     private readonly bindingStore: SessionBindingStore,
     private readonly inboxStore: TelegramInboxStore,
     private readonly menuPayloadStore: TelegramMenuPayloadStore,
+    private readonly localeStore: TelegramUserLocaleStore,
     private readonly xchangeFileMetaStore: TelegramXchangeFileMetaStore,
     private readonly maintenanceStore: MaintenanceStore,
     private readonly objectStore: MinioExchangeStore,
@@ -706,7 +713,9 @@ export class TelegramTransport implements HumanTransport {
       await this.cancelPendingPartnerNote(ctx);
     });
     this.bot.callbackQuery("partner-back", async (ctx) => {
-      await ctx.answerCallbackQuery({ text: "Назад к напарнику." });
+      await ctx.answerCallbackQuery({
+        text: await this.tForContext(ctx, "menu:partner.actions.back_to_partner"),
+      });
       await this.showPartnerMenu(ctx);
     });
     this.bot.callbackQuery("file-handoff-cancel", async (ctx) => {
@@ -1313,26 +1322,61 @@ export class TelegramTransport implements HumanTransport {
       if (!primarySessionId) {
         continue;
       }
+      const locale = await this.resolveLocaleForTelegramUserId(
+        recipientGroup.binding.telegramUserId,
+      );
       const uniqueSessionLabels = Array.from(new Set(recipientGroup.sessionLabels)).sort();
+      const browserStatus = this.config.browser.enabled
+        ? (this.config.browser.headless ? "enabled, headless" : "enabled, headed")
+        : "disabled";
       const startupMessage = [
-        "✅ TellyMCP запущен.",
-        `Версия: ${packageVersion}`,
-        `Протокол: ${TELLYMCP_PROTOCOL_VERSION}`,
-        `Режим: ${this.config.distributed.mode}`,
+        this.t(locale, "menu:notices.startup.title"),
+        this.t(locale, "menu:notices.startup.version", {
+          packageVersion,
+        }),
+        this.t(locale, "menu:notices.startup.protocol", {
+          protocolVersion: TELLYMCP_PROTOCOL_VERSION,
+        }),
+        this.t(locale, "menu:notices.startup.mode", {
+          mode: this.config.distributed.mode,
+        }),
         ...(this.config.telegram.botUsername
-          ? [`Бот: @${this.config.telegram.botUsername.replace(/^@/u, "")}`]
+          ? [
+              this.t(locale, "menu:notices.startup.bot", {
+                botUsername: this.config.telegram.botUsername.replace(/^@/u, ""),
+              }),
+            ]
           : []),
-        `Сессии: ${uniqueSessionLabels.join(", ")}`,
-        `MCP: ${localMcpUrl}`,
-        ...(this.config.webapp.enabled ? [`WebApp: ${localWebappUrl}`] : []),
+        this.t(locale, "menu:notices.startup.sessions", {
+          count: uniqueSessionLabels.length,
+        }),
+        this.t(locale, "menu:notices.startup.session_list", {
+          sessions: uniqueSessionLabels.join(", "),
+        }),
+        this.t(locale, "menu:notices.startup.mcp", {
+          url: localMcpUrl,
+        }),
+        ...(this.config.webapp.enabled
+          ? [this.t(locale, "menu:notices.startup.webapp", { url: localWebappUrl })]
+          : []),
         ...(this.config.distributed.gatewayPublicUrl
-          ? [`Gateway: ${this.config.distributed.gatewayPublicUrl}`]
+          ? [
+              this.t(locale, "menu:notices.startup.gateway", {
+                url: this.config.distributed.gatewayPublicUrl,
+              }),
+            ]
           : []),
         ...(this.config.distributed.gatewayWsUrl
-          ? [`Gateway WS: ${this.config.distributed.gatewayWsUrl}`]
+          ? [
+              this.t(locale, "menu:notices.startup.gateway_ws", {
+                url: this.config.distributed.gatewayWsUrl,
+              }),
+            ]
           : []),
-        `Browser: ${this.config.browser.enabled ? (this.config.browser.headless ? "enabled, headless" : "enabled, headed") : "disabled"}`,
-        "Напиши /menu, чтобы открыть меню сессий.",
+        this.t(locale, "menu:notices.startup.browser", {
+          status: browserStatus,
+        }),
+        this.t(locale, "menu:notices.startup.hint"),
       ].join("\n");
 
       try {
@@ -1423,11 +1467,11 @@ export class TelegramTransport implements HumanTransport {
     member_display_name?: string;
     member_telegram_username?: string;
   }): Promise<void> {
-    const memberLabel =
+    const rawMemberLabel =
       input.member_display_name?.trim() ||
       (input.member_telegram_username?.trim()
         ? `@${input.member_telegram_username.trim().replace(/^@/u, "")}`
-        : "Новый участник");
+        : null);
 
     const sessions = await this.sessionStore.listSessions();
     const notifiedChats = new Set<number>();
@@ -1437,6 +1481,11 @@ export class TelegramTransport implements HumanTransport {
       if (!binding || notifiedChats.has(binding.telegramChatId)) {
         continue;
       }
+      const locale = await this.resolveLocaleForTelegramUserId(
+        binding.telegramUserId,
+      );
+      const memberLabel =
+        rawMemberLabel ?? this.t(locale, "menu:notices.project.new_member");
 
       await this.sendNotification({
         sessionId: session.sessionId,
@@ -1445,7 +1494,10 @@ export class TelegramTransport implements HumanTransport {
           telegramChatId: binding.telegramChatId,
           telegramUserId: binding.telegramUserId,
         },
-        message: `В проект «${input.project_name}» вошёл участник: ${memberLabel}.`,
+        message: this.t(locale, "menu:notices.project.member_joined", {
+          projectName: input.project_name,
+          memberLabel,
+        }),
       });
       notifiedChats.add(binding.telegramChatId);
     }
@@ -1457,11 +1509,11 @@ export class TelegramTransport implements HumanTransport {
     member_display_name?: string;
     member_telegram_username?: string;
   }): Promise<void> {
-    const memberLabel =
+    const rawMemberLabel =
       input.member_display_name?.trim() ||
       (input.member_telegram_username?.trim()
         ? `@${input.member_telegram_username.trim().replace(/^@/u, "")}`
-        : "Участник");
+        : null);
 
     const sessions = await this.sessionStore.listSessions();
     const notifiedChats = new Set<number>();
@@ -1471,6 +1523,11 @@ export class TelegramTransport implements HumanTransport {
       if (!binding || notifiedChats.has(binding.telegramChatId)) {
         continue;
       }
+      const locale = await this.resolveLocaleForTelegramUserId(
+        binding.telegramUserId,
+      );
+      const memberLabel =
+        rawMemberLabel ?? this.t(locale, "menu:notices.project.member");
 
       await this.sendNotification({
         sessionId: session.sessionId,
@@ -1479,7 +1536,10 @@ export class TelegramTransport implements HumanTransport {
           telegramChatId: binding.telegramChatId,
           telegramUserId: binding.telegramUserId,
         },
-        message: `Из проекта «${input.project_name}» вышел участник: ${memberLabel}.`,
+        message: this.t(locale, "menu:notices.project.member_left", {
+          projectName: input.project_name,
+          memberLabel,
+        }),
       });
       notifiedChats.add(binding.telegramChatId);
     }
@@ -1506,6 +1566,9 @@ export class TelegramTransport implements HumanTransport {
       if (!binding || notifiedChats.has(binding.telegramChatId)) {
         continue;
       }
+      const locale = await this.resolveLocaleForTelegramUserId(
+        binding.telegramUserId,
+      );
 
       await this.sendNotification({
         sessionId: session.sessionId,
@@ -1514,7 +1577,9 @@ export class TelegramTransport implements HumanTransport {
           telegramChatId: binding.telegramChatId,
           telegramUserId: binding.telegramUserId,
         },
-        message: `Проект «${input.project_name}» удалён. Локальные project bindings очищены.`,
+        message: this.t(locale, "menu:notices.project.deleted", {
+          projectName: input.project_name,
+        }),
       });
       notifiedChats.add(binding.telegramChatId);
     }
@@ -1619,9 +1684,21 @@ export class TelegramTransport implements HumanTransport {
         telegramUserId: binding.telegramUserId,
       },
       message: [
-        "TOOLS.md обновлён на шлюзе или отсутствует локально.",
-        `Сессия: ${session.label ?? input.session_label ?? session.sessionId}`,
-        "Действие обязательно: вызови refresh_tools_markdown, затем перечитай локальный TOOLS.md и применяй его перед продолжением работы.",
+        await this.tForTelegramUserId(
+          binding.telegramUserId,
+          "menu:notices.tools.changed",
+        ),
+        await this.tForTelegramUserId(
+          binding.telegramUserId,
+          "menu:notices.tools.session",
+          {
+            sessionName: session.label ?? input.session_label ?? session.sessionId,
+          },
+        ),
+        await this.tForTelegramUserId(
+          binding.telegramUserId,
+          "menu:notices.tools.action_required",
+        ),
       ].join("\n"),
     });
 
@@ -1710,12 +1787,35 @@ export class TelegramTransport implements HumanTransport {
         telegramUserId: binding.telegramUserId,
       },
       message: [
-        input.compatibility === "reject"
-          ? "Шлюз и клиент несовместимы по протоколу. Транспорт этой сессии заблокирован."
-          : "Версии шлюза и клиента различаются.",
-        `Сессия: ${session.label ?? input.session_label ?? session.sessionId}`,
-        `Клиент: ${input.client_package_version} / protocol ${input.client_protocol_version}`,
-        `Шлюз: ${input.gateway_package_version} / protocol ${input.gateway_protocol_version}`,
+        await this.tForTelegramUserId(
+          binding.telegramUserId,
+          input.compatibility === "reject"
+            ? "menu:notices.version.reject"
+            : "menu:notices.version.warn",
+        ),
+        await this.tForTelegramUserId(
+          binding.telegramUserId,
+          "menu:notices.version.session",
+          {
+            sessionName: session.label ?? input.session_label ?? session.sessionId,
+          },
+        ),
+        await this.tForTelegramUserId(
+          binding.telegramUserId,
+          "menu:notices.version.client",
+          {
+            packageVersion: input.client_package_version,
+            protocolVersion: input.client_protocol_version,
+          },
+        ),
+        await this.tForTelegramUserId(
+          binding.telegramUserId,
+          "menu:notices.version.gateway",
+          {
+            packageVersion: input.gateway_package_version,
+            protocolVersion: input.gateway_protocol_version,
+          },
+        ),
         input.instruction,
       ].join("\n"),
     });
@@ -1743,6 +1843,9 @@ export class TelegramTransport implements HumanTransport {
       });
       return;
     }
+    const locale = await this.resolveLocaleForTelegramUserId(
+      binding.telegramUserId,
+    );
 
     const payloadKey = await this.createLiveApprovalMenuPayload({
       sessionId: targetSession.sessionId,
@@ -1761,18 +1864,28 @@ export class TelegramTransport implements HumanTransport {
     const sent = await this.sendChatMessage(
       binding.telegramChatId,
       [
-        "🖥 Запрос Live View",
+        this.t(locale, "menu:live.approval.request_title"),
         "",
-        ...(input.project_name ? [`Проект: ${input.project_name}`] : []),
-        `Сессия: ${input.source_session_label} -> ${input.target_session_label}`,
+        ...(input.project_name
+          ? [
+              this.t(locale, "menu:live.approval.project", {
+                projectName: input.project_name,
+              }),
+            ]
+          : []),
+        this.t(locale, "menu:live.approval.route", {
+          sourceSessionName: input.source_session_label,
+          targetSessionName: input.target_session_label,
+        }),
         "",
-        `Сессия ${input.source_session_label} запрашивает просмотр Live вашей сессии.`,
-        "Разрешить доступ?",
+        this.t(locale, "menu:live.approval.request_message", {
+          sourceSessionName: input.source_session_label,
+        }),
       ].join("\n"),
       {
         reply_markup: new InlineKeyboard()
-          .text("✅ Разрешить", `live-approval:approve:${payloadKey}`)
-          .text("❌ Отклонить", `live-approval:deny:${payloadKey}`),
+          .text(`✅ ${this.t(locale, "menu:live.approval.approve")}`, `live-approval:approve:${payloadKey}`)
+          .text(`❌ ${this.t(locale, "menu:live.approval.deny")}`, `live-approval:deny:${payloadKey}`),
       },
       {
         kind: "notification",
@@ -1811,6 +1924,9 @@ export class TelegramTransport implements HumanTransport {
       });
       return;
     }
+    const locale = await this.resolveLocaleForTelegramUserId(
+      binding.telegramUserId,
+    );
 
     if (!input.approved) {
       await this.sendNotification({
@@ -1821,9 +1937,18 @@ export class TelegramTransport implements HumanTransport {
           telegramUserId: binding.telegramUserId,
         },
         message: [
-          "🖥 Live View отклонён.",
-          ...(input.project_name ? [`Проект: ${input.project_name}`] : []),
-          `Сессия: ${input.source_session_label} -> ${input.target_session_label}`,
+          this.t(locale, "menu:live.approval.denied"),
+          ...(input.project_name
+            ? [
+                this.t(locale, "menu:live.approval.project", {
+                  projectName: input.project_name,
+                }),
+              ]
+            : []),
+          this.t(locale, "menu:live.approval.route", {
+            sourceSessionName: input.source_session_label,
+            targetSessionName: input.target_session_label,
+          }),
         ].join("\n"),
       });
       return;
@@ -1842,22 +1967,33 @@ export class TelegramTransport implements HumanTransport {
     const sent = await this.sendChatMessage(
       binding.telegramChatId,
       [
-        "🖥 Live View разрешён",
+        this.t(locale, "menu:live.approval.approved"),
         "",
-        ...(input.project_name ? [`Проект: ${input.project_name}`] : []),
-        `Сессия: ${input.source_session_label} -> ${input.target_session_label}`,
+        ...(input.project_name
+          ? [
+              this.t(locale, "menu:live.approval.project", {
+                projectName: input.project_name,
+              }),
+            ]
+          : []),
+        this.t(locale, "menu:live.approval.route", {
+          sourceSessionName: input.source_session_label,
+          targetSessionName: input.target_session_label,
+        }),
         "",
-        "Открой Live в нужном режиме по кнопкам ниже.",
+        this.t(locale, "menu:live.actions.choose_mode"),
       ].join("\n"),
       {
-        reply_markup: this.buildLiveViewLaunchKeyboard((mode) =>
-          this.buildLiveViewUrlForSessionTarget({
-            targetSessionId: input.target_session_id,
-            targetClientUuid: input.target_client_uuid,
-            targetLocalSessionId: input.target_local_session_id,
-            sourceClientUuid: input.source_client_uuid,
-            launchMode: mode,
-          }),
+        reply_markup: this.buildLiveViewLaunchKeyboard(
+          (mode) =>
+            this.buildLiveViewUrlForSessionTarget({
+              targetSessionId: input.target_session_id,
+              targetClientUuid: input.target_client_uuid,
+              targetLocalSessionId: input.target_local_session_id,
+              sourceClientUuid: input.source_client_uuid,
+              launchMode: mode,
+            }),
+          locale,
         ),
       },
       {
@@ -2208,22 +2344,26 @@ export class TelegramTransport implements HumanTransport {
       fingerprint: async (ctx) => this.buildMainMenuFingerprint(ctx),
       ...this.createMenuOptions((ctx) => this.showMainMenu(ctx)),
     })
-      .text("🖥 Live", async (ctx) => {
+      .text(async (ctx) => this.tForContext(ctx, "menu:main.buttons.live"), async (ctx) => {
         await this.showLiveViewLauncher(ctx);
       })
-      .text("📄 Content", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Opening content menu." });
+      .text(async (ctx) => this.tForContext(ctx, "menu:main.buttons.content"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:main.actions.open_content"),
+        });
         await this.showBufferMenu(ctx);
       })
-      .text("🌐 Browser", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Opening browser menu." });
+      .text(async (ctx) => this.tForContext(ctx, "menu:main.buttons.browser"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:main.actions.open_browser"),
+        });
         await this.showBrowserMenu(ctx);
       })
       .row()
-      .text("🏠 Local", async (ctx) => {
+      .text(async (ctx) => this.tForContext(ctx, "menu:main.buttons.local"), async (ctx) => {
         await this.showLocalEntryPoint(ctx);
       })
-      .text("👥 Collab", async (ctx) => {
+      .text(async (ctx) => this.tForContext(ctx, "menu:main.buttons.collab"), async (ctx) => {
         await this.showProjectsEntryPoint(ctx);
       })
       .row()
@@ -2234,21 +2374,29 @@ export class TelegramTransport implements HumanTransport {
             chatId: ctx.chat?.id,
             userId: ctx.from?.id,
           });
-          await ctx.answerCallbackQuery({ text: "Opening inbox." });
+          await ctx.answerCallbackQuery({
+            text: await this.tForContext(ctx, "menu:main.actions.open_inbox"),
+          });
           await this.showInboxMenu(ctx);
         },
       )
-      .text("📦 Storage", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Открываю storage." });
+      .text(async (ctx) => this.tForContext(ctx, "menu:main.buttons.storage"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:main.actions.open_storage"),
+        });
         await this.showStorageMenu(ctx);
       })
-      .text("⚙ Settings", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Открываю настройки." });
+      .text(async (ctx) => this.tForContext(ctx, "menu:main.buttons.settings"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:main.actions.open_settings"),
+        });
         await this.showSettingsMenu(ctx);
       })
       .row()
-      .text("⬅ Back", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Back to sessions." });
+      .text(async (ctx) => this.tForContext(ctx, "menu:main.buttons.back"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:main.actions.back_to_sessions"),
+        });
         await this.showSessionsMenu(ctx);
       });
   }
@@ -2261,13 +2409,20 @@ export class TelegramTransport implements HumanTransport {
       .text(
         async (ctx) => this.buildScreenshotsButtonLabel(ctx),
         async (ctx) => {
-          await ctx.answerCallbackQuery({ text: "Opening screenshots." });
+          await ctx.answerCallbackQuery({
+            text: await this.tForContext(ctx, "menu:browser.actions.open_screenshots"),
+          });
           await this.showScreenshotsMenu(ctx);
         },
       )
       .row()
-      .text("⬅ Back", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Back to session menu." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.back"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(
+            ctx,
+            "menu:browser.actions.back_to_session_menu",
+          ),
+        });
         await this.showMainMenu(ctx);
       });
   }
@@ -2284,22 +2439,34 @@ export class TelegramTransport implements HumanTransport {
         const range = new MenuRange<TelegramMenuContext>();
         const { session, projects } = await this.loadProjectsContext(ctx);
         if (!session || !projects) {
-          range.text("Gateway недоступен", async (innerCtx) => {
-            await innerCtx.answerCallbackQuery({
-              text: "Проекты доступны только через gateway.",
-              show_alert: true,
-            });
-          });
+          range.text(
+            await this.tForContext(ctx, "common:menu.gateway_unavailable"),
+            async (innerCtx) => {
+              await innerCtx.answerCallbackQuery({
+                text: await this.tForContext(
+                  innerCtx,
+                  "menu:collab.actions.gateway_only",
+                ),
+                show_alert: true,
+              });
+            },
+          );
           return range;
         }
 
         if (projects.length === 0) {
           range
-            .text("🫥 Нет проектов", async (innerCtx) => {
-              await innerCtx.answerCallbackQuery({
-                text: "Проектов пока нет. Создай или войди в существующий.",
-              });
-            })
+            .text(
+              await this.tForContext(ctx, "menu:collab.labels.no_projects"),
+              async (innerCtx) => {
+                await innerCtx.answerCallbackQuery({
+                  text: await this.tForContext(
+                    innerCtx,
+                    "menu:collab.actions.no_projects",
+                  ),
+                });
+              },
+            )
             .row();
           return range;
         }
@@ -2326,19 +2493,26 @@ export class TelegramTransport implements HumanTransport {
 
         return range;
       })
-      .text("➕ Создать", async (ctx) => {
+      .text(async (ctx) => this.tForContext(ctx, "menu:collab.buttons.create"), async (ctx) => {
         await this.beginProjectMode(ctx, "create");
       })
-      .text("🛠 Tools", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Открываю инструменты проекта." });
+      .text(async (ctx) => this.tForContext(ctx, "menu:collab.buttons.tools"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:collab.actions.open_tools"),
+        });
         await this.showCollabToolsMenu(ctx);
       })
       .row()
-      .text("🔑 Войти", async (ctx) => {
+      .text(async (ctx) => this.tForContext(ctx, "menu:collab.buttons.join"), async (ctx) => {
         await this.beginProjectMode(ctx, "join");
       })
-      .text("⬅ Назад", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Назад к меню сессии." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.back"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(
+            ctx,
+            "menu:collab.actions.back_to_session_menu",
+          ),
+        });
         await this.showMainMenu(ctx);
       });
   }
@@ -2348,20 +2522,24 @@ export class TelegramTransport implements HumanTransport {
       "telegram-collab-tools-menu",
       this.createMenuOptions((ctx) => this.showCollabToolsMenu(ctx)),
     )
-      .text("📣 Broadcast", async (ctx) => {
+      .text(async (ctx) => this.tForContext(ctx, "menu:collab.buttons.broadcast"), async (ctx) => {
         await this.beginProjectBroadcast(ctx);
       })
-      .text("🕘 History", async (ctx) => {
+      .text(async (ctx) => this.tForContext(ctx, "menu:collab.buttons.history"), async (ctx) => {
         await this.handleCollabHistoryExport(ctx);
       })
       .row()
-      .text("🗑 Delete", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Открываю удаление проектов." });
+      .text(async (ctx) => this.tForContext(ctx, "menu:collab.buttons.delete"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:collab.actions.open_delete"),
+        });
         await this.showCollabDeleteMenu(ctx);
       })
       .row()
-      .text("⬅ Back", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Назад к Collab." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.back"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:collab.actions.back_to_collab"),
+        });
         await this.showProjectsMenu(ctx);
       });
   }
@@ -2378,19 +2556,22 @@ export class TelegramTransport implements HumanTransport {
         const range = new MenuRange<TelegramMenuContext>();
         const { session, projects } = await this.loadProjectsContext(ctx);
         if (!session || !projects) {
-          range.text("Gateway недоступен", async (innerCtx) => {
+          range.text(
+            await this.tForContext(ctx, "common:menu.gateway_unavailable"),
+            async (innerCtx) => {
             await innerCtx.answerCallbackQuery({
-              text: "Удаление проектов доступно только через gateway.",
+              text: await this.tForContext(innerCtx, "menu:collab.actions.gateway_only"),
               show_alert: true,
             });
-          });
+            },
+          );
           return range;
         }
 
         if (projects.length === 0) {
-          range.text("🫥 Нет проектов", async (innerCtx) => {
+          range.text(await this.tForContext(ctx, "menu:collab.labels.no_projects"), async (innerCtx) => {
             await innerCtx.answerCallbackQuery({
-              text: "Удалять пока нечего.",
+              text: await this.tForContext(innerCtx, "menu:collab.actions.no_projects"),
             });
           });
           return range;
@@ -2418,8 +2599,10 @@ export class TelegramTransport implements HumanTransport {
 
         return range;
       })
-      .text("⬅ Back", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Назад к инструментам Collab." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.back"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:collab.actions.back_to_tools"),
+        });
         await this.showCollabToolsMenu(ctx);
       });
   }
@@ -2429,7 +2612,7 @@ export class TelegramTransport implements HumanTransport {
       "telegram-local-menu",
       this.createMenuOptions((ctx) => this.showLocalMenu(ctx)),
     )
-      .text("🤝 Напарник", async (ctx) => {
+      .text(async (ctx) => this.tForContext(ctx, "menu:local.buttons.partner"), async (ctx) => {
         await this.showPartnerEntryPoint(ctx);
       })
       .text(
@@ -2439,8 +2622,13 @@ export class TelegramTransport implements HumanTransport {
         },
       )
       .row()
-      .text("⬅ Назад", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Назад к меню сессии." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.back"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(
+            ctx,
+            "menu:local.actions.back_to_session_menu",
+          ),
+        });
         await this.showMainMenu(ctx);
       });
   }
@@ -2454,24 +2642,36 @@ export class TelegramTransport implements HumanTransport {
         const range = new MenuRange<TelegramMenuContext>();
         const principal = this.getPrincipalFromContext(ctx);
         if (!principal) {
-          range.text("No Telegram identity", async (innerCtx) => {
-            await innerCtx.answerCallbackQuery({
-              text: "Telegram user or chat is missing.",
-              show_alert: true,
-            });
-          });
+          range.text(
+            await this.tForContext(ctx, "common:menu.no_telegram_identity_label"),
+            async (innerCtx) => {
+              await innerCtx.answerCallbackQuery({
+                text: await this.tForContext(
+                  innerCtx,
+                  "common:errors.missing_telegram_context",
+                ),
+                show_alert: true,
+              });
+            },
+          );
           return range;
         }
 
         const activeSessionId =
           await this.bindingStore.getActiveSessionIdForPrincipal(principal);
         if (!activeSessionId) {
-          range.text("No active session", async (innerCtx) => {
-            await innerCtx.answerCallbackQuery({
-              text: "No active session is linked yet.",
-              show_alert: true,
-            });
-          });
+          range.text(
+            await this.tForContext(ctx, "common:menu.no_active_session_label"),
+            async (innerCtx) => {
+              await innerCtx.answerCallbackQuery({
+                text: await this.tForContext(
+                  innerCtx,
+                  "common:errors.no_active_session",
+                ),
+                show_alert: true,
+              });
+            },
+          );
           return range;
         }
 
@@ -2482,12 +2682,18 @@ export class TelegramTransport implements HumanTransport {
           .sort();
 
         if (sessionIds.length === 0) {
-          range.text("🫥 No partner sessions", async (innerCtx) => {
-            await innerCtx.answerCallbackQuery({
-              text: "No other linked sessions are available.",
-              show_alert: true,
-            });
-          });
+          range.text(
+            await this.tForContext(ctx, "menu:link.labels.no_partner_sessions"),
+            async (innerCtx) => {
+              await innerCtx.answerCallbackQuery({
+                text: await this.tForContext(
+                  innerCtx,
+                  "menu:link.actions.no_partner_sessions",
+                ),
+                show_alert: true,
+              });
+            },
+          );
           return range;
         }
 
@@ -2509,8 +2715,13 @@ export class TelegramTransport implements HumanTransport {
 
         return range;
       })
-      .text("⬅ Back", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Back to session menu." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.back"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(
+            ctx,
+            "menu:link.actions.back_to_session_menu",
+          ),
+        });
         await this.showMainMenu(ctx);
       });
   }
@@ -2520,18 +2731,23 @@ export class TelegramTransport implements HumanTransport {
       "telegram-partner-menu",
       this.createMenuOptions((ctx) => this.showPartnerMenu(ctx)),
     )
-      .text("❓ Ask", async (ctx) => {
+      .text(async (ctx) => this.tForContext(ctx, "menu:partner.buttons.ask"), async (ctx) => {
         await this.beginPartnerNoteMode(ctx, "question");
       })
-      .text("📤 Share", async (ctx) => {
+      .text(async (ctx) => this.tForContext(ctx, "menu:partner.buttons.share"), async (ctx) => {
         await this.beginPartnerNoteMode(ctx, "share");
       })
       .row()
-      .text("🔓 Unlink", async (ctx) => {
+      .text(async (ctx) => this.tForContext(ctx, "menu:partner.buttons.unlink"), async (ctx) => {
         await this.handleLinkButton(ctx);
       })
-      .text("⬅ Back", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Back to session menu." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.back"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(
+            ctx,
+            "menu:partner.actions.back_to_session_menu",
+          ),
+        });
         await this.showMainMenu(ctx);
       });
   }
@@ -2541,28 +2757,33 @@ export class TelegramTransport implements HumanTransport {
       "telegram-buffer-menu",
       this.createMenuOptions((ctx) => this.showBufferMenu(ctx)),
     )
-      .text("👁 Visible", async (ctx) => {
+      .text(async (ctx) => this.tForContext(ctx, "menu:buffer.buttons.visible"), async (ctx) => {
         await this.sendActiveSessionBuffer(ctx, { mode: "visible" });
       })
-      .text("🧾 Full", async (ctx) => {
+      .text(async (ctx) => this.tForContext(ctx, "menu:buffer.buttons.full"), async (ctx) => {
         await this.sendActiveSessionBuffer(ctx, { mode: "full" });
       })
       .row()
-      .text("📄 Last 300", async (ctx) => {
+      .text(async (ctx) => this.tForContext(ctx, "menu:buffer.buttons.last_300"), async (ctx) => {
         await this.sendActiveSessionBuffer(ctx, {
           mode: "lines",
           lines: 300,
         });
       })
-      .text("📄 Last 1000", async (ctx) => {
+      .text(async (ctx) => this.tForContext(ctx, "menu:buffer.buttons.last_1000"), async (ctx) => {
         await this.sendActiveSessionBuffer(ctx, {
           mode: "lines",
           lines: 1000,
         });
       })
       .row()
-      .text("⬅ Back", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Back to session menu." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.back"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(
+            ctx,
+            "menu:local.actions.back_to_session_menu",
+          ),
+        });
         await this.showMainMenu(ctx);
       });
   }
@@ -2572,21 +2793,28 @@ export class TelegramTransport implements HumanTransport {
       "telegram-settings-menu",
       this.createMenuOptions((ctx) => this.showSettingsMenu(ctx)),
     )
-      .text("ℹ Info", async (ctx) => {
+      .text(async (ctx) => this.tForContext(ctx, "menu:settings.buttons.info"), async (ctx) => {
         await this.showActiveSessionInfo(ctx);
       })
       .row()
-      .text("✏ Rename", async (ctx) => {
+      .text(async (ctx) => this.tForContext(ctx, "menu:settings.buttons.rename"), async (ctx) => {
         await this.beginRenameActiveSession(ctx);
       })
       .row()
-      .text("🗑 Unpair", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Confirm unpair." });
+      .text(async (ctx) => this.tForContext(ctx, "menu:settings.buttons.unpair"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:settings.actions.confirm_unpair"),
+        });
         await this.showUnpairConfirmMenu(ctx);
       })
       .row()
-      .text("⬅ Back", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Назад к меню сессии." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.back"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(
+            ctx,
+            "menu:local.actions.back_to_session_menu",
+          ),
+        });
         await this.showMainMenu(ctx);
       });
   }
@@ -2616,12 +2844,17 @@ export class TelegramTransport implements HumanTransport {
       "telegram-unpair-confirm-menu",
       this.createMenuOptions((ctx) => this.showUnpairConfirmMenu(ctx)),
     )
-      .text("⚠ Confirm unpair", async (ctx) => {
+      .text(async (ctx) => this.tForContext(ctx, "menu:settings.buttons.confirm_unpair"), async (ctx) => {
         await this.unpairActiveSession(ctx);
       })
       .row()
-      .text("⬅ Back", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Back to settings." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.back"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(
+            ctx,
+            "menu:settings.actions.back_to_settings",
+          ),
+        });
         await this.showSettingsMenu(ctx);
       });
   }
@@ -2650,24 +2883,36 @@ export class TelegramTransport implements HumanTransport {
         const range = new MenuRange<TelegramMenuContext>();
         const principal = this.getPrincipalFromContext(ctx);
         if (!principal) {
-          range.text("No Telegram identity", async (innerCtx) => {
+          range.text(
+            await this.tForContext(ctx, "common:menu.no_telegram_identity_label"),
+            async (innerCtx) => {
             await innerCtx.answerCallbackQuery({
-              text: "Telegram user or chat is missing.",
+              text: await this.tForContext(
+                innerCtx,
+                "common:errors.missing_telegram_context",
+              ),
               show_alert: true,
             });
-          });
+            },
+          );
           return range;
         }
 
         const sessionId =
           await this.bindingStore.getActiveSessionIdForPrincipal(principal);
         if (!sessionId) {
-          range.text("No active session", async (innerCtx) => {
+          range.text(
+            await this.tForContext(ctx, "common:menu.no_active_session_label"),
+            async (innerCtx) => {
             await innerCtx.answerCallbackQuery({
-              text: "No active session is linked yet.",
+              text: await this.tForContext(
+                innerCtx,
+                "common:errors.no_active_session",
+              ),
               show_alert: true,
             });
-          });
+            },
+          );
           return range;
         }
 
@@ -2677,9 +2922,9 @@ export class TelegramTransport implements HumanTransport {
         );
 
         if (inboxMessages.length === 0) {
-          range.text("📭 Inbox is empty", async (innerCtx) => {
+          range.text(await this.tForContext(ctx, "menu:inbox.labels.empty"), async (innerCtx) => {
             await innerCtx.answerCallbackQuery({
-              text: "No unsolicited Telegram messages are stored.",
+              text: await this.tForContext(innerCtx, "menu:inbox.actions.empty"),
               show_alert: false,
             });
           });
@@ -2703,12 +2948,19 @@ export class TelegramTransport implements HumanTransport {
 
         return range;
       })
-      .text("🔄 Refresh", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Inbox refreshed." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.refresh"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:inbox.actions.refreshed"),
+        });
         await this.showInboxMenu(ctx);
       })
-      .text("⬅ Back", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Back to session menu." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.back"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(
+            ctx,
+            "menu:local.actions.back_to_session_menu",
+          ),
+        });
         await this.showMainMenu(ctx);
       });
   }
@@ -2722,32 +2974,44 @@ export class TelegramTransport implements HumanTransport {
         const range = new MenuRange<TelegramMenuContext>();
         const principal = this.getPrincipalFromContext(ctx);
         if (!principal) {
-          range.text("No Telegram identity", async (innerCtx) => {
+          range.text(
+            await this.tForContext(ctx, "common:menu.no_telegram_identity_label"),
+            async (innerCtx) => {
             await innerCtx.answerCallbackQuery({
-              text: "Telegram user or chat is missing.",
+              text: await this.tForContext(
+                innerCtx,
+                "common:errors.missing_telegram_context",
+              ),
               show_alert: true,
             });
-          });
+            },
+          );
           return range;
         }
 
         const sessionId =
           await this.bindingStore.getActiveSessionIdForPrincipal(principal);
         if (!sessionId) {
-          range.text("No active session", async (innerCtx) => {
+          range.text(
+            await this.tForContext(ctx, "common:menu.no_active_session_label"),
+            async (innerCtx) => {
             await innerCtx.answerCallbackQuery({
-              text: "No active session is linked yet.",
+              text: await this.tForContext(
+                innerCtx,
+                "common:errors.no_active_session",
+              ),
               show_alert: true,
             });
-          });
+            },
+          );
           return range;
         }
 
         const entries = await this.listActiveSessionStorageEntries(sessionId);
         if (entries.length === 0) {
-          range.text("📭 Storage is empty", async (innerCtx) => {
+          range.text(await this.tForContext(ctx, "menu:storage.labels.empty"), async (innerCtx) => {
             await innerCtx.answerCallbackQuery({
-              text: "В .mcp-xchange пока нет файлов для этой сессии.",
+              text: await this.tForContext(innerCtx, "menu:storage.actions.empty"),
             });
           });
           return range;
@@ -2770,12 +3034,19 @@ export class TelegramTransport implements HumanTransport {
 
         return range;
       })
-      .text("🔄 Refresh", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Storage refreshed." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.refresh"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:storage.actions.refreshed"),
+        });
         await this.showStorageMenu(ctx);
       })
-      .text("⬅ Back", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Back to session menu." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.back"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(
+            ctx,
+            "menu:local.actions.back_to_session_menu",
+          ),
+        });
         await this.showMainMenu(ctx);
       });
   }
@@ -2789,34 +3060,52 @@ export class TelegramTransport implements HumanTransport {
         const range = new MenuRange<TelegramMenuContext>();
         const principal = this.getPrincipalFromContext(ctx);
         if (!principal) {
-          range.text("No Telegram identity", async (innerCtx) => {
+          range.text(
+            await this.tForContext(ctx, "common:menu.no_telegram_identity_label"),
+            async (innerCtx) => {
             await innerCtx.answerCallbackQuery({
-              text: "Telegram user or chat is missing.",
+              text: await this.tForContext(
+                innerCtx,
+                "common:errors.missing_telegram_context",
+              ),
               show_alert: true,
             });
-          });
+            },
+          );
           return range;
         }
 
         const sessionId =
           await this.bindingStore.getActiveSessionIdForPrincipal(principal);
         if (!sessionId) {
-          range.text("No active session", async (innerCtx) => {
+          range.text(
+            await this.tForContext(ctx, "common:menu.no_active_session_label"),
+            async (innerCtx) => {
             await innerCtx.answerCallbackQuery({
-              text: "No active session is linked yet.",
+              text: await this.tForContext(
+                innerCtx,
+                "common:errors.no_active_session",
+              ),
               show_alert: true,
             });
-          });
+            },
+          );
           return range;
         }
 
         const filePaths = await this.listActiveSessionScreenshots(sessionId);
         if (filePaths.length === 0) {
-          range.text("📭 No screenshots", async (innerCtx) => {
+          range.text(
+            await this.tForContext(ctx, "menu:screenshots.labels.empty"),
+            async (innerCtx) => {
             await innerCtx.answerCallbackQuery({
-              text: "No screenshots are stored for this session.",
+              text: await this.tForContext(
+                innerCtx,
+                "menu:screenshots.actions.empty",
+              ),
             });
-          });
+            },
+          );
           return range;
         }
 
@@ -2837,12 +3126,22 @@ export class TelegramTransport implements HumanTransport {
 
         return range;
       })
-      .text("🔄 Refresh", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Screenshots refreshed." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.refresh"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(
+            ctx,
+            "menu:screenshots.actions.refreshed",
+          ),
+        });
         await this.showScreenshotsMenu(ctx);
       })
-      .text("⬅ Back", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Back to browser menu." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.back"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(
+            ctx,
+            "menu:browser.actions.back_to_browser_menu",
+          ),
+        });
         await this.showBrowserMenu(ctx);
       });
   }
@@ -2857,12 +3156,18 @@ export class TelegramTransport implements HumanTransport {
         try {
           const principal = this.getPrincipalFromContext(ctx);
           if (!principal) {
-            range.text("No Telegram identity", async (innerCtx) => {
+            range.text(
+              await this.tForContext(ctx, "common:menu.no_telegram_identity_label"),
+              async (innerCtx) => {
               await innerCtx.answerCallbackQuery({
-                text: "Telegram user or chat is missing.",
+                text: await this.tForContext(
+                  innerCtx,
+                  "common:errors.missing_telegram_context",
+                ),
                 show_alert: true,
               });
-            });
+              },
+            );
             return range;
           }
 
@@ -2873,12 +3178,18 @@ export class TelegramTransport implements HumanTransport {
           ).sort();
 
           if (sessionIds.length === 0) {
-            range.text("🫥 No linked sessions", async (innerCtx) => {
+            range.text(
+              await this.tForContext(ctx, "menu:sessions.labels.no_linked_sessions"),
+              async (innerCtx) => {
               await innerCtx.answerCallbackQuery({
-                text: "No linked sessions found for this Telegram identity.",
+                text: await this.tForContext(
+                  innerCtx,
+                  "menu:sessions.actions.no_linked_sessions",
+                ),
                 show_alert: true,
               });
-            });
+              },
+            );
             return range;
           }
 
@@ -2920,21 +3231,31 @@ export class TelegramTransport implements HumanTransport {
             error:
               error instanceof Error ? (error.stack ?? error.message) : String(error),
           });
-          range.text("⚠ Sessions unavailable", async (innerCtx) => {
+          range.text(
+            await this.tForContext(ctx, "menu:sessions.labels.unavailable"),
+            async (innerCtx) => {
             await innerCtx.answerCallbackQuery({
-              text: "Sessions menu is temporarily unavailable.",
+              text: await this.tForContext(
+                innerCtx,
+                "menu:sessions.actions.unavailable",
+              ),
               show_alert: true,
             });
-          });
+            },
+          );
           return range;
         }
       })
-      .text("🔄 Refresh", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Sessions refreshed." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.refresh"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:sessions.actions.refreshed"),
+        });
         await this.showSessionsMenu(ctx);
       })
-      .text("🛠 Tools", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Opening tools menu." });
+      .text(async (ctx) => this.tForContext(ctx, "menu:sessions.labels.tools"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:sessions.actions.open_tools"),
+        });
         await this.showDeveloperMenu(ctx);
       });
   }
@@ -2946,15 +3267,17 @@ export class TelegramTransport implements HumanTransport {
     })
       .text(
         {
-          text: "🗑 Delete",
+          text: async (ctx) => this.tForContext(ctx, "common:menu.delete"),
           payload: (ctx) => readMenuPayloadKey(ctx) ?? "missing",
         },
         async (ctx) => {
           await this.handleInboxMessageDelete(ctx);
         },
       )
-      .text("✖ Close", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Closed." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.close"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "common:menu.close"),
+        });
         await ctx.deleteMessage();
       });
   }
@@ -2966,7 +3289,7 @@ export class TelegramTransport implements HumanTransport {
     })
       .text(
         {
-          text: "📥 Получить",
+          text: async (ctx) => this.tForContext(ctx, "common:menu.get"),
           payload: (ctx) => readMenuPayloadKey(ctx) ?? "missing",
         },
         async (ctx) => {
@@ -2975,7 +3298,7 @@ export class TelegramTransport implements HumanTransport {
       )
       .text(
         {
-          text: "🗑 Delete",
+          text: async (ctx) => this.tForContext(ctx, "menu:storage.buttons.delete"),
           payload: (ctx) => readMenuPayloadKey(ctx) ?? "missing",
         },
         async (ctx) => {
@@ -2983,8 +3306,10 @@ export class TelegramTransport implements HumanTransport {
         },
       )
       .row()
-      .text("⬅ Back", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Back to storage." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.back"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:storage.actions.back_to_storage"),
+        });
         await this.showStorageMenu(ctx);
       });
   }
@@ -2996,7 +3321,7 @@ export class TelegramTransport implements HumanTransport {
     })
       .text(
         {
-          text: "📥 Получить",
+          text: async (ctx) => this.tForContext(ctx, "menu:storage.buttons.get"),
           payload: (ctx) => readMenuPayloadKey(ctx) ?? "missing",
         },
         async (ctx) => {
@@ -3005,7 +3330,7 @@ export class TelegramTransport implements HumanTransport {
       )
       .text(
         {
-          text: "🗑 Delete",
+          text: async (ctx) => this.tForContext(ctx, "menu:storage.buttons.delete"),
           payload: (ctx) => readMenuPayloadKey(ctx) ?? "missing",
         },
         async (ctx) => {
@@ -3013,8 +3338,13 @@ export class TelegramTransport implements HumanTransport {
         },
       )
       .row()
-      .text("⬅ Back", async (ctx) => {
-        await ctx.answerCallbackQuery({ text: "Back to screenshots." });
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.back"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(
+            ctx,
+            "menu:screenshots.actions.back_to_screenshots",
+          ),
+        });
         await this.showScreenshotsMenu(ctx);
       });
   }
@@ -3472,8 +3802,12 @@ export class TelegramTransport implements HumanTransport {
       await this.replyText(
         ctx,
         currentTarget.projectUuid
-          ? `Файл отправлен в сессию ${currentTarget.targetSessionLabel}.`
-          : `Файл отправлен напарнику ${currentTarget.targetSessionLabel}.`,
+          ? await this.tForContext(ctx, "menu:handoff.uploaded_to_session", {
+              label: currentTarget.targetSessionLabel,
+            })
+          : await this.tForContext(ctx, "menu:handoff.uploaded_to_partner", {
+              label: currentTarget.targetSessionLabel,
+            }),
         {
           kind: "inbox",
           sessionId,
@@ -3505,11 +3839,21 @@ export class TelegramTransport implements HumanTransport {
       ctx,
       session?.label
         ? attachments.length === 1
-          ? `Файл доставлен в сессию ${session.label}.`
-          : `Файлы доставлены в сессию ${session.label}: ${attachments.length}.`
+          ? await this.tForContext(ctx, "menu:handoff.delivered_one", {
+              label: session.label,
+            })
+          : await this.tForContext(ctx, "menu:handoff.delivered_many", {
+              label: session.label,
+              count: attachments.length,
+            })
         : attachments.length === 1
-          ? `Файл доставлен в сессию ${sessionId}.`
-          : `Файлы доставлены в сессию ${sessionId}: ${attachments.length}.`,
+          ? await this.tForContext(ctx, "menu:handoff.delivered_one", {
+              label: sessionId,
+            })
+          : await this.tForContext(ctx, "menu:handoff.delivered_many", {
+              label: sessionId,
+              count: attachments.length,
+            }),
       {
         kind: "inbox",
         sessionId,
@@ -3758,6 +4102,9 @@ export class TelegramTransport implements HumanTransport {
     const tmuxTarget = session.tmuxTarget ?? "unknown";
     const errorMessage =
       error instanceof Error ? error.message : String(error);
+    const locale = await this.resolveLocaleForTelegramUserId(
+      binding.telegramUserId,
+    );
 
     try {
       await this.sendNotification({
@@ -3768,11 +4115,17 @@ export class TelegramTransport implements HumanTransport {
           telegramUserId: binding.telegramUserId,
         },
         message: [
-          `⚠️ Автоматический tmux nudge для сессии ${sessionLabel} не сработал.`,
-          `Сохранённый tmux target больше недействителен: ${tmuxTarget}`,
-          `Ошибка: ${errorMessage}`,
-          "Обычно это значит, что pane/window/session был пересоздан.",
-          "Перепривяжи tmux target для этой сессии.",
+          this.t(locale, "menu:notices.tmux.target_invalid_title", {
+            sessionName: sessionLabel,
+          }),
+          this.t(locale, "menu:notices.tmux.target_invalid_target", {
+            tmuxTarget,
+          }),
+          this.t(locale, "menu:system.error_prefix", {
+            message: errorMessage,
+          }),
+          this.t(locale, "menu:system.tmux_recreated_hint"),
+          this.t(locale, "menu:notices.tmux.target_invalid_action"),
         ].join("\n"),
       });
     } catch (notifyError) {
@@ -3814,6 +4167,9 @@ export class TelegramTransport implements HumanTransport {
     const tmuxTarget = session.tmuxTarget ?? "unknown";
     const errorMessage =
       error instanceof Error ? error.message : String(error);
+    const locale = await this.resolveLocaleForTelegramUserId(
+      binding.telegramUserId,
+    );
 
     try {
       await this.sendNotification({
@@ -3824,12 +4180,18 @@ export class TelegramTransport implements HumanTransport {
           telegramUserId: binding.telegramUserId,
         },
         message: [
-          `⚠️ Автоматический tmux nudge для сессии ${sessionLabel} пропущен.`,
-          "tmux сейчас недоступен на этой машине.",
-          `tmux target: ${tmuxTarget}`,
-          `Ошибка: ${errorMessage}`,
-          "Обычно это значит, что tmux session/server не запущен или недоступен по текущему socket path.",
-          "Запусти tmux и агента внутри него, либо обнови/сними tmux target для этой сессии.",
+          this.t(locale, "menu:notices.tmux.unavailable_title", {
+            sessionName: sessionLabel,
+          }),
+          this.t(locale, "menu:notices.tmux.unavailable_body"),
+          this.t(locale, "menu:notices.tmux.unavailable_target", {
+            tmuxTarget,
+          }),
+          this.t(locale, "menu:system.error_prefix", {
+            message: errorMessage,
+          }),
+          this.t(locale, "menu:notices.tmux.unavailable_reason"),
+          this.t(locale, "menu:notices.tmux.unavailable_action"),
         ].join("\n"),
       });
     } catch (notifyError) {
@@ -3912,15 +4274,16 @@ export class TelegramTransport implements HumanTransport {
   }
 
   private async buildMainMenuText(ctx: TelegramMenuContext): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "Telegram identity is unavailable for this chat.";
+      return this.t(locale, "common:errors.no_telegram_identity");
     }
 
     const activeSessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!activeSessionId) {
-      return "No active session is linked yet. Pair a session via /start <code>.";
+      return this.t(locale, "common:errors.no_active_session");
     }
 
     const session = await this.sessionStore.getSession(activeSessionId);
@@ -3934,106 +4297,115 @@ export class TelegramTransport implements HumanTransport {
       ? await this.sessionStore.getSession(session.linkedSessionId)
       : null;
     return [
-      `🎛 Session: ${sessionName}`,
+      this.t(locale, "menu:main.screen.title", { sessionName }),
       "",
-      `📥 Inbox messages: ${inboxCount}`,
-      ...(projectName ? [`📦 Project: <b>${projectName}</b>`] : []),
+      this.t(locale, "menu:main.screen.inbox_messages", { count: inboxCount }),
+      ...(projectName
+        ? [this.t(locale, "menu:main.screen.project", { projectName })]
+        : []),
       ...(session?.linkedSessionId
         ? [
-            `🤝 Partner: <b><i>${escapeHtml(
-              linkedSession?.label ?? session.linkedSessionId,
-            )}</i></b>`,
+            this.t(locale, "menu:main.screen.partner", {
+              partnerName: escapeHtml(
+                linkedSession?.label ?? session.linkedSessionId,
+              ),
+            }),
             "",
-            "Share API details, what's new, errors, and git changes with your teammate.",
+            this.t(locale, "menu:main.screen.partner_hint"),
           ]
-        : ["", "🔗 Link a partner session to coordinate through shared notes and files."]),
+        : ["", this.t(locale, "menu:main.screen.link_hint")]),
     ].join("\n");
   }
 
-  private async getTmuxStatusLine(): Promise<string> {
-    return "🖧 TMUX mode: direct";
+  private async getTmuxStatusLine(locale: SupportedLocale): Promise<string> {
+    return this.t(locale, "menu:main.screen.tmux_mode_direct");
   }
 
   private async buildMainMenuFingerprint(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "no-principal";
+      return `${locale}:no-principal`;
     }
 
     const sessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
-      return "no-active-session";
+      return `${locale}:no-active-session`;
     }
 
     const count = await this.inboxStore.countInboxMessages(sessionId);
     const session = await this.sessionStore.getSession(sessionId);
-    return `${sessionId}:${count}:${session?.linkedSessionId ?? "none"}`;
+    return `${locale}:${sessionId}:${count}:${session?.linkedSessionId ?? "none"}`;
   }
 
   private async buildInboxFingerprint(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "no-principal";
+      return `${locale}:no-principal`;
     }
 
     const sessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
-      return "no-active-session";
+      return `${locale}:no-active-session`;
     }
 
     const messages = await this.inboxStore.listInboxMessages(sessionId, 10);
-    return `${sessionId}:${messages.map((message) => message.id).join(",")}`;
+    return `${locale}:${sessionId}:${messages.map((message) => message.id).join(",")}`;
   }
 
   private async buildStorageFingerprint(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "no-principal";
+      return `${locale}:no-principal`;
     }
 
     const sessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
-      return "no-active-session";
+      return `${locale}:no-active-session`;
     }
 
     const entries = await this.listActiveSessionStorageEntries(sessionId);
-    return `${sessionId}:${entries.map((entry) => entry.filePath).join(",")}`;
+    return `${locale}:${sessionId}:${entries.map((entry) => entry.filePath).join(",")}`;
   }
 
   private async buildScreenshotsFingerprint(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "no-principal";
+      return `${locale}:no-principal`;
     }
 
     const sessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
-      return "no-active-session";
+      return `${locale}:no-active-session`;
     }
 
     const files = await this.listActiveSessionScreenshots(sessionId);
-    return `${sessionId}:${files.join(",")}`;
+    return `${locale}:${sessionId}:${files.join(",")}`;
   }
 
   private async buildSessionsFingerprint(
     ctx: TelegramMenuContext,
   ): Promise<string> {
     try {
+      const locale = await this.resolveLocaleForContext(ctx);
       const principal = this.getPrincipalFromContext(ctx);
       if (!principal) {
-        return "no-principal";
+        return `${locale}:no-principal`;
       }
 
       const activeSessionId =
@@ -4042,7 +4414,7 @@ export class TelegramTransport implements HumanTransport {
         await this.bindingStore.listBoundSessionIdsForPrincipal(principal)
       ).sort();
 
-      return `${activeSessionId ?? "none"}:${sessionIds.join(",")}`;
+      return `${locale}:${activeSessionId ?? "none"}:${sessionIds.join(",")}`;
     } catch (error) {
       this.logger.warn("Failed to build Telegram sessions menu fingerprint", {
         chatId: ctx.chat?.id,
@@ -4056,15 +4428,16 @@ export class TelegramTransport implements HumanTransport {
   private async buildLinkFingerprint(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "no-principal";
+      return `${locale}:no-principal`;
     }
 
     const activeSessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!activeSessionId) {
-      return "no-active-session";
+      return `${locale}:no-active-session`;
     }
 
     const session = await this.sessionStore.getSession(activeSessionId);
@@ -4074,70 +4447,79 @@ export class TelegramTransport implements HumanTransport {
       .filter((sessionId) => sessionId !== activeSessionId)
       .sort();
 
-    return `${activeSessionId}:${session?.linkedSessionId ?? "none"}:${sessionIds.join(",")}`;
+    return `${locale}:${activeSessionId}:${session?.linkedSessionId ?? "none"}:${sessionIds.join(",")}`;
   }
 
   private async buildInboxButtonLabel(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "Inbox";
+      return this.t(locale, "menu:inbox.button");
     }
 
     const sessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
-      return "📥 Inbox";
+      return this.t(locale, "menu:inbox.button");
     }
 
     const count = await this.inboxStore.countInboxMessages(sessionId);
-    return count > 0 ? `📥 Inbox (${count})` : "📥 Inbox";
+    return count > 0
+      ? this.t(locale, "menu:inbox.button_count", { count })
+      : this.t(locale, "menu:inbox.button");
   }
 
   private async buildScreenshotsButtonLabel(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "📸 Screenshots";
+      return this.t(locale, "menu:browser.buttons.screenshots");
     }
 
     const sessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
-      return "📸 Screenshots";
+      return this.t(locale, "menu:browser.buttons.screenshots");
     }
 
     const count = (await this.listActiveSessionScreenshots(sessionId)).length;
-    return count > 0 ? `📸 Screenshots (${count})` : "📸 Screenshots";
+    return count > 0
+      ? this.t(locale, "menu:browser.buttons.screenshots_count", { count })
+      : this.t(locale, "menu:browser.buttons.screenshots");
   }
 
   private async buildLinkButtonLabel(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "🔗 Связать";
+      return this.t(locale, "menu:local.buttons.link");
     }
 
     const sessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
-      return "🔗 Связать";
+      return this.t(locale, "menu:local.buttons.link");
     }
 
     const session = await this.sessionStore.getSession(sessionId);
     if (!session?.linkedSessionId) {
-      return "🔗 Связать";
+      return this.t(locale, "menu:local.buttons.link");
     }
 
     const linkedSession = await this.sessionStore.getSession(
       session.linkedSessionId,
     );
     return linkedSession?.label
-      ? `🔓 Разорвать ${linkedSession.label}`
-      : "🔓 Разорвать";
+      ? this.t(locale, "menu:link.buttons.unlink_with_name", {
+          sessionName: linkedSession.label,
+        })
+      : this.t(locale, "menu:link.buttons.unlink");
   }
 
   private async createInboxMenuPayload(
@@ -4541,25 +4923,36 @@ export class TelegramTransport implements HumanTransport {
       (meta?.relativePath ? path.basename(meta.relativePath) : undefined) ||
       path.basename(input.filePath);
     const principalKey = buildPrincipalKey(principal);
+    const locale = await this.resolveLocaleForContext(ctx);
 
     await ctx.answerCallbackQuery({
-      text: "Project file handoff.",
+      text: this.t(locale, "menu:handoff.prompt_title"),
     });
     const sent = await this.replyText(
       ctx,
       [
-        "🤝 Передать участнику",
+        this.t(locale, "menu:handoff.prompt_title"),
         "",
-        `Сессия: ${session?.label ?? input.sessionId} -> ${input.targetSessionLabel}`,
-        `Кому: ${input.targetSessionLabel}`,
-        `Файл: ${fileName}`,
+        this.t(locale, "menu:handoff.route", {
+          sourceSessionName: session?.label ?? input.sessionId,
+          targetSessionName: input.targetSessionLabel,
+        }),
+        this.t(locale, "menu:handoff.recipient", {
+          label: input.targetSessionLabel,
+        }),
+        this.t(locale, "menu:handoff.file", {
+          fileName,
+        }),
         "",
-        "Отправь следующим сообщением описание или инструкции для этого файла.",
-        "Этот текст будет приложен к handoff.",
+        this.t(locale, "menu:handoff.prompt_body"),
+        this.t(locale, "menu:handoff.prompt_hint"),
       ].join("\n"),
       { kind: "menu", sessionId: input.sessionId },
       {
-        reply_markup: new InlineKeyboard().text("Отмена", "file-handoff-cancel"),
+        reply_markup: new InlineKeyboard().text(
+          this.t(locale, "menu:handoff.cancel"),
+          "file-handoff-cancel",
+        ),
       },
     );
 
@@ -4576,10 +4969,11 @@ export class TelegramTransport implements HumanTransport {
   }
 
   private async handleLinkButton(ctx: TelegramMenuContext): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Telegram identity недоступна.",
+        text: this.t(locale, "common:errors.no_telegram_identity"),
         show_alert: true,
       });
       return;
@@ -4589,7 +4983,7 @@ export class TelegramTransport implements HumanTransport {
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
       await ctx.answerCallbackQuery({
-        text: "Активная сессия не выбрана.",
+        text: await this.tForContext(ctx, "common:errors.no_active_session"),
         show_alert: true,
       });
       return;
@@ -4598,22 +4992,27 @@ export class TelegramTransport implements HumanTransport {
     const session = await this.sessionStore.getSession(sessionId);
     if (session?.linkedSessionId) {
       await this.unlinkSessions(sessionId, session.linkedSessionId);
-      await ctx.answerCallbackQuery({ text: "Partner session unlinked." });
-      await this.showMainMenu(ctx, "Partner session unlinked.");
+      await ctx.answerCallbackQuery({
+        text: this.t(locale, "menu:link.actions.unlinked"),
+      });
+      await this.showMainMenu(ctx, this.t(locale, "menu:link.actions.unlinked"));
       return;
     }
 
-    await ctx.answerCallbackQuery({ text: "Choose a partner session." });
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:link.actions.choose_partner"),
+    });
     await this.showLinkMenu(ctx);
   }
 
   private async showPartnerEntryPoint(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Идентификатор Telegram недоступен.",
+        text: this.t(locale, "common:errors.no_telegram_identity"),
         show_alert: true,
       });
       return;
@@ -4623,7 +5022,7 @@ export class TelegramTransport implements HumanTransport {
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
       await ctx.answerCallbackQuery({
-        text: "Активная сессия не выбрана.",
+        text: this.t(locale, "common:errors.no_active_session"),
         show_alert: true,
       });
       return;
@@ -4632,21 +5031,24 @@ export class TelegramTransport implements HumanTransport {
     const session = await this.sessionStore.getSession(sessionId);
     if (!session?.linkedSessionId) {
       await ctx.answerCallbackQuery({
-        text: "Сначала свяжи сессию с напарником.",
+        text: await this.tForContext(ctx, "menu:partner.screen.use_link_first"),
         show_alert: true,
       });
       return;
     }
 
-    await ctx.answerCallbackQuery({ text: "Открываю меню напарника." });
+    await ctx.answerCallbackQuery({
+      text: await this.tForContext(ctx, "menu:partner.actions.open_partner_menu"),
+    });
     await this.showPartnerMenu(ctx);
   }
 
   private async showPartnerFiles(ctx: TelegramMenuContext): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Идентификатор Telegram недоступен.",
+        text: this.t(locale, "common:errors.no_telegram_identity"),
         show_alert: true,
       });
       return;
@@ -4656,7 +5058,7 @@ export class TelegramTransport implements HumanTransport {
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
       await ctx.answerCallbackQuery({
-        text: "Активная сессия не выбрана.",
+        text: this.t(locale, "common:errors.no_active_session"),
         show_alert: true,
       });
       return;
@@ -4665,7 +5067,7 @@ export class TelegramTransport implements HumanTransport {
     const session = await this.sessionStore.getSession(sessionId);
     if (!session?.linkedSessionId) {
       await ctx.answerCallbackQuery({
-        text: "Сначала свяжи сессию с напарником.",
+        text: this.t(locale, "menu:partner.screen.use_link_first"),
         show_alert: true,
       });
       return;
@@ -4674,13 +5076,15 @@ export class TelegramTransport implements HumanTransport {
     const linkedSession = await this.sessionStore.getSession(session.linkedSessionId);
     const files = await this.listActiveSessionFiles(sessionId);
     const lines = [
-      "📎 Выбор файла",
+      this.t(locale, "menu:handoff.choose_title"),
       "",
-      `Получатель: ${linkedSession?.label ?? session.linkedSessionId}`,
+      this.t(locale, "menu:handoff.choose_recipient", {
+        label: linkedSession?.label ?? session.linkedSessionId,
+      }),
       "",
       files.length > 0
-        ? "Выбери файл для отправки локальному напарнику."
-        : "В этой сессии нет загруженных файлов.",
+        ? this.t(locale, "menu:handoff.choose_local")
+        : this.t(locale, "menu:handoff.no_files"),
     ];
 
     const keyboard = new InlineKeyboard();
@@ -4699,7 +5103,7 @@ export class TelegramTransport implements HumanTransport {
       keyboard.text(label, `partner-file-open:${payloadKey}`).row();
     }
 
-    keyboard.text("⬅ К напарнику", "partner-back");
+    keyboard.text(await this.tForContext(ctx, "common:menu.back"), "partner-back");
 
     const text = lines.join("\n");
     if (ctx.callbackQuery?.message) {
@@ -4723,7 +5127,9 @@ export class TelegramTransport implements HumanTransport {
   private async showLocalEntryPoint(
     ctx: TelegramMenuContext,
   ): Promise<void> {
-    await ctx.answerCallbackQuery({ text: "Открываю локальное взаимодействие." });
+    await ctx.answerCallbackQuery({
+      text: await this.tForContext(ctx, "menu:local.actions.open_local"),
+    });
     await this.showLocalMenu(ctx);
   }
 
@@ -4732,13 +5138,15 @@ export class TelegramTransport implements HumanTransport {
   ): Promise<void> {
     if (!this.config.distributed.gatewayPublicUrl) {
       await ctx.answerCallbackQuery({
-        text: "Collab доступен только через gateway.",
+        text: await this.tForContext(ctx, "menu:collab.actions.gateway_only"),
         show_alert: true,
       });
       return;
     }
 
-    await ctx.answerCallbackQuery({ text: "Открываю Collab." });
+    await ctx.answerCallbackQuery({
+      text: await this.tForContext(ctx, "menu:collab.actions.open_collab"),
+    });
     await this.showProjectsMenu(ctx);
   }
 
@@ -5545,6 +5953,75 @@ export class TelegramTransport implements HumanTransport {
     };
   }
 
+  private async resolveLocaleForContext(
+    ctx: TelegramMenuContext,
+  ): Promise<SupportedLocale> {
+    if (this.config?.telegram?.debugLanguage) {
+      return normalizeLocale(this.config.telegram.debugLanguage);
+    }
+
+    const telegramUserId = ctx.from?.id;
+    const telegramLanguageCode = ctx.from?.language_code;
+    if (!telegramUserId) {
+      return normalizeLocale(telegramLanguageCode);
+    }
+
+    const storedLocale = await this.localeStore?.getUserLocale?.(telegramUserId);
+    if (storedLocale) {
+      return normalizeLocale(storedLocale);
+    }
+
+    const detectedLocale = normalizeLocale(telegramLanguageCode);
+    await this.localeStore?.setUserLocale?.(telegramUserId, detectedLocale);
+    return detectedLocale;
+  }
+
+  private async resolveLocaleForTelegramUserId(
+    telegramUserId?: number,
+    telegramLanguageCode?: string | null | undefined,
+  ): Promise<SupportedLocale> {
+    if (this.config?.telegram?.debugLanguage) {
+      return normalizeLocale(this.config.telegram.debugLanguage);
+    }
+
+    if (!telegramUserId) {
+      return normalizeLocale(telegramLanguageCode);
+    }
+
+    const storedLocale = await this.localeStore?.getUserLocale?.(telegramUserId);
+    if (storedLocale) {
+      return normalizeLocale(storedLocale);
+    }
+
+    const detectedLocale = normalizeLocale(telegramLanguageCode);
+    await this.localeStore?.setUserLocale?.(telegramUserId, detectedLocale);
+    return detectedLocale;
+  }
+
+  private async tForContext(
+    ctx: TelegramMenuContext,
+    key: string,
+    options?: Record<string, unknown>,
+  ): Promise<string> {
+    return this.t(await this.resolveLocaleForContext(ctx), key, options);
+  }
+
+  private async tForTelegramUserId(
+    telegramUserId: number | undefined,
+    key: string,
+    options?: Record<string, unknown>,
+  ): Promise<string> {
+    return this.t(await this.resolveLocaleForTelegramUserId(telegramUserId), key, options);
+  }
+
+  private t(
+    locale: SupportedLocale,
+    key: string,
+    options?: Record<string, unknown>,
+  ): string {
+    return translate(locale, key, options);
+  }
+
   private getGatewayActorFromContext(
     ctx: TelegramMenuContext,
   ): GatewayActorProfile | undefined {
@@ -5588,7 +6065,7 @@ export class TelegramTransport implements HumanTransport {
       });
       await this.replyText(
         ctx,
-        "Sessions menu is temporarily unavailable. Try /menu again.",
+        await this.tForContext(ctx, "menu:system.sessions_menu_unavailable"),
         { kind: "menu" },
       );
     }
@@ -5734,6 +6211,7 @@ export class TelegramTransport implements HumanTransport {
   }
 
   private buildCollabHistoryMarkdown(input: {
+    locale?: SupportedLocale;
     sessionLabel: string;
     history: Array<{
       kind: string;
@@ -5746,16 +6224,19 @@ export class TelegramTransport implements HumanTransport {
       delivery_status?: string;
     }>;
   }): string {
+    const locale = input.locale ?? "en";
     const lines = [
-      "# Collab History",
+      this.t(locale, "menu:history.title"),
       "",
-      `Session: ${input.sessionLabel}`,
+      this.t(locale, "menu:history.session", {
+        sessionName: input.sessionLabel,
+      }),
       `Generated at: ${new Date().toISOString()}`,
       "",
     ];
 
     if (input.history.length === 0) {
-      lines.push("No recent Collab events.");
+      lines.push(this.t(locale, "menu:history.empty"));
       lines.push("");
       return lines.join("\n");
     }
@@ -5769,7 +6250,11 @@ export class TelegramTransport implements HumanTransport {
       lines.push(`- Direction: ${item.direction}`);
       lines.push(`- Route: ${item.from_label} -> ${item.to_label}`);
       if (item.project_name) {
-        lines.push(`- Project: ${item.project_name}`);
+        lines.push(
+          this.t(locale, "menu:history.project", {
+            projectName: item.project_name,
+          }),
+        );
       }
       if (item.delivery_status) {
         lines.push(`- Status: ${item.delivery_status}`);
@@ -5784,10 +6269,11 @@ export class TelegramTransport implements HumanTransport {
   private async handleCollabHistoryExport(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const { principal, session } = await this.loadProjectsContext(ctx);
     if (!this.config.distributed.gatewayPublicUrl || !principal || !session) {
       await ctx.answerCallbackQuery({
-        text: "История Collab недоступна для этой сессии.",
+        text: this.t(locale, "menu:collab.screen.unavailable"),
         show_alert: true,
       });
       return;
@@ -5798,6 +6284,7 @@ export class TelegramTransport implements HumanTransport {
       session.sessionId,
     );
     const markdown = this.buildCollabHistoryMarkdown({
+      locale,
       sessionLabel: session.label ?? session.sessionId,
       history,
     });
@@ -5809,7 +6296,9 @@ export class TelegramTransport implements HumanTransport {
       ctx,
       new InputFile(Buffer.from(markdown, "utf8"), fileName),
       {
-        caption: `Collab history for ${session.label ?? session.sessionId}`,
+        caption: this.t(locale, "menu:history.caption", {
+          sessionName: session.label ?? session.sessionId,
+        }),
       },
       {
         kind: "menu",
@@ -5817,7 +6306,9 @@ export class TelegramTransport implements HumanTransport {
       },
     );
 
-    await ctx.answerCallbackQuery({ text: "История отправлена в Telegram." });
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:collab.buttons.history"),
+    });
   }
 
   private async showCollabDeleteMenu(
@@ -5972,19 +6463,20 @@ export class TelegramTransport implements HumanTransport {
   }
 
   private async showHelp(ctx: TelegramMenuContext): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     await this.replyText(
       ctx,
       [
-        "❓ Telegram MCP help",
+        this.t(locale, "menu:help.title"),
         "",
-        "/menu - open the sessions list",
-        "/help - show this help",
+        this.t(locale, "menu:help.menu"),
+        this.t(locale, "menu:help.help"),
         "",
-        "How it works:",
-        "- choose the active session",
-        "- ordinary Telegram messages go to that session inbox",
-        "- if a tmux target is configured, the service nudges the agent automatically",
-        "- the agent then reads the inbox batch through MCP tools",
+        this.t(locale, "menu:help.how_it_works"),
+        this.t(locale, "menu:help.step_choose"),
+        this.t(locale, "menu:help.step_inbox"),
+        this.t(locale, "menu:help.step_nudge"),
+        this.t(locale, "menu:help.step_tools"),
       ].join("\n"),
       { kind: "menu" },
     );
@@ -5993,10 +6485,11 @@ export class TelegramTransport implements HumanTransport {
   private async showLiveViewLauncher(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Telegram identity is unavailable.",
+        text: this.t(locale, "menu:live.errors.identity_unavailable"),
         show_alert: true,
       });
       return;
@@ -6006,7 +6499,7 @@ export class TelegramTransport implements HumanTransport {
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!activeSessionId) {
       await ctx.answerCallbackQuery({
-        text: "No active session selected.",
+        text: this.t(locale, "menu:live.errors.no_active_session"),
         show_alert: true,
       });
       return;
@@ -6018,7 +6511,7 @@ export class TelegramTransport implements HumanTransport {
         !this.config.distributed.gatewayPublicUrl)
     ) {
       await ctx.answerCallbackQuery({
-        text: "WebApp is not enabled on the server.",
+        text: this.t(locale, "menu:live.errors.webapp_disabled"),
         show_alert: true,
       });
       return;
@@ -6040,7 +6533,7 @@ export class TelegramTransport implements HumanTransport {
       : resolveWebAppPublicBaseUrl(this.config);
     if (!baseUrl) {
       await ctx.answerCallbackQuery({
-        text: "WebApp public URL is not configured.",
+        text: this.t(locale, "menu:live.errors.public_url_missing"),
         show_alert: true,
       });
       return;
@@ -6052,17 +6545,25 @@ export class TelegramTransport implements HumanTransport {
     const url = new URL(`${baseUrl}/live/${encodeURIComponent(liveSessionId)}`);
     url.searchParams.set("launchMode", this.config.webapp.launchMode);
 
-    await ctx.answerCallbackQuery({ text: "Открываю Live View." });
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:live.actions.opening"),
+    });
     const sent = await this.replyText(
       ctx,
-      [`🖥 Live: ${session?.label ?? activeSessionId}`, "", "Выбери режим открытия:"].join("\n"),
+      [
+        this.t(locale, "menu:live.screen.launcher_title", {
+          sessionName: session?.label ?? activeSessionId,
+        }),
+        "",
+        this.t(locale, "menu:live.actions.choose_mode"),
+      ].join("\n"),
       { kind: "menu", sessionId: activeSessionId },
       {
         reply_markup: this.buildLiveViewLaunchKeyboard((mode) => {
           const modeUrl = new URL(url.toString());
           modeUrl.searchParams.set("launchMode", mode);
           return modeUrl.toString();
-        }),
+        }, locale),
       },
     );
     this.webAppLaunchRegistry.set(
@@ -6124,12 +6625,22 @@ export class TelegramTransport implements HumanTransport {
 
   private buildLiveViewLaunchKeyboard(
     getUrl: (mode: WebAppLaunchMode) => string | null,
+    locale: SupportedLocale = "en",
   ): InlineKeyboard {
     const keyboard = new InlineKeyboard();
     const modes: Array<{ mode: WebAppLaunchMode; label: string }> = [
-      { mode: "fullscreen", label: "Fullscreen" },
-      { mode: "expand", label: "Expand" },
-      { mode: "default", label: "Default" },
+      {
+        mode: "fullscreen",
+        label: this.t(locale, "menu:live.buttons.fullscreen"),
+      },
+      {
+        mode: "expand",
+        label: this.t(locale, "menu:live.buttons.expand"),
+      },
+      {
+        mode: "default",
+        label: this.t(locale, "menu:live.buttons.default"),
+      },
     ];
 
     for (const [index, { mode, label }] of modes.entries()) {
@@ -6182,10 +6693,11 @@ export class TelegramTransport implements HumanTransport {
     ctx: TelegramMenuContext,
     scope: TmuxCaptureScope,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Telegram identity is unavailable.",
+        text: this.t(locale, "common:errors.no_telegram_identity"),
         show_alert: true,
       });
       return;
@@ -6195,7 +6707,7 @@ export class TelegramTransport implements HumanTransport {
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
       await ctx.answerCallbackQuery({
-        text: "No active session selected.",
+        text: this.t(locale, "common:errors.no_active_session"),
         show_alert: true,
       });
       return;
@@ -6276,9 +6788,10 @@ export class TelegramTransport implements HumanTransport {
   private async buildSessionsMenuText(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "Telegram identity is unavailable for this chat.";
+      return this.t(locale, "common:errors.no_telegram_identity");
     }
 
     const activeSessionId =
@@ -6288,7 +6801,7 @@ export class TelegramTransport implements HumanTransport {
     ).sort();
 
     if (sessionIds.length === 0) {
-      return "No linked sessions found for this Telegram identity.";
+      return this.t(locale, "menu:sessions.screen.no_linked_sessions");
     }
 
     let lastWorkedSession:
@@ -6317,18 +6830,24 @@ export class TelegramTransport implements HumanTransport {
       }
     }
 
-    const lines = ["🗂 Choose active session", ""];
+    const lines = [this.t(locale, "menu:sessions.screen.title"), ""];
     if (lastWorkedSession) {
       lines.push(
-        `🕘 Last worked: <i>${escapeHtml(
-          lastWorkedSession.label ?? lastWorkedSession.sessionId,
-        )}</i>`,
+        this.t(locale, "menu:sessions.screen.last_worked", {
+          sessionName: escapeHtml(
+            lastWorkedSession.label ?? lastWorkedSession.sessionId,
+          ),
+        }),
       );
       const formattedUpdatedAt = formatMenuTimestamp(
         lastWorkedSession.updatedAt,
       );
       if (formattedUpdatedAt) {
-        lines.push(`⏱ Updated: <i>${escapeHtml(formattedUpdatedAt)}</i>`);
+        lines.push(
+          this.t(locale, "menu:sessions.screen.updated", {
+            timestamp: escapeHtml(formattedUpdatedAt),
+          }),
+        );
       }
       lines.push("");
     }
@@ -6336,228 +6855,262 @@ export class TelegramTransport implements HumanTransport {
     if (activeSessionId) {
       const activeSession = await this.sessionStore.getSession(activeSessionId);
       lines.push(
-        `📌 Current active: <b>${escapeHtml(
-          activeSession?.label ?? activeSessionId,
-        )}</b>`,
+        this.t(locale, "menu:sessions.screen.current_active", {
+          sessionName: escapeHtml(activeSession?.label ?? activeSessionId),
+        }),
       );
       lines.push("");
     }
 
-    lines.push(`<i>${escapeHtml(await this.getTmuxStatusLine())}</i>`);
+    lines.push(`<i>${escapeHtml(await this.getTmuxStatusLine(locale))}</i>`);
     lines.push("");
     return lines.join("\n");
   }
 
   private async buildInboxMenuText(ctx: TelegramMenuContext): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "Telegram identity is unavailable for this chat.";
+      return this.t(locale, "common:errors.no_telegram_identity");
     }
 
     const activeSessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!activeSessionId) {
-      return "No active session is linked yet. Pair a session via /start <code>.";
+      return this.t(locale, "common:errors.no_active_session");
     }
 
     const session = await this.sessionStore.getSession(activeSessionId);
     const total = await this.inboxStore.countInboxMessages(activeSessionId);
 
     return [
-      "📥 Inbox",
+      this.t(locale, "menu:inbox.screen.title"),
       "",
-      `📌 Active session: ${session?.label ?? activeSessionId}`,
-      `📨 Stored messages: ${total}`,
+      this.t(locale, "menu:inbox.screen.active_session", {
+        sessionName: session?.label ?? activeSessionId,
+      }),
+      this.t(locale, "menu:inbox.screen.stored_messages", {
+        count: total,
+      }),
       "",
       total > 0
-        ? "Choose a message below to inspect or delete it."
-        : "No stored unsolicited Telegram messages for this session.",
+        ? this.t(locale, "menu:inbox.screen.choose_message")
+        : this.t(locale, "menu:inbox.screen.empty"),
     ].join("\n");
   }
 
   private async buildBufferMenuText(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "Telegram identity is unavailable for this chat.";
+      return this.t(locale, "common:errors.no_telegram_identity");
     }
 
     const activeSessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!activeSessionId) {
-      return "No active session is linked yet. Pair a session via /start <code>.";
+      return this.t(locale, "common:errors.no_active_session");
     }
 
     const session = await this.sessionStore.getSession(activeSessionId);
 
     return [
-      "📄 Content",
+      this.t(locale, "menu:buffer.screen.title"),
       "",
-      `📌 Active session: ${session?.label ?? activeSessionId}`,
-      `🖥 tmux target: ${session?.tmuxTarget ?? "not set"}`,
+      this.t(locale, "menu:buffer.screen.active_session", {
+        sessionName: session?.label ?? activeSessionId,
+      }),
+      this.t(locale, "menu:buffer.screen.tmux_target", {
+        tmuxTarget: session?.tmuxTarget ?? "not set",
+      }),
       "",
-      "Choose how much pane history to export as a Markdown file.",
-      "Visible is the current pane viewport. Full exports the whole available tmux history.",
+      this.t(locale, "menu:buffer.screen.export_hint"),
+      this.t(locale, "menu:buffer.screen.export_modes"),
     ].join("\n");
   }
 
   private async buildBrowserMenuText(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "Telegram identity is unavailable for this chat.";
+      return this.t(locale, "common:errors.no_telegram_identity");
     }
 
     const activeSessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!activeSessionId) {
-      return "No active session is linked yet. Pair a session via /start <code>.";
+      return this.t(locale, "common:errors.no_active_session");
     }
 
     const session = await this.sessionStore.getSession(activeSessionId);
     const screenshots = await this.listActiveSessionScreenshots(activeSessionId);
 
     return [
-      "🌐 Browser",
+      this.t(locale, "menu:browser.screen.title"),
       "",
-      `📌 Active session: ${session?.label ?? activeSessionId}`,
-      `📸 Stored screenshots: ${screenshots.length}`,
+      this.t(locale, "menu:browser.screen.active_session", {
+        sessionName: session?.label ?? activeSessionId,
+      }),
+      this.t(locale, "menu:browser.screen.stored_screenshots", {
+        count: screenshots.length,
+      }),
       "",
-      "Choose a browser-related action below.",
+      this.t(locale, "menu:browser.screen.choose_action"),
     ].join("\n");
   }
 
   private async buildSettingsMenuText(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "Telegram identity is unavailable for this chat.";
+      return this.t(locale, "common:errors.no_telegram_identity");
     }
 
     const activeSessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!activeSessionId) {
-      return "No active session is linked yet. Pair a session via /start <code>.";
+      return this.t(locale, "common:errors.no_active_session");
     }
 
     const session = await this.sessionStore.getSession(activeSessionId);
 
     return [
-      "⚙ Settings",
+      this.t(locale, "menu:settings.screen.title"),
       "",
-      `📌 Active session: ${session?.label ?? activeSessionId}`,
+      this.t(locale, "menu:settings.screen.active_session", {
+        sessionName: session?.label ?? activeSessionId,
+      }),
       "",
-      "Открой информацию о сессии, переименуй её или отвяжи от Telegram.",
+      this.t(locale, "menu:settings.screen.hint"),
     ].join("\n");
   }
 
   private async buildScreenshotsMenuText(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "Telegram identity is unavailable for this chat.";
+      return this.t(locale, "common:errors.no_telegram_identity");
     }
 
     const activeSessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!activeSessionId) {
-      return "No active session is linked yet. Pair a session via /start <code>.";
+      return this.t(locale, "common:errors.no_active_session");
     }
 
     const session = await this.sessionStore.getSession(activeSessionId);
     const files = await this.listActiveSessionScreenshots(activeSessionId);
 
     return [
-      "📸 Screenshots",
+      this.t(locale, "menu:screenshots.screen.title"),
       "",
-      `📌 Active session: ${session?.label ?? activeSessionId}`,
-      `📦 Stored screenshots: ${files.length}`,
+      this.t(locale, "menu:screenshots.screen.active_session", {
+        sessionName: session?.label ?? activeSessionId,
+      }),
+      this.t(locale, "menu:screenshots.screen.stored_screenshots", {
+        count: files.length,
+      }),
       "",
       files.length > 0
-        ? "Choose a screenshot below to get it in Telegram or delete it."
-        : "No browser screenshots are stored for this session.",
+        ? this.t(locale, "menu:screenshots.screen.choose_screenshot")
+        : this.t(locale, "menu:screenshots.screen.empty"),
     ].join("\n");
   }
 
   private async buildStorageMenuText(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "Telegram identity is unavailable for this chat.";
+      return this.t(locale, "common:errors.no_telegram_identity");
     }
 
     const activeSessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!activeSessionId) {
-      return "No active session is linked yet. Pair a session via /start <code>.";
+      return this.t(locale, "common:errors.no_active_session");
     }
 
     const session = await this.sessionStore.getSession(activeSessionId);
     const entries = await this.listActiveSessionStorageEntries(activeSessionId);
 
     return [
-      "📦 Storage",
+      this.t(locale, "menu:storage.screen.title"),
       "",
-      `📌 Active session: ${session?.label ?? activeSessionId}`,
-      `📦 Stored files: ${entries.length}`,
+      this.t(locale, "menu:storage.screen.active_session", {
+        sessionName: session?.label ?? activeSessionId,
+      }),
+      this.t(locale, "menu:storage.screen.stored_files", {
+        count: entries.length,
+      }),
       "",
       entries.length > 0
-        ? "Choose a file below to inspect it or send it to Telegram."
-        : "No .mcp-xchange files are stored for this session.",
+        ? this.t(locale, "menu:storage.screen.choose_file")
+        : this.t(locale, "menu:storage.screen.empty"),
     ].join("\n");
   }
 
   private async buildLinkMenuText(ctx: TelegramMenuContext): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "Telegram identity is unavailable for this chat.";
+      return this.t(locale, "common:errors.no_telegram_identity");
     }
 
     const activeSessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!activeSessionId) {
-      return "No active session is linked yet. Pair a session via /start <code>.";
+      return this.t(locale, "common:errors.no_active_session");
     }
 
     const session = await this.sessionStore.getSession(activeSessionId);
     return [
-      "🔗 Link partner",
+      this.t(locale, "menu:link.screen.title"),
       "",
-      `📌 Active session: ${session?.label ?? activeSessionId}`,
+      this.t(locale, "menu:link.screen.active_session", {
+        sessionName: session?.label ?? activeSessionId,
+      }),
       "",
-      "Choose another session to link as a teammate.",
-      "Use this partnership to share API summaries, what's new, errors, and relevant git changes through .mcp-xchange notes and files.",
+      this.t(locale, "menu:link.screen.choose_partner"),
+      this.t(locale, "menu:link.screen.hint"),
     ].join("\n");
   }
 
   private async buildPartnerMenuText(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "Telegram identity is unavailable for this chat.";
+      return this.t(locale, "common:errors.no_telegram_identity");
     }
 
     const activeSessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!activeSessionId) {
-      return "No active session is linked yet. Pair a session via /start <code>.";
+      return this.t(locale, "common:errors.no_active_session");
     }
 
     const session = await this.sessionStore.getSession(activeSessionId);
     if (!session?.linkedSessionId) {
       return [
-        "🤝 Partner",
+        this.t(locale, "menu:partner.screen.title"),
         "",
-        `📌 Active session: ${session?.label ?? activeSessionId}`,
+        this.t(locale, "menu:partner.screen.active_session", {
+          sessionName: session?.label ?? activeSessionId,
+        }),
         "",
-        "No partner is linked yet.",
-        "Use Link in the session menu first.",
+        this.t(locale, "menu:partner.screen.no_partner"),
+        this.t(locale, "menu:partner.screen.use_link_first"),
       ].join("\n");
     }
 
@@ -6566,28 +7119,33 @@ export class TelegramTransport implements HumanTransport {
     );
 
     return [
-      "🤝 Partner",
+      this.t(locale, "menu:partner.screen.title"),
       "",
-      `📌 Active session: ${session.label ?? activeSessionId}`,
-      `👥 Linked partner: ${linkedSession?.label ?? session.linkedSessionId}`,
+      this.t(locale, "menu:partner.screen.active_session", {
+        sessionName: session.label ?? activeSessionId,
+      }),
+      this.t(locale, "menu:partner.screen.linked_partner", {
+        partnerName: linkedSession?.label ?? session.linkedSessionId,
+      }),
       "",
-      "Ask for API details or share what changed.",
-      "Prompt format: first line is summary. Add a blank line and then the main message body if needed.",
+      this.t(locale, "menu:partner.screen.prompt_hint"),
+      this.t(locale, "menu:partner.screen.prompt_format"),
     ].join("\n");
   }
 
   private async buildLocalMenuText(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "Локальное взаимодействие недоступно для этого чата.";
+      return this.t(locale, "menu:local.screen.unavailable");
     }
 
     const activeSessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!activeSessionId) {
-      return "Активная сессия не выбрана. Сначала привяжи её через /start.";
+      return this.t(locale, "menu:local.screen.no_active_session");
     }
 
     const session = await this.sessionStore.getSession(activeSessionId);
@@ -6596,67 +7154,85 @@ export class TelegramTransport implements HumanTransport {
       : null;
 
     return [
-      "🏠 Local",
+      this.t(locale, "menu:main.buttons.local"),
       "",
-      `📌 Активная сессия: ${session?.label ?? activeSessionId}`,
-      `🤝 Связь: ${linkedSession?.label ?? "не настроена"}`,
+      this.t(locale, "menu:local.screen.active_session", {
+        sessionName: session?.label ?? activeSessionId,
+      }),
+      linkedSession?.label
+        ? this.t(locale, "menu:local.screen.link_status", {
+            linkedSessionName: linkedSession.label,
+          })
+        : this.t(locale, "menu:local.screen.link_status_none"),
       "",
-      "Здесь живёт локальная работа в одном боте:",
-      "связка сессий, обмен note и файлами без gateway.",
+      this.t(locale, "menu:local.screen.hint_title"),
+      this.t(locale, "menu:local.screen.hint_body"),
     ].join("\n");
   }
 
   private async buildProjectsMenuText(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const { session, projects } = await this.loadProjectsContext(ctx);
     if (!this.config.distributed.gatewayPublicUrl) {
       return [
-        "👥 Collab",
+        this.t(locale, "menu:collab.screen.title"),
         "",
-        "Gateway не настроен для этого запуска.",
-        "Для локальной работы в одном боте используй раздел Local.",
+        this.t(locale, "menu:collab.screen.gateway_not_configured"),
+        this.t(locale, "menu:collab.screen.use_local_instead"),
       ].join("\n");
     }
 
     if (!session || !projects) {
-      return "Collab недоступен для текущей сессии.";
+      return this.t(locale, "menu:collab.screen.unavailable");
     }
 
     return [
-      "👥 Collab",
+      this.t(locale, "menu:collab.screen.title"),
       "",
-      `📌 Активная сессия: ${session.label ?? session.sessionId}`,
-      `📦 Открытый проект: ${session.activeProjectName ?? "не выбран"}`,
-      `🗂 Доступно проектов: ${projects.length}`,
+      this.t(locale, "menu:collab.screen.active_session", {
+        sessionName: session.label ?? session.sessionId,
+      }),
+      session.activeProjectName
+        ? this.t(locale, "menu:collab.screen.open_project", {
+            projectName: session.activeProjectName,
+          })
+        : this.t(locale, "menu:collab.screen.open_project_none"),
+      this.t(locale, "menu:collab.screen.project_count", {
+        count: projects.length,
+      }),
       "",
-      "Открой проект, создай новый или войди по invite-коду.",
+      this.t(locale, "menu:collab.screen.invite_hint"),
     ].join("\n");
   }
 
   private async buildCollabToolsMenuText(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal || !this.config.distributed.gatewayPublicUrl) {
-      return "Collab tools недоступны для этого запуска.";
+      return this.t(locale, "menu:collab.screen.gateway_not_configured");
     }
 
     const sessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
-      return "Активная сессия не выбрана.";
+      return this.t(locale, "common:errors.no_active_session");
     }
 
     const session = await this.sessionStore.getSession(sessionId);
     const projects = await this.listGatewayProjects(principal);
     if (projects.length === 0) {
       return [
-        "🛠 Collab Tools",
+        this.t(locale, "menu:collab.screen.tools_title"),
         "",
-        `📌 Активная сессия: ${session?.label ?? sessionId}`,
+        this.t(locale, "menu:collab.screen.active_session", {
+          sessionName: session?.label ?? sessionId,
+        }),
         "",
-        "Сначала создай проект или войди в существующий.",
+        this.t(locale, "menu:collab.screen.tools_empty"),
       ].join("\n");
     }
 
@@ -6668,120 +7244,143 @@ export class TelegramTransport implements HumanTransport {
       targets.localTargetSessionIds.length + targets.remoteTargets.length;
 
     return [
-      "🛠 Collab Tools",
+      this.t(locale, "menu:collab.screen.tools_title"),
       "",
-      `📌 Активная сессия: ${session?.label ?? sessionId}`,
-      `🗂 Проектов в Collab: ${projects.length}`,
-      `👥 Уникальных сессий: ${uniqueCount}`,
+      this.t(locale, "menu:collab.screen.active_session", {
+        sessionName: session?.label ?? sessionId,
+      }),
+      this.t(locale, "menu:collab.screen.tools_project_count", {
+        count: projects.length,
+      }),
+      this.t(locale, "menu:collab.screen.tools_session_count", {
+        count: uniqueCount,
+      }),
       "",
-      "Broadcast отправит следующее текстовое сообщение всем уникальным Collab-сессиям на ботах без дублирования.",
-      "History отправит .md с последними 5 Collab-событиями текущей сессии.",
-      "Локальные сессии получат inbox message, удалённые — gateway delivery.",
+      this.t(locale, "menu:collab.screen.tools_broadcast"),
+      this.t(locale, "menu:collab.screen.tools_history"),
+      this.t(locale, "menu:broadcast.collab_hint"),
     ].join("\n");
   }
 
   private async buildCollabDeleteMenuText(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const { session, projects } = await this.loadProjectsContext(ctx);
     if (!this.config.distributed.gatewayPublicUrl) {
-      return "Удаление проектов недоступно для этого запуска.";
+      return this.t(locale, "menu:collab.screen.gateway_not_configured");
     }
 
     if (!session || !projects) {
-      return "Удаление проектов недоступно для текущей сессии.";
+      return this.t(locale, "menu:collab.screen.unavailable");
     }
 
     const ownerCount = projects.filter((project) => project.role === "owner").length;
 
     return [
-      "🗑 Delete Project",
+      this.t(locale, "menu:project.delete_menu_title"),
       "",
-      `📌 Активная сессия: ${session.label ?? session.sessionId}`,
-      `🗂 Проектов в Collab: ${projects.length}`,
-      `👑 Проектов, где ты owner: ${ownerCount}`,
+      this.t(locale, "menu:project.active_session", {
+        sessionName: session.label ?? session.sessionId,
+      }),
+      this.t(locale, "menu:project.total_count", {
+        count: projects.length,
+      }),
+      this.t(locale, "menu:project.owner_count", {
+        count: ownerCount,
+      }),
       "",
-      "Выбери проект для полного удаления.",
-      "Будут отвязаны участники, удалены project sessions и сама запись проекта.",
-      "Удалять проект может только owner.",
+      this.t(locale, "menu:project.delete_choose"),
+      this.t(locale, "menu:project.delete_body"),
+      this.t(locale, "menu:project.delete_owner_hint"),
     ].join("\n");
   }
 
   private async buildDeveloperMenuText(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "Telegram identity is unavailable for this chat.";
+      return this.t(locale, "common:errors.no_telegram_identity");
     }
 
     const sessionIds =
       await this.bindingStore.listBoundSessionIdsForPrincipal(principal);
 
     return [
-      "🛠 Tools",
+      this.t(locale, "menu:developer.screen.title"),
       "",
-      `🔗 Linked sessions: ${sessionIds.length}`,
+      this.t(locale, "menu:developer.screen.linked_sessions", {
+        count: sessionIds.length,
+      }),
       "",
-      "Broadcast writes your next text message into every linked session inbox and nudges all configured tmux targets.",
-      "Prune all clears every Redis key under this Telegram MCP namespace.",
+      this.t(locale, "menu:developer.screen.broadcast_help"),
+      this.t(locale, "menu:developer.screen.prune_help"),
     ].join("\n");
   }
 
   private async buildUnpairConfirmText(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "Telegram identity is unavailable for this chat.";
+      return this.t(locale, "common:errors.no_telegram_identity");
     }
 
     const activeSessionId =
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!activeSessionId) {
-      return "No active session selected.";
+      return this.t(locale, "common:errors.no_active_session");
     }
 
     const session = await this.sessionStore.getSession(activeSessionId);
 
     return [
-      "⚠ Confirm unpair",
+      this.t(locale, "menu:unpair.title"),
       "",
-      `📌 Active session: ${session?.label ?? activeSessionId}`,
+      this.t(locale, "menu:unpair.active_session", {
+        sessionName: session?.label ?? activeSessionId,
+      }),
       "",
-      "This removes the Telegram binding for the active session.",
-      "Session metadata and inbox records stay in Redis until you delete them separately.",
+      this.t(locale, "menu:unpair.body_1"),
+      this.t(locale, "menu:unpair.body_2"),
     ].join("\n");
   }
 
   private async buildPruneConfirmText(
     ctx: TelegramMenuContext,
   ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
-      return "Telegram identity is unavailable for this chat.";
+      return this.t(locale, "common:errors.no_telegram_identity");
     }
 
     const sessionIds =
       await this.bindingStore.listBoundSessionIdsForPrincipal(principal);
 
     return [
-      "⚠ Confirm prune",
+      this.t(locale, "menu:prune.title"),
       "",
-      `🔗 Linked sessions visible here: ${sessionIds.length}`,
+      this.t(locale, "menu:prune.linked_sessions", {
+        count: sessionIds.length,
+      }),
       "",
-      "This clears every Redis key under the telegram-mcp namespace.",
-      "Pair codes, bindings, sessions, inbox, menu payloads, and pending requests will all be deleted.",
+      this.t(locale, "menu:prune.body_1"),
+      this.t(locale, "menu:prune.body_2"),
     ].join("\n");
   }
 
   private async showActiveSessionInfo(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Telegram identity is unavailable.",
+        text: this.t(locale, "common:errors.no_telegram_identity"),
         show_alert: true,
       });
       return;
@@ -6791,7 +7390,7 @@ export class TelegramTransport implements HumanTransport {
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
       await ctx.answerCallbackQuery({
-        text: "No active session selected.",
+        text: this.t(locale, "common:errors.no_active_session"),
         show_alert: true,
       });
       return;
@@ -6804,25 +7403,59 @@ export class TelegramTransport implements HumanTransport {
       ? await this.sessionStore.getSession(session.linkedSessionId)
       : null;
 
-    await ctx.answerCallbackQuery({ text: "Session info opened." });
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:session_info.opened"),
+    });
     await this.replyText(
       ctx,
       [
-        "ℹ Session info",
+        this.t(locale, "menu:session_info.title"),
         "",
-        `📌 Label: ${session?.label ?? sessionId}`,
-        `🆔 Session ID: ${sessionId}`,
-        `📥 Inbox count: ${inboxCount}`,
-        `🔗 Paired: ${binding ? "yes" : "no"}`,
-        `🤝 Partner: ${linkedSession?.label ?? session?.linkedSessionId ?? "not linked"}`,
-        `🖥 tmux target: ${session?.tmuxTarget ?? "not set"}`,
+        this.t(locale, "menu:session_info.label", {
+          value: session?.label ?? sessionId,
+        }),
+        this.t(locale, "menu:session_info.session_id", {
+          value: sessionId,
+        }),
+        this.t(locale, "menu:session_info.inbox_count", {
+          count: inboxCount,
+        }),
+        this.t(locale, "menu:session_info.paired", {
+          value: binding
+            ? this.t(locale, "menu:session_info.yes")
+            : this.t(locale, "menu:session_info.no"),
+        }),
+        this.t(locale, "menu:session_info.partner", {
+          value:
+            linkedSession?.label ??
+            session?.linkedSessionId ??
+            this.t(locale, "menu:session_info.not_linked"),
+        }),
+        this.t(locale, "menu:session_info.tmux_target", {
+          value:
+            session?.tmuxTarget ?? this.t(locale, "menu:session_info.not_set"),
+        }),
         ...(session?.tmuxSessionName
-          ? [`📺 tmux session: ${session.tmuxSessionName}`]
+          ? [
+              this.t(locale, "menu:session_info.tmux_session", {
+                value: session.tmuxSessionName,
+              }),
+            ]
           : []),
         ...(session?.tmuxWindowName
-          ? [`🪟 tmux window: ${session.tmuxWindowName}`]
+          ? [
+              this.t(locale, "menu:session_info.tmux_window", {
+                value: session.tmuxWindowName,
+              }),
+            ]
           : []),
-        ...(session?.tmuxPaneId ? [`🔹 tmux pane: ${session.tmuxPaneId}`] : []),
+        ...(session?.tmuxPaneId
+          ? [
+              this.t(locale, "menu:session_info.tmux_pane", {
+                value: session.tmuxPaneId,
+              }),
+            ]
+          : []),
       ].join("\n"),
       { kind: "menu", sessionId },
       { reply_markup: this.settingsMenu },
@@ -7034,10 +7667,11 @@ export class TelegramTransport implements HumanTransport {
   }
 
   private async unpairActiveSession(ctx: TelegramMenuContext): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Telegram identity is unavailable.",
+        text: this.t(locale, "common:errors.no_telegram_identity"),
         show_alert: true,
       });
       return;
@@ -7047,7 +7681,7 @@ export class TelegramTransport implements HumanTransport {
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
       await ctx.answerCallbackQuery({
-        text: "No active session selected.",
+        text: this.t(locale, "common:errors.no_active_session"),
         show_alert: true,
       });
       return;
@@ -7080,25 +7714,26 @@ export class TelegramTransport implements HumanTransport {
     this.clearPendingInteractionsForContext(ctx);
 
     await ctx.answerCallbackQuery({
-      text: session?.label
-        ? `Unpaired: ${session.label}`
-        : `Unpaired: ${sessionId}`,
+      text: this.t(locale, "menu:unpair.done", {
+        sessionName: session?.label ?? sessionId,
+      }),
     });
     await this.showSessionsMenu(
       ctx,
-      session?.label
-        ? `Session unpaired: ${session.label}`
-        : `Session unpaired: ${sessionId}`,
+      this.t(locale, "menu:unpair.shown", {
+        sessionName: session?.label ?? sessionId,
+      }),
     );
   }
 
   private async beginRenameActiveSession(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Telegram identity is unavailable.",
+        text: this.t(locale, "common:errors.no_telegram_identity"),
         show_alert: true,
       });
       return;
@@ -7108,7 +7743,7 @@ export class TelegramTransport implements HumanTransport {
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
       await ctx.answerCallbackQuery({
-        text: "No active session selected.",
+        text: this.t(locale, "common:errors.no_active_session"),
         show_alert: true,
       });
       return;
@@ -7117,24 +7752,24 @@ export class TelegramTransport implements HumanTransport {
     const principalKey = buildPrincipalKey(principal);
     this.pendingBroadcasts.delete(principalKey);
     this.pendingRenames.set(principalKey, { sessionId });
-    await ctx.answerCallbackQuery({ text: "Send the new session title." });
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:settings.actions.rename_prompt"),
+    });
     await this.replyText(
       ctx,
-      [
-        "✏ Rename session",
-        "",
-        "Send the next text message as the new title for the active session.",
-        "Commands like /menu or /help will cancel rename mode.",
-      ].join("\n"),
+      ["✏ Rename session", "", this.t(locale, "menu:settings.actions.rename_body")].join(
+        "\n",
+      ),
       { kind: "menu", sessionId },
     );
   }
 
   private async beginBroadcast(ctx: TelegramMenuContext): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Telegram identity is unavailable.",
+        text: this.t(locale, "common:errors.no_telegram_identity"),
         show_alert: true,
       });
       return;
@@ -7144,7 +7779,7 @@ export class TelegramTransport implements HumanTransport {
       await this.bindingStore.listBoundSessionIdsForPrincipal(principal);
     if (sessionIds.length === 0) {
       await ctx.answerCallbackQuery({
-        text: "No linked sessions found.",
+        text: this.t(locale, "menu:broadcast.no_linked_sessions"),
         show_alert: true,
       });
       return;
@@ -7154,16 +7789,20 @@ export class TelegramTransport implements HumanTransport {
     this.pendingRenames.delete(principalKey);
 
     await ctx.answerCallbackQuery({
-      text: `Broadcast to ${sessionIds.length} sessions.`,
+      text: this.t(locale, "menu:broadcast.begin", {
+        count: sessionIds.length,
+      }),
     });
     const sent = await this.replyText(
       ctx,
       [
-        "📣 Broadcast",
+        this.t(locale, "menu:broadcast.title"),
         "",
-        `Send the next text message to broadcast it to all ${sessionIds.length} linked sessions.`,
-        "The message will be stored in every session inbox and the service will nudge every configured tmux target.",
-        "Commands like /menu or /help will cancel broadcast mode.",
+        this.t(locale, "menu:broadcast.body", {
+          count: sessionIds.length,
+        }),
+        this.t(locale, "menu:broadcast.hint"),
+        this.t(locale, "menu:broadcast.cancel_hint"),
       ].join("\n"),
       { kind: "menu" },
       {
@@ -7185,10 +7824,11 @@ export class TelegramTransport implements HumanTransport {
   }
 
   private async beginProjectBroadcast(ctx: TelegramMenuContext): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Telegram identity is unavailable.",
+        text: this.t(locale, "common:errors.no_telegram_identity"),
         show_alert: true,
       });
       return;
@@ -7198,7 +7838,7 @@ export class TelegramTransport implements HumanTransport {
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
       await ctx.answerCallbackQuery({
-        text: "Активная сессия не выбрана.",
+        text: this.t(locale, "common:errors.no_active_session"),
         show_alert: true,
       });
       return;
@@ -7207,7 +7847,7 @@ export class TelegramTransport implements HumanTransport {
     const projects = await this.listGatewayProjects(principal);
     if (projects.length === 0) {
       await ctx.answerCallbackQuery({
-        text: "Сначала создай проект или войди в существующий.",
+        text: this.t(locale, "menu:broadcast.no_projects_first"),
         show_alert: true,
       });
       return;
@@ -7218,7 +7858,7 @@ export class TelegramTransport implements HumanTransport {
       targets.localTargetSessionIds.length + targets.remoteTargets.length;
     if (totalTargets === 0) {
       await ctx.answerCallbackQuery({
-        text: "Нет доступных Collab-сессий для broadcast.",
+        text: this.t(locale, "menu:broadcast.no_collab_targets"),
         show_alert: true,
       });
       return;
@@ -7228,19 +7868,25 @@ export class TelegramTransport implements HumanTransport {
     this.pendingRenames.delete(principalKey);
 
     await ctx.answerCallbackQuery({
-      text: `Broadcast to ${totalTargets} collab sessions.`,
+      text: this.t(locale, "menu:broadcast.collab_begin", {
+        count: totalTargets,
+      }),
     });
     const sent = await this.replyText(
       ctx,
       [
-        "📣 Collab Broadcast",
+        this.t(locale, "menu:broadcast.collab_title"),
         "",
-        `Collab проектов: ${projects.length}`,
-        `Уникальных сессий: ${totalTargets}`,
+        this.t(locale, "menu:broadcast.collab_projects", {
+          count: projects.length,
+        }),
+        this.t(locale, "menu:broadcast.collab_sessions", {
+          count: totalTargets,
+        }),
         "",
-        "Отправь следующее текстовое сообщение, чтобы разослать его всем Collab-сессиям на ботах без дублирования.",
-        "Локальные сессии получат inbox message, удалённые — gateway delivery.",
-        "Команды вроде /menu или /help отменят режим broadcast.",
+        this.t(locale, "menu:broadcast.collab_body"),
+        this.t(locale, "menu:broadcast.collab_hint"),
+        this.t(locale, "menu:broadcast.cancel_hint"),
       ].join("\n"),
       { kind: "menu", sessionId },
       {
@@ -7357,10 +8003,11 @@ export class TelegramTransport implements HumanTransport {
   private async cancelPendingBroadcast(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Telegram identity is unavailable.",
+        text: this.t(locale, "common:errors.no_telegram_identity"),
         show_alert: true,
       });
       return;
@@ -7370,7 +8017,7 @@ export class TelegramTransport implements HumanTransport {
     const pending = this.pendingBroadcasts.get(principalKey);
     if (!pending) {
       await ctx.answerCallbackQuery({
-        text: "Broadcast mode is not active.",
+        text: this.t(locale, "menu:broadcast.mode_not_active"),
         show_alert: true,
       });
       return;
@@ -7380,7 +8027,9 @@ export class TelegramTransport implements HumanTransport {
     await this.deletePendingBroadcastArtifacts(ctx, pending, {
       deleteMenuMessage: false,
     });
-    await ctx.answerCallbackQuery({ text: "Broadcast cancelled." });
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:broadcast.cancelled"),
+    });
     if (pending.scope === "project") {
       await this.showCollabToolsMenu(ctx);
       return;
@@ -7640,12 +8289,22 @@ export class TelegramTransport implements HumanTransport {
       ctx,
       pending.scope === "project"
         ? [
-            "Collab broadcast completed.",
-            `Локальных inbox: ${storedCount}`,
-            `Удалённых deliveries: ${remoteCount}`,
-            `Всего сессий: ${storedCount + remoteCount}`,
+            this.t(await this.resolveLocaleForContext(ctx), "menu:broadcast.completed_collab", {
+              count: storedCount + remoteCount,
+            }),
+            this.t(await this.resolveLocaleForContext(ctx), "menu:broadcast.completed_collab_local", {
+              count: storedCount,
+            }),
+            this.t(await this.resolveLocaleForContext(ctx), "menu:broadcast.completed_collab_remote", {
+              count: remoteCount,
+            }),
+            this.t(await this.resolveLocaleForContext(ctx), "menu:broadcast.completed_collab_total", {
+              count: storedCount + remoteCount,
+            }),
           ].join("\n")
-        : `Broadcast completed for ${storedCount} linked sessions.`,
+        : await this.tForContext(ctx, "menu:broadcast.completed_linked", {
+            count: storedCount,
+          }),
       {
         kind: "menu",
         ...(pending.sessionId ? { sessionId: pending.sessionId } : {}),
@@ -7678,10 +8337,11 @@ export class TelegramTransport implements HumanTransport {
       projectUuid?: string;
     },
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Telegram identity is unavailable.",
+        text: this.t(locale, "common:errors.no_telegram_identity"),
         show_alert: true,
       });
       return;
@@ -7691,7 +8351,7 @@ export class TelegramTransport implements HumanTransport {
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
       await ctx.answerCallbackQuery({
-        text: "No active session selected.",
+        text: this.t(locale, "common:errors.no_active_session"),
         show_alert: true,
       });
       return;
@@ -7700,7 +8360,7 @@ export class TelegramTransport implements HumanTransport {
     const session = await this.sessionStore.getSession(sessionId);
     if (!target && !session?.linkedSessionId) {
       await ctx.answerCallbackQuery({
-        text: "Link a partner session first.",
+        text: this.t(locale, "menu:partner.screen.use_link_first"),
         show_alert: true,
       });
       return;
@@ -7714,7 +8374,7 @@ export class TelegramTransport implements HumanTransport {
       target?.targetSessionLabel ??
       linkedSession?.label ??
       session?.linkedSessionId ??
-      "напарник";
+      this.t(locale, "menu:partner.screen.default_partner");
     const sourceLabel = session?.label ?? sessionId;
     const isProjectTarget = Boolean(target?.projectUuid);
     const prompt = buildPartnerNotePromptText({
@@ -7731,7 +8391,10 @@ export class TelegramTransport implements HumanTransport {
       prompt.text,
       { kind: "menu", sessionId },
       {
-        reply_markup: new InlineKeyboard().text("Отмена", "partner-note-cancel"),
+        reply_markup: new InlineKeyboard().text(
+          this.t(locale, "menu:handoff.cancel"),
+          "partner-note-cancel",
+        ),
       },
     );
 
@@ -7769,10 +8432,11 @@ export class TelegramTransport implements HumanTransport {
   private async cancelPendingPartnerNote(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Telegram identity недоступна.",
+        text: this.t(locale, "common:errors.no_telegram_identity"),
         show_alert: true,
       });
       return;
@@ -7782,7 +8446,7 @@ export class TelegramTransport implements HumanTransport {
     const pending = this.pendingPartnerNotes.get(principalKey);
     if (!pending) {
       await ctx.answerCallbackQuery({
-        text: "Нет активного ввода для note напарнику.",
+        text: this.t(locale, "menu:partner.actions.no_pending_note_input"),
         show_alert: true,
       });
       return;
@@ -7790,7 +8454,9 @@ export class TelegramTransport implements HumanTransport {
 
     this.pendingPartnerNotes.delete(principalKey);
     await this.deletePendingPartnerNotePrompt(ctx, pending);
-    await ctx.answerCallbackQuery({ text: "Отправка note напарнику отменена." });
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:partner.actions.cancel_note_input"),
+    });
     await this.showPartnerMenu(ctx);
   }
 
@@ -7798,10 +8464,11 @@ export class TelegramTransport implements HumanTransport {
     ctx: TelegramMenuContext,
     mode: "create" | "join",
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Telegram identity is unavailable.",
+        text: this.t(locale, "common:errors.no_telegram_identity"),
         show_alert: true,
       });
       return;
@@ -7811,7 +8478,7 @@ export class TelegramTransport implements HumanTransport {
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
       await ctx.answerCallbackQuery({
-        text: "No active session selected.",
+        text: this.t(locale, "common:errors.no_active_session"),
         show_alert: true,
       });
       return;
@@ -7821,16 +8488,16 @@ export class TelegramTransport implements HumanTransport {
       ctx,
       mode === "create"
         ? [
-            "📦 Создать проект",
+            this.t(locale, "menu:project.create_prompt_title"),
             "",
-            "Отправь следующим сообщением имя проекта.",
-            "Команды вроде /menu или /help отменят этот режим.",
+            this.t(locale, "menu:project.create_prompt_body"),
+            this.t(locale, "menu:project.prompt_cancel"),
           ].join("\n")
         : [
-            "🔑 Вступить в проект",
+            this.t(locale, "menu:project.join_prompt_title"),
             "",
-            "Отправь следующим сообщением invite token проекта.",
-            "Команды вроде /menu или /help отменят этот режим.",
+            this.t(locale, "menu:project.join_prompt_body"),
+            this.t(locale, "menu:project.prompt_cancel"),
           ].join("\n"),
       { kind: "menu", sessionId },
     );
@@ -7843,17 +8510,21 @@ export class TelegramTransport implements HumanTransport {
     });
 
     await ctx.answerCallbackQuery({
-      text: mode === "create" ? "Создание проекта." : "Вход в проект.",
+      text:
+        mode === "create"
+          ? this.t(locale, "menu:project.start_create")
+          : this.t(locale, "menu:project.start_join"),
     });
   }
 
   private async handleProjectSelect(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const payloadKey = readMenuPayloadKey(ctx);
     if (!payloadKey) {
       await ctx.answerCallbackQuery({
-        text: "Данные проекта не найдены.",
+        text: this.t(locale, "menu:project.data_missing"),
         show_alert: true,
       });
       return;
@@ -7867,7 +8538,7 @@ export class TelegramTransport implements HumanTransport {
       !payload.projectUuid
     ) {
       await ctx.answerCallbackQuery({
-        text: "Данные проекта устарели или некорректны.",
+        text: this.t(locale, "menu:project.data_stale"),
         show_alert: true,
       });
       return;
@@ -7876,7 +8547,7 @@ export class TelegramTransport implements HumanTransport {
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Telegram identity is unavailable.",
+        text: this.t(locale, "common:errors.no_telegram_identity"),
         show_alert: true,
       });
       return;
@@ -7888,7 +8559,7 @@ export class TelegramTransport implements HumanTransport {
     );
     if (!project) {
       await ctx.answerCallbackQuery({
-        text: "Проект не найден.",
+        text: this.t(locale, "menu:project.not_found"),
         show_alert: true,
       });
       return;
@@ -7900,17 +8571,20 @@ export class TelegramTransport implements HumanTransport {
       projectUuid: project.projectUuid,
       projectName: project.projectName,
     });
-    await ctx.answerCallbackQuery({ text: "Открываю участников проекта." });
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:project.opening_members"),
+    });
     await this.showProjectMembers(ctx, project);
   }
 
   private async handleProjectDeleteSelect(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const payloadKey = readMenuPayloadKey(ctx);
     if (!payloadKey) {
       await ctx.answerCallbackQuery({
-        text: "Данные проекта не найдены.",
+        text: this.t(locale, "menu:project.data_missing"),
         show_alert: true,
       });
       return;
@@ -7924,7 +8598,7 @@ export class TelegramTransport implements HumanTransport {
       !payload.projectUuid
     ) {
       await ctx.answerCallbackQuery({
-        text: "Данные проекта устарели или некорректны.",
+        text: this.t(locale, "menu:project.data_stale"),
         show_alert: true,
       });
       await ctx.deleteMessage().catch(() => undefined);
@@ -7934,7 +8608,7 @@ export class TelegramTransport implements HumanTransport {
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Telegram identity is unavailable.",
+        text: this.t(locale, "common:errors.no_telegram_identity"),
         show_alert: true,
       });
       return;
@@ -7944,7 +8618,7 @@ export class TelegramTransport implements HumanTransport {
     const project = projects.find((item) => item.project_uuid === payload.projectUuid);
     if (!project) {
       await ctx.answerCallbackQuery({
-        text: "Проект не найден.",
+        text: this.t(locale, "menu:project.not_found"),
         show_alert: true,
       });
       await ctx.deleteMessage().catch(() => undefined);
@@ -7953,7 +8627,7 @@ export class TelegramTransport implements HumanTransport {
 
     if (project.role !== "owner") {
       await ctx.answerCallbackQuery({
-        text: "Удалять проект может только owner.",
+        text: this.t(locale, "menu:project.delete_only_owner"),
         show_alert: true,
       });
       return;
@@ -7965,10 +8639,11 @@ export class TelegramTransport implements HumanTransport {
   private async leaveActiveProject(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Telegram identity is unavailable.",
+        text: this.t(locale, "common:errors.no_telegram_identity"),
         show_alert: true,
       });
       return;
@@ -7978,7 +8653,7 @@ export class TelegramTransport implements HumanTransport {
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
       await ctx.answerCallbackQuery({
-        text: "No active session selected.",
+        text: this.t(locale, "common:errors.no_active_session"),
         show_alert: true,
       });
       return;
@@ -7987,7 +8662,7 @@ export class TelegramTransport implements HumanTransport {
     const session = await this.sessionStore.getSession(sessionId);
     if (!session?.activeProjectUuid) {
       await ctx.answerCallbackQuery({
-        text: "No active project.",
+        text: this.t(locale, "menu:project.no_active_project"),
         show_alert: true,
       });
       return;
@@ -8006,8 +8681,13 @@ export class TelegramTransport implements HumanTransport {
       updatedAt: new Date().toISOString(),
     });
 
-    await ctx.answerCallbackQuery({ text: "Project left." });
-    await this.showProjectsMenu(ctx, "Вы вышли из текущего проекта.");
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:project.left_current"),
+    });
+    await this.showProjectsMenu(
+      ctx,
+      this.t(locale, "menu:project.left_current_screen"),
+    );
   }
 
   private async showProjectDetail(
@@ -8099,6 +8779,9 @@ export class TelegramTransport implements HumanTransport {
     if (!binding) {
       throw new Error("Binding is missing for project members screen.");
     }
+    const locale = await this.resolveLocaleForTelegramUserId(
+      binding.telegramUserId,
+    );
     const sessions = await this.listGatewayProjectSessions(
       {
         telegramChatId: binding.telegramChatId,
@@ -8112,19 +8795,25 @@ export class TelegramTransport implements HumanTransport {
     );
 
     const lines = [
-      `👥 Участники ${escapeHtml(input.projectName)}`,
+      this.t(locale, "menu:project.members_title", {
+        projectName: escapeHtml(input.projectName),
+      }),
       "",
       `UUID: ${input.projectUuid}`,
       `Invite: <code>${escapeHtml(input.inviteToken)}</code>`,
       "",
-      `Сессия: ${escapeHtml(session?.label ?? input.sessionId)}`,
-      `Других сессий: ${selectableMembers.length}`,
+      this.t(locale, "menu:project.current_session", {
+        sessionName: escapeHtml(session?.label ?? input.sessionId),
+      }),
+      this.t(locale, "menu:project.other_sessions", {
+        count: selectableMembers.length,
+      }),
       "",
       selectableMembers.length > 0
         ? options?.filePath
-          ? "Выбери, кому передать этот файл."
-          : "Выбери сессию, чтобы спросить, поделиться, ответить или передать."
-        : "В этом проекте пока нет других активных сессий.",
+          ? this.t(locale, "menu:project.choose_file_target")
+          : this.t(locale, "menu:project.choose_member_action")
+        : this.t(locale, "menu:project.no_other_active"),
     ];
 
     const keyboard = new InlineKeyboard();
@@ -8157,8 +8846,8 @@ export class TelegramTransport implements HumanTransport {
     }
 
     keyboard
-      .text("🚪 Выйти", `project-leave:${input.projectUuid}`)
-      .text("⬅ К проектам", "project-back");
+      .text(this.t(locale, "menu:project.leave"), `project-leave:${input.projectUuid}`)
+      .text(this.t(locale, "menu:project.back_to_projects"), "project-back");
 
     return { text: lines.join("\n"), keyboard };
   }
@@ -8176,6 +8865,7 @@ export class TelegramTransport implements HumanTransport {
       targetLocalSessionId?: string;
     },
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (principal) {
       await this.ensureOpenedProjectIsActive({
@@ -8219,8 +8909,8 @@ export class TelegramTransport implements HumanTransport {
       },
     );
     const keyboard = new InlineKeyboard()
-      .text("❓ Спросить", `project-member-note:question:${payloadKey}`)
-      .text("📤 Поделиться", `project-member-note:share:${payloadKey}`)
+      .text(this.t(locale, "menu:project.ask"), `project-member-note:question:${payloadKey}`)
+      .text(this.t(locale, "menu:project.share_button"), `project-member-note:share:${payloadKey}`)
       .row();
     if (
       this.config.webapp.enabled &&
@@ -8231,7 +8921,7 @@ export class TelegramTransport implements HumanTransport {
     ) {
       keyboard.text("🖥 Live", `project-member-live:${payloadKey}`).row();
     }
-    keyboard.text("⬅ К участникам", `project-members:${input.projectUuid}`);
+    keyboard.text(this.t(locale, "menu:project.back_to_members"), `project-members:${input.projectUuid}`);
 
     if (ctx.callbackQuery?.message) {
       if (principal && ctx.chat && "message_id" in ctx.callbackQuery.message) {
@@ -8288,6 +8978,7 @@ export class TelegramTransport implements HumanTransport {
       targetLocalSessionId?: string;
     },
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (principal) {
       await this.ensureOpenedProjectIsActive({
@@ -8300,14 +8991,18 @@ export class TelegramTransport implements HumanTransport {
 
     const files = await this.listActiveSessionFiles(input.sessionId);
     const lines = [
-      "📎 Выбор файла",
+      this.t(locale, "menu:project.file_title"),
       "",
-      `Проект: ${input.projectName}`,
-      `Получатель: ${input.targetSessionLabel}`,
+      this.t(locale, "menu:project.file_project", {
+        projectName: input.projectName,
+      }),
+      this.t(locale, "menu:project.file_recipient", {
+        label: input.targetSessionLabel,
+      }),
       "",
       files.length > 0
-        ? "Выбери файл для отправки."
-        : "В этой сессии нет загруженных файлов.",
+        ? this.t(locale, "menu:project.file_choose")
+        : this.t(locale, "menu:project.file_none"),
     ];
 
     const keyboard = new InlineKeyboard();
@@ -8335,7 +9030,7 @@ export class TelegramTransport implements HumanTransport {
       keyboard.text(label, `project-member-open:${payloadKey}`).row();
     }
 
-    keyboard.text("⬅ К сессии", `project-member-open:${await this.createProjectMemberMenuPayload(
+    keyboard.text(this.t(locale, "menu:project.back_to_session"), `project-member-open:${await this.createProjectMemberMenuPayload(
       input.sessionId,
       input.projectUuid,
       input.targetSessionId,
@@ -8543,11 +9238,12 @@ export class TelegramTransport implements HumanTransport {
   private async handleProjectSetCallback(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const projectUuid = this.extractCallbackSuffix(ctx, "project-set:");
     const principal = this.getPrincipalFromContext(ctx);
     if (!projectUuid || !principal) {
       await ctx.answerCallbackQuery({
-        text: "Некорректное действие проекта.",
+        text: this.t(locale, "menu:project.invalid_action"),
         show_alert: true,
       });
       return;
@@ -8557,7 +9253,7 @@ export class TelegramTransport implements HumanTransport {
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
       await ctx.answerCallbackQuery({
-        text: "Активная сессия не выбрана.",
+        text: this.t(locale, "common:errors.no_active_session"),
         show_alert: true,
       });
       return;
@@ -8566,7 +9262,7 @@ export class TelegramTransport implements HumanTransport {
     const payload = await this.getProjectPayloadByUuid(sessionId, projectUuid);
     if (!payload) {
       await ctx.answerCallbackQuery({
-        text: "Проект не найден.",
+        text: this.t(locale, "menu:project.not_found"),
         show_alert: true,
       });
       return;
@@ -8578,18 +9274,21 @@ export class TelegramTransport implements HumanTransport {
       projectUuid: payload.projectUuid,
       projectName: payload.projectName,
     });
-    await ctx.answerCallbackQuery({ text: "Открываю участников проекта." });
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:project.opening_members"),
+    });
     await this.showProjectMembers(ctx, payload);
   }
 
   private async handleProjectDetailCallback(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const projectUuid = this.extractCallbackSuffix(ctx, "project-detail:");
     const principal = this.getPrincipalFromContext(ctx);
     if (!projectUuid || !principal) {
       await ctx.answerCallbackQuery({
-        text: "Некорректное действие проекта.",
+        text: this.t(locale, "menu:project.invalid_action"),
         show_alert: true,
       });
       return;
@@ -8599,7 +9298,7 @@ export class TelegramTransport implements HumanTransport {
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
       await ctx.answerCallbackQuery({
-        text: "Активная сессия не выбрана.",
+        text: this.t(locale, "common:errors.no_active_session"),
         show_alert: true,
       });
       return;
@@ -8608,7 +9307,7 @@ export class TelegramTransport implements HumanTransport {
     const payload = await this.getProjectPayloadByUuid(sessionId, projectUuid);
     if (!payload) {
       await ctx.answerCallbackQuery({
-        text: "Проект не найден.",
+        text: this.t(locale, "menu:project.not_found"),
         show_alert: true,
       });
       return;
@@ -8620,17 +9319,20 @@ export class TelegramTransport implements HumanTransport {
       projectUuid: payload.projectUuid,
       projectName: payload.projectName,
     });
-    await ctx.answerCallbackQuery({ text: "Открываю участников проекта." });
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:project.opening_members"),
+    });
     await this.showProjectMembers(ctx, payload);
   }
 
   private async handleProjectDeleteCallback(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const projectUuid = this.extractCallbackSuffix(ctx, "project-delete:");
     if (!projectUuid) {
       await ctx.answerCallbackQuery({
-        text: "Некорректное действие проекта.",
+        text: this.t(locale, "menu:project.invalid_action"),
         show_alert: true,
       });
       return;
@@ -8642,10 +9344,11 @@ export class TelegramTransport implements HumanTransport {
   private async handleProjectMemberOpenCallback(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const payloadKey = this.extractCallbackSuffix(ctx, "project-member-open:");
     if (!payloadKey) {
       await ctx.answerCallbackQuery({
-        text: "Некорректные данные участника проекта.",
+        text: this.t(locale, "menu:project.invalid_member_payload"),
         show_alert: true,
       });
       return;
@@ -8654,7 +9357,7 @@ export class TelegramTransport implements HumanTransport {
     const payload = await this.getProjectMemberPayloadByKey(payloadKey);
     if (!payload) {
       await ctx.answerCallbackQuery({
-        text: "Данные участника проекта некорректны или устарели.",
+        text: this.t(locale, "menu:project.stale_member_payload"),
         show_alert: true,
       });
       await ctx.deleteMessage().catch(() => undefined);
@@ -8672,18 +9375,21 @@ export class TelegramTransport implements HumanTransport {
       return;
     }
 
-    await ctx.answerCallbackQuery({ text: "Открываю сессию." });
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:project.opening_session"),
+    });
     await this.showProjectMemberDetail(ctx, payload);
   }
 
   private async handleProjectMemberNoteCallback(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const data = ctx.callbackQuery?.data ?? "";
     const match = data.match(/^project-member-note:(question|share):(.+)$/u);
     if (!match) {
       await ctx.answerCallbackQuery({
-        text: "Некорректное действие для участника проекта.",
+        text: this.t(locale, "menu:project.invalid_member_action"),
         show_alert: true,
       });
       return;
@@ -8693,7 +9399,7 @@ export class TelegramTransport implements HumanTransport {
     const payloadKey = payloadKeyRaw?.trim();
     if (!payloadKey) {
       await ctx.answerCallbackQuery({
-        text: "Некорректные данные участника проекта.",
+        text: this.t(locale, "menu:project.invalid_member_payload"),
         show_alert: true,
       });
       return;
@@ -8701,7 +9407,7 @@ export class TelegramTransport implements HumanTransport {
     const payload = await this.getProjectMemberPayloadByKey(payloadKey);
     if (!payload) {
       await ctx.answerCallbackQuery({
-        text: "Данные участника проекта некорректны или устарели.",
+        text: this.t(locale, "menu:project.stale_member_payload"),
         show_alert: true,
       });
       await ctx.deleteMessage().catch(() => undefined);
@@ -8718,10 +9424,11 @@ export class TelegramTransport implements HumanTransport {
   private async handleProjectMemberLiveCallback(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const payloadKey = this.extractCallbackSuffix(ctx, "project-member-live:");
     if (!payloadKey) {
       await ctx.answerCallbackQuery({
-        text: "Некорректные данные Live View.",
+        text: this.t(locale, "menu:project.invalid_live_payload"),
         show_alert: true,
       });
       return;
@@ -8730,7 +9437,7 @@ export class TelegramTransport implements HumanTransport {
     const payload = await this.getProjectMemberPayloadByKey(payloadKey);
     if (!payload || !payload.targetClientUuid || !payload.targetLocalSessionId) {
       await ctx.answerCallbackQuery({
-        text: "Данные Live View некорректны или устарели.",
+        text: this.t(locale, "menu:project.stale_live_payload"),
         show_alert: true,
       });
       await ctx.deleteMessage().catch(() => undefined);
@@ -8740,7 +9447,7 @@ export class TelegramTransport implements HumanTransport {
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Не удалось определить Telegram пользователя.",
+        text: this.t(locale, "menu:project.no_telegram_user"),
         show_alert: true,
       });
       return;
@@ -8771,8 +9478,8 @@ export class TelegramTransport implements HumanTransport {
 
     await ctx.answerCallbackQuery({
       text: result?.delivered
-        ? "Запрос на Live отправлен на подтверждение."
-        : "Сессия сейчас недоступна для подтверждения.",
+        ? this.t(locale, "menu:project.request_live_sent")
+        : this.t(locale, "menu:live.actions.approval_unavailable"),
       ...(result?.delivered ? {} : { show_alert: true }),
     });
   }
@@ -8780,11 +9487,12 @@ export class TelegramTransport implements HumanTransport {
   private async handleLiveApprovalCallback(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const data = ctx.callbackQuery?.data ?? "";
     const match = data.match(/^live-approval:(approve|deny):(.+)$/u);
     if (!match) {
       await ctx.answerCallbackQuery({
-        text: "Некорректное подтверждение Live View.",
+        text: this.t(locale, "menu:project.invalid_approval"),
         show_alert: true,
       });
       return;
@@ -8794,7 +9502,7 @@ export class TelegramTransport implements HumanTransport {
     const payloadKey = payloadKeyRaw?.trim();
     if (!payloadKey) {
       await ctx.answerCallbackQuery({
-        text: "Некорректные данные подтверждения.",
+        text: this.t(locale, "menu:project.invalid_approval_data"),
         show_alert: true,
       });
       return;
@@ -8803,7 +9511,7 @@ export class TelegramTransport implements HumanTransport {
     const payload = await this.getLiveApprovalPayloadByKey(payloadKey);
     if (!payload) {
       await ctx.answerCallbackQuery({
-        text: "Запрос Live View устарел.",
+        text: this.t(locale, "menu:project.approval_stale"),
         show_alert: true,
       });
       await ctx.deleteMessage().catch(() => undefined);
@@ -8832,23 +9540,39 @@ export class TelegramTransport implements HumanTransport {
     );
 
     await ctx.answerCallbackQuery({
-      text: approved ? "Live View разрешён." : "Live View отклонён.",
+      text: approved
+        ? this.t(locale, "menu:live.approval.approved")
+        : this.t(locale, "menu:live.approval.denied"),
     });
 
     if (ctx.callbackQuery?.message) {
       await this.editText(
         ctx,
         [
-          approved ? "🖥 Live View разрешён" : "🖥 Live View отклонён",
+          approved
+            ? this.t(locale, "menu:live.approval.approved")
+            : this.t(locale, "menu:live.approval.denied"),
           "",
-          ...(payload.projectName ? [`Проект: ${payload.projectName}`] : []),
-          `Сессия: ${payload.sourceSessionLabel} -> ${payload.targetSessionLabel}`,
+          ...(payload.projectName
+            ? [
+                this.t(locale, "menu:live.approval.project", {
+                  projectName: payload.projectName,
+                }),
+              ]
+            : []),
+          this.t(locale, "menu:live.approval.route", {
+            sourceSessionName: payload.sourceSessionLabel,
+            targetSessionName: payload.targetSessionLabel,
+          }),
           "",
           result?.delivered
             ? approved
-              ? "Запросившая сторона получила кнопку для открытия Live."
-              : "Запросившая сторона получила уведомление об отклонении."
-            : "Запросившая сторона сейчас недоступна.",
+              ? this.t(locale, "menu:live.approval.source_open")
+              : this.t(locale, "menu:live.approval.result_denied", {
+                  sourceSessionName: payload.sourceSessionLabel,
+                  targetSessionName: payload.targetSessionLabel,
+                })
+            : this.t(locale, "menu:live.actions.approval_unavailable"),
         ].join("\n"),
         { kind: "menu", sessionId: payload.sessionId },
       );
@@ -8858,10 +9582,11 @@ export class TelegramTransport implements HumanTransport {
   private async handleProjectMemberFilesCallback(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const payloadKey = this.extractCallbackSuffix(ctx, "project-member-files:");
     if (!payloadKey) {
       await ctx.answerCallbackQuery({
-        text: "Некорректные данные участника проекта.",
+        text: this.t(locale, "menu:project.invalid_member_payload"),
         show_alert: true,
       });
       return;
@@ -8870,24 +9595,27 @@ export class TelegramTransport implements HumanTransport {
     const payload = await this.getProjectMemberPayloadByKey(payloadKey);
     if (!payload) {
       await ctx.answerCallbackQuery({
-        text: "Данные участника проекта некорректны или устарели.",
+        text: this.t(locale, "menu:project.stale_member_payload"),
         show_alert: true,
       });
       await ctx.deleteMessage().catch(() => undefined);
       return;
     }
 
-    await ctx.answerCallbackQuery({ text: "Открываю файлы." });
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:project.opening_files"),
+    });
     await this.showProjectMemberFiles(ctx, payload);
   }
 
   private async handlePartnerFileOpenCallback(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const payloadKey = this.extractCallbackSuffix(ctx, "partner-file-open:");
     if (!payloadKey) {
       await ctx.answerCallbackQuery({
-        text: "Некорректные данные файла.",
+        text: this.t(locale, "menu:project.invalid_member_payload"),
         show_alert: true,
       });
       return;
@@ -8896,7 +9624,7 @@ export class TelegramTransport implements HumanTransport {
     const payload = await this.getPartnerFileTargetPayloadByKey(payloadKey);
     if (!payload) {
       await ctx.answerCallbackQuery({
-        text: "Данные файла устарели.",
+        text: this.t(locale, "menu:project.data_stale"),
         show_alert: true,
       });
       return;
@@ -8913,11 +9641,12 @@ export class TelegramTransport implements HumanTransport {
   private async handleProjectMembersCallback(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const projectUuid = this.extractCallbackSuffix(ctx, "project-members:");
     const principal = this.getPrincipalFromContext(ctx);
     if (!projectUuid || !principal) {
       await ctx.answerCallbackQuery({
-        text: "Некорректное действие проекта.",
+        text: this.t(locale, "menu:project.invalid_action"),
         show_alert: true,
       });
       return;
@@ -8927,7 +9656,7 @@ export class TelegramTransport implements HumanTransport {
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
       await ctx.answerCallbackQuery({
-        text: "Активная сессия не выбрана.",
+        text: this.t(locale, "common:errors.no_active_session"),
         show_alert: true,
       });
       return;
@@ -8936,24 +9665,27 @@ export class TelegramTransport implements HumanTransport {
     const payload = await this.getProjectPayloadByUuid(sessionId, projectUuid);
     if (!payload) {
       await ctx.answerCallbackQuery({
-        text: "Проект не найден.",
+        text: this.t(locale, "menu:project.not_found"),
         show_alert: true,
       });
       return;
     }
 
-    await ctx.answerCallbackQuery({ text: "Загружаю участников." });
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:project.loading_members"),
+    });
     await this.showProjectMembers(ctx, payload);
   }
 
   private async handleProjectLeaveCallback(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const projectUuid = this.extractCallbackSuffix(ctx, "project-leave:");
     const principal = this.getPrincipalFromContext(ctx);
     if (!projectUuid || !principal) {
       await ctx.answerCallbackQuery({
-        text: "Некорректное действие проекта.",
+        text: this.t(locale, "menu:project.invalid_action"),
         show_alert: true,
       });
       return;
@@ -8963,7 +9695,7 @@ export class TelegramTransport implements HumanTransport {
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
       await ctx.answerCallbackQuery({
-        text: "Активная сессия не выбрана.",
+        text: this.t(locale, "common:errors.no_active_session"),
         show_alert: true,
       });
       return;
@@ -8985,18 +9717,24 @@ export class TelegramTransport implements HumanTransport {
       });
     }
 
-    await ctx.answerCallbackQuery({ text: "Выход из проекта выполнен." });
-    await this.showProjectsMenu(ctx, "Вы вышли из выбранного проекта.");
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:project.left_callback"),
+    });
+    await this.showProjectsMenu(
+      ctx,
+      this.t(locale, "menu:project.left_screen"),
+    );
   }
 
   private async handleProjectDeleteByUuid(
     ctx: TelegramMenuContext,
     projectUuid: string,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Telegram identity is unavailable.",
+        text: this.t(locale, "common:errors.no_telegram_identity"),
         show_alert: true,
       });
       return;
@@ -9006,7 +9744,7 @@ export class TelegramTransport implements HumanTransport {
       await this.bindingStore.getActiveSessionIdForPrincipal(principal);
     if (!sessionId) {
       await ctx.answerCallbackQuery({
-        text: "Активная сессия не выбрана.",
+        text: this.t(locale, "common:errors.no_active_session"),
         show_alert: true,
       });
       return;
@@ -9016,7 +9754,7 @@ export class TelegramTransport implements HumanTransport {
     const project = projects.find((item) => item.project_uuid === projectUuid);
     if (!project) {
       await ctx.answerCallbackQuery({
-        text: "Проект не найден.",
+        text: this.t(locale, "menu:project.not_found"),
         show_alert: true,
       });
       await ctx.deleteMessage().catch(() => undefined);
@@ -9025,7 +9763,7 @@ export class TelegramTransport implements HumanTransport {
 
     if (project.role !== "owner") {
       await ctx.answerCallbackQuery({
-        text: "Удалять проект может только owner.",
+        text: this.t(locale, "menu:project.delete_only_owner"),
         show_alert: true,
       });
       return;
@@ -9047,10 +9785,14 @@ export class TelegramTransport implements HumanTransport {
       });
     }
 
-    await ctx.answerCallbackQuery({ text: "Проект удалён." });
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:project.deleted_callback"),
+    });
     await this.showCollabDeleteMenu(
       ctx,
-      `Проект «${project.name}» удалён. Участники отвязаны, project state очищен.`,
+      this.t(locale, "menu:project.deleted_screen", {
+        projectName: project.name,
+      }),
     );
   }
 
@@ -9078,10 +9820,11 @@ export class TelegramTransport implements HumanTransport {
   private async cancelPendingFileHandoff(
     ctx: TelegramMenuContext,
   ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       await ctx.answerCallbackQuery({
-        text: "Telegram identity is unavailable.",
+        text: this.t(locale, "common:errors.no_telegram_identity"),
         show_alert: true,
       });
       return;
@@ -9091,7 +9834,7 @@ export class TelegramTransport implements HumanTransport {
     const pending = this.pendingFileHandoffs.get(principalKey);
     if (!pending) {
       await ctx.answerCallbackQuery({
-        text: "No pending file handoff prompt.",
+        text: this.t(locale, "menu:handoff.no_pending"),
         show_alert: true,
       });
       return;
@@ -9099,7 +9842,9 @@ export class TelegramTransport implements HumanTransport {
 
     this.pendingFileHandoffs.delete(principalKey);
     await this.deletePendingFileHandoffPrompt(ctx, pending);
-    await ctx.answerCallbackQuery({ text: "File handoff cancelled." });
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:handoff.cancelled"),
+    });
     if (pending.projectUuid && pending.targetSessionId && pending.targetSessionLabel) {
       const project = await this.getProjectPayloadByUuid(
         pending.sessionId,
@@ -9301,6 +10046,7 @@ export class TelegramTransport implements HumanTransport {
     ctx: TelegramMenuContext,
     text: string,
   ): Promise<boolean> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       return false;
@@ -9327,9 +10073,12 @@ export class TelegramTransport implements HumanTransport {
         sourceSession.linkedSessionId,
       );
       resolvedTargetLabel =
-        linkedSession?.label ?? sourceSession.linkedSessionId ?? "напарник";
+        linkedSession?.label ??
+        sourceSession.linkedSessionId ??
+        this.t(locale, "menu:partner.screen.default_partner");
     }
-    const targetLabel = resolvedTargetLabel ?? "напарник";
+    const targetLabel =
+      resolvedTargetLabel ?? this.t(locale, "menu:partner.screen.default_partner");
 
     this.pendingPartnerNotes.delete(principalKey);
     await this.deletePendingPartnerNotePrompt(ctx, pending);
@@ -9368,13 +10117,31 @@ export class TelegramTransport implements HumanTransport {
       const sent = await this.replyText(
         ctx,
         [
-          "Задача отправлена выбранной сессии.",
+          this.t(locale, "menu:partner.actions.task_sent"),
           ...(output.project_name ? [`Проект: ${output.project_name}`] : []),
-          ...(output.target_actor_label ? [`Исполнитель: ${output.target_actor_label}`] : []),
-          `Маршрут результата: ${targetLabel} -> ${sourceLabel}`,
-          `Тип: ${pending.kind}`,
-          `Кратко: ${parsed.summary}`,
-          `Статус: ${output.delivery_status === "delivered" ? "доставлено" : "в очереди"}`,
+          ...(output.target_actor_label
+            ? [
+                this.t(locale, "menu:partner.screen.executor", {
+                  label: output.target_actor_label,
+                }),
+              ]
+            : []),
+          this.t(locale, "menu:partner.screen.route_result", {
+            source: targetLabel,
+            target: sourceLabel,
+          }),
+          this.t(locale, "menu:partner.screen.type", {
+            kind: pending.kind,
+          }),
+          this.t(locale, "menu:partner.screen.summary", {
+            summary: parsed.summary,
+          }),
+          this.t(locale, "menu:partner.screen.status", {
+            status:
+              output.delivery_status === "delivered"
+                ? this.t(locale, "menu:partner.screen.delivered")
+                : this.t(locale, "menu:partner.screen.queued"),
+          }),
           `Share: ${output.share_id}`,
         ].join("\n"),
         { kind: "menu", sessionId: pending.sessionId },
@@ -9423,11 +10190,18 @@ export class TelegramTransport implements HumanTransport {
     await this.replyText(
       ctx,
       [
-        "Задача поставлена в inbox текущей сессии.",
-        `Маршрут отправки: ${sourceLabel} -> ${targetLabel}`,
-        `Тип: ${pending.kind}`,
-        `Кратко: ${parsed.summary}`,
-        "Текущая сессия подготовит результат и отправит его сама.",
+        this.t(locale, "menu:partner.actions.inbox_queued"),
+        this.t(locale, "menu:partner.screen.route_send", {
+          source: sourceLabel,
+          target: targetLabel,
+        }),
+        this.t(locale, "menu:partner.screen.type", {
+          kind: pending.kind,
+        }),
+        this.t(locale, "menu:partner.screen.summary", {
+          summary: parsed.summary,
+        }),
+        this.t(locale, "menu:partner.screen.current_session_handles"),
       ].join("\n"),
       { kind: "menu", sessionId: pending.sessionId },
     );
@@ -9489,6 +10263,7 @@ export class TelegramTransport implements HumanTransport {
     ctx: TelegramMenuContext,
     text: string,
   ): Promise<boolean> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       return false;
@@ -9523,7 +10298,7 @@ export class TelegramTransport implements HumanTransport {
       await this.deletePendingFileHandoffPrompt(ctx, pending);
       await this.replyText(
         ctx,
-        "Файл передан агенту.",
+        this.t(locale, "menu:handoff.delivered_agent"),
         { kind: "menu", sessionId: pending.sessionId },
       );
       return true;
@@ -9551,12 +10326,37 @@ export class TelegramTransport implements HumanTransport {
     const sent = await this.replyText(
       ctx,
       [
-        "Файл поставлен в очередь доставки напарнику.",
-        ...(output.project_name ? [`Проект: ${output.project_name}`] : []),
-        ...(output.target_actor_label ? [`Получатель: ${output.target_actor_label}`] : []),
-        ...(output.target_session_label ? [`Сессия: ${output.target_session_label}`] : []),
-        `Статус: ${output.delivery_status === "delivered" ? "доставлено" : "в очереди"}`,
-        `Share: ${output.share_id}`,
+        this.t(locale, "menu:handoff.queued_partner"),
+        ...(output.project_name
+          ? [
+              this.t(locale, "menu:handoff.project", {
+                projectName: output.project_name,
+              }),
+            ]
+          : []),
+        ...(output.target_actor_label
+          ? [
+              this.t(locale, "menu:handoff.recipient", {
+                label: output.target_actor_label,
+              }),
+            ]
+          : []),
+        ...(output.target_session_label
+          ? [
+              this.t(locale, "menu:handoff.session", {
+                label: output.target_session_label,
+              }),
+            ]
+          : []),
+        this.t(locale, "menu:handoff.status", {
+          status:
+            output.delivery_status === "delivered"
+              ? this.t(locale, "menu:handoff.delivered")
+              : this.t(locale, "menu:handoff.queued"),
+        }),
+        this.t(locale, "menu:handoff.share", {
+          shareId: output.share_id,
+        }),
       ].join("\n"),
       { kind: "menu", sessionId: pending.sessionId },
     );
@@ -9605,6 +10405,7 @@ export class TelegramTransport implements HumanTransport {
     ctx: TelegramMenuContext,
     text: string,
   ): Promise<boolean> {
+    const locale = await this.resolveLocaleForContext(ctx);
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
       return false;
@@ -9649,7 +10450,10 @@ export class TelegramTransport implements HumanTransport {
       });
       await this.replyText(
         ctx,
-        `Проект создан: ${projectName}\nInvite: ${created.invite_token}`,
+        this.t(locale, "menu:project.created", {
+          projectName,
+          inviteToken: created.invite_token,
+        }),
         { kind: "menu", sessionId: pending.sessionId },
       );
     } else {
@@ -9671,13 +10475,20 @@ export class TelegramTransport implements HumanTransport {
       });
       await this.replyText(
         ctx,
-        `Вход в проект выполнен: ${projectName}`,
+        this.t(locale, "menu:project.joined", {
+          projectName,
+        }),
         { kind: "menu", sessionId: pending.sessionId },
       );
     }
 
     this.pendingProjects.delete(principalKey);
-    await this.showProjectsMenu(ctx, `Открыт проект: ${projectName}`);
+    await this.showProjectsMenu(
+      ctx,
+      this.t(locale, "menu:project.opened", {
+        projectName,
+      }),
+    );
     return true;
   }
 }

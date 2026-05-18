@@ -49,7 +49,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
       );
     }
 
-    const runtime = runtimeService.getRuntime();
+    const runtime = await runtimeService.waitUntilReady();
 
     this.logger.info("Starting telegram_mcp browser service");
     this.browserService = new BrowserService(

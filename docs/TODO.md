@@ -96,7 +96,7 @@ Next session:
   - как не путать живой бот, живой сервис и закрытый агент
 
 - [ ] Доделать packaging/publish polish:
-  - проверить publish/upgrade flow для `0.0.8`
+  - проверить publish/upgrade flow для `0.0.10`
   - проверить install/smoke на чистой машине
 
 - [ ] Дочистить operational logs:

@@ -95,6 +95,7 @@ function createCallbackContext(data: string): CallbackContext {
     answerCallbackQuery: vi.fn(async () => undefined),
     deleteMessage: vi.fn(async () => undefined),
     chat: { id: 171197806 },
+    from: { id: 171197806, language_code: "ru" },
     message: { message_id: 1157 },
   };
 }

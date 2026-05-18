@@ -98,6 +98,11 @@ export interface TelegramMenuPayloadStore {
   getMenuPayload(key: string): Promise<TelegramMenuPayloadRecord | null>;
 }
 
+export interface TelegramUserLocaleStore {
+  getUserLocale(telegramUserId: number): Promise<string | null>;
+  setUserLocale(telegramUserId: number, locale: string): Promise<void>;
+}
+
 export interface TelegramXchangeFileMetaStore {
   setXchangeFileMeta(meta: TelegramXchangeFileMeta): Promise<void>;
   listXchangeFileMetas(sessionId: string): Promise<TelegramXchangeFileMeta[]>;

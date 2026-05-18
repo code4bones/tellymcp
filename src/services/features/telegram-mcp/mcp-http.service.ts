@@ -107,7 +107,7 @@ const TelegramMcpHttpService: ServiceSchema = {
       );
     }
 
-    const runtime = runtimeService.getRuntime();
+    const runtime = await runtimeService.waitUntilReady();
     this.logger.info("Starting telegram_mcp HTTP service");
     this.httpHandler = createMcpHttpHandler(runtime, {
       createMcpServer: () => mcpServerService.createServer(),

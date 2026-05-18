@@ -49,7 +49,7 @@ const TelegramMcpPairService: ServiceSchema = {
       );
     }
 
-    const runtime = runtimeService.getRuntime();
+    const runtime = await runtimeService.waitUntilReady();
 
     this.logger.info("Starting telegram_mcp pair service");
     this.pairSessionService = new PairSessionService(

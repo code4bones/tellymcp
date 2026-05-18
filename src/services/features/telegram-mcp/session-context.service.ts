@@ -54,7 +54,7 @@ const TelegramMcpSessionContextService: ServiceSchema = {
       );
     }
 
-    const runtime = runtimeService.getRuntime();
+    const runtime = await runtimeService.waitUntilReady();
 
     this.logger.info("Starting telegram_mcp session-context service");
     this.sessionContextService = new SessionContextService(

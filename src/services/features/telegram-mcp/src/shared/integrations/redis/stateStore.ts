@@ -25,6 +25,7 @@ import type {
   SessionBindingStore,
   SessionStore,
   TelegramInboxStore,
+  TelegramUserLocaleStore,
   TelegramXchangeFileMetaStore,
   TelegramMenuPayloadStore,
 } from "../../api/storage/contract";
@@ -73,6 +74,10 @@ function menuPayloadKey(key: string): string {
   return `${KEY_PREFIX}:menu-payload:${key}`;
 }
 
+function userLocaleKey(telegramUserId: number): string {
+  return `${KEY_PREFIX}:user-locale:${telegramUserId}`;
+}
+
 function gatewayClientUuidKey(): string {
   return `${KEY_PREFIX}:gateway:client-uuid`;
 }
@@ -112,6 +117,7 @@ export class RedisStateStore
     SessionBindingStore,
     PendingRequestStore,
     TelegramInboxStore,
+    TelegramUserLocaleStore,
     TelegramXchangeFileMetaStore,
     TelegramMenuPayloadStore,
     MaintenanceStore
@@ -192,6 +198,17 @@ export class RedisStateStore
   public async getBinding(sessionId: string): Promise<SessionBinding | null> {
     const raw = await this.redis.get(bindingKey(sessionId));
     return parseJson<SessionBinding>(raw);
+  }
+
+  public async getUserLocale(telegramUserId: number): Promise<string | null> {
+    return (await this.redis.get(userLocaleKey(telegramUserId))) ?? null;
+  }
+
+  public async setUserLocale(
+    telegramUserId: number,
+    locale: string,
+  ): Promise<void> {
+    await this.redis.set(userLocaleKey(telegramUserId), locale);
   }
 
   public async setBinding(binding: SessionBinding): Promise<void> {

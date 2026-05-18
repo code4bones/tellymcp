@@ -15,6 +15,7 @@ import type {
   SessionStore,
   SessionBindingStore,
   TelegramInboxStore,
+  TelegramUserLocaleStore,
   TelegramXchangeFileMetaStore,
 } from "../../shared/api/storage/contract";
 
@@ -27,6 +28,7 @@ export type AppRuntime = {
   sessionStore: SessionStore;
   bindingStore: SessionBindingStore;
   inboxStore: TelegramInboxStore;
+  localeStore: TelegramUserLocaleStore;
   xchangeFileMetaStore: TelegramXchangeFileMetaStore;
   maintenanceStore: MaintenanceStore;
   objectStore: MinioExchangeStore;
@@ -127,6 +129,7 @@ export async function createAppRuntime(input: {
     stateStore,
     stateStore,
     stateStore,
+    stateStore,
     objectStore,
     webAppLaunchRegistry,
     logger,
@@ -149,6 +152,7 @@ export async function createAppRuntime(input: {
     sessionStore: stateStore,
     bindingStore: stateStore,
     inboxStore: stateStore,
+    localeStore: stateStore,
     xchangeFileMetaStore: stateStore,
     maintenanceStore: stateStore,
     objectStore,

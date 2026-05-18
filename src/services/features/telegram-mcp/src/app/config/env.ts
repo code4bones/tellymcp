@@ -27,6 +27,7 @@ const envSchema = z.object({
     .int()
     .positive()
     .default(300),
+  DEBUG_LANGUAGE: z.enum(["en", "ru"]).optional(),
   REDIS_HOST: z.string().min(1),
   REDIS_PORT: z.coerce.number().int().positive(),
   REDIS_DB: z.coerce.number().int().nonnegative(),
@@ -144,6 +145,7 @@ export type AppConfig = {
   telegram: {
     botToken: string;
     botUsername?: string;
+    debugLanguage?: "en" | "ru";
     pollIntervalMs: number;
     defaultTimeoutSeconds: number;
     maxContextChars: number;
@@ -278,6 +280,9 @@ export function loadConfig(): AppConfig {
       botToken: parsed.TELEGRAM_BOT_TOKEN,
       ...(parsed.TELEGRAM_BOT_USERNAME
         ? { botUsername: parsed.TELEGRAM_BOT_USERNAME }
+        : {}),
+      ...(parsed.DEBUG_LANGUAGE
+        ? { debugLanguage: parsed.DEBUG_LANGUAGE }
         : {}),
       pollIntervalMs: parsed.TELEGRAM_POLL_INTERVAL_MS,
       defaultTimeoutSeconds: parsed.TELEGRAM_DEFAULT_TIMEOUT_SECONDS,

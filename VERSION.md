@@ -4,6 +4,32 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.10
+
+### Added
+- Telegram UI localization for the bot layer:
+  - English and Russian catalogs for user-facing bot screens
+  - locale resolution from Telegram profile with persisted user preference
+  - `DEBUG_LANGUAGE=en|ru` override for fast testing without changing the Telegram profile
+
+### Changed
+- Localization scope is now explicit:
+  - Telegram bot UI is localized
+  - MCP tools, logs, `TOOLS.md`, and the Live Mini App remain canonical English by design
+- Telegram menus, callbacks, project/collaboration screens, startup notices, and operational bot notices now render through a shared translation layer instead of ad hoc inline strings
+
+### Fixed
+- Builder startup is more robust:
+  - runtime-dependent services now wait for full runtime readiness instead of racing broker registration
+  - this avoids `telegram_mcp runtime is not initialized yet` failures during `yarn dev:builder`
+- Locale resolution is safe for partial test mocks and startup paths
+- Telegram UI text is now consistent across:
+  - main menus
+  - inbox/session flows
+  - project/collab flows
+  - live approval prompts
+  - tmux and operational bot notices
+
 ## 0.0.9
 
 ### Added

@@ -239,6 +239,26 @@ tellymcp run --env .env
 
 - `https://your-host.example/api/mcp`
 
+## Mini App / Live
+
+Если `WEBAPP_ENABLED=true`, в меню сессии появляется `🖥 Live`.
+
+Mini App:
+
+- обслуживается этим же Node service по `WEBAPP_BASE_PATH`
+- в `client`-режиме тоже может открываться через общий gateway domain
+- показывает видимую область tmux pane и отправляет ограниченный набор control actions
+- валидирует Telegram `initData` на сервере
+- умеет открываться в режимах:
+  - `default`
+  - `expand`
+  - `fullscreen` с fallback на `expand`
+- после успешного bootstrap удаляет временное launcher-сообщение
+- автоматически восстанавливается после короткого рестарта шлюза:
+  - краткий `502/503` переживается обычным polling
+  - если in-process WebApp session на шлюзе была потеряна и приходит `401/403`, Mini App сама делает повторный bootstrap
+  - в типовом restart-case переоткрывать `Live` не нужно
+
 ## Docker: только для инфраструктуры или для `gateway`-only
 
 Docker больше не является основным способом запуска TellyMCP, но один container path поддерживается:

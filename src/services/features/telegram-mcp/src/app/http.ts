@@ -199,6 +199,14 @@ function normalizePrefixedPathname(pathname: string): string {
   return stripped.startsWith("/") ? stripped : `/${stripped || ""}`;
 }
 
+function resolveLaunchModeOverride(
+  value: string | null,
+): "default" | "expand" | "fullscreen" | null {
+  return value === "default" || value === "expand" || value === "fullscreen"
+    ? value
+    : null;
+}
+
 function normalizeBasePath(value: string): string {
   const trimmed = value.trim().replace(/\/+$/u, "");
   if (!trimmed) {
@@ -277,12 +285,16 @@ export function createMcpHttpHandler(
           return;
         }
 
+        const launchMode =
+          resolveLaunchModeOverride(requestUrl.searchParams.get("launchMode")) ??
+          runtime.config.webapp.launchMode;
+
         writeHtml(
           res,
           200,
           renderWebAppHtml({
             basePath: publicWebAppBasePath,
-            launchMode: runtime.config.webapp.launchMode,
+            launchMode,
           }),
         );
         return;

@@ -101,6 +101,21 @@ body {
   border-color: rgba(87, 193, 255, 0.8);
 }
 
+.btn.active {
+  border-color: rgba(87, 193, 255, 0.85);
+  background: linear-gradient(180deg, rgba(20, 54, 77, 0.98) 0%, rgba(14, 39, 57, 1) 100%);
+  color: #d9f3ff;
+  box-shadow: inset 0 0 0 1px rgba(87, 193, 255, 0.16);
+}
+
+.btn.toggle {
+  border-color: rgba(87, 193, 255, 0.42);
+  background: linear-gradient(180deg, rgba(31, 38, 52, 0.98) 0%, rgba(21, 27, 38, 1) 100%);
+  color: #cfe9ff;
+  box-shadow: inset 0 0 0 1px rgba(87, 193, 255, 0.08);
+  font-weight: 600;
+}
+
 .statusbar {
   position: fixed;
   left: 0;
@@ -128,9 +143,30 @@ body {
   gap: 8px 16px;
 }
 
+.status-toggle {
+  min-width: 72px;
+  padding: 4px 8px;
+  border-radius: 9px;
+  font-size: 12px;
+  line-height: 1.1;
+}
+
 .session-label {
-  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(76, 217, 100, 0.42);
+  background: rgba(26, 42, 31, 0.92);
+  color: #d6ffe0;
   font-weight: 600;
+}
+
+.session-label.error {
+  border-color: rgba(255, 116, 116, 0.5);
+  background: rgba(57, 23, 26, 0.94);
+  color: #ffd8d8;
 }
 
 .ok {
@@ -145,6 +181,13 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
   font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.terminal.unwrap {
+  white-space: pre;
+  word-break: normal;
+  overflow-x: auto;
+  overflow-y: auto;
 }
 
 .ansi-bold {
@@ -196,6 +239,8 @@ const state = {
   timer: null,
   actionBusy: false,
   pollIntervalMs: 2000,
+  wrapEnabled: true,
+  recoverPromise: null,
 };
 
 const elements = {
@@ -203,6 +248,7 @@ const elements = {
   status: document.querySelector("[data-role=status]"),
   updated: document.querySelector("[data-role=updated]"),
   interrupt: document.querySelector("[data-role=interrupt]"),
+  wrap: document.querySelector("[data-role=wrap]"),
   type: document.querySelector("[data-role=type]"),
   esc: document.querySelector("[data-role=escape]"),
   tab: document.querySelector("[data-role=tab]"),
@@ -215,14 +261,78 @@ const elements = {
 };
 
 function setStatus(text, isError = false) {
-  const sessionName = elements.session.textContent || "Live View";
-  elements.status.textContent = text + " - " + sessionName;
+  elements.status.textContent = text;
   elements.status.classList.toggle("error", isError);
   elements.status.classList.toggle("ok", !isError);
+  elements.session.classList.toggle("error", isError);
+  elements.session.classList.toggle("ok", !isError);
 }
 
 function setUpdated(text) {
   elements.updated.textContent = text;
+}
+
+function createHttpError(message, status) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+function shouldRecoverWebAppSession(error) {
+  return (
+    error &&
+    typeof error === "object" &&
+    (error.status === 401 || error.status === 403)
+  );
+}
+
+function applyTmuxAvailability(hasTarget) {
+  elements.interrupt.disabled = !hasTarget;
+  elements.type.disabled = !hasTarget;
+  elements.esc.disabled = !hasTarget;
+  elements.tab.disabled = !hasTarget;
+  elements.slash.disabled = !hasTarget;
+  elements.del.disabled = !hasTarget;
+  elements.up.disabled = !hasTarget;
+  elements.down.disabled = !hasTarget;
+  elements.enter.disabled = !hasTarget;
+}
+
+function getWrapPreferenceKey() {
+  return "telegram-mcp-live-wrap";
+}
+
+function applyWrapMode(enabled) {
+  state.wrapEnabled = enabled;
+  elements.terminal.classList.toggle("unwrap", !enabled);
+  elements.wrap.classList.toggle("active", enabled);
+  elements.wrap.setAttribute("aria-pressed", enabled ? "true" : "false");
+  elements.wrap.textContent = enabled ? "Unwrap" : "Wrap";
+  elements.wrap.title = enabled
+    ? "Wrapping enabled. Tap to switch to horizontal scroll."
+    : "Horizontal scroll enabled. Tap to wrap lines.";
+}
+
+function loadWrapPreference() {
+  try {
+    const stored = window.localStorage.getItem(getWrapPreferenceKey());
+    if (stored === "off") {
+      applyWrapMode(false);
+      return;
+    }
+  } catch (_error) {
+  }
+
+  applyWrapMode(true);
+}
+
+function toggleWrapMode() {
+  const next = !state.wrapEnabled;
+  applyWrapMode(next);
+  try {
+    window.localStorage.setItem(getWrapPreferenceKey(), next ? "on" : "off");
+  } catch (_error) {
+  }
 }
 
 function formatCapturedAt(value) {
@@ -236,12 +346,10 @@ function formatCapturedAt(value) {
   }
 
   return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
+    hour12: false,
   }).format(date);
 }
 
@@ -563,6 +671,49 @@ async function bootstrap() {
   return response.json();
 }
 
+function applyBootstrapPayload(bootstrapPayload) {
+  state.token = bootstrapPayload.token;
+  state.sessionId = bootstrapPayload.session_id;
+  state.pollIntervalMs = bootstrapPayload.poll_interval_ms || state.pollIntervalMs;
+  elements.session.textContent =
+    bootstrapPayload.session_label || bootstrapPayload.session_id;
+  elements.session.hidden = false;
+
+  const hasTmuxTarget = Boolean(bootstrapPayload.tmux_target);
+  applyTmuxAvailability(hasTmuxTarget);
+  setStatus(hasTmuxTarget ? "Live" : "No tmux target", !hasTmuxTarget);
+}
+
+async function recoverWebAppSession() {
+  if (state.recoverPromise) {
+    return state.recoverPromise;
+  }
+
+  state.recoverPromise = (async () => {
+    setStatus("Reconnecting...", true);
+    const bootstrapPayload = await bootstrap();
+    applyBootstrapPayload(bootstrapPayload);
+    return bootstrapPayload;
+  })().finally(() => {
+    state.recoverPromise = null;
+  });
+
+  return state.recoverPromise;
+}
+
+async function withRecoveredSession(operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!shouldRecoverWebAppSession(error)) {
+      throw error;
+    }
+
+    await recoverWebAppSession();
+    return operation();
+  }
+}
+
 async function fetchVisibleBuffer() {
   const response = await fetch(config.basePath + "/api/view", {
     method: "GET",
@@ -573,7 +724,7 @@ async function fetchVisibleBuffer() {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || "Failed to fetch visible buffer.");
+    throw createHttpError(text || "Failed to fetch visible buffer.", response.status);
   }
 
   return response.json();
@@ -586,21 +737,22 @@ async function sendAction(action) {
 
   state.actionBusy = true;
   try {
-    const response = await fetch(config.basePath + "/api/action", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: "Bearer " + state.token,
-      },
-      body: JSON.stringify({ action }),
+    await withRecoveredSession(async () => {
+      const response = await fetch(config.basePath + "/api/action", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer " + state.token,
+        },
+        body: JSON.stringify({ action }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw createHttpError(text || "Failed to send action.", response.status);
+      }
     });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(text || "Failed to send action.");
-    }
-
-    await refreshVisibleBuffer();
+    await withRecoveredSession(refreshVisibleBuffer);
   } finally {
     state.actionBusy = false;
   }
@@ -613,22 +765,26 @@ async function sendTextInput(text) {
 
   state.actionBusy = true;
   try {
-    const response = await fetch(config.basePath + "/api/action", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: "Bearer " + state.token,
-      },
-      body: JSON.stringify({ action: "text", text }),
+    await withRecoveredSession(async () => {
+      const response = await fetch(config.basePath + "/api/action", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer " + state.token,
+        },
+        body: JSON.stringify({ action: "text", text }),
+      });
+
+      if (!response.ok) {
+        const textResponse = await response.text();
+        throw createHttpError(
+          textResponse || "Failed to send text.",
+          response.status,
+        );
+      }
     });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(text || "Failed to send text.");
-    }
-
     setStatus("Text sent");
-    await refreshVisibleBuffer();
+    await withRecoveredSession(refreshVisibleBuffer);
   } finally {
     state.actionBusy = false;
   }
@@ -648,9 +804,9 @@ function confirmInterrupt() {
 }
 
 async function refreshVisibleBuffer() {
-  const payload = await fetchVisibleBuffer();
+  const payload = await withRecoveredSession(fetchVisibleBuffer);
   elements.terminal.innerHTML = renderAnsiToHtml(payload.content || "");
-  setUpdated("Updated: " + formatCapturedAt(payload.captured_at));
+  setUpdated(formatCapturedAt(payload.captured_at));
 }
 
 function stopPolling() {
@@ -674,6 +830,10 @@ function startPolling() {
 }
 
 function bindUi() {
+  elements.wrap.addEventListener("click", () => {
+    toggleWrapMode();
+  });
+
   elements.interrupt.addEventListener("click", () => {
     confirmInterrupt()
       .then((ok) => {
@@ -750,32 +910,12 @@ async function applyLaunchMode() {
 async function main() {
   try {
     await applyLaunchMode();
+    loadWrapPreference();
     bindUi();
     setStatus("Authorizing Mini App...");
     const bootstrapPayload = await bootstrap();
-    state.token = bootstrapPayload.token;
-    state.sessionId = bootstrapPayload.session_id;
-    state.pollIntervalMs = bootstrapPayload.poll_interval_ms || state.pollIntervalMs;
-    elements.session.textContent =
-      bootstrapPayload.session_label || bootstrapPayload.session_id;
-
-    if (!bootstrapPayload.tmux_target) {
-      elements.interrupt.disabled = true;
-      elements.type.disabled = true;
-      elements.esc.disabled = true;
-      elements.tab.disabled = true;
-      elements.slash.disabled = true;
-      elements.del.disabled = true;
-      elements.up.disabled = true;
-      elements.down.disabled = true;
-      elements.enter.disabled = true;
-      setStatus("No tmux target", true);
-    }
-
+    applyBootstrapPayload(bootstrapPayload);
     await refreshVisibleBuffer();
-    if (bootstrapPayload.tmux_target) {
-      setStatus("Connected");
-    }
     startPolling();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -821,7 +961,8 @@ export function renderWebAppHtml(input: RenderWebAppHtmlInput): string {
           <span class="session-label" data-role="session" hidden>Live View</span>
         </div>
         <div class="status-right">
-          <span data-role="updated">Updated: never</span>
+          <button class="btn toggle status-toggle active" data-role="wrap" type="button" aria-pressed="true">Wrap</button>
+          <span data-role="updated">never</span>
         </div>
       </div>
     </div>

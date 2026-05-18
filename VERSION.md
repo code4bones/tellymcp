@@ -32,6 +32,10 @@ For detailed engineering history, refactors, and internal development notes, see
 - Stale tmux pane ids like `%1 -> %2` no longer require manual user understanding before the service can try to wake the session again.
 - Broken tmux nudge targets are now visible to the user in Telegram, not only in backend logs.
 - `Share` inbox instructions are now explicit enough to reduce the chance that one agent re-delegates the task back into the collaboration graph.
+- `Live` Mini App now survives a normal gateway restart much better:
+  - short `502/503` periods recover through polling
+  - lost in-process WebApp sessions (`401/403`) trigger automatic re-bootstrap
+  - reopening the Mini App is no longer required in the normal restart case
 
 ## 0.0.3
 

@@ -521,6 +521,10 @@ The Mini App:
 - requires the Telegram user from `initData` to match the bound session user
 - resolves the active session from the bound Telegram user, so a session id in the URL is not required for normal use
 - deletes the temporary `Open Live View` launcher message after successful Mini App bootstrap
+- auto-recovers after a short gateway restart:
+  - short `502/503` periods are tolerated by polling
+  - expired in-process WebApp sessions (`401/403`) trigger an automatic re-bootstrap
+  - in normal restart cases the user does not need to reopen `Live`
 - allows only a fixed control set:
   - `Esc`
   - `Tab`

@@ -236,6 +236,7 @@ type StoredAttachmentRecord = {
 };
 
 const LOCAL_INDEX_FILE_NAME = "LOCAL_INDEX.md";
+type WebAppLaunchMode = "default" | "expand" | "fullscreen";
 const TMUX_NUDGE_FAILURE_NOTICE_COOLDOWN_MS = 5 * 60 * 1000;
 
 function trimTrailingSlashes(value: string): string {
@@ -1846,10 +1847,18 @@ export class TelegramTransport implements HumanTransport {
         ...(input.project_name ? [`Проект: ${input.project_name}`] : []),
         `Сессия: ${input.source_session_label} -> ${input.target_session_label}`,
         "",
-        "Открой Live по кнопке ниже.",
+        "Открой Live в нужном режиме по кнопкам ниже.",
       ].join("\n"),
       {
-        reply_markup: new InlineKeyboard().webApp("Open Live View", liveViewUrl),
+        reply_markup: this.buildLiveViewLaunchKeyboard((mode) =>
+          this.buildLiveViewUrlForSessionTarget({
+            targetSessionId: input.target_session_id,
+            targetClientUuid: input.target_client_uuid,
+            targetLocalSessionId: input.target_local_session_id,
+            sourceClientUuid: input.source_client_uuid,
+            launchMode: mode,
+          }),
+        ),
       },
       {
         kind: "notification",
@@ -5973,17 +5982,19 @@ export class TelegramTransport implements HumanTransport {
         ? buildLiveRelaySessionId(clientUuid, activeSessionId)
         : activeSessionId;
     const url = new URL(`${baseUrl}/live/${encodeURIComponent(liveSessionId)}`);
+    url.searchParams.set("launchMode", this.config.webapp.launchMode);
 
     await ctx.answerCallbackQuery({ text: "Открываю Live View." });
     const sent = await this.replyText(
       ctx,
-      `🖥 Live: ${session?.label ?? activeSessionId}`,
+      [`🖥 Live: ${session?.label ?? activeSessionId}`, "", "Выбери режим открытия:"].join("\n"),
       { kind: "menu", sessionId: activeSessionId },
       {
-        reply_markup: new InlineKeyboard().webApp(
-          "Open Live View",
-          url.toString(),
-        ),
+        reply_markup: this.buildLiveViewLaunchKeyboard((mode) => {
+          const modeUrl = new URL(url.toString());
+          modeUrl.searchParams.set("launchMode", mode);
+          return modeUrl.toString();
+        }),
       },
     );
     this.webAppLaunchRegistry.set(
@@ -6004,6 +6015,7 @@ export class TelegramTransport implements HumanTransport {
     targetClientUuid?: string | undefined;
     targetLocalSessionId?: string | undefined;
     sourceClientUuid?: string | undefined;
+    launchMode?: WebAppLaunchMode | undefined;
   }): string | null {
     if (
       !this.config.webapp.enabled ||
@@ -6034,9 +6046,36 @@ export class TelegramTransport implements HumanTransport {
           input.sourceClientUuid,
         )
       : (input.targetLocalSessionId ?? input.targetSessionId);
-    return new URL(
-      `${baseUrl}/live/${encodeURIComponent(liveSessionId)}`,
-    ).toString();
+    const url = new URL(`${baseUrl}/live/${encodeURIComponent(liveSessionId)}`);
+    url.searchParams.set(
+      "launchMode",
+      input.launchMode ?? this.config.webapp.launchMode,
+    );
+    return url.toString();
+  }
+
+  private buildLiveViewLaunchKeyboard(
+    getUrl: (mode: WebAppLaunchMode) => string | null,
+  ): InlineKeyboard {
+    const keyboard = new InlineKeyboard();
+    const modes: Array<{ mode: WebAppLaunchMode; label: string }> = [
+      { mode: "fullscreen", label: "Fullscreen" },
+      { mode: "expand", label: "Expand" },
+      { mode: "default", label: "Default" },
+    ];
+
+    for (const [index, { mode, label }] of modes.entries()) {
+      const url = getUrl(mode);
+      if (!url) {
+        continue;
+      }
+      keyboard.webApp(label, url);
+      if (index === 1) {
+        keyboard.row();
+      }
+    }
+
+    return keyboard;
   }
 
   private clearPendingInteractionsForContext(ctx: TelegramMenuContext): void {

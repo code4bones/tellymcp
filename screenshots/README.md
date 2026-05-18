@@ -51,6 +51,12 @@ The main menu exposes the core surfaces:
 - `Expand`
 - `Default`
 
+### Local Live Mini App
+
+![Local Live Mini App](./livefeed_webapp.png)
+
+After launch, the Telegram Mini App opens the local tmux viewport with compact controls, text input, wrap/unwrap, and `Ctrl+C` confirmation.
+
 ## Content And Browser
 
 ### Export tmux content as Markdown
@@ -142,12 +148,6 @@ Remote `Live` access requires approval from the target session.
 ![Approved Live launcher](./collab_livefeed_partner_request_approved.png)
 
 After approval, the requester receives a fresh launcher with the same opening modes.
-
-### Live Mini App
-
-![Live Mini App](./livefeed_webapp.png)
-
-The `Live` Mini App shows a tmux viewport, compact controls, text input, wrap/unwrap toggle, and `Ctrl+C` confirmation.
 
 ### Remote Live over gateway relay
 

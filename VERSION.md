@@ -4,6 +4,34 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.9
+
+### Added
+- Public screenshot docs:
+  - full screenshot index in `screenshots/README.md`
+  - shorter public gallery in `screenshots/GALLERY.md`
+- More explicit Live launch modes from Telegram:
+  - `Fullscreen`
+  - `Expand`
+  - `Default`
+
+### Changed
+- README and README-RU now surface screenshot links directly in the top navigation.
+- The `Live` Mini App UI is more practical on phones:
+  - wrap/unwrap toggle moved into the status bar
+  - session name is shown as a compact state badge
+  - update timestamp is shorter and less noisy
+  - local `Live` screenshots are documented in a clearer flow near the launcher step
+
+### Fixed
+- `Live` now reconnects more gracefully after a gateway restart:
+  - short `502/503` gaps recover through polling
+  - expired in-process WebApp sessions (`401/403`) trigger automatic re-bootstrap
+  - reopening the Mini App is no longer required in the normal restart case
+- Runtime MCP metadata now reports the actual package version instead of stale hardcoded version data.
+- Successful tmux nudges no longer overwrite `tmuxPaneId` with non-pane targets such as `backend:0.0`.
+- If tmux itself is unavailable for a paired session with a saved tmux target, Telegram now receives an operational warning instead of leaving the signal only in backend logs.
+
 ## 0.0.8
 
 ### Added

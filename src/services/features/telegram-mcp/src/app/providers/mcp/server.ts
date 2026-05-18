@@ -33,11 +33,12 @@ import { SendPartnerNoteTool } from "../../../features/collaboration/model/sendP
 import { RefreshToolsMarkdownTool } from "../../../features/tools-sync/model/refreshToolsMarkdownTool";
 import type { ToolModule } from "../../../shared/api/tool-registry/types";
 import { registerTools } from "../../../shared/api/tool-registry/registry";
+import { getTellyMcpPackageVersion } from "../../../shared/lib/version/versionHandshake";
 
 export function createMcpServer(tools: ToolModule[]): McpServer {
   const server = new McpServer({
     name: "tellymcp",
-    version: "0.0.6",
+    version: getTellyMcpPackageVersion(__dirname),
   });
 
   registerTools(server, tools);

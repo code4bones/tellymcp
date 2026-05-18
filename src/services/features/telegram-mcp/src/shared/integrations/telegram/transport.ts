@@ -3558,6 +3558,13 @@ export class TelegramTransport implements HumanTransport {
         };
 
         if (isTmuxUnavailableError(error)) {
+          void this.sessionStore.getSession(sessionId).then((session) => {
+            if (!session?.tmuxTarget) {
+              return;
+            }
+
+            return this.notifyTmuxUnavailable(sessionId, session, error);
+          });
           this.logger.warn(
             "tmux nudge skipped because tmux is unavailable",
             payload,
@@ -3669,7 +3676,11 @@ export class TelegramTransport implements HumanTransport {
     await this.sessionStore.setSession({
       ...session,
       tmuxTarget,
-      ...(tmuxTarget ? { tmuxPaneId: tmuxTarget } : {}),
+      ...(tmuxTarget.startsWith("%")
+        ? { tmuxPaneId: tmuxTarget }
+        : session.tmuxPaneId
+          ? { tmuxPaneId: session.tmuxPaneId }
+          : {}),
       lastTmuxNudgeAt,
     });
     this.tmuxNudgeFailureNoticeAt.delete(sessionId);
@@ -3766,6 +3777,63 @@ export class TelegramTransport implements HumanTransport {
       });
     } catch (notifyError) {
       this.logger.warn("Failed to deliver tmux target failure notification", {
+        sessionId,
+        tmuxTarget,
+        telegramChatId: binding.telegramChatId,
+        telegramUserId: binding.telegramUserId,
+        notifyError:
+          notifyError instanceof Error
+            ? (notifyError.stack ?? notifyError.message)
+            : String(notifyError),
+      });
+    }
+  }
+
+  private async notifyTmuxUnavailable(
+    sessionId: string,
+    session: NonNullable<Awaited<ReturnType<SessionStore["getSession"]>>>,
+    error: unknown,
+  ): Promise<void> {
+    const binding = await this.bindingStore.getBinding(sessionId);
+    if (!binding) {
+      return;
+    }
+
+    const nowMs = Date.now();
+    const lastNoticeAt = this.tmuxNudgeFailureNoticeAt.get(sessionId);
+    if (
+      lastNoticeAt &&
+      nowMs - lastNoticeAt < TMUX_NUDGE_FAILURE_NOTICE_COOLDOWN_MS
+    ) {
+      return;
+    }
+
+    this.tmuxNudgeFailureNoticeAt.set(sessionId, nowMs);
+
+    const sessionLabel = session.label ?? sessionId;
+    const tmuxTarget = session.tmuxTarget ?? "unknown";
+    const errorMessage =
+      error instanceof Error ? error.message : String(error);
+
+    try {
+      await this.sendNotification({
+        sessionId,
+        sessionLabel: "TellyMCP",
+        recipient: {
+          telegramChatId: binding.telegramChatId,
+          telegramUserId: binding.telegramUserId,
+        },
+        message: [
+          `⚠️ Автоматический tmux nudge для сессии ${sessionLabel} пропущен.`,
+          "tmux сейчас недоступен на этой машине.",
+          `tmux target: ${tmuxTarget}`,
+          `Ошибка: ${errorMessage}`,
+          "Обычно это значит, что tmux session/server не запущен или недоступен по текущему socket path.",
+          "Запусти tmux и агента внутри него, либо обнови/сними tmux target для этой сессии.",
+        ].join("\n"),
+      });
+    } catch (notifyError) {
+      this.logger.warn("Failed to deliver tmux unavailable notification", {
         sessionId,
         tmuxTarget,
         telegramChatId: binding.telegramChatId,

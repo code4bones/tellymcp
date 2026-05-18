@@ -1,10 +1,12 @@
 # Tools
 
-Version: `2026-05-17.1`
+Version: `2026-05-18.1`
 
 Gateway/client runtime compatibility:
 
 - `TOOLS.md` hash sync and runtime version handshake are separate checks.
+- The authoritative freshness check for `TOOLS.md` is the content hash, not this human-readable `Version:` line.
+- Treat this `Version:` line only as a quick visual marker for humans and logs.
 - `TOOLS.md` sync tells the agent to refresh instructions.
 - `ws hello/hello_ack` checks `package_version`, `protocol_version`, and `capabilities`.
 - If protocol major versions differ, gateway transport is blocked until the older side is upgraded.

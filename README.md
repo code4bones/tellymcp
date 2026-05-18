@@ -1,6 +1,6 @@
 # TellyMCP
 
-[English](README.md) | [Русский](README-ru.md) | [Standalone Guide](STANDALONE.md) | [Standalone RU](STANDALONE-ru.md) | [Release Notes](VERSION.md)
+[English](README.md) | [Русский](README-ru.md) | [Standalone Guide](STANDALONE.md) | [Standalone RU](STANDALONE-ru.md) | [Screenshots](screenshots/README.md) | [Gallery](screenshots/GALLERY.md) | [Release Notes](VERSION.md)
 
 [![npm version](https://img.shields.io/npm/v/%40deadragdoll%2Ftellymcp)](https://www.npmjs.com/package/@deadragdoll/tellymcp)
 [![npm downloads](https://img.shields.io/npm/dm/%40deadragdoll%2Ftellymcp)](https://www.npmjs.com/package/@deadragdoll/tellymcp)

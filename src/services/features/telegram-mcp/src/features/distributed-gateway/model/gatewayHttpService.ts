@@ -12,6 +12,7 @@ import type {
   SendPartnerNoteOutput,
 } from "../../../entities/collaboration/model/types";
 import type { TelegramWebAppInitDataUnsafe } from "../../../app/webapp/auth";
+import { getTellyMcpPackageRoot } from "../../../shared/lib/version/versionHandshake";
 
 function readHeader(
   req: IncomingMessage,
@@ -434,7 +435,10 @@ export class GatewayHttpService {
       }
 
       try {
-        const toolsPath = join(process.cwd(), "TOOLS.md");
+        const toolsPath = join(
+          getTellyMcpPackageRoot(__dirname) ?? process.cwd(),
+          "TOOLS.md",
+        );
         res.statusCode = 200;
         res.setHeader("content-type", "text/markdown; charset=utf-8");
         res.end(readFileSync(toolsPath, "utf8"));

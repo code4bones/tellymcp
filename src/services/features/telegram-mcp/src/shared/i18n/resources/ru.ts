@@ -417,6 +417,20 @@ export const ruMenu = {
         "Запусти tmux и агента внутри него, либо обнови/сними tmux target для этой сессии.",
     },
   },
+  admin: {
+    auth: {
+      prompt:
+        "Доступ к gateway-боту закрыт. Отправь /auth <token>, чтобы продолжить.",
+      help:
+        "Этот gateway-бот требует предварительную admin-аутентификацию. Отправь /auth <token>.",
+      required_callback:
+        "Сначала авторизуйся через /auth <token>.",
+      invalid: "Admin token неверный.",
+      success:
+        "Admin-аутентификация шлюза принята. Теперь можно пользоваться командами и меню.",
+      disabled: "Admin-аутентификация шлюза не включена.",
+    },
+  },
   developer: {
     screen: {
       title: "🛠 Tools",

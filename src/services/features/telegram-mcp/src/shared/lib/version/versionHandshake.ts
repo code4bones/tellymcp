@@ -133,6 +133,10 @@ export function findPackageRoot(startDir: string): string | null {
   }
 }
 
+export function getTellyMcpPackageRoot(startDir: string): string | null {
+  return findPackageRoot(startDir);
+}
+
 let cachedPackageVersion: string | null = null;
 
 export function getTellyMcpPackageVersion(startDir: string): string {

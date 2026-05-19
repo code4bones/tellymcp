@@ -411,6 +411,20 @@ export const enMenu = {
         "Start tmux and the agent inside it, or update/remove the tmux target for this session.",
     },
   },
+  admin: {
+    auth: {
+      prompt:
+        "Gateway admin access is locked. Send /auth <token> to continue.",
+      help:
+        "This gateway bot requires admin authentication first. Send /auth <token>.",
+      required_callback:
+        "Authenticate first with /auth <token>.",
+      invalid: "Admin token is invalid.",
+      success:
+        "Gateway admin authentication accepted. You can continue with commands and menus.",
+      disabled: "Gateway admin authentication is not enabled.",
+    },
+  },
   developer: {
     screen: {
       title: "🛠 Tools",

@@ -1030,6 +1030,10 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
                   payload.telegramUserId.trim()
                 ? Number(payload.telegramUserId)
                 : null;
+          let launchRecord: {
+            telegramChatId?: number;
+            telegramMessageId?: number;
+          } | null = null;
 
           let telegramUserId = trustedTelegramUserId;
           if (
@@ -1058,6 +1062,9 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
               runtime.config.webapp.initDataTtlSeconds,
             );
             telegramUserId = validated.user.id;
+            launchRecord = runtime.webAppLaunchRegistry.getByUserId(
+              validated.user.id,
+            );
           }
 
           const sessionId = request.local_session_id.trim();
@@ -1076,6 +1083,22 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           }
 
           const session = await runtime.sessionStore.getSession(sessionId);
+
+          if (trustedTelegramUserId === null && telegramUserId !== null) {
+            runtime.webAppLaunchRegistry.deleteByUserId(telegramUserId);
+          }
+
+          if (
+            launchRecord?.telegramChatId !== undefined &&
+            launchRecord?.telegramMessageId !== undefined
+          ) {
+            void runtime.telegramTransport
+              .deleteMessage(
+                launchRecord.telegramChatId,
+                launchRecord.telegramMessageId,
+              )
+              .catch(() => undefined);
+          }
 
           return {
             type: "live_response",

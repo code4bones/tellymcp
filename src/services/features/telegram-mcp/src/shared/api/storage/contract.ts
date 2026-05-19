@@ -103,6 +103,12 @@ export interface TelegramUserLocaleStore {
   setUserLocale(telegramUserId: number, locale: string): Promise<void>;
 }
 
+export interface TelegramAdminAuthStore {
+  isAdminAuthorized(principal: TelegramPrincipal): Promise<boolean>;
+  setAdminAuthorized(principal: TelegramPrincipal): Promise<void>;
+  clearAdminAuthorized(principal: TelegramPrincipal): Promise<void>;
+}
+
 export interface TelegramXchangeFileMetaStore {
   setXchangeFileMeta(meta: TelegramXchangeFileMeta): Promise<void>;
   listXchangeFileMetas(sessionId: string): Promise<TelegramXchangeFileMeta[]>;

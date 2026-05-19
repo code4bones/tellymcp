@@ -33,7 +33,6 @@ services:
   rabbitmq:
     image: rabbitmq:3-management
     restart: unless-stopped
-    profiles: ["rmq"]
     environment:
       RABBITMQ_DEFAULT_USER: user
       RABBITMQ_DEFAULT_PASS: password
@@ -66,9 +65,10 @@ services:
       REDIS_HOST: redis
       DB_HOST: postgres
     ports:
-      - "8080:8080"
+      - "8090:8080"
     volumes:
       - ./.env-gateway:/app/.env-gateway:ro
+      - ./.tellymcp:/app/.tellymcp
 
 volumes:
   redis_data:

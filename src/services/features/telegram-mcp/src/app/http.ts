@@ -364,6 +364,10 @@ export function createMcpHttpHandler(
         if (relayTarget) {
           try {
             let trustedTelegramUserId: number | null = null;
+            let launchRecord: {
+              telegramChatId?: number;
+              telegramMessageId?: number;
+            } | null = null;
             if (
               relayTarget.sourceClientUuid &&
               relayTarget.sourceClientUuid !== relayTarget.clientUuid
@@ -384,7 +388,9 @@ export function createMcpHttpHandler(
                   runtime.config.webapp.initDataTtlSeconds,
                 );
                 trustedTelegramUserId = validated.user.id;
-                runtime.webAppLaunchRegistry.deleteByUserId(validated.user.id);
+                launchRecord = runtime.webAppLaunchRegistry.getByUserId(
+                  validated.user.id,
+                );
               } catch {
                 trustedTelegramUserId = null;
               }
@@ -417,6 +423,38 @@ export function createMcpHttpHandler(
               poll_interval_ms: relayBootstrap.poll_interval_ms,
               expires_at: new Date(record.expiresAtMs).toISOString(),
             });
+
+            if (trustedTelegramUserId !== null) {
+              runtime.webAppLaunchRegistry.deleteByUserId(trustedTelegramUserId);
+            }
+
+            if (
+              launchRecord?.telegramChatId !== undefined &&
+              launchRecord?.telegramMessageId !== undefined
+            ) {
+              void runtime.telegramTransport
+                .deleteMessage(
+                  launchRecord.telegramChatId,
+                  launchRecord.telegramMessageId,
+                )
+                .catch((deleteError: unknown) => {
+                  runtime.logger.warn(
+                    "Telegram WebApp relay launcher message deletion failed",
+                    {
+                      sessionId,
+                      clientUuid: relayTarget.clientUuid,
+                      localSessionId: relayTarget.localSessionId,
+                      telegramUserId: trustedTelegramUserId,
+                      telegramChatId: launchRecord.telegramChatId,
+                      telegramMessageId: launchRecord.telegramMessageId,
+                      error:
+                        deleteError instanceof Error
+                          ? (deleteError.stack ?? deleteError.message)
+                          : String(deleteError),
+                    },
+                  );
+                });
+            }
           } catch (error) {
             runtime.logger.warn("Telegram WebApp relay bootstrap rejected", {
               sessionId,

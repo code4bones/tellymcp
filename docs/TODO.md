@@ -112,3 +112,10 @@ Next session:
   - retry / backoff
   - DLQ
   - offline delivery beyond DB backlog
+
+- [ ] Исследовать Telegram `bot-to-bot communication` как future control-plane layer:
+  - может ли `gateway bot` отправлять admin/control-команды `client bots`
+  - может ли `client bot` отправлять `gateway bot` status/events без user-mediated flow
+  - что из текущего `ws` нужно оставить low-latency transport, а что можно вынести в bot-to-bot
+  - как подписывать команды и делать dedupe / rate limits / loop prevention
+  - нужен ли отдельный fleet-model для `gateway bot` + many `client bots`

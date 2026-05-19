@@ -7,6 +7,7 @@ import type { QueueMode } from "../../shared/types/common";
 const envSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1),
   TELEGRAM_BOT_USERNAME: z.string().min(1).optional(),
+  ADMIN_TOKEN: z.string().min(1).optional(),
   TELEGRAM_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
   TELEGRAM_DEFAULT_TIMEOUT_SECONDS: z.coerce
     .number()
@@ -145,6 +146,7 @@ export type AppConfig = {
   telegram: {
     botToken: string;
     botUsername?: string;
+    adminToken?: string;
     debugLanguage?: "en" | "ru";
     pollIntervalMs: number;
     defaultTimeoutSeconds: number;
@@ -281,6 +283,7 @@ export function loadConfig(): AppConfig {
       ...(parsed.TELEGRAM_BOT_USERNAME
         ? { botUsername: parsed.TELEGRAM_BOT_USERNAME }
         : {}),
+      ...(parsed.ADMIN_TOKEN ? { adminToken: parsed.ADMIN_TOKEN } : {}),
       ...(parsed.DEBUG_LANGUAGE
         ? { debugLanguage: parsed.DEBUG_LANGUAGE }
         : {}),

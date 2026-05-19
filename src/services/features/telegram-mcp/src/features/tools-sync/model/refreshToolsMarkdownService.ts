@@ -10,6 +10,7 @@ import type {
 import type { SessionStore } from "../../../shared/api/storage/contract";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
+import { getTellyMcpPackageRoot } from "../../../shared/lib/version/versionHandshake";
 
 function normalizeGatewayBaseUrl(value: string): URL {
   const url = new URL(value);
@@ -45,7 +46,10 @@ export class RefreshToolsMarkdownService {
         ? resolve(session.cwd.trim())
         : undefined;
     const saveLocally = input.save_locally !== false;
-    const gatewayToolsPath = join(process.cwd(), "TOOLS.md");
+    const gatewayToolsPath = join(
+      getTellyMcpPackageRoot(__dirname) ?? process.cwd(),
+      "TOOLS.md",
+    );
 
     let source: "gateway" | "local" = "local";
     let content: string;

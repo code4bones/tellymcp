@@ -5,7 +5,18 @@ WORKDIR /app
 ENV NODE_ENV=production
 ARG TELLYMCP_VERSION=0.0.10
 
-RUN npm install -g "@deadragdoll/tellymcp@${TELLYMCP_VERSION}"
+COPY . /tmp/tellymcp-build-context
+
+RUN set -eu; \
+    archive="$(find /tmp/tellymcp-build-context -maxdepth 1 -type f -name 'deadragdoll-tellymcp-*.tgz' | sort | tail -n 1)"; \
+    if [ -n "${archive}" ]; then \
+      echo "Installing TellyMCP from local archive: ${archive}"; \
+      npm install -g "${archive}"; \
+    else \
+      echo "Installing TellyMCP from npm: @deadragdoll/tellymcp@${TELLYMCP_VERSION}"; \
+      npm install -g "@deadragdoll/tellymcp@${TELLYMCP_VERSION}"; \
+    fi; \
+    rm -rf /tmp/tellymcp-build-context
 
 EXPOSE 8080
 

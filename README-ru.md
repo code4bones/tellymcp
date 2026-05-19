@@ -311,6 +311,7 @@ cp .env.example.gateway .env-gateway
 
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_BOT_USERNAME`
+- при желании `ADMIN_TOKEN`, если gateway-бот должен требовать `/auth <token>` перед доступом к меню
 - `WEBAPP_PUBLIC_URL`
 - `GATEWAY_PUBLIC_URL`
 - `GATEWAY_WS_URL`
@@ -331,6 +332,8 @@ docker compose up -d
 Контейнер gateway ставит опубликованный пакет `@deadragdoll/tellymcp` напрямую.
 Локальные TypeScript-исходники внутри Docker больше не собираются.
 Смонтированный файл `.env-gateway` является источником истины для конфигурации приложения внутри контейнера.
+Если в build context лежит локальный архив `deadragdoll-tellymcp-*.tgz`, Docker поставит его вместо загрузки пакета из npm.
+При `LOG_FILE_ENABLED=true` JSONL-логи пишутся в смонтированную на хост папку `./.tellymcp/`.
 
 Внутри Docker compose сам переопределяет:
 

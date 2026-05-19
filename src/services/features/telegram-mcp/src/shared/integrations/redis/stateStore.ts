@@ -24,6 +24,7 @@ import type {
   PendingRequestStore,
   SessionBindingStore,
   SessionStore,
+  TelegramAdminAuthStore,
   TelegramInboxStore,
   TelegramUserLocaleStore,
   TelegramXchangeFileMetaStore,
@@ -78,6 +79,10 @@ function userLocaleKey(telegramUserId: number): string {
   return `${KEY_PREFIX}:user-locale:${telegramUserId}`;
 }
 
+function adminAuthorizedKey(principal: TelegramPrincipal): string {
+  return `${KEY_PREFIX}:admin-auth:${principal.telegramChatId}:${principal.telegramUserId}`;
+}
+
 function gatewayClientUuidKey(): string {
   return `${KEY_PREFIX}:gateway:client-uuid`;
 }
@@ -117,6 +122,7 @@ export class RedisStateStore
     SessionBindingStore,
     PendingRequestStore,
     TelegramInboxStore,
+    TelegramAdminAuthStore,
     TelegramUserLocaleStore,
     TelegramXchangeFileMetaStore,
     TelegramMenuPayloadStore,
@@ -209,6 +215,24 @@ export class RedisStateStore
     locale: string,
   ): Promise<void> {
     await this.redis.set(userLocaleKey(telegramUserId), locale);
+  }
+
+  public async isAdminAuthorized(
+    principal: TelegramPrincipal,
+  ): Promise<boolean> {
+    return (await this.redis.get(adminAuthorizedKey(principal))) === "1";
+  }
+
+  public async setAdminAuthorized(
+    principal: TelegramPrincipal,
+  ): Promise<void> {
+    await this.redis.set(adminAuthorizedKey(principal), "1");
+  }
+
+  public async clearAdminAuthorized(
+    principal: TelegramPrincipal,
+  ): Promise<void> {
+    await this.redis.del(adminAuthorizedKey(principal));
   }
 
   public async setBinding(binding: SessionBinding): Promise<void> {

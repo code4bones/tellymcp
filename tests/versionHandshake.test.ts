@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateVersionCompatibility,
   findPackageRoot,
+  getTellyMcpPackageRoot,
   getTellyMcpPackageVersion,
   parseProtocolVersion,
   TELLYMCP_PROTOCOL_VERSION,
@@ -54,6 +55,7 @@ describe("version handshake", () => {
   it("finds the package root and version", () => {
     const root = findPackageRoot(path.resolve(__dirname, ".."));
     expect(root).toBeTruthy();
+    expect(getTellyMcpPackageRoot(__dirname)).toBe(root);
     expect(getTellyMcpPackageVersion(__dirname)).toMatch(/^\d+\.\d+\.\d+/u);
   });
 });

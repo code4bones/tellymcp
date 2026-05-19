@@ -60,8 +60,6 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
-    env_file:
-      - .env-gateway
     environment:
       ENV_FILE: /app/.env-gateway
       MCP_HTTP_HOST: 0.0.0.0

@@ -540,7 +540,14 @@ async function runDoctor(args: string[]): Promise<void> {
   }
 
   const envContent = readFileSync(envPath, "utf8");
-  const parsed = parseDotenv(envContent);
+  const fileEnv = parseDotenv(envContent);
+  const runtimeEnvOverrides = Object.fromEntries(
+    Object.entries(process.env).filter(([, value]) => typeof value === "string"),
+  ) as Record<string, string>;
+  const parsed = {
+    ...fileEnv,
+    ...runtimeEnvOverrides,
+  };
   const mode = (parsed.DISTRIBUTED_MODE || "client").trim();
   const httpHost = (parsed.MCP_HTTP_HOST || "0.0.0.0").trim();
   const httpPort =

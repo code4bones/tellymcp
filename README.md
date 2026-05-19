@@ -911,6 +911,7 @@ This starts:
 
 The gateway container installs the published `@deadragdoll/tellymcp` package directly.
 It does not build local TypeScript sources inside Docker.
+The mounted `.env-gateway` file is the source of truth for app config inside the container.
 
 Inside Docker, compose overrides:
 

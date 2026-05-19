@@ -378,6 +378,10 @@ export const ruMenu = {
       gateway: "Gateway: {{url}}",
       gateway_ws: "Gateway WS: {{url}}",
       browser: "Browser: {{status}}",
+      update_available:
+        "Доступно обновление: {{currentVersion}} -> {{latestVersion}}",
+      update_command:
+        "Команда обновления: npm install -g {{packageName}}@{{latestVersion}}",
       hint: "Напиши /menu, чтобы открыть меню сессий.",
     },
     project: {
@@ -415,6 +419,13 @@ export const ruMenu = {
         "Обычно это значит, что tmux session/server не запущен или недоступен по текущему socket path.",
       unavailable_action:
         "Запусти tmux и агента внутри него, либо обнови/сними tmux target для этой сессии.",
+      prompt_detected_title:
+        "🛎 Похоже, агент в сессии {{sessionName}} ждёт твой ввод.",
+      prompt_detected_score: "Сила срабатывания: {{score}}",
+      prompt_detected_target: "tmux target: {{tmuxTarget}}",
+      prompt_detected_hint:
+        "Открой Live или ответь в терминале, если этот prompt действительно требует тебя.",
+      prompt_detected_excerpt: "Последние строки prompt:",
     },
   },
   admin: {
@@ -429,6 +440,64 @@ export const ruMenu = {
       success:
         "Admin-аутентификация шлюза принята. Теперь можно пользоваться командами и меню.",
       disabled: "Admin-аутентификация шлюза не включена.",
+    },
+    buttons: {
+      clients: "Clients",
+      tools: "Tools",
+      client_env: "Client .env",
+    },
+    actions: {
+      open_clients: "Открываю список клиентов.",
+      open_client_sessions: "Открываю сессии клиента.",
+      open_client_session: "Открываю сессию.",
+      open_tools: "Открываю инструменты.",
+      back_to_admin: "Назад в admin.",
+      back_to_clients: "Назад к клиентам.",
+      back_to_client_sessions: "Назад к сессиям клиента.",
+    },
+    screen: {
+      title: "🛡 Gateway Admin",
+      help:
+        "Используй admin-меню, чтобы смотреть клиентов шлюза и экспортировать клиентский .env.",
+      gateway_clients: "Известных клиентов: {{count}}",
+      gateway_clients_unavailable: "Список клиентов шлюза сейчас недоступен.",
+      hint: "Выбери нужный раздел ниже.",
+    },
+    clients: {
+      title: "🖥 Клиенты шлюза",
+      empty: "Шлюз пока не знает ни одного клиента.",
+      unavailable: "Список клиентов шлюза сейчас недоступен.",
+      item: "• {{label}}",
+      bot: "  Бот: {{botUsername}}",
+      sessions: "  Сессий: {{count}}",
+      last_seen: "  Последняя активность: {{value}}",
+    },
+    client_sessions: {
+      title: "🧩 Сессии клиента",
+      client: "Клиент: <b>{{client}}</b>",
+      total: "Сессий: {{count}}",
+      choose: "Выбери сессию ниже.",
+      empty: "У этого клиента нет активных сессий.",
+      unavailable: "Список сессий клиента сейчас недоступен.",
+      updated: "  Обновлено: {{timestamp}}",
+      project: "  Проект: <b>{{projectName}}</b>",
+      no_client_selected: "Сначала выбери клиента.",
+      invalid_action: "Некорректное действие с клиентом.",
+      not_found: "Выбранный клиент больше недоступен.",
+    },
+    client_session_detail: {
+      title: "🖥 Сессия клиента",
+      session: "Сессия: <b>{{sessionName}}</b>",
+      project: "Проект: <b>{{projectName}}</b>",
+      back_to_sessions: "⬅ Назад к сессиям",
+    },
+    tools: {
+      title: "🛠 Admin Tools",
+      client_env_help:
+        "Экспортирует готовый к редактированию .env-client, собранный из текущих URL и runtime-настроек шлюза.",
+      client_env_caption:
+        "Сгенерированный .env-client из текущих настроек шлюза.",
+      client_env_sent: "Client .env отправлен.",
     },
   },
   developer: {

@@ -108,6 +108,24 @@ const envSchema = z.object({
     .default("не inbox: прочитай SHARED_INDEX.md и partner note"),
   TMUX_CAPTURE_MODE: z.enum(["visible", "lines"]).default("visible"),
   TMUX_CAPTURE_LINES: z.coerce.number().int().positive().default(300),
+  TMUX_PROMPT_SCAN_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
+  TMUX_PROMPT_SCAN_INTERVAL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(15),
+  TMUX_PROMPT_SCAN_COOLDOWN_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(120),
+  TMUX_PROMPT_SCAN_STRATEGY: z
+    .enum(["strict", "balanced"])
+    .default("strict"),
+  TMUX_PROMPT_SCAN_MIN_SCORE: z.coerce.number().int().positive().default(5),
   BROWSER_ENABLED: z
     .string()
     .optional()
@@ -223,6 +241,11 @@ export type AppConfig = {
     partnerNudgeMessage: string;
     captureMode: "visible" | "lines";
     captureLines: number;
+    promptScanEnabled: boolean;
+    promptScanIntervalSeconds: number;
+    promptScanCooldownSeconds: number;
+    promptScanStrategy: "strict" | "balanced";
+    promptScanMinScore: number;
   };
   browser: {
     enabled: boolean;
@@ -383,6 +406,11 @@ export function loadConfig(): AppConfig {
       partnerNudgeMessage: parsed.TMUX_PARTNER_NUDGE_MESSAGE,
       captureMode: parsed.TMUX_CAPTURE_MODE,
       captureLines: parsed.TMUX_CAPTURE_LINES,
+      promptScanEnabled: parsed.TMUX_PROMPT_SCAN_ENABLED,
+      promptScanIntervalSeconds: parsed.TMUX_PROMPT_SCAN_INTERVAL_SECONDS,
+      promptScanCooldownSeconds: parsed.TMUX_PROMPT_SCAN_COOLDOWN_SECONDS,
+      promptScanStrategy: parsed.TMUX_PROMPT_SCAN_STRATEGY,
+      promptScanMinScore: parsed.TMUX_PROMPT_SCAN_MIN_SCORE,
     },
     browser: {
       enabled: parsed.BROWSER_ENABLED,

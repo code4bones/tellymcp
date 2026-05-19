@@ -932,6 +932,31 @@ Public endpoint expectations stay the same:
 Example nginx snippet:
 - [docs/tellymcp.gw.conf](docs/tellymcp.gw.conf)
 
+### GitLab runner deploy by tag
+
+If your gateway host already has a local `gitlab-runner`, you can deploy by tag with the included `.gitlab-ci.yml`.
+
+Expected model:
+
+- the runner uses the `gateway` tag
+- `DEPLOY_DIR` is configured as a GitLab CI/CD variable
+- `DEPLOY_DIR` is a persistent git checkout of this repository on the gateway host
+- `DEPLOY_DIR/.env-gateway` already exists and stays local to the server
+- the runner user can run `docker compose`
+
+What happens on a tag like `0.0.10` or `v0.0.10`:
+
+- the job checks out the matching commit in `DEPLOY_DIR`
+- keeps `.env-gateway` and `.tellymcp/`
+- runs `yarn install`, `yarn lint`, `yarn test`
+- builds a fresh `deadragdoll-tellymcp-*.tgz` via `npm pack`
+- runs `docker compose up -d --build --force-recreate`
+
+Main files:
+
+- [.gitlab-ci.yml](.gitlab-ci.yml)
+- [scripts/deploy-gateway.sh](scripts/deploy-gateway.sh)
+
 Stop everything:
 
 ```bash

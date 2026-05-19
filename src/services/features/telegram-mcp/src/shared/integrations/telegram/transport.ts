@@ -57,6 +57,7 @@ import {
 import type { MinioExchangeStore } from "../object-storage/minioExchangeStore";
 import { createTelegramFetch } from "./proxyFetch";
 import {
+  captureVisibleTmuxPane,
   captureTmuxPaneRange,
   deleteXchangeFile,
   getTmuxWindowHeight,
@@ -69,7 +70,9 @@ import {
   writeXchangeRelativeFile,
 } from "../tmux/client";
 import {
+  TELLYMCP_PACKAGE_NAME,
   TELLYMCP_PROTOCOL_VERSION,
+  detectAvailablePackageUpdate,
   getTellyMcpPackageVersion,
 } from "../../lib/version/versionHandshake";
 import {
@@ -77,6 +80,10 @@ import {
   translate,
   type SupportedLocale,
 } from "../../i18n";
+import {
+  detectTmuxInteractivePrompt,
+  type TmuxPromptDetection,
+} from "../../lib/tmuxPromptDetection";
 
 type WaiterRecord = {
   requestId: string;
@@ -211,6 +218,28 @@ type GatewayProjectSessionRecord = {
   updated_at?: string;
 };
 
+type GatewayClientRecord = {
+  client_uuid: string;
+  client_label: string | null;
+  telegram_username: string | null;
+  telegram_display_name: string | null;
+  bot_username: string | null;
+  last_seen_at?: string;
+  updated_at?: string;
+  session_count?: number;
+};
+
+type GatewayClientSessionRecord = {
+  session_uuid: string;
+  client_uuid: string;
+  local_session_id: string;
+  label: string | null;
+  status: string;
+  project_uuid?: string;
+  project_name?: string | null;
+  updated_at?: string;
+};
+
 type GatewayActorProfile = {
   telegramUsername?: string;
   telegramFirstName?: string;
@@ -245,6 +274,7 @@ type StoredAttachmentRecord = {
 const LOCAL_INDEX_FILE_NAME = "LOCAL_INDEX.md";
 type WebAppLaunchMode = "default" | "expand" | "fullscreen";
 const TMUX_NUDGE_FAILURE_NOTICE_COOLDOWN_MS = 5 * 60 * 1000;
+const TMUX_PROMPT_SCAN_MATCHED_LINES_LIMIT = 6;
 
 function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/u, "");
@@ -295,6 +325,29 @@ function resolveWebAppPublicBaseUrl(config: AppConfig): string | null {
   }
 
   url.pathname = expectedPath;
+  return trimTrailingSlashes(url.toString());
+}
+
+function resolveGatewayControlBaseUrl(config: AppConfig): string | null {
+  if (
+    config.distributed.mode === "gateway" ||
+    config.distributed.mode === "both"
+  ) {
+    const runtimePort = Number(process.env.PORT || config.mcp.httpPort);
+    const rootPrefix = normalizeBasePath(process.env.ROOT_PREFIX || "/api");
+    const gatewayPath = joinHttpPath(rootPrefix, "/gateway");
+    return trimTrailingSlashes(`http://127.0.0.1:${runtimePort}${gatewayPath}`);
+  }
+
+  if (!config.distributed.gatewayPublicUrl) {
+    return null;
+  }
+
+  const url = new URL(config.distributed.gatewayPublicUrl);
+  url.pathname = url.pathname.replace(/\/+$/u, "");
+  if (!url.pathname.endsWith("/gateway")) {
+    url.pathname = `${url.pathname}/gateway`.replace(/\/{2,}/gu, "/");
+  }
   return trimTrailingSlashes(url.toString());
 }
 
@@ -586,6 +639,11 @@ export class TelegramTransport implements HumanTransport {
   private readonly telegramFetch: TelegramClientFetch;
   private readonly bot: Bot<TelegramMenuContext>;
   private readonly mainMenu: Menu<TelegramMenuContext>;
+  private readonly adminMainMenu: Menu<TelegramMenuContext>;
+  private readonly adminClientsMenu: Menu<TelegramMenuContext>;
+  private readonly adminClientSessionsMenu: Menu<TelegramMenuContext>;
+  private readonly adminClientSessionDetailMenu: Menu<TelegramMenuContext>;
+  private readonly adminToolsMenu: Menu<TelegramMenuContext>;
   private readonly inboxMenu: Menu<TelegramMenuContext>;
   private readonly storageMenu: Menu<TelegramMenuContext>;
   private readonly browserMenu: Menu<TelegramMenuContext>;
@@ -608,11 +666,16 @@ export class TelegramTransport implements HumanTransport {
   private readonly waiters = new Map<string, WaiterRecord>();
   private readonly tmuxNudgeDebounceTimers = new Map<string, NodeJS.Timeout>();
   private readonly tmuxNudgeFailureNoticeAt = new Map<string, number>();
+  private readonly tmuxPromptNoticeState = new Map<
+    string,
+    { fingerprint: string; sentAtMs: number }
+  >();
   private readonly pendingRenames = new Map<string, PendingRenameRecord>();
   private readonly pendingBroadcasts = new Map<string, PendingBroadcastRecord>();
   private readonly pendingPartnerNotes = new Map<string, PendingPartnerNoteRecord>();
   private readonly pendingFileHandoffs = new Map<string, PendingFileHandoffRecord>();
   private readonly pendingProjects = new Map<string, PendingProjectRecord>();
+  private readonly adminClientViewByPrincipal = new Map<string, GatewayClientRecord>();
   private readonly currentAttachmentTargets = new Map<
     string,
     CurrentAttachmentTargetRecord
@@ -620,6 +683,8 @@ export class TelegramTransport implements HumanTransport {
   private started = false;
   private pollingTask: Promise<void> | undefined;
   private collaborationService?: CollaborationService;
+  private tmuxPromptScanTimer: NodeJS.Timeout | undefined;
+  private tmuxPromptScanInFlight = false;
 
   private createMenuOptions(
     handler: (ctx: TelegramMenuContext) => Promise<void>,
@@ -664,6 +729,11 @@ export class TelegramTransport implements HumanTransport {
       },
     });
     this.mainMenu = this.createMainMenu();
+    this.adminMainMenu = this.createAdminMainMenu();
+    this.adminClientsMenu = this.createAdminClientsMenu();
+    this.adminClientSessionsMenu = this.createAdminClientSessionsMenu();
+    this.adminClientSessionDetailMenu = this.createAdminClientSessionDetailMenu();
+    this.adminToolsMenu = this.createAdminToolsMenu();
     this.inboxMenu = this.createInboxMenu();
     this.storageMenu = this.createStorageMenu();
     this.browserMenu = this.createBrowserMenu();
@@ -704,10 +774,16 @@ export class TelegramTransport implements HumanTransport {
       this.storageMessageMenu,
       this.screenshotMessageMenu,
     ]);
+    this.adminMainMenu.register([
+      this.adminClientsMenu,
+      this.adminClientSessionsMenu,
+      this.adminClientSessionDetailMenu,
+      this.adminToolsMenu,
+    ]);
     this.bot.use(async (ctx, next) => {
       await this.handleAdminAccessMiddleware(ctx, next);
     });
-    this.bot.use(this.mainMenu);
+    this.bot.use(this.getRootMenu());
     this.bot.catch((error) => {
       this.logger.error("Telegram polling error", {
       error:
@@ -730,6 +806,15 @@ export class TelegramTransport implements HumanTransport {
     });
     this.bot.callbackQuery("file-handoff-cancel", async (ctx) => {
       await this.cancelPendingFileHandoff(ctx);
+    });
+    this.bot.callbackQuery(/^admin-client-session-live:(.+)$/u, async (ctx) => {
+      await this.handleAdminClientSessionLiveCallback(ctx);
+    });
+    this.bot.callbackQuery("admin-client-sessions-back", async (ctx) => {
+      await ctx.answerCallbackQuery({
+        text: await this.tForContext(ctx, "menu:admin.actions.back_to_client_sessions"),
+      });
+      await this.showAdminClientSessionsMenu(ctx);
     });
     this.bot.callbackQuery(/^project-set:(.+)$/u, async (ctx) => {
       await this.handleProjectSetCallback(ctx);
@@ -769,6 +854,14 @@ export class TelegramTransport implements HumanTransport {
 
   private isAdminAuthEnabled(): boolean {
     return Boolean(this.config.telegram.adminToken?.trim());
+  }
+
+  private isAdminBotProfile(): boolean {
+    return this.isAdminAuthEnabled();
+  }
+
+  private getRootMenu(): Menu<TelegramMenuContext> {
+    return this.isAdminBotProfile() ? this.adminMainMenu : this.mainMenu;
   }
 
   private async isPrincipalAdminAuthorized(
@@ -871,15 +964,12 @@ export class TelegramTransport implements HumanTransport {
     endpointPath: string,
     body: Record<string, unknown>,
   ): Promise<T> {
-    if (!this.config.distributed.gatewayPublicUrl) {
+    const baseUrl = resolveGatewayControlBaseUrl(this.config);
+    if (!baseUrl) {
       throw new Error("Gateway is not configured.");
     }
 
-    const url = new URL(this.config.distributed.gatewayPublicUrl);
-    url.pathname = url.pathname.replace(/\/+$/u, "");
-    if (!url.pathname.endsWith("/gateway")) {
-      url.pathname = `${url.pathname}/gateway`.replace(/\/{2,}/gu, "/");
-    }
+    const url = new URL(baseUrl);
     url.pathname = `${url.pathname}${endpointPath}`.replace(/\/{2,}/gu, "/");
 
     const response = await fetch(url, {
@@ -952,6 +1042,42 @@ export class TelegramTransport implements HumanTransport {
       client_uuid: clientUuid,
     });
     return response.projects;
+  }
+
+  private async listGatewayClients(): Promise<GatewayClientRecord[]> {
+    this.logger.info("Telegram admin requested gateway clients list", {
+      gatewayBaseUrl: resolveGatewayControlBaseUrl(this.config),
+    });
+    const response = await this.callGatewayJson<{
+      clients: GatewayClientRecord[];
+    }>("/clients/list", {});
+    const clients = Array.isArray(response.clients) ? response.clients : [];
+    this.logger.info("Telegram admin received gateway clients list", {
+      count: clients.length,
+      clientUuids: clients.map((client) => client.client_uuid),
+    });
+    return clients;
+  }
+
+  private async listGatewayClientSessions(
+    clientUuid: string,
+  ): Promise<GatewayClientSessionRecord[]> {
+    this.logger.info("Telegram admin requested gateway client sessions", {
+      gatewayBaseUrl: resolveGatewayControlBaseUrl(this.config),
+      clientUuid,
+    });
+    const response = await this.callGatewayJson<{
+      sessions: GatewayClientSessionRecord[];
+    }>("/clients/sessions", {
+      client_uuid: clientUuid,
+    });
+    const sessions = Array.isArray(response.sessions) ? response.sessions : [];
+    this.logger.info("Telegram admin received gateway client sessions", {
+      clientUuid,
+      count: sessions.length,
+      localSessionIds: sessions.map((session) => session.local_session_id),
+    });
+    return sessions;
   }
 
   private async listGatewayProjectSessions(
@@ -1178,6 +1304,7 @@ export class TelegramTransport implements HumanTransport {
       });
     });
     this.started = true;
+    this.startTmuxPromptScan();
     this.logger.info("Telegram transport start returned control to app", {
       isRunning: this.bot.isRunning(),
       isInited: this.bot.isInited(),
@@ -1194,6 +1321,7 @@ export class TelegramTransport implements HumanTransport {
 
     this.logger.info("Telegram transport stopping");
     this.clearTmuxNudgeDebounceTimers();
+    this.clearTmuxPromptScanTimer();
     await this.bot.stop();
     this.started = false;
     this.pollingTask = undefined;
@@ -1337,6 +1465,16 @@ export class TelegramTransport implements HumanTransport {
 
   public async sendStartupNotifications(): Promise<void> {
     const packageVersion = getTellyMcpPackageVersion(__dirname);
+    const availableUpdate = await detectAvailablePackageUpdate({
+      currentVersion: packageVersion,
+    });
+    if (availableUpdate) {
+      this.logger.warn("A newer TellyMCP package version is available", {
+        currentVersion: availableUpdate.currentVersion,
+        latestVersion: availableUpdate.latestVersion,
+        packageName: TELLYMCP_PACKAGE_NAME,
+      });
+    }
     const sessions = await this.sessionStore.listSessions();
     const groupedRecipients = new Map<
       string,
@@ -1454,6 +1592,18 @@ export class TelegramTransport implements HumanTransport {
         this.t(locale, "menu:notices.startup.browser", {
           status: browserStatus,
         }),
+        ...(availableUpdate
+          ? [
+              this.t(locale, "menu:notices.startup.update_available", {
+                currentVersion: availableUpdate.currentVersion,
+                latestVersion: availableUpdate.latestVersion,
+              }),
+              this.t(locale, "menu:notices.startup.update_command", {
+                packageName: TELLYMCP_PACKAGE_NAME,
+                latestVersion: availableUpdate.latestVersion,
+              }),
+            ]
+          : []),
         this.t(locale, "menu:notices.startup.hint"),
       ].join("\n");
 
@@ -2479,6 +2629,210 @@ export class TelegramTransport implements HumanTransport {
       });
   }
 
+  private createAdminMainMenu(): Menu<TelegramMenuContext> {
+    return new Menu<TelegramMenuContext>("telegram-admin-main-menu", {
+      ...this.createMenuOptions((ctx) => this.showAdminMainMenu(ctx)),
+    })
+      .text(async (ctx) => this.tForContext(ctx, "menu:admin.buttons.clients"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:admin.actions.open_clients"),
+        });
+        await this.showAdminClientsMenu(ctx);
+      })
+      .text(async (ctx) => this.tForContext(ctx, "menu:admin.buttons.tools"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:admin.actions.open_tools"),
+        });
+        await this.showAdminToolsMenu(ctx);
+      });
+  }
+
+  private createAdminClientsMenu(): Menu<TelegramMenuContext> {
+    return new Menu<TelegramMenuContext>("telegram-admin-clients-menu", {
+      ...this.createMenuOptions((ctx) => this.showAdminClientsMenu(ctx)),
+    })
+      .dynamic(async (ctx) => {
+        const range = new MenuRange<TelegramMenuContext>();
+        let clients: GatewayClientRecord[];
+        try {
+          clients = await this.listGatewayClients();
+        } catch {
+          range.text(
+            await this.tForContext(ctx, "menu:admin.clients.unavailable"),
+            async (innerCtx) => {
+              await innerCtx.answerCallbackQuery({
+                text: await this.tForContext(
+                  innerCtx,
+                  "menu:admin.clients.unavailable",
+                ),
+                show_alert: true,
+              });
+            },
+          );
+          return range;
+        }
+
+        if (clients.length === 0) {
+          range.text(
+            await this.tForContext(ctx, "menu:admin.clients.empty"),
+            async (innerCtx) => {
+              await innerCtx.answerCallbackQuery({
+                text: await this.tForContext(
+                  innerCtx,
+                  "menu:admin.clients.empty",
+                ),
+              });
+            },
+          );
+          return range;
+        }
+
+        for (const client of clients) {
+          const payloadKey = await this.createAdminClientMenuPayload(client);
+          range
+            .text(
+              {
+                text: this.buildAdminClientButtonLabel(client),
+                payload: async () => payloadKey,
+              },
+              async (innerCtx) => {
+                await this.handleAdminClientSelectCallback(innerCtx);
+              },
+            )
+            .row();
+        }
+
+        return range;
+      })
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.back"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:admin.actions.back_to_admin"),
+        });
+        await this.showAdminMainMenu(ctx);
+      });
+  }
+
+  private createAdminClientSessionsMenu(): Menu<TelegramMenuContext> {
+    return new Menu<TelegramMenuContext>("telegram-admin-client-sessions-menu", {
+      ...this.createMenuOptions((ctx) => this.showAdminClientSessionsMenu(ctx)),
+    })
+      .dynamic(async (ctx) => {
+        const range = new MenuRange<TelegramMenuContext>();
+        const principal = this.getPrincipalFromContext(ctx);
+        if (!principal) {
+          range.text(
+            await this.tForContext(ctx, "common:errors.no_telegram_identity"),
+            async (innerCtx) => {
+              await innerCtx.answerCallbackQuery({
+                text: await this.tForContext(
+                  innerCtx,
+                  "common:errors.no_telegram_identity",
+                ),
+                show_alert: true,
+              });
+            },
+          );
+          return range;
+        }
+
+        const client = this.adminClientViewByPrincipal.get(buildPrincipalKey(principal));
+        if (!client) {
+          range.text(
+            await this.tForContext(ctx, "menu:admin.client_sessions.no_client_selected"),
+            async (innerCtx) => {
+              await innerCtx.answerCallbackQuery({
+                text: await this.tForContext(
+                  innerCtx,
+                  "menu:admin.client_sessions.no_client_selected",
+                ),
+                show_alert: true,
+              });
+            },
+          );
+          return range;
+        }
+
+        let sessions: GatewayClientSessionRecord[];
+        try {
+          sessions = await this.listGatewayClientSessions(client.client_uuid);
+        } catch {
+          range.text(
+            await this.tForContext(ctx, "menu:admin.client_sessions.unavailable"),
+            async (innerCtx) => {
+              await innerCtx.answerCallbackQuery({
+                text: await this.tForContext(
+                  innerCtx,
+                  "menu:admin.client_sessions.unavailable",
+                ),
+                show_alert: true,
+              });
+            },
+          );
+          return range;
+        }
+
+        if (sessions.length === 0) {
+          range.text(
+            await this.tForContext(ctx, "menu:admin.client_sessions.empty"),
+            async (innerCtx) => {
+              await innerCtx.answerCallbackQuery({
+                text: await this.tForContext(
+                  innerCtx,
+                  "menu:admin.client_sessions.empty",
+                ),
+              });
+            },
+          );
+          return range;
+        }
+
+        for (const session of sessions) {
+          const payloadKey = await this.createAdminClientSessionMenuPayload(session);
+          range
+            .text(
+              {
+                text: this.buildAdminClientSessionButtonLabel(session),
+                payload: async () => payloadKey,
+              },
+              async (innerCtx) => {
+                await this.handleAdminClientSessionOpenCallback(innerCtx);
+              },
+            )
+            .row();
+        }
+
+        return range;
+      })
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.back"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:admin.actions.back_to_clients"),
+        });
+        await this.showAdminClientsMenu(ctx);
+      });
+  }
+
+  private createAdminClientSessionDetailMenu(): Menu<TelegramMenuContext> {
+    return new Menu<TelegramMenuContext>("telegram-admin-client-session-detail-menu", {
+      ...this.createMenuOptions((ctx) => this.showAdminClientSessionsMenu(ctx)),
+    });
+  }
+
+  private createAdminToolsMenu(): Menu<TelegramMenuContext> {
+    return new Menu<TelegramMenuContext>("telegram-admin-tools-menu", {
+      ...this.createMenuOptions((ctx) => this.showAdminToolsMenu(ctx)),
+    })
+      .text(async (ctx) => this.tForContext(ctx, "menu:admin.buttons.client_env"), async (ctx) => {
+        await this.handleAdminClientEnvExport(ctx);
+      })
+      .row()
+      .text(async (ctx) => this.tForContext(ctx, "common:menu.back"), async (ctx) => {
+        await ctx.answerCallbackQuery({
+          text: await this.tForContext(ctx, "menu:admin.actions.back_to_admin"),
+        });
+        await this.showAdminMainMenu(ctx);
+      });
+  }
+
   private createBrowserMenu(): Menu<TelegramMenuContext> {
     return new Menu<TelegramMenuContext>(
       "telegram-browser-menu",
@@ -3451,6 +3805,11 @@ export class TelegramTransport implements HumanTransport {
       return;
     }
 
+    if (this.isAdminBotProfile()) {
+      await this.handleAdminMessage(ctx, text);
+      return;
+    }
+
     if (text && (await this.handlePendingRename(ctx, text))) {
       return;
     }
@@ -3505,6 +3864,26 @@ export class TelegramTransport implements HumanTransport {
     }
 
     await this.handleInboxCapture(ctx);
+  }
+
+  private async handleAdminMessage(
+    ctx: TelegramMenuContext,
+    text: string | null,
+  ): Promise<void> {
+    if (text && isMenuEntryCommand(text)) {
+      await this.showAdminMainMenu(ctx);
+      return;
+    }
+
+    if (text && isHelpCommand(text)) {
+      await this.showAdminMainMenu(
+        ctx,
+        await this.tForContext(ctx, "menu:admin.screen.help"),
+      );
+      return;
+    }
+
+    await this.showAdminMainMenu(ctx);
   }
 
   private async handlePairingCommand(
@@ -3642,9 +4021,10 @@ export class TelegramTransport implements HumanTransport {
       chatId: principal.telegramChatId,
       userId: principal.telegramUserId,
     });
-    await this.replyText(ctx, await this.tForContext(ctx, "menu:admin.auth.success"), {
-      kind: "transport",
-    });
+    await this.showAdminMainMenu(
+      ctx,
+      await this.tForContext(ctx, "menu:admin.auth.success"),
+    );
   }
 
   private async handleReply(ctx: TelegramMenuContext): Promise<boolean> {
@@ -3988,6 +4368,67 @@ export class TelegramTransport implements HumanTransport {
     this.tmuxNudgeDebounceTimers.clear();
   }
 
+  private startTmuxPromptScan(): void {
+    if (!this.config.tmux.promptScanEnabled) {
+      return;
+    }
+
+    this.clearTmuxPromptScanTimer();
+
+    const intervalMs = this.config.tmux.promptScanIntervalSeconds * 1000;
+    const timer = setInterval(() => {
+      void this.runTmuxPromptScanCycle().catch((error) => {
+        this.logger.warn("tmux prompt scan cycle failed", {
+          error:
+            error instanceof Error
+              ? (error.stack ?? error.message)
+              : String(error),
+        });
+      });
+    }, intervalMs);
+    timer.unref();
+    this.tmuxPromptScanTimer = timer;
+
+    this.logger.info("tmux prompt scan scheduled", {
+      intervalSeconds: this.config.tmux.promptScanIntervalSeconds,
+      cooldownSeconds: this.config.tmux.promptScanCooldownSeconds,
+      strategy: this.config.tmux.promptScanStrategy,
+      minScore: this.config.tmux.promptScanMinScore,
+    });
+
+    void this.runTmuxPromptScanCycle().catch((error) => {
+      this.logger.warn("initial tmux prompt scan failed", {
+        error:
+          error instanceof Error
+            ? (error.stack ?? error.message)
+            : String(error),
+      });
+    });
+  }
+
+  private clearTmuxPromptScanTimer(): void {
+    if (this.tmuxPromptScanTimer) {
+      clearInterval(this.tmuxPromptScanTimer);
+      this.tmuxPromptScanTimer = undefined;
+    }
+  }
+
+  private async runTmuxPromptScanCycle(): Promise<void> {
+    if (!this.config.tmux.promptScanEnabled || this.tmuxPromptScanInFlight) {
+      return;
+    }
+
+    this.tmuxPromptScanInFlight = true;
+    try {
+      const sessions = await this.sessionStore.listSessions();
+      for (const session of sessions) {
+        await this.scanTmuxPromptForSession(session);
+      }
+    } finally {
+      this.tmuxPromptScanInFlight = false;
+    }
+  }
+
   private scheduleTmuxNudgeForInboxMessage(
     sessionId: string,
     session: Awaited<ReturnType<SessionStore["getSession"]>>,
@@ -4327,6 +4768,186 @@ export class TelegramTransport implements HumanTransport {
     }
   }
 
+  private async scanTmuxPromptForSession(
+    session: Awaited<ReturnType<SessionStore["listSessions"]>>[number],
+  ): Promise<void> {
+    if (!session.tmuxTarget) {
+      this.tmuxPromptNoticeState.delete(session.sessionId);
+      return;
+    }
+
+    const binding = await this.bindingStore.getBinding(session.sessionId);
+    if (!binding) {
+      this.tmuxPromptNoticeState.delete(session.sessionId);
+      return;
+    }
+
+    let tmuxTarget = session.tmuxTarget;
+    let capture: string;
+
+    try {
+      capture = await this.captureTmuxPromptBuffer(session);
+    } catch (error) {
+      if (isTmuxUnavailableError(error)) {
+        this.logger.debug("tmux prompt scan skipped because tmux is unavailable", {
+          sessionId: session.sessionId,
+          tmuxTarget,
+        });
+        return;
+      }
+
+      if (isTmuxTargetInvalidError(error)) {
+        const recoveredTarget = await this.tryRecoverTmuxTarget(
+          session.sessionId,
+          session,
+        );
+
+        if (!recoveredTarget) {
+          this.logger.debug("tmux prompt scan skipped because target is invalid", {
+            sessionId: session.sessionId,
+            tmuxTarget,
+          });
+          return;
+        }
+
+        tmuxTarget = recoveredTarget;
+        capture = await this.captureTmuxPromptBuffer({
+          ...session,
+          tmuxTarget: recoveredTarget,
+          tmuxPaneId: recoveredTarget.startsWith("%")
+            ? recoveredTarget
+            : session.tmuxPaneId,
+        });
+      } else {
+        this.logger.warn("tmux prompt scan capture failed", {
+          sessionId: session.sessionId,
+          tmuxTarget,
+          error:
+            error instanceof Error
+              ? (error.stack ?? error.message)
+              : String(error),
+        });
+        return;
+      }
+    }
+
+    const detection = detectTmuxInteractivePrompt(capture, {
+      strategy: this.config.tmux.promptScanStrategy,
+      minScore: this.config.tmux.promptScanMinScore,
+    });
+
+    if (!detection) {
+      this.tmuxPromptNoticeState.delete(session.sessionId);
+      return;
+    }
+
+    if (!this.shouldSendTmuxPromptNotice(session.sessionId, detection)) {
+      return;
+    }
+
+    await this.notifyTmuxPromptDetected(session, binding, detection, tmuxTarget);
+  }
+
+  private async captureTmuxPromptBuffer(session: {
+    sessionId: string;
+    tmuxTarget?: string | undefined;
+    tmuxPaneId?: string | undefined;
+  }): Promise<string> {
+    const target = session.tmuxTarget;
+    if (!target) {
+      throw new Error("tmux target is not configured");
+    }
+
+    if (this.config.tmux.captureMode === "visible") {
+      return captureVisibleTmuxPane(
+        this.config.tmux,
+        target,
+        this.config.tmux.captureLines,
+        this.config.webapp.visibleScreens,
+      );
+    }
+
+    return captureTmuxPaneRange(
+      this.config.tmux,
+      target,
+      `-${this.config.tmux.captureLines}`,
+      false,
+    );
+  }
+
+  private shouldSendTmuxPromptNotice(
+    sessionId: string,
+    detection: TmuxPromptDetection,
+  ): boolean {
+    const existing = this.tmuxPromptNoticeState.get(sessionId);
+    const nowMs = Date.now();
+    const cooldownMs = this.config.tmux.promptScanCooldownSeconds * 1000;
+
+    if (
+      existing &&
+      existing.fingerprint === detection.fingerprint &&
+      nowMs - existing.sentAtMs < cooldownMs
+    ) {
+      return false;
+    }
+
+    this.tmuxPromptNoticeState.set(sessionId, {
+      fingerprint: detection.fingerprint,
+      sentAtMs: nowMs,
+    });
+    return true;
+  }
+
+  private async notifyTmuxPromptDetected(
+    session: Awaited<ReturnType<SessionStore["listSessions"]>>[number],
+    binding: Awaited<ReturnType<SessionBindingStore["getBinding"]>>,
+    detection: TmuxPromptDetection,
+    tmuxTarget: string,
+  ): Promise<void> {
+    if (!binding) {
+      return;
+    }
+
+    const locale = await this.resolveLocaleForTelegramUserId(
+      binding.telegramUserId,
+    );
+    const sessionLabel = session.label ?? session.sessionId;
+    const excerpt = detection.matchedLines
+      .slice(-TMUX_PROMPT_SCAN_MATCHED_LINES_LIMIT)
+      .join("\n");
+
+    await this.sendNotification({
+      sessionId: session.sessionId,
+      sessionLabel: "TellyMCP",
+      recipient: {
+        telegramChatId: binding.telegramChatId,
+        telegramUserId: binding.telegramUserId,
+      },
+      message: [
+        this.t(locale, "menu:notices.tmux.prompt_detected_title", {
+          sessionName: sessionLabel,
+        }),
+        this.t(locale, "menu:notices.tmux.prompt_detected_score", {
+          score: detection.score,
+        }),
+        this.t(locale, "menu:notices.tmux.prompt_detected_target", {
+          tmuxTarget,
+        }),
+        this.t(locale, "menu:notices.tmux.prompt_detected_hint"),
+        this.t(locale, "menu:notices.tmux.prompt_detected_excerpt"),
+        excerpt,
+      ].join("\n"),
+    });
+
+    this.logger.info("tmux prompt detected", {
+      sessionId: session.sessionId,
+      tmuxTarget,
+      score: detection.score,
+      reasons: detection.reasons,
+      fingerprint: detection.fingerprint,
+    });
+  }
+
   private async sendTypingForSession(sessionId: string): Promise<void> {
     const binding = await this.bindingStore.getBinding(sessionId);
     if (!binding) {
@@ -4434,6 +5055,430 @@ export class TelegramTransport implements HumanTransport {
           ]
         : ["", this.t(locale, "menu:main.screen.link_hint")]),
     ].join("\n");
+  }
+
+  private async showAdminMainMenu(
+    ctx: TelegramMenuContext,
+    introText?: string,
+  ): Promise<void> {
+    const text = await this.buildAdminMainMenuText(ctx);
+    const intro = introText ? escapeHtml(introText) : null;
+    await this.renderMenuHtmlScreen(
+      ctx,
+      intro ? `${intro}\n\n${text}` : text,
+      { kind: "menu" },
+      this.adminMainMenu,
+    );
+  }
+
+  private async buildAdminMainMenuText(
+    ctx: TelegramMenuContext,
+  ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
+    let clients: GatewayClientRecord[] | null = null;
+    try {
+      clients = await this.listGatewayClients();
+    } catch (error) {
+      this.logger.warn("Failed to load gateway clients for admin main menu", {
+        chatId: ctx.chat?.id,
+        userId: ctx.from?.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return [
+      this.t(locale, "menu:admin.screen.title"),
+      "",
+      ...(clients
+        ? [
+            this.t(locale, "menu:admin.screen.gateway_clients", {
+              count: clients.length,
+            }),
+          ]
+        : [this.t(locale, "menu:admin.screen.gateway_clients_unavailable")]),
+      "",
+      this.t(locale, "menu:admin.screen.hint"),
+    ].join("\n");
+  }
+
+  private async showAdminClientsMenu(
+    ctx: TelegramMenuContext,
+    introText?: string,
+  ): Promise<void> {
+    const text = await this.buildAdminClientsMenuText(ctx);
+    const intro = introText ? escapeHtml(introText) : null;
+    await this.renderMenuHtmlScreen(
+      ctx,
+      intro ? `${intro}\n\n${text}` : text,
+      { kind: "menu" },
+      this.adminClientsMenu,
+    );
+  }
+
+  private async showAdminClientSessionsMenu(
+    ctx: TelegramMenuContext,
+    client?: GatewayClientRecord,
+  ): Promise<void> {
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal) {
+      await this.showAdminClientsMenu(ctx);
+      return;
+    }
+
+    const principalKey = buildPrincipalKey(principal);
+    if (client) {
+      this.adminClientViewByPrincipal.set(principalKey, client);
+    }
+
+    const selectedClient = this.adminClientViewByPrincipal.get(principalKey);
+    if (!selectedClient) {
+      await this.showAdminClientsMenu(
+        ctx,
+        await this.tForContext(ctx, "menu:admin.client_sessions.no_client_selected"),
+      );
+      return;
+    }
+
+    const text = await this.buildAdminClientSessionsMenuText(ctx, selectedClient);
+    await this.renderMenuHtmlScreen(
+      ctx,
+      text,
+      { kind: "menu" },
+      this.adminClientSessionsMenu,
+    );
+  }
+
+  private async showAdminClientSessionDetail(
+    ctx: TelegramMenuContext,
+    input: {
+      sessionId: string;
+      targetSessionId: string;
+      targetSessionLabel: string;
+      targetClientUuid: string;
+      targetLocalSessionId: string;
+      projectUuid?: string;
+      projectName?: string;
+    },
+    payloadKey: string,
+  ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
+    const lines = [
+      this.t(locale, "menu:admin.client_session_detail.title"),
+      "",
+      this.t(locale, "menu:admin.client_session_detail.session", {
+        sessionName: escapeHtml(input.targetSessionLabel),
+      }),
+      `ID: <code>${escapeHtml(input.targetLocalSessionId)}</code>`,
+      ...(input.projectName
+        ? [
+            this.t(locale, "menu:admin.client_session_detail.project", {
+              projectName: escapeHtml(input.projectName),
+            }),
+          ]
+        : []),
+    ];
+
+    const keyboard = new InlineKeyboard();
+    if (this.buildLiveViewUrlForSessionTarget({
+      targetSessionId: input.targetSessionId,
+      targetClientUuid: input.targetClientUuid,
+      targetLocalSessionId: input.targetLocalSessionId,
+    })) {
+      keyboard.text("🖥 Live", `admin-client-session-live:${payloadKey}`).row();
+    }
+    keyboard.text(
+      this.t(locale, "menu:admin.client_session_detail.back_to_sessions"),
+      "admin-client-sessions-back",
+    );
+
+    if (ctx.callbackQuery?.message) {
+      await this.editText(
+        ctx,
+        lines.join("\n"),
+        { kind: "menu", sessionId: input.targetLocalSessionId },
+        { parse_mode: "HTML", reply_markup: keyboard },
+      );
+      return;
+    }
+
+    await this.replyText(
+      ctx,
+      lines.join("\n"),
+      { kind: "menu", sessionId: input.targetLocalSessionId },
+      { parse_mode: "HTML", reply_markup: keyboard },
+    );
+  }
+
+  private async buildAdminClientsMenuText(
+    ctx: TelegramMenuContext,
+  ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
+    let clients: GatewayClientRecord[];
+    try {
+      clients = await this.listGatewayClients();
+    } catch (error) {
+      this.logger.warn("Failed to load gateway clients for admin clients menu", {
+        chatId: ctx.chat?.id,
+        userId: ctx.from?.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [
+        this.t(locale, "menu:admin.clients.title"),
+        "",
+        this.t(locale, "menu:admin.clients.unavailable"),
+      ].join("\n");
+    }
+    const lines = [
+      this.t(locale, "menu:admin.clients.title"),
+      "",
+    ];
+
+    if (clients.length === 0) {
+      lines.push(this.t(locale, "menu:admin.clients.empty"));
+      return lines.join("\n");
+    }
+
+    for (const client of clients) {
+      lines.push(
+        this.t(locale, "menu:admin.clients.item", {
+          label: escapeHtml(client.client_label ?? client.client_uuid),
+          clientUuid: escapeHtml(client.client_uuid),
+        }),
+      );
+      if (client.bot_username) {
+        lines.push(
+          this.t(locale, "menu:admin.clients.bot", {
+            botUsername: escapeHtml(client.bot_username),
+          }),
+        );
+      }
+      if (typeof client.session_count === "number") {
+        lines.push(
+          this.t(locale, "menu:admin.clients.sessions", {
+            count: client.session_count,
+          }),
+        );
+      }
+      if (client.last_seen_at) {
+        lines.push(
+          this.t(locale, "menu:admin.clients.last_seen", {
+            value: escapeHtml(client.last_seen_at),
+          }),
+        );
+      }
+      lines.push("");
+    }
+
+    return lines.join("\n");
+  }
+
+  private buildAdminClientTitle(client: GatewayClientRecord): string {
+    const displayName = client.telegram_display_name?.trim() || "";
+    const telegramUsername = client.telegram_username?.trim().replace(/^@/u, "") || "";
+    const botUsername = client.bot_username?.trim().replace(/^@/u, "") || "";
+    const fallback = (client.client_label ?? client.client_uuid).trim();
+
+    const identityParts = [
+      displayName || null,
+      !displayName && telegramUsername ? `@${telegramUsername}` : null,
+      botUsername ? `🤖@${botUsername}` : null,
+    ].filter(Boolean);
+
+    return identityParts.length > 0 ? identityParts.join(" · ") : fallback;
+  }
+
+  private buildAdminClientButtonLabel(client: GatewayClientRecord): string {
+    return this.buildAdminClientTitle(client).slice(0, 56);
+  }
+
+  private buildAdminClientSessionButtonLabel(
+    session: GatewayClientSessionRecord,
+  ): string {
+    const sessionName = (session.label?.trim() || session.local_session_id).trim();
+    const projectName = session.project_name?.trim() || null;
+    return projectName
+      ? `${sessionName} · ${projectName}`.slice(0, 56)
+      : sessionName.slice(0, 56);
+  }
+
+  private async buildAdminClientSessionsMenuText(
+    ctx: TelegramMenuContext,
+    client: GatewayClientRecord,
+  ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
+    const clientTitle = this.buildAdminClientTitle(client);
+    return [
+      this.t(locale, "menu:admin.client_sessions.title"),
+      "",
+      this.t(locale, "menu:admin.client_sessions.client", {
+        client: escapeHtml(clientTitle),
+      }),
+      "",
+      this.t(locale, "menu:admin.client_sessions.choose"),
+    ].join("\n");
+  }
+
+  private async showAdminToolsMenu(
+    ctx: TelegramMenuContext,
+    introText?: string,
+  ): Promise<void> {
+    const text = await this.buildAdminToolsMenuText(ctx);
+    const intro = introText ? escapeHtml(introText) : null;
+    await this.renderMenuHtmlScreen(
+      ctx,
+      intro ? `${intro}\n\n${text}` : text,
+      { kind: "menu" },
+      this.adminToolsMenu,
+    );
+  }
+
+  private async buildAdminToolsMenuText(
+    ctx: TelegramMenuContext,
+  ): Promise<string> {
+    const locale = await this.resolveLocaleForContext(ctx);
+    return [
+      this.t(locale, "menu:admin.tools.title"),
+      "",
+      this.t(locale, "menu:admin.tools.client_env_help"),
+    ].join("\n");
+  }
+
+  private buildClientEnvFromGatewayConfig(): string {
+    const gatewayPublicUrl = this.config.distributed.gatewayPublicUrl ?? "";
+    const gatewayWsUrl =
+      this.config.distributed.gatewayWsUrl?.trim() ||
+      (gatewayPublicUrl
+        ? gatewayPublicUrl.replace(/^http/u, "ws").replace(/\/gateway$/u, "/gateway/ws")
+        : "");
+    const webappPublicUrl =
+      this.config.webapp.publicUrl?.trim() ||
+      (gatewayPublicUrl
+        ? gatewayPublicUrl.replace(/\/gateway$/u, "/webapp")
+        : "");
+    const tokenBindingSecret =
+      typeof process.env.TOKEN_BINDING_SECRET === "string"
+        ? process.env.TOKEN_BINDING_SECRET.trim()
+        : "";
+    const nodeId =
+      typeof process.env.NODE_ID === "string" && process.env.NODE_ID.trim()
+        ? process.env.NODE_ID.trim()
+        : "client";
+    const namespace =
+      typeof process.env.NAMESPACE === "string" && process.env.NAMESPACE.trim()
+        ? process.env.NAMESPACE.trim()
+        : "mcp";
+
+    return [
+      "# TellyMCP client node",
+      "",
+      "TELEGRAM_BOT_TOKEN=",
+      "TELEGRAM_BOT_USERNAME=",
+      "# DEBUG_LANGUAGE=ru",
+      "PROJECT_NAME=",
+      "",
+      "REDIS_HOST=127.0.0.1",
+      "REDIS_PORT=6379",
+      "REDIS_DB=1",
+      "",
+      `MODE=${this.config.mode}`,
+      `PAIR_CODE_TTL_SECONDS=${this.config.pairCodeTtlSeconds}`,
+      "",
+      "MCP_HTTP_HOST=127.0.0.1",
+      "MCP_HTTP_PORT=8787",
+      `MCP_HTTP_PATH=${this.config.mcp.httpPath}`,
+      "# MCP_HTTP_BEARER_TOKEN=",
+      `MCP_HTTP_ENABLE_DEBUG_ROUTES=${String(this.config.mcp.enableDebugRoutes)}`,
+      `MCP_HTTP_ENABLE_PRUNE_ROUTE=${String(this.config.mcp.enablePruneRoute)}`,
+      "",
+      "DISTRIBUTED_MODE=client",
+      `GATEWAY_PUBLIC_URL=${gatewayPublicUrl}`,
+      `GATEWAY_WS_URL=${gatewayWsUrl}`,
+      `GATEWAY_WS_PATH=${this.config.distributed.gatewayWsPath}`,
+      `GATEWAY_AUTH_TOKEN=${this.config.distributed.gatewayAuthToken ?? ""}`,
+      "",
+      `WEBAPP_ENABLED=${String(this.config.webapp.enabled)}`,
+      `WEBAPP_BASE_PATH=${this.config.webapp.basePath}`,
+      `WEBAPP_PUBLIC_URL=${webappPublicUrl}`,
+      `WEBAPP_INITDATA_TTL_SECONDS=${this.config.webapp.initDataTtlSeconds}`,
+      `WEBAPP_SESSION_TTL_SECONDS=${this.config.webapp.sessionTtlSeconds}`,
+      `WEBAPP_LAUNCH_MODE=${this.config.webapp.launchMode}`,
+      `WEBAPP_VISIBLE_SCREENS=${this.config.webapp.visibleScreens}`,
+      `WEBAPP_POLL_INTERVAL_MS=${this.config.webapp.pollIntervalMs}`,
+      `WEBAPP_ACTION_COOLDOWN_MS=${this.config.webapp.actionCooldownMs}`,
+      "",
+      "MCP_XCHANGE_DIR=.mcp-xchange",
+      "",
+      `TMUX_NUDGE_ENABLED=${String(this.config.tmux.nudgeEnabled)}`,
+      `TMUX_NUDGE_DEBOUNCE_SECONDS=${this.config.tmux.nudgeDebounceSeconds}`,
+      `TMUX_NUDGE_COOLDOWN_SECONDS=${this.config.tmux.nudgeCooldownSeconds}`,
+      `TMUX_NUDGE_MESSAGE=${this.config.tmux.nudgeMessage}`,
+      `TMUX_PARTNER_NUDGE_MESSAGE=${this.config.tmux.partnerNudgeMessage}`,
+      `TMUX_CAPTURE_MODE=${this.config.tmux.captureMode}`,
+      `TMUX_CAPTURE_LINES=${this.config.tmux.captureLines}`,
+      `TMUX_PROMPT_SCAN_ENABLED=${String(this.config.tmux.promptScanEnabled)}`,
+      `TMUX_PROMPT_SCAN_INTERVAL_SECONDS=${this.config.tmux.promptScanIntervalSeconds}`,
+      `TMUX_PROMPT_SCAN_COOLDOWN_SECONDS=${this.config.tmux.promptScanCooldownSeconds}`,
+      `TMUX_PROMPT_SCAN_STRATEGY=${this.config.tmux.promptScanStrategy}`,
+      `TMUX_PROMPT_SCAN_MIN_SCORE=${this.config.tmux.promptScanMinScore}`,
+      "# TMUX_SOCKET_PATH=",
+      "",
+      `BROWSER_ENABLED=${String(this.config.browser.enabled)}`,
+      `BROWSER_HEADLESS=${String(this.config.browser.headless)}`,
+      `BROWSER_DEVTOOLS=${String(this.config.browser.devtools)}`,
+      `BROWSER_ADDRESS=${this.config.browser.address ?? "http://localhost:5173"}`,
+      `BROWSER_TIMEOUT_MS=${this.config.browser.timeoutMs}`,
+      `BROWSER_MAX_EVENTS=${this.config.browser.maxEvents}`,
+      `BROWSER_WAIT_UNTIL=${this.config.browser.waitUntil}`,
+      ...(this.config.browser.executablePath
+        ? [`BROWSER_EXECUTABLE_PATH=${this.config.browser.executablePath}`]
+        : ["# BROWSER_EXECUTABLE_PATH="]),
+      ...(this.config.browser.channel
+        ? [`BROWSER_CHANNEL=${this.config.browser.channel}`]
+        : ["# BROWSER_CHANNEL=chrome"]),
+      `BROWSER_SLOW_MO_MS=${this.config.browser.slowMoMs}`,
+      "",
+      `TELEGRAM_POLL_INTERVAL_MS=${this.config.telegram.pollIntervalMs}`,
+      `TELEGRAM_DEFAULT_TIMEOUT_SECONDS=${this.config.telegram.defaultTimeoutSeconds}`,
+      `TELEGRAM_MAX_CONTEXT_CHARS=${this.config.telegram.maxContextChars}`,
+      `TELEGRAM_MAX_QUESTION_CHARS=${this.config.telegram.maxQuestionChars}`,
+      `TELEGRAM_MAX_MESSAGE_CHARS=${this.config.telegram.maxMessageChars}`,
+      `TELEGRAM_INBOX_BATCH_SIZE=${this.config.telegram.inboxBatchSize}`,
+      `TELEGRAM_MENU_PAYLOAD_TTL_SECONDS=${this.config.telegram.menuPayloadTtlSeconds}`,
+      "",
+      "# PROXY_USE=http",
+      "# HTTP_PROXY=",
+      "# SOCKS5_PROXY=",
+      "",
+      `NAMESPACE=${namespace}`,
+      `NODE_ID=${this.isAdminBotProfile() ? "client" : nodeId}`,
+      "ENABLE_LOGFEED=0",
+      `LOG_LEVEL=${this.config.logging.level}`,
+      `LOG_FILE_ENABLED=${String(this.config.logging.fileEnabled)}`,
+      `LOG_FILE_PATH=${this.config.logging.filePath}`,
+      ...(tokenBindingSecret
+        ? ["", `TOKEN_BINDING_SECRET=${tokenBindingSecret}`]
+        : []),
+      "",
+    ].join("\n");
+  }
+
+  private async handleAdminClientEnvExport(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
+    const content = this.buildClientEnvFromGatewayConfig();
+    await this.replyDocumentWithRetry(
+      ctx,
+      new InputFile(Buffer.from(content, "utf8"), ".env-client"),
+      {
+        caption: this.t(locale, "menu:admin.tools.client_env_caption"),
+      },
+      { kind: "menu" },
+    );
+    if (ctx.callbackQuery) {
+      await ctx.answerCallbackQuery({
+        text: this.t(locale, "menu:admin.tools.client_env_sent"),
+      });
+    }
   }
 
   private async getTmuxStatusLine(locale: SupportedLocale): Promise<string> {
@@ -4718,6 +5763,56 @@ export class TelegramTransport implements HumanTransport {
         kind: "link-target",
         sessionId,
         targetSessionId,
+        createdAt: now.toISOString(),
+        expiresAt: new Date(
+          now.getTime() + this.config.telegram.menuPayloadTtlSeconds * 1000,
+        ).toISOString(),
+      },
+      this.config.telegram.menuPayloadTtlSeconds,
+    );
+
+    return key;
+  }
+
+  private async createAdminClientMenuPayload(
+    client: GatewayClientRecord,
+  ): Promise<string> {
+    const key = createMenuPayloadKey();
+    const now = new Date();
+    await this.menuPayloadStore.createMenuPayload(
+      {
+        key,
+        kind: "admin-client",
+        sessionId: client.client_uuid,
+        targetClientUuid: client.client_uuid,
+        title: this.buildAdminClientTitle(client),
+        createdAt: now.toISOString(),
+        expiresAt: new Date(
+          now.getTime() + this.config.telegram.menuPayloadTtlSeconds * 1000,
+        ).toISOString(),
+      },
+      this.config.telegram.menuPayloadTtlSeconds,
+    );
+
+    return key;
+  }
+
+  private async createAdminClientSessionMenuPayload(
+    session: GatewayClientSessionRecord,
+  ): Promise<string> {
+    const key = createMenuPayloadKey();
+    const now = new Date();
+    await this.menuPayloadStore.createMenuPayload(
+      {
+        key,
+        kind: "admin-client-session",
+        sessionId: session.local_session_id,
+        targetSessionId: session.session_uuid,
+        targetClientUuid: session.client_uuid,
+        targetLocalSessionId: session.local_session_id,
+        title: session.label ?? session.local_session_id,
+        ...(session.project_uuid ? { projectUuid: session.project_uuid } : {}),
+        ...(session.project_name ? { projectName: session.project_name } : {}),
         createdAt: now.toISOString(),
         expiresAt: new Date(
           now.getTime() + this.config.telegram.menuPayloadTtlSeconds * 1000,
@@ -9343,6 +10438,40 @@ export class TelegramTransport implements HumanTransport {
     };
   }
 
+  private async getAdminClientSessionPayloadByKey(
+    payloadKey: string,
+  ): Promise<{
+    sessionId: string;
+    targetSessionId: string;
+    targetSessionLabel: string;
+    targetClientUuid: string;
+    targetLocalSessionId: string;
+    projectUuid?: string;
+    projectName?: string;
+  } | null> {
+    const payload = await this.menuPayloadStore.getMenuPayload(payloadKey);
+    if (
+      !payload ||
+      payload.kind !== "admin-client-session" ||
+      !payload.sessionId ||
+      !payload.targetSessionId ||
+      !payload.targetClientUuid ||
+      !payload.targetLocalSessionId
+    ) {
+      return null;
+    }
+
+    return {
+      sessionId: payload.sessionId,
+      targetSessionId: payload.targetSessionId,
+      targetSessionLabel: payload.title ?? payload.targetLocalSessionId,
+      targetClientUuid: payload.targetClientUuid,
+      targetLocalSessionId: payload.targetLocalSessionId,
+      ...(payload.projectUuid ? { projectUuid: payload.projectUuid } : {}),
+      ...(payload.projectName ? { projectName: payload.projectName } : {}),
+    };
+  }
+
   private extractCallbackSuffix(
     ctx: TelegramMenuContext,
     prefix: string,
@@ -9352,6 +10481,175 @@ export class TelegramTransport implements HumanTransport {
       return null;
     }
     return data.slice(prefix.length) || null;
+  }
+
+  private async handleAdminClientSelectCallback(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
+    const payloadKey = readMenuPayloadKey(ctx);
+    if (!payloadKey) {
+      await ctx.answerCallbackQuery({
+        text: this.t(locale, "menu:admin.client_sessions.invalid_action"),
+        show_alert: true,
+      });
+      return;
+    }
+
+    const payload = await this.menuPayloadStore.getMenuPayload(payloadKey);
+    const clientUuid =
+      payload?.kind === "admin-client" && payload.targetClientUuid
+        ? payload.targetClientUuid
+        : null;
+    if (!clientUuid) {
+      await ctx.answerCallbackQuery({
+        text: this.t(locale, "menu:admin.client_sessions.invalid_action"),
+        show_alert: true,
+      });
+      return;
+    }
+
+    let clients: GatewayClientRecord[];
+    try {
+      clients = await this.listGatewayClients();
+    } catch (error) {
+      this.logger.warn("Failed to resolve admin client selection", {
+        chatId: ctx.chat?.id,
+        userId: ctx.from?.id,
+        clientUuid,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await ctx.answerCallbackQuery({
+        text: this.t(locale, "menu:admin.clients.unavailable"),
+        show_alert: true,
+      });
+      return;
+    }
+
+    const client = clients.find((item) => item.client_uuid === clientUuid);
+    if (!client) {
+      await ctx.answerCallbackQuery({
+        text: this.t(locale, "menu:admin.client_sessions.not_found"),
+        show_alert: true,
+      });
+      return;
+    }
+
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:admin.actions.open_client_sessions"),
+    });
+    await this.showAdminClientSessionsMenu(ctx, client);
+  }
+
+  private async handleAdminClientSessionOpenCallback(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
+    const payloadKey = readMenuPayloadKey(ctx);
+    if (!payloadKey) {
+      await ctx.answerCallbackQuery({
+        text: this.t(locale, "menu:admin.client_sessions.invalid_action"),
+        show_alert: true,
+      });
+      return;
+    }
+
+    const payload = await this.getAdminClientSessionPayloadByKey(payloadKey);
+    if (!payload) {
+      await ctx.answerCallbackQuery({
+        text: this.t(locale, "menu:admin.client_sessions.not_found"),
+        show_alert: true,
+      });
+      return;
+    }
+
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:admin.actions.open_client_session"),
+    });
+    await this.showAdminClientSessionDetail(ctx, payload, payloadKey);
+  }
+
+  private async handleAdminClientSessionLiveCallback(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
+    const payloadKey = this.extractCallbackSuffix(
+      ctx,
+      "admin-client-session-live:",
+    );
+    if (!payloadKey) {
+      await ctx.answerCallbackQuery({
+        text: this.t(locale, "menu:admin.client_sessions.invalid_action"),
+        show_alert: true,
+      });
+      return;
+    }
+
+    const payload = await this.getAdminClientSessionPayloadByKey(payloadKey);
+    if (!payload) {
+      await ctx.answerCallbackQuery({
+        text: this.t(locale, "menu:admin.client_sessions.not_found"),
+        show_alert: true,
+      });
+      return;
+    }
+
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal) {
+      await ctx.answerCallbackQuery({
+        text: this.t(locale, "menu:live.errors.identity_unavailable"),
+        show_alert: true,
+      });
+      return;
+    }
+
+    const getUrl = (mode: WebAppLaunchMode) =>
+      this.buildLiveViewUrlForSessionTarget({
+        targetSessionId: payload.targetSessionId,
+        targetClientUuid: payload.targetClientUuid,
+        targetLocalSessionId: payload.targetLocalSessionId,
+        launchMode: mode,
+      });
+    const defaultUrl = getUrl(this.config.webapp.launchMode);
+    if (!defaultUrl) {
+      await ctx.answerCallbackQuery({
+        text: this.t(locale, "menu:live.errors.public_url_missing"),
+        show_alert: true,
+      });
+      return;
+    }
+
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:live.actions.opening"),
+    });
+
+    const sent = await this.replyText(
+      ctx,
+      [
+        this.t(locale, "menu:live.screen.launcher_title", {
+          sessionName: payload.targetSessionLabel,
+        }),
+        "",
+        this.t(locale, "menu:live.actions.choose_mode"),
+      ].join("\n"),
+      { kind: "menu", sessionId: payload.targetLocalSessionId },
+      {
+        reply_markup: this.buildLiveViewLaunchKeyboard(getUrl, locale),
+      },
+    );
+
+    this.webAppLaunchRegistry.set(
+      principal.telegramUserId,
+      payload.targetLocalSessionId,
+      this.config.webapp.initDataTtlSeconds,
+      {
+        telegramChatId: principal.telegramChatId,
+        allowForeignBinding: true,
+        ...(sent && "message_id" in sent
+          ? { telegramMessageId: sent.message_id }
+          : {}),
+      },
+    );
   }
 
   private async handleProjectSetCallback(

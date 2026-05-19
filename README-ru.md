@@ -351,6 +351,31 @@ docker compose up -d
 Пример nginx-конфига:
 - [docs/tellymcp.gw.conf](docs/tellymcp.gw.conf)
 
+### Деплой по тэгу через GitLab runner
+
+Если на хосте шлюза уже установлен локальный `gitlab-runner`, можно деплоить по тэгу через приложенный `.gitlab-ci.yml`.
+
+Ожидаемая схема:
+
+- runner работает с тэгом `gateway`
+- `DEPLOY_DIR` задан как GitLab CI/CD variable
+- `DEPLOY_DIR` — это постоянный git checkout этого репозитория на сервере шлюза
+- `DEPLOY_DIR/.env-gateway` уже существует и хранится только на сервере
+- пользователь runner-а умеет выполнять `docker compose`
+
+Что происходит на тэге вида `0.0.10` или `v0.0.10`:
+
+- job переключает `DEPLOY_DIR` на нужный commit
+- сохраняет `.env-gateway` и `.tellymcp/`
+- выполняет `yarn install`, `yarn lint`, `yarn test`
+- собирает свежий `deadragdoll-tellymcp-*.tgz` через `npm pack`
+- запускает `docker compose up -d --build --force-recreate`
+
+Основные файлы:
+
+- [.gitlab-ci.yml](.gitlab-ci.yml)
+- [scripts/deploy-gateway.sh](scripts/deploy-gateway.sh)
+
 Остановить всё:
 
 ```bash

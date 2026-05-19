@@ -373,6 +373,10 @@ export const enMenu = {
       gateway: "Gateway: {{url}}",
       gateway_ws: "Gateway WS: {{url}}",
       browser: "Browser: {{status}}",
+      update_available:
+        "Update available: {{currentVersion}} -> {{latestVersion}}",
+      update_command:
+        "Update command: npm install -g {{packageName}}@{{latestVersion}}",
       hint: "Send /menu to open the session menu.",
     },
     project: {
@@ -409,6 +413,13 @@ export const enMenu = {
         "This usually means the tmux session/server is not running or is unreachable via the current socket path.",
       unavailable_action:
         "Start tmux and the agent inside it, or update/remove the tmux target for this session.",
+      prompt_detected_title:
+        "🛎 The agent in session {{sessionName}} may be waiting for your input.",
+      prompt_detected_score: "Detection score: {{score}}",
+      prompt_detected_target: "tmux target: {{tmuxTarget}}",
+      prompt_detected_hint:
+        "Open Live or answer in the terminal if this prompt really needs you.",
+      prompt_detected_excerpt: "Recent prompt lines:",
     },
   },
   admin: {
@@ -423,6 +434,62 @@ export const enMenu = {
       success:
         "Gateway admin authentication accepted. You can continue with commands and menus.",
       disabled: "Gateway admin authentication is not enabled.",
+    },
+    buttons: {
+      clients: "Clients",
+      tools: "Tools",
+      client_env: "Client .env",
+    },
+    actions: {
+      open_clients: "Opening clients.",
+      open_client_sessions: "Opening client sessions.",
+      open_client_session: "Opening session.",
+      open_tools: "Opening tools.",
+      back_to_admin: "Back to admin.",
+      back_to_clients: "Back to clients.",
+      back_to_client_sessions: "Back to client sessions.",
+    },
+    screen: {
+      title: "🛡 Gateway Admin",
+      help: "Use the admin menu to inspect gateway clients and export a client .env.",
+      gateway_clients: "Known clients: {{count}}",
+      gateway_clients_unavailable: "Known clients: unavailable right now.",
+      hint: "Choose a section below.",
+    },
+    clients: {
+      title: "🖥 Gateway Clients",
+      empty: "The gateway does not know any clients yet.",
+      unavailable: "The gateway client list is unavailable right now.",
+      item: "• {{label}}",
+      bot: "  Bot: {{botUsername}}",
+      sessions: "  Sessions: {{count}}",
+      last_seen: "  Last seen: {{value}}",
+    },
+    client_sessions: {
+      title: "🧩 Client Sessions",
+      client: "Client: <b>{{client}}</b>",
+      total: "Sessions: {{count}}",
+      choose: "Choose a session below.",
+      empty: "This client has no active sessions.",
+      unavailable: "The client session list is unavailable right now.",
+      updated: "  Updated: {{timestamp}}",
+      project: "  Project: <b>{{projectName}}</b>",
+      no_client_selected: "Choose a client first.",
+      invalid_action: "Invalid client action.",
+      not_found: "The selected client is no longer available.",
+    },
+    client_session_detail: {
+      title: "🖥 Client Session",
+      session: "Session: <b>{{sessionName}}</b>",
+      project: "Project: <b>{{projectName}}</b>",
+      back_to_sessions: "⬅ Back to sessions",
+    },
+    tools: {
+      title: "🛠 Admin Tools",
+      client_env_help:
+        "Export a ready-to-edit .env-client built from the current gateway URLs and runtime settings.",
+      client_env_caption: "Generated .env-client from current gateway settings.",
+      client_env_sent: "Client .env sent.",
     },
   },
   developer: {

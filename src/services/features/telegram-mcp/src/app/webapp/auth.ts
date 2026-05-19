@@ -57,6 +57,7 @@ export type PendingWebAppLaunchRecord = {
   sessionId: string;
   telegramChatId?: number;
   telegramMessageId?: number;
+  allowForeignBinding?: boolean;
   expiresAtMs: number;
   createdAtMs: number;
 };
@@ -71,6 +72,7 @@ export class WebAppLaunchRegistry {
     details?: {
       telegramChatId?: number;
       telegramMessageId?: number;
+      allowForeignBinding?: boolean;
     },
   ): PendingWebAppLaunchRecord {
     this.cleanupExpired();
@@ -83,6 +85,9 @@ export class WebAppLaunchRegistry {
         : {}),
       ...(details?.telegramMessageId !== undefined
         ? { telegramMessageId: details.telegramMessageId }
+        : {}),
+      ...(details?.allowForeignBinding === true
+        ? { allowForeignBinding: true }
         : {}),
       expiresAtMs: nowMs + ttlSeconds * 1000,
       createdAtMs: nowMs,

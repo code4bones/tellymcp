@@ -367,6 +367,7 @@ export function createMcpHttpHandler(
             let launchRecord: {
               telegramChatId?: number;
               telegramMessageId?: number;
+              allowForeignBinding?: boolean;
             } | null = null;
             if (
               relayTarget.sourceClientUuid &&
@@ -401,6 +402,9 @@ export function createMcpHttpHandler(
                 localSessionId: relayTarget.localSessionId,
                 ...(trustedTelegramUserId !== null
                   ? { telegramUserId: trustedTelegramUserId }
+                  : {}),
+                ...(launchRecord?.allowForeignBinding === true
+                  ? { allowForeignBinding: true }
                   : {}),
                 ...(relayTarget.sourceClientUuid &&
                 relayTarget.sourceClientUuid !== relayTarget.clientUuid

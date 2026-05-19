@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  comparePackageVersions,
   evaluateVersionCompatibility,
   findPackageRoot,
   getTellyMcpPackageRoot,
@@ -57,5 +58,16 @@ describe("version handshake", () => {
     expect(root).toBeTruthy();
     expect(getTellyMcpPackageRoot(__dirname)).toBe(root);
     expect(getTellyMcpPackageVersion(__dirname)).toMatch(/^\d+\.\d+\.\d+/u);
+  });
+
+  it("compares semver versions in npm update direction", () => {
+    expect(comparePackageVersions("0.0.10", "0.0.9")).toBe(1);
+    expect(comparePackageVersions("0.0.9", "0.0.10")).toBe(-1);
+    expect(comparePackageVersions("0.0.10", "0.0.10")).toBe(0);
+  });
+
+  it("treats stable versions as newer than prereleases", () => {
+    expect(comparePackageVersions("0.1.0", "0.1.0-beta.1")).toBe(1);
+    expect(comparePackageVersions("0.1.0-beta.2", "0.1.0-beta.1")).toBe(1);
   });
 });

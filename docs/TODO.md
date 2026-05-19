@@ -43,6 +43,11 @@ Current state:
   - stale pane id после пересоздания tmux больше не требует немедленной ручной перепривязки
   - сервис пытается найти новый pane по tmux hints и обновить Redis сам
   - если это не удалось, пользователь получает Telegram notice
+- Появился optional `tmux prompt scan`:
+  - периодически сканирует хвост tmux buffer
+  - использует `strict|balanced` scoring вместо реакции на одно слово
+  - шлёт Telegram notice только при достаточном score
+  - делает dedupe/cooldown по fingerprint prompt-а
 - `Share` inbox semantics ужесточены:
   - текущая сессия выполняет работу сама
   - target-сессии отправляется только результат
@@ -85,6 +90,11 @@ Next session:
   - нужно ли пробовать auto-refresh target при `set_session_context`
   - нужен ли отдельный tool/command для “repair tmux target”
 
+- [ ] Подкрутить `tmux prompt scan` после реального использования:
+  - проверить, хватает ли `strict` scoring без ложных срабатываний
+  - решить, нужен ли отдельный admin/user toggle для scan на уровне сессии
+  - решить, нужно ли добавлять быстрые action buttons (`Open Live`, `Send Enter`, `Ctrl+C`) прямо в notice
+
 - [ ] Подумать над policy для `Live` approval:
   - one-shot approve only
   - remember approve for session/member/project
@@ -119,3 +129,22 @@ Next session:
   - что из текущего `ws` нужно оставить low-latency transport, а что можно вынести в bot-to-bot
   - как подписывать команды и делать dedupe / rate limits / loop prevention
   - нужен ли отдельный fleet-model для `gateway bot` + many `client bots`
+
+- [ ] Исследовать Codex/OpenAI `computer use` / remote-control как optional fallback для `tmux`:
+  - может ли это заменить только `nudge` / простые control-actions там, где нет `tmux`
+  - как объявлять capability на уровне session/client: `tmux`, `remote_control`, `none`
+  - можно ли использовать это только для desktop/local clients, не ломая headless Linux path
+  - где провести границу:
+    - `tmux` как primary deterministic path
+    - `computer use` как optional fallback
+    - не использовать это как основной low-latency transport для `Live`
+  - какие user/admin flows реально выигрывают:
+    - wake-up
+    - открыть окно/терминал
+    - вставить текст
+    - простые локальные действия
+  - какие риски нужно принять:
+    - beta / preview nature
+    - GUI dependency
+    - ниже надёжность, чем у `tmux`
+    - higher HITL / safety oversight

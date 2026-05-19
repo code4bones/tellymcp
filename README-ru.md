@@ -223,6 +223,9 @@ tellymcp init both
 - `/api/gateway`
 - `/api/healthz`
 
+Пример nginx-конфига:
+- [docs/tellymcp.gw.conf](docs/tellymcp.gw.conf)
+
 Проверка:
 
 ```bash
@@ -325,6 +328,9 @@ docker compose up -d
 - `postgres`
 - `tellymcp-gateway`
 
+Контейнер gateway ставит опубликованный пакет `@deadragdoll/tellymcp` напрямую.
+Локальные TypeScript-исходники внутри Docker больше не собираются.
+
 Внутри Docker compose сам переопределяет:
 
 - `MCP_HTTP_HOST=0.0.0.0`
@@ -337,6 +343,9 @@ docker compose up -d
 - `http://127.0.0.1:8080/api/mcp`
 - `http://127.0.0.1:8080/api/webapp`
 - `http://127.0.0.1:8080/api/gateway`
+
+Пример nginx-конфига:
+- [docs/tellymcp.gw.conf](docs/tellymcp.gw.conf)
 
 Остановить всё:
 

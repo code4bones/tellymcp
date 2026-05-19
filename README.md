@@ -225,6 +225,9 @@ tellymcp init both
 - `/api/gateway`
 - `/api/healthz`
 
+Example nginx snippet:
+- [docs/tellymcp.gw.conf](docs/tellymcp.gw.conf)
+
 4. Validate the setup:
 
 ```bash
@@ -906,6 +909,9 @@ This starts:
 - `postgres`
 - `tellymcp-gateway`
 
+The gateway container installs the published `@deadragdoll/tellymcp` package directly.
+It does not build local TypeScript sources inside Docker.
+
 Inside Docker, compose overrides:
 
 - `MCP_HTTP_HOST=0.0.0.0`
@@ -918,6 +924,9 @@ Public endpoint expectations stay the same:
 - `http://127.0.0.1:8080/api/mcp`
 - `http://127.0.0.1:8080/api/webapp`
 - `http://127.0.0.1:8080/api/gateway`
+
+Example nginx snippet:
+- [docs/tellymcp.gw.conf](docs/tellymcp.gw.conf)
 
 Stop everything:
 

@@ -52,6 +52,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.gateway
+      args:
+        TELLYMCP_VERSION: 0.0.10
     restart: unless-stopped
     depends_on:
       redis:

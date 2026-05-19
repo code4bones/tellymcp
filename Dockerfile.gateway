@@ -1,26 +1,12 @@
-FROM node:24-bookworm AS builder
-
-WORKDIR /app
-
-COPY package.json yarn.lock ./
-RUN corepack enable && yarn install --frozen-lockfile
-
-COPY tsconfig.json tsconfig.build.json tsconfig.editor.json tsconfig.eslint.json ./
-COPY eslint.config.js .prettierrc.json .prettierignore ./
-COPY src ./src
-
-RUN yarn build
-
-FROM node:24-bookworm-slim AS runtime
+FROM node:24-bookworm-slim
 
 WORKDIR /app
 
 ENV NODE_ENV=production
+ARG TELLYMCP_VERSION=0.0.10
 
-COPY package.json yarn.lock ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
+RUN npm install -g "@deadragdoll/tellymcp@${TELLYMCP_VERSION}"
 
 EXPOSE 8080
 
-CMD ["node", "dist/cli.js", "run", "--env", "/app/.env-gateway"]
+CMD ["tellymcp", "run", "--env", "/app/.env-gateway"]

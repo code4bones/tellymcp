@@ -52,7 +52,7 @@ services:
       context: .
       dockerfile: Dockerfile.gateway
       args:
-        TELLYMCP_VERSION: 0.0.10
+        TELLYMCP_VERSION: ${TELLYMCP_VERSION:-0.0.10}
     restart: unless-stopped
     depends_on:
       redis:
@@ -67,8 +67,8 @@ services:
     ports:
       - "8090:8080"
     volumes:
-      - ./.env-gateway:/app/.env-gateway:ro
-      - ./.tellymcp:/app/.tellymcp
+      - ${GATEWAY_ENV_FILE:-./.env-gateway}:/app/.env-gateway:ro
+      - ${LOG_HOST_DIR:-./.tellymcp}:/app/.tellymcp
 
 volumes:
   redis_data:

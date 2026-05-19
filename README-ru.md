@@ -357,19 +357,36 @@ docker compose up -d
 
 Ожидаемая схема:
 
-- runner работает с тэгом `gateway`
-- `DEPLOY_DIR` задан как GitLab CI/CD variable
-- `DEPLOY_DIR` — это постоянный git checkout этого репозитория на сервере шлюза
-- `DEPLOY_DIR/.env-gateway` уже существует и хранится только на сервере
+- runner умеет выполнять `docker`
 - пользователь runner-а умеет выполнять `docker compose`
+- `GATEWAY_ENV_FILE` задан как GitLab CI/CD variable
+- этот файл уже существует на сервере, например `/opt/tellymcp/.env-gateway`
+- опционально `LOG_HOST_DIR` указывает на постоянную директорию логов на хосте
+
+Структура pipeline:
+
+1. `build:package`
+2. `deploy:gateway`
 
 Что происходит на тэге вида `0.0.10` или `v0.0.10`:
 
-- job переключает `DEPLOY_DIR` на нужный commit
-- сохраняет `.env-gateway` и `.tellymcp/`
-- выполняет `yarn install`, `yarn lint`, `yarn test`
-- собирает свежий `deadragdoll-tellymcp-*.tgz` через `npm pack`
-- запускает `docker compose up -d --build --force-recreate`
+- `build:package` запускается внутри `node:24-bookworm-slim` через `docker run`
+- там выполняются `yarn install`, `yarn lint`, `yarn test`, `npm pack`
+- GitLab сохраняет `deadragdoll-tellymcp-*.tgz` как artifact
+- `deploy:gateway` получает этот artifact
+- deploy job экспортирует `TELLYMCP_VERSION` из `package.json`
+- deploy job подставляет `GATEWAY_ENV_FILE` в compose
+- `docker compose build` видит локальный `.tgz` и ставит его внутри `Dockerfile.gateway`
+- `docker compose up -d --force-recreate` перезапускает стек шлюза
+
+Такой deploy path не требует `node`, `yarn` или `npm` на хосте runner-а.
+На сервере нужны только:
+
+- `docker compose`
+- доступ к workspace, который создаёт GitLab CI
+- внешний `.env-gateway`, заданный через `GATEWAY_ENV_FILE`
+
+Сама установка пакета происходит уже внутри Docker через [Dockerfile.gateway](Dockerfile.gateway).
 
 Основные файлы:
 

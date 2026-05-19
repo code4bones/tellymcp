@@ -1,42 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DEPLOY_DIR="${DEPLOY_DIR:-}"
-DEPLOY_REF="${CI_COMMIT_SHA:-${1:-HEAD}}"
+GATEWAY_ENV_FILE="${GATEWAY_ENV_FILE:-}"
 DEPLOY_TAG="${CI_COMMIT_TAG:-}"
-RUN_LINT="${RUN_LINT:-true}"
-RUN_TESTS="${RUN_TESTS:-true}"
+LOG_HOST_DIR="${LOG_HOST_DIR:-}"
 
-if [[ -z "${DEPLOY_DIR}" ]]; then
-  echo "DEPLOY_DIR is required." >&2
+if [[ -z "${GATEWAY_ENV_FILE}" ]]; then
+  echo "GATEWAY_ENV_FILE is required." >&2
   exit 1
 fi
 
-if [[ ! -d "${DEPLOY_DIR}" ]]; then
-  echo "DEPLOY_DIR does not exist: ${DEPLOY_DIR}" >&2
+if [[ ! -f "${GATEWAY_ENV_FILE}" ]]; then
+  echo "Missing gateway env file: ${GATEWAY_ENV_FILE}" >&2
   exit 1
 fi
 
-if [[ ! -d "${DEPLOY_DIR}/.git" ]]; then
-  echo "DEPLOY_DIR must be a git checkout: ${DEPLOY_DIR}" >&2
+ARCHIVE="$(find . -maxdepth 1 -type f -name 'deadragdoll-tellymcp-*.tgz' | sort | tail -n 1)"
+if [[ -z "${ARCHIVE}" ]]; then
+  echo "No deadragdoll-tellymcp-*.tgz artifact found in current workspace." >&2
   exit 1
 fi
 
-if [[ ! -f "${DEPLOY_DIR}/.env-gateway" ]]; then
-  echo "Missing ${DEPLOY_DIR}/.env-gateway" >&2
+extract_package_version() {
+  local package_json
+  package_json="$(<package.json)"
+  sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*$/\1/p' \
+    <<<"${package_json}" \
+    | head -n 1
+}
+
+PACKAGE_VERSION="$(extract_package_version)"
+if [[ -z "${PACKAGE_VERSION}" ]]; then
+  echo "Failed to extract version from package.json" >&2
   exit 1
 fi
-
-echo "Deploy directory: ${DEPLOY_DIR}"
-echo "Deploy ref: ${DEPLOY_REF}"
-
-cd "${DEPLOY_DIR}"
-
-git fetch --tags origin
-git checkout --force "${DEPLOY_REF}"
-git clean -fdx -e .env-gateway -e .tellymcp
-
-PACKAGE_VERSION="$(node -p "require('./package.json').version")"
 if [[ -n "${DEPLOY_TAG}" ]]; then
   if [[ "${DEPLOY_TAG}" != "${PACKAGE_VERSION}" && "${DEPLOY_TAG}" != "v${PACKAGE_VERSION}" ]]; then
     echo "Tag ${DEPLOY_TAG} does not match package.json version ${PACKAGE_VERSION}" >&2
@@ -44,25 +41,24 @@ if [[ -n "${DEPLOY_TAG}" ]]; then
   fi
 fi
 
-echo "Installing dependencies for ${PACKAGE_VERSION}"
-yarn install --frozen-lockfile
-
-if [[ "${RUN_LINT}" == "true" ]]; then
-  echo "Running lint"
-  yarn lint
+if [[ -z "${LOG_HOST_DIR}" ]]; then
+  LOG_HOST_DIR="$(dirname "${GATEWAY_ENV_FILE}")/.tellymcp"
 fi
 
-if [[ "${RUN_TESTS}" == "true" ]]; then
-  echo "Running tests"
-  yarn test
-fi
+mkdir -p "${LOG_HOST_DIR}"
 
-echo "Packing npm archive"
-rm -f deadragdoll-tellymcp-*.tgz
-npm pack
+export TELLYMCP_VERSION="${PACKAGE_VERSION}"
+export GATEWAY_ENV_FILE
+export LOG_HOST_DIR
+
+echo "Deploying TellyMCP gateway ${TELLYMCP_VERSION}"
+echo "Artifact: ${ARCHIVE}"
+echo "Gateway env: ${GATEWAY_ENV_FILE}"
+echo "Log host dir: ${LOG_HOST_DIR}"
 
 echo "Rebuilding gateway container stack"
-docker compose up -d --build --force-recreate
+docker compose build --pull tellymcp-gateway
+docker compose up -d --force-recreate
 
 echo "Gateway deployment completed"
 docker compose ps

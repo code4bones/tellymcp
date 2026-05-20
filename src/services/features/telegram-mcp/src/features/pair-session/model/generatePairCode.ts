@@ -14,6 +14,10 @@ import type {
 import { createPairCode } from "../../../shared/lib/ids/ids";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
+import {
+  callGatewayJson,
+  ensureGatewayClientUuid,
+} from "../../distributed-client/model/gatewayClientAccess";
 
 export class PairSessionService {
   private static readonly MAX_PAIR_CODE_ATTEMPTS = 20;
@@ -66,6 +70,81 @@ export class PairSessionService {
         `Gateway session unregister failed with status ${response.status}: ${text || response.statusText}`,
       );
     }
+  }
+
+  private async mirrorPairCodeToGateway(input: {
+    code: string;
+    sessionId: string;
+    sessionLabel?: string;
+    expiresAt: string;
+    createdAt: string;
+  }): Promise<void> {
+    if (!this.config.distributed.gatewayPublicUrl) {
+      return;
+    }
+
+    const clientUuid = await ensureGatewayClientUuid({
+      maintenanceStore: this.maintenanceStore,
+      gatewayPublicUrl: this.config.distributed.gatewayPublicUrl,
+      ...(this.config.distributed.gatewayAuthToken
+        ? { gatewayAuthToken: this.config.distributed.gatewayAuthToken }
+        : {}),
+      ...(this.config.project.name ? { projectName: this.config.project.name } : {}),
+      ...(this.config.telegram.botUsername
+        ? { botUsername: this.config.telegram.botUsername }
+        : {}),
+      ...(this.config.distributed.gatewayToken
+        ? { gatewayToken: this.config.distributed.gatewayToken }
+        : {}),
+    });
+
+    await callGatewayJson({
+      gatewayPublicUrl: this.config.distributed.gatewayPublicUrl,
+      ...(this.config.distributed.gatewayAuthToken
+        ? { gatewayAuthToken: this.config.distributed.gatewayAuthToken }
+        : {}),
+      endpointPath: "/pair-codes/register",
+      body: {
+        code: input.code,
+        session_id: input.sessionId,
+        ...(input.sessionLabel ? { session_label: input.sessionLabel } : {}),
+        client_uuid: clientUuid,
+        local_session_id: input.sessionId,
+        created_at: input.createdAt,
+        expires_at: input.expiresAt,
+      },
+    });
+  }
+
+  public async registerRemotePairCode(input: {
+    code: string;
+    sessionId: string;
+    sessionLabel?: string;
+    targetClientUuid: string;
+    targetLocalSessionId: string;
+    createdAt: string;
+    expiresAt: string;
+  }): Promise<boolean> {
+    const expiresAtMs = new Date(input.expiresAt).getTime();
+    const ttlSeconds = Math.max(
+      1,
+      Math.ceil((expiresAtMs - Date.now()) / 1000),
+    );
+
+    return this.bindingStore.createPairCode(
+      {
+        code: input.code.trim().toUpperCase(),
+        sessionId: input.sessionId,
+        ...(input.sessionLabel?.trim()
+          ? { sessionLabel: input.sessionLabel.trim() }
+          : {}),
+        targetClientUuid: input.targetClientUuid.trim(),
+        targetLocalSessionId: input.targetLocalSessionId.trim(),
+        createdAt: input.createdAt,
+        expiresAt: input.expiresAt,
+      },
+      ttlSeconds,
+    );
   }
 
   public async createPairCode(
@@ -196,6 +275,14 @@ export class PairSessionService {
       tmuxPaneIndex: input.tmux_pane_index,
       expiresAt,
       ttlSeconds,
+    });
+
+    await this.mirrorPairCodeToGateway({
+      code,
+      sessionId: resolved.sessionId,
+      ...(resolved.sessionLabel ? { sessionLabel: resolved.sessionLabel } : {}),
+      createdAt: now.toISOString(),
+      expiresAt,
     });
 
     return {

@@ -36,6 +36,50 @@ const TelegramMcpPairService: ServiceSchema = {
     },
   },
 
+  actions: {
+    registerRemotePairCode: {
+      params: {
+        code: "string",
+        session_id: "string",
+        created_at: "string",
+        expires_at: "string",
+        client_uuid: "string",
+        local_session_id: "string",
+        session_label: { type: "string", optional: true },
+      },
+      async handler(this: PairServiceCarrier, ctx) {
+        const service = this.getPairSessionService?.();
+        if (!service) {
+          throw new Error("telegram_mcp pair service is not initialized yet");
+        }
+
+        const params = ctx.params as {
+          code: string;
+          session_id: string;
+          created_at: string;
+          expires_at: string;
+          client_uuid: string;
+          local_session_id: string;
+          session_label?: string;
+        };
+
+        const registered = await service.registerRemotePairCode({
+          code: params.code,
+          sessionId: params.session_id,
+          ...(params.session_label?.trim()
+            ? { sessionLabel: params.session_label.trim() }
+            : {}),
+          targetClientUuid: params.client_uuid,
+          targetLocalSessionId: params.local_session_id,
+          createdAt: params.created_at,
+          expiresAt: params.expires_at,
+        });
+
+        return { registered };
+      },
+    },
+  },
+
   async started(this: PairServiceCarrier) {
     await this.broker.waitForServices([TELEGRAM_MCP_RUNTIME_SERVICE_NAME]);
 

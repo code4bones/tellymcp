@@ -4236,10 +4236,24 @@ export class TelegramTransport implements HumanTransport {
     if (text && isMenuEntryCommand(text)) {
       const isAdminAuthorized =
         await this.isPrincipalAdminAuthorized(principal);
-      const hasLinkedSessions = principal
-        ? (await this.bindingStore.listBoundSessionIdsForPrincipal(principal)).length >
-          0
-        : false;
+      const activeSessionId = principal
+        ? await this.bindingStore.getActiveSessionIdForPrincipal(principal)
+        : null;
+      const boundSessionIds = principal
+        ? await this.bindingStore.listBoundSessionIdsForPrincipal(principal)
+        : [];
+      const hasLinkedSessions =
+        Boolean(activeSessionId) || boundSessionIds.length > 0;
+
+      this.logger.info("Gateway /menu routing evaluated", {
+        chatId: ctx.chat?.id,
+        userId: ctx.from?.id,
+        isAdminAuthorized,
+        activeSessionId,
+        boundSessionCount: boundSessionIds.length,
+        boundSessionIds,
+      });
+
       if (hasLinkedSessions) {
         this.clearPendingInteractionsForContext(ctx);
         await this.showSessionsMenu(ctx);
@@ -4255,10 +4269,14 @@ export class TelegramTransport implements HumanTransport {
     if (text && isHelpCommand(text)) {
       const isAdminAuthorized =
         await this.isPrincipalAdminAuthorized(principal);
-      const hasLinkedSessions = principal
-        ? (await this.bindingStore.listBoundSessionIdsForPrincipal(principal)).length >
-          0
-        : false;
+      const activeSessionId = principal
+        ? await this.bindingStore.getActiveSessionIdForPrincipal(principal)
+        : null;
+      const boundSessionIds = principal
+        ? await this.bindingStore.listBoundSessionIdsForPrincipal(principal)
+        : [];
+      const hasLinkedSessions =
+        Boolean(activeSessionId) || boundSessionIds.length > 0;
       if (hasLinkedSessions) {
         this.clearPendingInteractionsForContext(ctx);
         await this.showHelp(ctx);
@@ -4375,6 +4393,41 @@ export class TelegramTransport implements HumanTransport {
       await this.replyText(ctx, "Unable to determine Telegram user or chat.", {
         kind: "transport",
       });
+      return;
+    }
+
+    if (pairCode.targetClientUuid && pairCode.targetLocalSessionId) {
+      const principal = {
+        telegramChatId: chatId,
+        telegramUserId: fromUserId,
+      };
+
+      const session = await this.bindRelaySessionToPrincipal({
+        principal,
+        ctx,
+        payload: {
+          sessionId: pairCode.sessionId,
+          targetSessionId: pairCode.targetLocalSessionId,
+          targetSessionLabel:
+            pairCode.sessionLabel ?? pairCode.targetLocalSessionId,
+          targetClientUuid: pairCode.targetClientUuid,
+          targetLocalSessionId: pairCode.targetLocalSessionId,
+        },
+      });
+
+      this.logger.info("Gateway relay session linked via pairing code", {
+        code,
+        sessionId: session.sessionId,
+        targetClientUuid: pairCode.targetClientUuid,
+        targetLocalSessionId: pairCode.targetLocalSessionId,
+        telegramChatId: chatId,
+        telegramUserId: fromUserId,
+      });
+
+      await this.showSessionsMenu(
+        ctx,
+        "Pairing complete. Choose the active session from the menu.",
+      );
       return;
     }
 

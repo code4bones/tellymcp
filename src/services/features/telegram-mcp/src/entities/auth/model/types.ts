@@ -32,6 +32,8 @@ export type PairCodeRecord = {
   code: string;
   sessionId: string;
   sessionLabel?: string | undefined;
+  targetClientUuid?: string | undefined;
+  targetLocalSessionId?: string | undefined;
   createdAt: string;
   expiresAt: string;
 };

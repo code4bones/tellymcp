@@ -1,16 +1,24 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import net from "node:net";
 import { parse as parseDotenv } from "dotenv";
+import Redis from "ioredis";
 import pc from "picocolors";
 import WebSocket from "ws";
 import { getTellyMcpPackageVersion } from "./services/features/telegram-mcp/src/shared/lib/version/versionHandshake";
 
 type InitMode = "client" | "gateway" | "both";
-type CliCommand = "help" | "init" | "run" | "mcp" | "doctor" | "browser";
+type CliCommand =
+  | "help"
+  | "init"
+  | "run"
+  | "mcp"
+  | "doctor"
+  | "browser"
+  | "system-prune";
 
 const distDir = __dirname;
 const packageRoot = path.resolve(distDir, "..");
@@ -113,6 +121,7 @@ function printHelp(): void {
     "  tellymcp run [--env <file>]",
     "  tellymcp run --env=<file>",
     "  tellymcp doctor [--env <file>]",
+    "  tellymcp system-prune [--env <file>] --yes",
     "  tellymcp browser install",
     "  tellymcp mcp [--url <url>] [--bearer <token>] [--format claude|legacy]",
     "  tellymcp help",
@@ -123,6 +132,7 @@ function printHelp(): void {
     "  tellymcp run",
     "  tellymcp run --env .env.client",
     "  tellymcp doctor --env .env.client",
+    "  tellymcp system-prune --env .env.gateway --yes",
     "  tellymcp browser install",
     "  tellymcp mcp --help",
   ]);
@@ -139,6 +149,32 @@ function printHelp(): void {
       ...getTmuxInstallHints().map((line) => `    ${line}`),
     ]);
   }
+}
+
+type LoadedCliEnv = {
+  envPath: string;
+  parsed: Record<string, string>;
+};
+
+function loadCliEnv(args: string[]): LoadedCliEnv {
+  const envPath = resolveRunEnvPath(args);
+  if (!existsSync(envPath)) {
+    fail(`Missing env file: ${envPath}`);
+  }
+
+  const envContent = readFileSync(envPath, "utf8");
+  const fileEnv = parseDotenv(envContent);
+  const runtimeEnvOverrides = Object.fromEntries(
+    Object.entries(process.env).filter(([, value]) => typeof value === "string"),
+  ) as Record<string, string>;
+
+  return {
+    envPath,
+    parsed: {
+      ...fileEnv,
+      ...runtimeEnvOverrides,
+    },
+  };
 }
 
 function printMcpHelp(): void {
@@ -512,7 +548,7 @@ async function checkWebSocketUrl(
 }
 
 async function runDoctor(args: string[]): Promise<void> {
-  const envPath = resolveRunEnvPath(args);
+  const { envPath, parsed } = loadCliEnv(args);
   const tmux = getTmuxStatus();
 
   printBanner("doctor", "Local installation diagnostics");
@@ -531,23 +567,6 @@ async function runDoctor(args: string[]): Promise<void> {
     ]);
   }
 
-  if (!existsSync(envPath)) {
-    printSection("env", [
-      `${pc.red("  ERROR")} Missing env file: ${envPath}`,
-      "  Run 'tellymcp init client' or pass --env <file>.",
-    ]);
-    return;
-  }
-
-  const envContent = readFileSync(envPath, "utf8");
-  const fileEnv = parseDotenv(envContent);
-  const runtimeEnvOverrides = Object.fromEntries(
-    Object.entries(process.env).filter(([, value]) => typeof value === "string"),
-  ) as Record<string, string>;
-  const parsed = {
-    ...fileEnv,
-    ...runtimeEnvOverrides,
-  };
   const mode = (parsed.DISTRIBUTED_MODE || "client").trim();
   const httpHost = (parsed.MCP_HTTP_HOST || "0.0.0.0").trim();
   const httpPort =
@@ -771,6 +790,140 @@ async function runDoctor(args: string[]): Promise<void> {
   }
 }
 
+function hasFlag(args: string[], flagName: string): boolean {
+  return args.includes(flagName);
+}
+
+async function runSystemPrune(args: string[]): Promise<void> {
+  const confirmed = hasFlag(args, "--yes");
+  if (!confirmed) {
+    fail("system-prune is destructive. Re-run with --yes.");
+  }
+
+  const filteredArgs = args.filter((arg) => arg !== "--yes");
+  const { envPath, parsed } = loadCliEnv(filteredArgs);
+  const mode = (parsed.DISTRIBUTED_MODE || "client").trim();
+  const redisHost = (parsed.REDIS_HOST || "127.0.0.1").trim();
+  const redisPort = Number(parsed.REDIS_PORT || 6379);
+  const redisDb = Number(parsed.REDIS_DB || 1);
+  const redisUsername = parsed.REDIS_USERNAME?.trim();
+  const redisPassword = parsed.REDIS_PASSWORD?.trim();
+  const dbHost = parsed.DB_HOST?.trim();
+  const dbPort = Number(parsed.DB_PORT || 5432);
+  const dbUser = parsed.DB_USER?.trim();
+  const dbPassword = parsed.DB_PASSWORD?.trim();
+  const dbName = parsed.DB_NAME?.trim();
+  const dbSchema = (parsed.DB_SCHEME || "mcp").trim();
+  const xchangeDir = path.resolve(process.cwd(), parsed.MCP_XCHANGE_DIR || ".mcp-xchange");
+  const sessionMarkerPath = path.resolve(process.cwd(), ".mcpsession.json");
+  const sqliteDbPath = path.join(xchangeDir, "xchange.sqlite3");
+
+  printBanner("system-prune", "Destroying local and gateway state");
+  printSection("Target", [
+    `  env: ${envPath}`,
+    `  mode: ${mode}`,
+    `  redis: ${redisHost}:${redisPort}/${redisDb}`,
+    ...(dbHost && dbUser && dbName
+      ? [`  postgres: ${dbHost}:${dbPort}/${dbName} schema ${dbSchema}`]
+      : [`  postgres: ${pc.dim("skipped (not configured)")}`]),
+    `  xchange dir: ${xchangeDir}`,
+    `  session marker: ${sessionMarkerPath}`,
+  ]);
+
+  const redis = new Redis({
+    host: redisHost,
+    port: redisPort,
+    db: redisDb,
+    ...(redisUsername ? { username: redisUsername } : {}),
+    ...(redisPassword ? { password: redisPassword } : {}),
+    maxRetriesPerRequest: 1,
+    enableReadyCheck: true,
+  });
+
+  let deletedRedisKeys = 0;
+  try {
+    let cursor = "0";
+    do {
+      const [nextCursor, keys] = await redis.scan(
+        cursor,
+        "MATCH",
+        "telegram-mcp:*",
+        "COUNT",
+        500,
+      );
+      cursor = nextCursor;
+      if (keys.length > 0) {
+        deletedRedisKeys += await redis.del(...keys);
+      }
+    } while (cursor !== "0");
+  } finally {
+    redis.disconnect();
+  }
+
+  let truncatedTables: string[] = [];
+  if (dbHost && dbUser && dbName) {
+    const { Client: PgClient } = require("pg") as {
+      Client: new (config: Record<string, unknown>) => {
+        connect(): Promise<void>;
+        query(sql: string): Promise<void>;
+        end(): Promise<void>;
+      };
+    };
+    const pg = new PgClient({
+      host: dbHost,
+      port: dbPort,
+      user: dbUser,
+      password: dbPassword,
+      database: dbName,
+    });
+
+    try {
+      await pg.connect();
+      truncatedTables = [
+        "gateway_deliveries",
+        "gateway_message_artifacts",
+        "gateway_messages",
+        "gateway_session_links",
+        "gateway_sessions",
+        "gateway_project_members",
+        "gateway_projects",
+        "gateway_clients",
+      ];
+      await pg.query(
+        `TRUNCATE TABLE ${truncatedTables
+          .map((table) => `"${dbSchema}"."${table}"`)
+          .join(", ")} RESTART IDENTITY CASCADE`,
+      );
+    } finally {
+      await pg.end();
+    }
+  }
+
+  let deletedLocalArtifacts = 0;
+  if (existsSync(sqliteDbPath)) {
+    rmSync(sqliteDbPath, { force: true });
+    deletedLocalArtifacts += 1;
+  }
+  if (existsSync(xchangeDir)) {
+    rmSync(xchangeDir, { recursive: true, force: true });
+    deletedLocalArtifacts += 1;
+  }
+  if (existsSync(sessionMarkerPath)) {
+    rmSync(sessionMarkerPath, { force: true });
+    deletedLocalArtifacts += 1;
+  }
+
+  printSection("Result", [
+    `${pc.green("  OK")} redis keys deleted: ${deletedRedisKeys}`,
+    ...(truncatedTables.length > 0
+      ? [
+          `${pc.green("  OK")} postgres tables truncated: ${truncatedTables.join(", ")}`,
+        ]
+      : [`${pc.dim("  SKIP")} postgres tables: not configured`]),
+    `${pc.green("  OK")} local artifacts removed: ${deletedLocalArtifacts}`,
+  ]);
+}
+
 function runBrowserCommand(args: string[]): void {
   const [subcommand] = args;
   if (!subcommand || subcommand === "--help" || subcommand === "-h") {
@@ -870,7 +1023,7 @@ function runRuntime(args: string[]): void {
 
 async function main(argv: string[]): Promise<void> {
   const [rawCommand, firstArg, secondArg] = argv;
-  const command: CliCommand = rawCommand === "init" || rawCommand === "run" || rawCommand === "help" || rawCommand === "mcp" || rawCommand === "doctor" || rawCommand === "browser"
+  const command: CliCommand = rawCommand === "init" || rawCommand === "run" || rawCommand === "help" || rawCommand === "mcp" || rawCommand === "doctor" || rawCommand === "browser" || rawCommand === "system-prune"
     ? rawCommand
     : "help";
 
@@ -896,6 +1049,11 @@ async function main(argv: string[]): Promise<void> {
 
   if (command === "browser") {
     runBrowserCommand(argv.slice(1));
+    return;
+  }
+
+  if (command === "system-prune") {
+    await runSystemPrune(argv.slice(1));
     return;
   }
 

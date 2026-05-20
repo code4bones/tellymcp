@@ -59,7 +59,7 @@ export type SendPartnerNoteOutput = {
   share_id: string;
   delivery_status: "queued" | "delivered";
   note_path: string;
-  share_index_path: string;
+  xchange_record_id: string;
   copied_artifacts: string[];
   inbox_message_id: string;
   requires_reply: boolean;

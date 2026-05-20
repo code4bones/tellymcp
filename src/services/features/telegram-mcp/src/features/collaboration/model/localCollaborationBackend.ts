@@ -17,12 +17,19 @@ import type {
 import { createInboxMessageId } from "../../../shared/lib/ids/ids";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import type { ResolvedSessionDefaults } from "../../../shared/lib/project-identity/projectIdentity";
+import {
+  buildIncomingPartnerActionDesc,
+  buildIncomingPartnerTools,
+  buildOutgoingPartnerActionDesc,
+  buildOutgoingPartnerTools,
+} from "../../../shared/lib/xchangeRecordHints";
 import type { MinioExchangeStore } from "../../../shared/integrations/object-storage/minioExchangeStore";
 import {
   readWorkspaceFile,
   writeXchangeRelativeFile,
 } from "../../../shared/integrations/tmux/client";
 import { TelegramTransport } from "../../../shared/integrations/telegram/transport";
+import { upsertXchangeRecord } from "../../../shared/integrations/xchange/sqliteRecordStore";
 import type { CollaborationBackend } from "./backend";
 
 function slugify(input: string): string {
@@ -69,8 +76,6 @@ const SOURCE_ARTIFACT_EXTENSIONS = new Set([
   ".zsh",
 ]);
 
-const PARTNER_INDEX_FILE_NAME = "SHARED_INDEX.md";
-
 function trimOptional(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
@@ -115,10 +120,12 @@ function renderYamlArray(values: string[]): string {
 }
 
 function buildPartnerInboxText(input: {
+  recordId: string;
   kind: PartnerNoteKind;
   fromLabel: string;
   summary: string;
   notePath: string;
+  actionDesc: string;
   requiresReply: boolean;
   copiedArtifacts: string[];
 }): string {
@@ -137,8 +144,10 @@ function buildPartnerInboxText(input: {
     kindTitle,
     `From: ${input.fromLabel}`,
     `Summary: ${input.summary}`,
+    `Xchange record: ${input.recordId}`,
     "",
-    `Immediate action: read ${PARTNER_INDEX_FILE_NAME} and then open the note below.`,
+    "Immediate action: call get_xchange_record for this record and follow its action_desc.",
+    `Action: ${input.actionDesc}`,
     `Note: ${input.notePath}`,
     ...(input.copiedArtifacts.length > 0
       ? ["", "Artifacts:", ...input.copiedArtifacts.map((item) => `- ${item}`)]
@@ -219,24 +228,6 @@ function buildNoteContent(input: {
   }
 
   return `${lines.join("\n")}\n`;
-}
-
-function buildShareIndexLine(input: {
-  createdAt: string;
-  sourceLabel: string;
-  targetLabel: string;
-  kind: PartnerNoteKind;
-  summary: string;
-  relativeNotePath: string;
-}): string {
-  return [
-    "-",
-    `[${input.createdAt}]`,
-    `${input.sourceLabel} → ${input.targetLabel}`,
-    `| ${input.kind} |`,
-    `${input.summary}`,
-    `| \`${input.relativeNotePath}\``,
-  ].join(" ");
 }
 
 export class LocalCollaborationBackend implements CollaborationBackend {
@@ -349,22 +340,93 @@ export class LocalCollaborationBackend implements CollaborationBackend {
       mimeType: "text/markdown",
       sizeBytes: this.textEncoder.encode(noteContent).byteLength,
     });
-    const shareIndexPath = await writeXchangeRelativeFile(
+    const targetActionDesc = buildIncomingPartnerActionDesc(
+      input.kind,
+      requiresReply,
+    );
+    const targetTools = buildIncomingPartnerTools(input.kind, requiresReply);
+    await upsertXchangeRecord(
       this.config.tmux,
       targetWorkspaceDir,
       this.config.exchange.dir,
-      PARTNER_INDEX_FILE_NAME,
-      this.textEncoder.encode(
-        `${buildShareIndexLine({
-          createdAt,
-          sourceLabel,
-          targetLabel,
-          kind: input.kind,
-          summary: input.summary.trim(),
-          relativeNotePath,
-        })}\n`,
-      ),
-      { append: true },
+      {
+        record_id: shareId,
+        session_id: targetSession.sessionId,
+        category: "partner_note",
+        direction: "incoming",
+        status: "new",
+        kind: input.kind,
+        summary: input.summary.trim(),
+        body_text: noteContent,
+        action_desc: targetActionDesc,
+        tools: targetTools,
+        note_path: notePath,
+        note_relative_path: relativeNotePath,
+        source_session_id: sourceSession.sessionId,
+        source_label: sourceLabel,
+        target_session_id: targetSession.sessionId,
+        target_label: targetLabel,
+        requires_reply: requiresReply,
+        ...(inReplyTo ? { in_reply_to: inReplyTo } : {}),
+        ...(expectedReply ? { expected_reply: expectedReply } : {}),
+        attachments: [
+          {
+            file_path: notePath,
+            relative_path: relativeNotePath,
+            original_name: path.basename(relativeNotePath),
+            mime_type: "text/markdown",
+            size_bytes: this.textEncoder.encode(noteContent).byteLength,
+          },
+          ...copiedArtifacts.map((filePath) => ({
+            file_path: filePath,
+          })),
+        ],
+        tags: [
+          "partner",
+          input.kind,
+          ...(requiresReply ? ["requires-reply"] : []),
+        ],
+        created_at: createdAt,
+        updated_at: createdAt,
+      },
+    );
+    await upsertXchangeRecord(
+      this.config.tmux,
+      sourceWorkspaceDir,
+      this.config.exchange.dir,
+      {
+        record_id: shareId,
+        session_id: sourceSession.sessionId,
+        category: "partner_note",
+        direction: "outgoing",
+        status: "read",
+        kind: input.kind,
+        summary: input.summary.trim(),
+        body_text: noteContent,
+        action_desc: buildOutgoingPartnerActionDesc(input.kind, requiresReply),
+        tools: buildOutgoingPartnerTools(input.kind, requiresReply),
+        note_path: notePath,
+        note_relative_path: relativeNotePath,
+        source_session_id: sourceSession.sessionId,
+        source_label: sourceLabel,
+        target_session_id: targetSession.sessionId,
+        target_label: targetLabel,
+        requires_reply: requiresReply,
+        ...(inReplyTo ? { in_reply_to: inReplyTo } : {}),
+        ...(expectedReply ? { expected_reply: expectedReply } : {}),
+        attachments: copiedArtifacts.map((filePath) => ({
+          file_path: filePath,
+        })),
+        tags: [
+          "partner",
+          "outgoing",
+          input.kind,
+          ...(requiresReply ? ["awaiting-reply"] : []),
+        ],
+        created_at: createdAt,
+        updated_at: createdAt,
+        read_at: createdAt,
+      },
     );
 
     const inboxMessage: TelegramInboxMessage = {
@@ -374,10 +436,12 @@ export class LocalCollaborationBackend implements CollaborationBackend {
       telegramUserId: targetBinding.telegramUserId,
       sourceTelegramMessageId: now.getTime(),
       text: buildPartnerInboxText({
+        recordId: shareId,
         kind: input.kind,
         fromLabel: sourceLabel,
         summary: input.summary.trim(),
         notePath,
+        actionDesc: targetActionDesc,
         requiresReply,
         copiedArtifacts,
       }),
@@ -451,7 +515,7 @@ export class LocalCollaborationBackend implements CollaborationBackend {
       share_id: shareId,
       delivery_status: "delivered",
       note_path: notePath,
-      share_index_path: shareIndexPath,
+      xchange_record_id: shareId,
       copied_artifacts: copiedArtifacts,
       inbox_message_id: inboxMessage.id,
       requires_reply: requiresReply,

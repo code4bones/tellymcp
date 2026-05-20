@@ -25,7 +25,7 @@ export class GetTelegramInboxTool implements ToolModule {
       {
         title: "Get Telegram Inbox",
         description:
-          "Use this to read unsolicited Telegram inbox messages stored for the session. Pass session_id explicitly after pairing; do not rely on implicit defaults unless cwd is also correct for this agent workspace. Each item now includes message_kind: human or system. Treat system messages as operational instructions from the service, not as normal user prompts. Returned items may also include local attachment paths from .mcp-xchange when the human message contained a photo or document. Do not use this first for partner-note wakeups; partner collaboration notes must be read from .mcp-xchange/SHARED_INDEX.md and the referenced note files.",
+          "Use this to read unsolicited Telegram inbox messages stored for the session. Pass session_id explicitly after pairing; do not rely on implicit defaults unless cwd is also correct for this agent workspace. Each item now includes message_kind: human or system. Treat system messages as operational instructions from the service, not as normal user prompts. Returned items may also include local attachment paths from .mcp-xchange when the human message contained a photo or document. Do not use this first for partner-note wakeups; for collaboration and local handoff wakeups, use list_xchange_records and then get_xchange_record.",
         inputSchema: getTelegramInboxInputSchema,
         outputSchema: getTelegramInboxOutputSchema,
       },

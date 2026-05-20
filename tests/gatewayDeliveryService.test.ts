@@ -3,7 +3,15 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 vi.mock(
   "../src/services/features/telegram-mcp/src/shared/integrations/tmux/client",
   () => ({
+    ensureXchangeDir: vi.fn(async () => "/workspace/.mcp-xchange"),
     writeXchangeRelativeFile: vi.fn(),
+  }),
+);
+
+vi.mock(
+  "../src/services/features/telegram-mcp/src/shared/integrations/xchange/sqliteRecordStore",
+  () => ({
+    upsertXchangeRecord: vi.fn(),
   }),
 );
 
@@ -31,7 +39,6 @@ type GatewayDelivery = {
   target_session_label: string;
   created_at: string;
   note_relative_path: string;
-  share_index_file_name: string;
   artifacts: Array<{
     artifact_uuid: string;
     original_name: string;
@@ -119,7 +126,6 @@ function createDelivery(overrides?: Partial<GatewayDelivery>): GatewayDelivery {
     target_session_label: "backend",
     created_at: "2026-05-16T00:00:00.000Z",
     note_relative_path: "shares/share-1.md",
-    share_index_file_name: "SHARED_INDEX.md",
     artifacts: [],
     ...overrides,
   };
@@ -196,8 +202,7 @@ describe("gatewayDelivery service", () => {
     });
     mockedWriteXchangeRelativeFile
       .mockResolvedValueOnce("/workspace/.mcp-xchange/shares/files/share-1/wicardd.conf")
-      .mockResolvedValueOnce("/workspace/.mcp-xchange/shares/share-1.md")
-      .mockResolvedValueOnce("/workspace/.mcp-xchange/SHARED_INDEX.md");
+      .mockResolvedValueOnce("/workspace/.mcp-xchange/shares/share-1.md");
 
     await methods.materializeIncomingDelivery.call(harness, delivery);
 

@@ -105,7 +105,7 @@ const envSchema = z.object({
   TMUX_PARTNER_NUDGE_MESSAGE: z
     .string()
     .min(1)
-    .default("не inbox: прочитай SHARED_INDEX.md и partner note"),
+    .default("не inbox: проверь xchange records и partner note"),
   TMUX_CAPTURE_MODE: z.enum(["visible", "lines"]).default("visible"),
   TMUX_CAPTURE_LINES: z.coerce.number().int().positive().default(300),
   TMUX_PROMPT_SCAN_ENABLED: z

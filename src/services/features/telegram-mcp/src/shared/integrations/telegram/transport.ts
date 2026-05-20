@@ -84,6 +84,11 @@ import {
   detectTmuxInteractivePrompt,
   type TmuxPromptDetection,
 } from "../../lib/tmuxPromptDetection";
+import {
+  buildLocalHandoffActionDesc,
+  buildLocalHandoffTools,
+} from "../../lib/xchangeRecordHints";
+import { upsertXchangeRecord } from "../xchange/sqliteRecordStore";
 
 type WaiterRecord = {
   requestId: string;
@@ -311,7 +316,6 @@ type StoredAttachmentRecord = {
   mimeType?: string | undefined;
 };
 
-const LOCAL_INDEX_FILE_NAME = "LOCAL_INDEX.md";
 type WebAppLaunchMode = "default" | "expand" | "fullscreen";
 const TMUX_NUDGE_FAILURE_NOTICE_COOLDOWN_MS = 5 * 60 * 1000;
 const TMUX_PROMPT_SCAN_MATCHED_LINES_LIMIT = 6;
@@ -629,20 +633,6 @@ function normalizeGatewayBaseUrl(value: string): URL {
 function buildLocalHandoffId(fileName: string, now: Date): string {
   const timestamp = now.toISOString().replace(/[:.]/gu, "-");
   return `${timestamp}-${slugifyFilenamePart(fileName) || "file-handoff"}`;
-}
-
-function buildLocalIndexLine(input: {
-  createdAt: string;
-  summary: string;
-  relativeNotePath: string;
-}): string {
-  return [
-    "-",
-    `[${input.createdAt}]`,
-    `local-handoff |`,
-    `${input.summary}`,
-    `| \`${input.relativeNotePath}\``,
-  ].join(" ");
 }
 
 function buildLocalNoteContent(input: {
@@ -4984,6 +4974,12 @@ export class TelegramTransport implements HumanTransport {
     });
 
     if (!detection) {
+      this.logger.debug("tmux prompt scan found no interactive prompt", {
+        sessionId: session.sessionId,
+        tmuxTarget,
+        strategy: this.config.tmux.promptScanStrategy,
+        minScore: this.config.tmux.promptScanMinScore,
+      });
       this.tmuxPromptNoticeState.delete(session.sessionId);
       return;
     }
@@ -5035,6 +5031,13 @@ export class TelegramTransport implements HumanTransport {
       existing.fingerprint === detection.fingerprint &&
       nowMs - existing.sentAtMs < cooldownMs
     ) {
+      this.logger.debug("tmux prompt detected but notification is on cooldown", {
+        sessionId,
+        fingerprint: detection.fingerprint,
+        score: detection.score,
+        reasons: detection.reasons,
+        cooldownSeconds: this.config.tmux.promptScanCooldownSeconds,
+      });
       return false;
     }
 
@@ -5086,12 +5089,39 @@ export class TelegramTransport implements HumanTransport {
       ].join("\n"),
     });
 
+    try {
+      await this.sendLiveViewLauncherMessage({
+        principal: {
+          telegramChatId: binding.telegramChatId,
+          telegramUserId: binding.telegramUserId,
+        },
+        sessionId: session.sessionId,
+        sessionName: sessionLabel,
+        locale,
+      });
+    } catch (error) {
+      this.logger.warn("Failed to deliver tmux prompt live launcher", {
+        sessionId: session.sessionId,
+        tmuxTarget,
+        telegramChatId: binding.telegramChatId,
+        telegramUserId: binding.telegramUserId,
+        error:
+          error instanceof Error
+            ? (error.stack ?? error.message)
+            : String(error),
+      });
+    }
+
     this.logger.info("tmux prompt detected", {
       sessionId: session.sessionId,
       tmuxTarget,
       score: detection.score,
+      strategy: this.config.tmux.promptScanStrategy,
+      minScore: this.config.tmux.promptScanMinScore,
       reasons: detection.reasons,
       fingerprint: detection.fingerprint,
+      matchedLines: detection.matchedLines,
+      excerpt,
     });
   }
 
@@ -8061,64 +8091,24 @@ export class TelegramTransport implements HumanTransport {
 
     const session = await this.sessionStore.getSession(activeSessionId);
     const actor = this.getGatewayActorFromContext(ctx);
-    const useGatewayRelay =
-      this.config.distributed.mode === "client" &&
-      Boolean(this.config.distributed.gatewayPublicUrl);
-    const clientUuid = useGatewayRelay
-      ? await this.ensureGatewayClientUuid(principal, actor)
-      : null;
-    const baseUrl = useGatewayRelay
-      ? resolveGatewayWebAppBaseUrl(
-          this.config.distributed.gatewayPublicUrl!,
-          this.config.webapp.basePath,
-        )
-      : resolveWebAppPublicBaseUrl(this.config);
-    if (!baseUrl) {
+    const sent = await this.sendLiveViewLauncherMessage({
+      principal,
+      sessionId: activeSessionId,
+      sessionName: session?.label ?? activeSessionId,
+      locale,
+      ...(actor ? { actor } : {}),
+    });
+    if (!sent) {
       await ctx.answerCallbackQuery({
         text: this.t(locale, "menu:live.errors.public_url_missing"),
         show_alert: true,
       });
       return;
     }
-    const liveSessionId =
-      useGatewayRelay && clientUuid
-        ? buildLiveRelaySessionId(clientUuid, activeSessionId)
-        : activeSessionId;
-    const url = new URL(`${baseUrl}/live/${encodeURIComponent(liveSessionId)}`);
-    url.searchParams.set("launchMode", this.config.webapp.launchMode);
 
     await ctx.answerCallbackQuery({
       text: this.t(locale, "menu:live.actions.opening"),
     });
-    const sent = await this.replyText(
-      ctx,
-      [
-        this.t(locale, "menu:live.screen.launcher_title", {
-          sessionName: session?.label ?? activeSessionId,
-        }),
-        "",
-        this.t(locale, "menu:live.actions.choose_mode"),
-      ].join("\n"),
-      { kind: "menu", sessionId: activeSessionId },
-      {
-        reply_markup: this.buildLiveViewLaunchKeyboard((mode) => {
-          const modeUrl = new URL(url.toString());
-          modeUrl.searchParams.set("launchMode", mode);
-          return modeUrl.toString();
-        }, locale),
-      },
-    );
-    this.webAppLaunchRegistry.set(
-      principal.telegramUserId,
-      activeSessionId,
-      this.config.webapp.initDataTtlSeconds,
-      {
-        telegramChatId: principal.telegramChatId,
-        ...(sent && "message_id" in sent
-          ? { telegramMessageId: sent.message_id }
-          : {}),
-      },
-    );
   }
 
   private buildLiveViewUrlForSessionTarget(input: {
@@ -8197,6 +8187,83 @@ export class TelegramTransport implements HumanTransport {
     }
 
     return keyboard;
+  }
+
+  private async sendLiveViewLauncherMessage(input: {
+    principal: { telegramChatId: number; telegramUserId: number };
+    sessionId: string;
+    sessionName: string;
+    locale: SupportedLocale;
+    actor?: GatewayActorProfile;
+    allowForeignBinding?: boolean;
+  }): Promise<{ message_id: number } | null> {
+    if (
+      !this.config.webapp.enabled ||
+      (!this.config.webapp.publicUrl &&
+        !this.config.distributed.gatewayPublicUrl)
+    ) {
+      return null;
+    }
+
+    const useGatewayRelay =
+      this.config.distributed.mode === "client" &&
+      Boolean(this.config.distributed.gatewayPublicUrl);
+    const clientUuid = useGatewayRelay
+      ? await this.ensureGatewayClientUuid(input.principal, input.actor)
+      : null;
+    const baseUrl = useGatewayRelay
+      ? resolveGatewayWebAppBaseUrl(
+          this.config.distributed.gatewayPublicUrl!,
+          this.config.webapp.basePath,
+        )
+      : resolveWebAppPublicBaseUrl(this.config);
+    if (!baseUrl) {
+      return null;
+    }
+
+    const liveSessionId =
+      useGatewayRelay && clientUuid
+        ? buildLiveRelaySessionId(clientUuid, input.sessionId)
+        : input.sessionId;
+    const url = new URL(`${baseUrl}/live/${encodeURIComponent(liveSessionId)}`);
+    url.searchParams.set("launchMode", this.config.webapp.launchMode);
+
+    const sent = await this.sendChatMessage(
+      input.principal.telegramChatId,
+      [
+        this.t(input.locale, "menu:live.screen.launcher_title", {
+          sessionName: input.sessionName,
+        }),
+        "",
+        this.t(input.locale, "menu:live.actions.choose_mode"),
+      ].join("\n"),
+      {
+        reply_markup: this.buildLiveViewLaunchKeyboard((mode) => {
+          const modeUrl = new URL(url.toString());
+          modeUrl.searchParams.set("launchMode", mode);
+          return modeUrl.toString();
+        }, input.locale),
+      },
+      {
+        kind: "notification",
+        sessionId: input.sessionId,
+      },
+    );
+
+    this.webAppLaunchRegistry.set(
+      input.principal.telegramUserId,
+      input.sessionId,
+      this.config.webapp.initDataTtlSeconds,
+      {
+        telegramChatId: input.principal.telegramChatId,
+        ...(input.allowForeignBinding === true
+          ? { allowForeignBinding: true }
+          : {}),
+        telegramMessageId: sent.message_id,
+      },
+    );
+
+    return sent;
   }
 
   private clearPendingInteractionsForContext(ctx: TelegramMenuContext): void {
@@ -11672,20 +11739,46 @@ export class TelegramTransport implements HumanTransport {
       relativeNotePath,
       Buffer.from(noteContent, "utf8"),
     );
-    await writeXchangeRelativeFile(
+    await upsertXchangeRecord(
       this.config.tmux,
       workspaceDir,
       this.config.exchange.dir,
-      LOCAL_INDEX_FILE_NAME,
-      Buffer.from(
-        `${buildLocalIndexLine({
-          createdAt,
-          summary: handoffSummary,
-          relativeNotePath,
-        })}\n`,
-        "utf8",
-      ),
-      { append: true },
+      {
+        record_id: handoffId,
+        session_id: input.sessionId,
+        category: "local_handoff",
+        direction: "local",
+        status: "new",
+        kind: "local-file",
+        summary: handoffSummary,
+        body_text: noteContent,
+        action_desc: buildLocalHandoffActionDesc(),
+        tools: buildLocalHandoffTools(),
+        note_path: notePath,
+        note_relative_path: relativeNotePath,
+        attachments: [
+          {
+            file_path: notePath,
+            relative_path: relativeNotePath,
+            original_name: path.basename(relativeNotePath),
+            mime_type: "text/markdown",
+            size_bytes: Buffer.byteLength(noteContent, "utf8"),
+          },
+          {
+            file_path: ensuredFilePath,
+            relative_path: relativeArtifactPath,
+            original_name: fileName,
+            ...(meta?.mimeType ? { mime_type: meta.mimeType } : {}),
+            ...(typeof meta?.sizeBytes === "number"
+              ? { size_bytes: meta.sizeBytes }
+              : {}),
+            ...(meta?.storageRef ? { storage_ref: meta.storageRef } : {}),
+          },
+        ],
+        tags: ["local", "handoff", "file"],
+        created_at: createdAt,
+        updated_at: createdAt,
+      },
     );
 
     const inboxMessage: TelegramInboxMessage = {
@@ -11697,8 +11790,9 @@ export class TelegramTransport implements HumanTransport {
       text: [
         "Получен локальный handoff файла.",
         `Кратко: ${handoffSummary}`,
+        `Xchange record: ${handoffId}`,
         "",
-        `Immediate action: read ${LOCAL_INDEX_FILE_NAME} and then open the note below.`,
+        "Immediate action: call get_xchange_record for this record and follow its action_desc.",
         `Note: ${notePath}`,
         "",
         "Artifacts:",

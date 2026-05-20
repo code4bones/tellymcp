@@ -41,6 +41,9 @@ Browser runtime rule:
 Collaboration tools:
 
 - `list_gateway_sessions`
+- `list_xchange_records`
+- `get_xchange_record`
+- `mark_xchange_record_read`
 - `send_partner_note`
 - `send_partner_file`
 
@@ -396,13 +399,114 @@ Rules:
 - prefer connected sessions for direct gateway-wide messaging
 - if a session is not connected, do not assume direct delivery will succeed
 
+## `list_xchange_records`
+
+Purpose:
+
+- List structured `.mcp-xchange` records from the local sqlite store for the current session.
+- Use this as the first lookup path for partner notes, local handoffs, unread collaboration items, and follow-up work.
+
+Input:
+
+- `session_id?`
+- `status?`
+  - `new`
+  - `read`
+  - `archived`
+- `category?`
+  - `partner_note`
+  - `local_handoff`
+- `direction?`
+  - `incoming`
+  - `outgoing`
+  - `local`
+- `limit?`
+
+Output:
+
+- `session_id`
+- `total`
+- `records`
+
+Each record includes:
+
+- `record_id`
+- `category`
+- `direction`
+- `status`
+- `kind?`
+- `summary`
+- `action_desc`
+- `tools`
+- `attachments`
+- `source_*` and `target_*` routing fields when available
+- `project_uuid?`
+- `project_name?`
+- `requires_reply?`
+- `expected_reply?`
+- `in_reply_to?`
+- `created_at`
+- `updated_at`
+- `read_at?`
+
+Rules:
+
+- use this first when the session is nudged for partner collaboration or local handoff work
+- prefer `status = "new"` for fresh work
+- after selecting the relevant record, call `get_xchange_record`
+
+## `get_xchange_record`
+
+Purpose:
+
+- Read one structured `.mcp-xchange` record in full.
+- This gives the canonical `body_text`, `action_desc`, `tools`, attachments, and routing metadata for the next step.
+
+Input:
+
+- `session_id?`
+- `record_id`
+
+Output:
+
+- `session_id`
+- `record`
+
+Rules:
+
+- after `list_xchange_records`, call this on the chosen `record_id`
+- trust `action_desc` and `tools` over old markdown-index habits
+- use `body_text` as the structured note content; only open the note file directly if you need the raw markdown artifact
+
+## `mark_xchange_record_read`
+
+Purpose:
+
+- Mark a structured `.mcp-xchange` record as read after consuming it.
+
+Input:
+
+- `session_id?`
+- `record_id`
+
+Output:
+
+- `session_id`
+- `record_id`
+- `updated`
+
+Rules:
+
+- do this after you have consumed `body_text`, attachments, and next-step instructions
+- do not mark a record read before you have actually processed it
+
 ## `send_partner_note`
 
 Purpose:
 
 - Send a structured collaboration note to another session.
 - Write a note file into the partner workspace under `.mcp-xchange/shares/`.
-- Append a line to the partner `.mcp-xchange/SHARED_INDEX.md`.
+- Create a structured xchange record in the partner sqlite store.
 - Optionally copy listed artifacts from the current workspace into the partner `.mcp-xchange/shares/files/<share_id>/`.
 - Create an inbox message for the partner agent and trigger the normal tmux nudge path.
 
@@ -433,7 +537,7 @@ Output:
 - `kind`
 - `share_id`
 - `note_path`
-- `share_index_path`
+- `xchange_record_id`
 - `copied_artifacts`
 - `inbox_message_id`
 - `requires_reply`
@@ -605,15 +709,15 @@ How the receiving agent must react:
 
 - partner collaboration wake-ups are not ordinary Telegram inbox wake-ups
 - if the tmux nudge says things like:
-  - `прочитай SHARED_INDEX.md`
+  - `проверь xchange records`
   - `partner note`
   - `partner notes`
   then do not start with `get_telegram_inbox`
 - instead:
-  1. open `.mcp-xchange/SHARED_INDEX.md`
-  2. find the newest partner note
-  3. open that note file
-  4. read any copied artifacts referenced there
+  1. call `list_xchange_records`
+  2. select the newest relevant `partner_note` record
+  3. call `get_xchange_record`
+  4. read `body_text`, `action_desc`, `tools`, and any attachments
 - only use `get_telegram_inbox` for the normal Telegram human-message path
 - do not confuse partner collaboration notes with human Telegram inbox traffic
 
@@ -670,8 +774,8 @@ Note contract:
 
 - the service writes one note per message to:
   - `.mcp-xchange/shares/<share_id>.md`
-- the partner index is append-only:
-  - `.mcp-xchange/SHARED_INDEX.md`
+- the structured source of truth is the local sqlite xchange store:
+  - `.mcp-xchange/xchange.sqlite3`
 - artifacts are copied into:
   - `.mcp-xchange/shares/files/<share_id>/...`
 
@@ -1232,8 +1336,8 @@ Telegram UI summary:
   - remaining text = full message body
 - if an old project-member menu message becomes stale, clicking it deletes that outdated Telegram message
 - partner-note wake-up means:
-  - read `.mcp-xchange/SHARED_INDEX.md`
-  - then read the newest partner note
+  - call `list_xchange_records`
+  - then call `get_xchange_record`
   - not `get_telegram_inbox`
 
 Distributed mode scaffold:
@@ -1250,7 +1354,7 @@ Distributed mode scaffold:
   - gateway compares them with canonical gateway `TOOLS.md`
   - mismatch produces `tools_event`
   - client also self-checks after `hello_ack`
-- once linked, agents should use `.mcp-xchange/SHARED_INDEX.md` plus separate files in `.mcp-xchange/shares/` for collaboration
+- once linked, agents should use `list_xchange_records` / `get_xchange_record` plus separate files in `.mcp-xchange/shares/` for collaboration
 - recommended collaboration note kinds are:
   - `share`
   - `question`

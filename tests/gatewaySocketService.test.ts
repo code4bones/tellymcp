@@ -20,7 +20,6 @@ type GatewaySocketDelivery = {
   target_session_label: string;
   created_at: string;
   note_relative_path: string;
-  share_index_file_name: string;
   artifacts: unknown[];
 };
 
@@ -130,7 +129,6 @@ function createDelivery(
     target_session_label: "backend",
     created_at: "2026-05-16T00:00:00.000Z",
     note_relative_path: "shares/share-1.md",
-    share_index_file_name: "SHARED_INDEX.md",
     artifacts: [],
     ...overrides,
   };

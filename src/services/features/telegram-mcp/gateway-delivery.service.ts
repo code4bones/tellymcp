@@ -8,7 +8,12 @@ import {
 } from "./runtime.service";
 import type { TelegramInboxMessage } from "./src/entities/inbox/model/types";
 import { createInboxMessageId } from "./src/shared/lib/ids/ids";
+import {
+  buildIncomingPartnerActionDesc,
+  buildIncomingPartnerTools,
+} from "./src/shared/lib/xchangeRecordHints";
 import { writeXchangeRelativeFile } from "./src/shared/integrations/tmux/client";
+import { upsertXchangeRecord } from "./src/shared/integrations/xchange/sqliteRecordStore";
 import type { OutgoingDeliveryNotice } from "./src/shared/api/storage/contract";
 
 export const TELEGRAM_MCP_GATEWAY_DELIVERY_SERVICE_NAME =
@@ -48,7 +53,6 @@ type GatewayDelivery = {
   target_session_label: string;
   created_at: string;
   note_relative_path: string;
-  share_index_file_name: string;
   artifacts: GatewayDeliveryArtifact[];
 };
 
@@ -176,22 +180,10 @@ function buildNoteContent(input: {
   return `${lines.join("\n")}\n`;
 }
 
-function buildShareIndexLine(input: {
-  delivery: GatewayDelivery;
-  relativeNotePath: string;
-}): string {
-  return [
-    "-",
-    `[${input.delivery.created_at}]`,
-    `${input.delivery.source_session_label} → ${input.delivery.target_session_label}`,
-    `| ${input.delivery.kind} |`,
-    `${input.delivery.summary}`,
-    `| \`${input.relativeNotePath}\``,
-  ].join(" ");
-}
-
 function buildPartnerInboxText(input: {
   delivery: GatewayDelivery;
+  recordId: string;
+  actionDesc: string;
   notePath: string;
   copiedArtifacts: string[];
 }): string {
@@ -216,8 +208,10 @@ function buildPartnerInboxText(input: {
       : []),
     `Сессия: ${input.delivery.source_session_label} -> ${input.delivery.target_session_label}`,
     `Кратко: ${input.delivery.summary}`,
+    `Xchange record: ${input.recordId}`,
     "",
-    `Действие: открой ${input.delivery.share_index_file_name}, затем note ниже.`,
+    "Действие: вызови get_xchange_record для этой записи и следуй action_desc.",
+    `Action: ${input.actionDesc}`,
     `Note: ${input.notePath}`,
     ...(input.copiedArtifacts.length > 0
       ? ["", "Файлы:", ...input.copiedArtifacts.map((item) => `- ${item}`)]
@@ -417,6 +411,7 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
         return;
       }
 
+      const workspaceDir = runtime.objectStore.resolveWorkspaceDir(targetSession);
       const copiedArtifacts: string[] = [];
       for (const artifact of delivery.artifacts) {
         const relativePath =
@@ -426,7 +421,7 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
         if (artifact.content_base64) {
           localArtifactPath = await writeXchangeRelativeFile(
             runtime.config.tmux,
-            runtime.objectStore.resolveWorkspaceDir(targetSession),
+            workspaceDir,
             runtime.config.exchange.dir,
             relativePath,
             Buffer.from(artifact.content_base64, "base64"),
@@ -459,7 +454,7 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
       const noteContent = buildNoteContent({ delivery, copiedArtifacts });
       const notePath = await writeXchangeRelativeFile(
         runtime.config.tmux,
-        runtime.objectStore.resolveWorkspaceDir(targetSession),
+        workspaceDir,
         runtime.config.exchange.dir,
         delivery.note_relative_path,
         Buffer.from(noteContent, "utf8"),
@@ -473,20 +468,79 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
         mimeType: "text/markdown",
         sizeBytes: Buffer.byteLength(noteContent, "utf8"),
       });
-
-      await writeXchangeRelativeFile(
+      const actionDesc = buildIncomingPartnerActionDesc(
+        delivery.kind as Parameters<typeof buildIncomingPartnerActionDesc>[0],
+        delivery.requires_reply,
+      );
+      await upsertXchangeRecord(
         runtime.config.tmux,
-        runtime.objectStore.resolveWorkspaceDir(targetSession),
+        workspaceDir,
         runtime.config.exchange.dir,
-        delivery.share_index_file_name,
-        Buffer.from(
-          `${buildShareIndexLine({
-            delivery,
-            relativeNotePath: delivery.note_relative_path,
-          })}\n`,
-          "utf8",
-        ),
-        { append: true },
+        {
+          record_id: delivery.share_id,
+          session_id: targetSession.sessionId,
+          category: "partner_note",
+          direction: "incoming",
+          status: "new",
+          kind: delivery.kind,
+          summary: delivery.summary,
+          body_text: noteContent,
+          action_desc: actionDesc,
+          tools: buildIncomingPartnerTools(
+            delivery.kind as Parameters<typeof buildIncomingPartnerTools>[0],
+            delivery.requires_reply,
+          ),
+          note_path: notePath,
+          note_relative_path: delivery.note_relative_path,
+          source_session_id: delivery.source_session_uuid,
+          source_label: delivery.source_session_label,
+          ...(delivery.source_client_uuid
+            ? { source_client_uuid: delivery.source_client_uuid }
+            : {}),
+          source_local_session_id: delivery.source_local_session_id,
+          target_session_id: delivery.target_session_uuid,
+          target_label: delivery.target_session_label,
+          ...(delivery.target_client_uuid
+            ? { target_client_uuid: delivery.target_client_uuid }
+            : {}),
+          target_local_session_id: delivery.target_local_session_id,
+          ...(delivery.project_uuid ? { project_uuid: delivery.project_uuid } : {}),
+          ...(delivery.project_name ? { project_name: delivery.project_name } : {}),
+          requires_reply: delivery.requires_reply,
+          ...(delivery.expected_reply
+            ? { expected_reply: delivery.expected_reply }
+            : {}),
+          ...(delivery.in_reply_to ? { in_reply_to: delivery.in_reply_to } : {}),
+          attachments: [
+            {
+              file_path: notePath,
+              relative_path: delivery.note_relative_path,
+              original_name: path.basename(delivery.note_relative_path),
+              mime_type: "text/markdown",
+              size_bytes: Buffer.byteLength(noteContent, "utf8"),
+            },
+            ...delivery.artifacts.map((artifact, index) => ({
+              file_path: copiedArtifacts[index] ?? artifact.original_name,
+              ...(artifact.relative_path
+                ? { relative_path: artifact.relative_path }
+                : {}),
+              original_name: artifact.original_name,
+              ...(artifact.mime_type ? { mime_type: artifact.mime_type } : {}),
+              ...(typeof artifact.size_bytes === "number"
+                ? { size_bytes: artifact.size_bytes }
+                : {}),
+              ...(artifact.storage_ref ? { storage_ref: artifact.storage_ref } : {}),
+            })),
+          ],
+          tags: [
+            "partner",
+            delivery.kind,
+            ...(delivery.project_uuid ? ["project"] : ["direct"]),
+            ...(delivery.requires_reply ? ["requires-reply"] : []),
+          ],
+          created_at: delivery.created_at,
+          updated_at: delivery.created_at,
+        },
       );
 
       const inboxMessage: TelegramInboxMessage = {
@@ -497,6 +551,8 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
         sourceTelegramMessageId: Date.now(),
         text: buildPartnerInboxText({
           delivery,
+          recordId: delivery.share_id,
+          actionDesc,
           notePath,
           copiedArtifacts,
         }),

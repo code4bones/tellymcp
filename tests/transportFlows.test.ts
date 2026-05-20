@@ -134,7 +134,7 @@ describe("TelegramTransport collaboration flows", () => {
       share_id: "share-1",
       delivery_status: "queued",
       note_path: "gateway://shares/share-1.md",
-      share_index_path: "gateway://SHARED_INDEX.md",
+      xchange_record_id: "share-1",
       copied_artifacts: [],
       inbox_message_id: "delivery-1",
       requires_reply: true,

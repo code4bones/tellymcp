@@ -185,7 +185,6 @@ type GatewaySocketDelivery = {
   target_session_label: string;
   created_at: string;
   note_relative_path: string;
-  share_index_file_name: string;
   artifacts: GatewaySocketDeliveryArtifact[];
 };
 
@@ -932,7 +931,6 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           targetInfo?.session_label ?? params.targetLocalSessionId,
         created_at: createdAt,
         note_relative_path: `shares/${shareId}.md`,
-        share_index_file_name: "SHARED_INDEX.md",
         artifacts,
       };
 
@@ -957,7 +955,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         share_id: shareId,
         delivery_status: "delivered",
         note_path: `gateway://shares/${shareId}.md`,
-        share_index_path: "gateway://SHARED_INDEX.md",
+        xchange_record_id: shareId,
         copied_artifacts: artifacts.map((artifact) => artifact.original_name),
         inbox_message_id: deliveryUuid,
         requires_reply: requiresReply,

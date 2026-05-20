@@ -167,7 +167,6 @@ type GatewayServiceCarrier = Service & {
       target_session_label: string;
       created_at: string;
       note_relative_path: string;
-      share_index_file_name: string;
       artifacts: Array<{
         artifact_uuid: string;
         original_name: string;
@@ -1234,7 +1233,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
         share_id: shareId,
         delivery_status: "queued",
         note_path: `gateway://shares/${shareId}.md`,
-        share_index_path: "gateway://SHARED_INDEX.md",
+        xchange_record_id: shareId,
         copied_artifacts: artifactRefs.map((artifact) =>
           trimOptionalText(artifact.original_name) ||
           trimOptionalText(artifact.relative_path) ||
@@ -1270,7 +1269,6 @@ const TelegramMcpGatewayService: ServiceSchema = {
             targetSession.label ?? targetSession.local_session_id,
           created_at: now,
           note_relative_path: `shares/${shareId}.md`,
-          share_index_file_name: "SHARED_INDEX.md",
           artifacts: queuedArtifacts,
         },
       };
@@ -1406,7 +1404,6 @@ const TelegramMcpGatewayService: ServiceSchema = {
               row.target_session_label ?? row.target_local_session_id,
             created_at: String(row.created_at),
             note_relative_path: `shares/${shareId}.md`,
-            share_index_file_name: "SHARED_INDEX.md",
             artifacts: artifactsByMessage.get(row.message_uuid) ?? [],
           };
         }),

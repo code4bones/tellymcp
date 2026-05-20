@@ -143,10 +143,12 @@ function buildPartnerNoteOutputFallback(
       typeof outputRecord.note_path === "string"
         ? outputRecord.note_path
         : "gateway://shares/pending.md",
-    share_index_path:
-      typeof outputRecord.share_index_path === "string"
-        ? outputRecord.share_index_path
-        : "gateway://SHARED_INDEX.md",
+    xchange_record_id:
+      typeof outputRecord.xchange_record_id === "string"
+        ? outputRecord.xchange_record_id
+        : (typeof outputRecord.share_id === "string"
+            ? outputRecord.share_id
+            : `gateway-${Date.now()}`),
     copied_artifacts: Array.isArray(outputRecord.copied_artifacts)
       ? outputRecord.copied_artifacts.filter(
           (item): item is string => typeof item === "string",

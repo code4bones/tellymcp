@@ -607,8 +607,85 @@ export const sendPartnerNoteOutputSchema = z.object({
   share_id: z.string(),
   delivery_status: z.enum(["queued", "delivered"]),
   note_path: z.string(),
-  share_index_path: z.string(),
+  xchange_record_id: z.string(),
   copied_artifacts: z.array(z.string()),
   inbox_message_id: z.string(),
   requires_reply: z.boolean(),
+});
+
+const xchangeRecordAttachmentSchema = z.object({
+  file_path: z.string(),
+  relative_path: z.string().optional(),
+  original_name: z.string().optional(),
+  mime_type: z.string().optional(),
+  size_bytes: z.number().int().nonnegative().optional(),
+  storage_ref: z.string().optional(),
+});
+
+const xchangeRecordSchema = z.object({
+  record_id: z.string(),
+  session_id: z.string(),
+  category: z.enum(["partner_note", "local_handoff"]),
+  direction: z.enum(["incoming", "outgoing", "local"]),
+  status: z.enum(["new", "read", "archived"]),
+  kind: z.string().optional(),
+  summary: z.string(),
+  body_text: z.string(),
+  action_desc: z.string(),
+  tools: z.array(z.string()),
+  note_path: z.string().optional(),
+  note_relative_path: z.string().optional(),
+  source_session_id: z.string().optional(),
+  source_label: z.string().optional(),
+  source_client_uuid: z.string().optional(),
+  source_local_session_id: z.string().optional(),
+  target_session_id: z.string().optional(),
+  target_label: z.string().optional(),
+  target_client_uuid: z.string().optional(),
+  target_local_session_id: z.string().optional(),
+  project_uuid: z.string().optional(),
+  project_name: z.string().optional(),
+  requires_reply: z.boolean().optional(),
+  expected_reply: z.string().optional(),
+  in_reply_to: z.string().optional(),
+  attachments: z.array(xchangeRecordAttachmentSchema),
+  tags: z.array(z.string()),
+  created_at: z.string(),
+  updated_at: z.string(),
+  read_at: z.string().optional(),
+});
+
+export const listXchangeRecordsInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  status: z.enum(["new", "read", "archived"]).optional(),
+  category: z.enum(["partner_note", "local_handoff"]).optional(),
+  direction: z.enum(["incoming", "outgoing", "local"]).optional(),
+  limit: z.number().int().positive().max(200).optional(),
+});
+
+export const listXchangeRecordsOutputSchema = z.object({
+  session_id: z.string(),
+  total: z.number().int().nonnegative(),
+  records: z.array(xchangeRecordSchema),
+});
+
+export const getXchangeRecordInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  record_id: z.string().trim().min(1),
+});
+
+export const getXchangeRecordOutputSchema = z.object({
+  session_id: z.string(),
+  record: xchangeRecordSchema.nullable(),
+});
+
+export const markXchangeRecordReadInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  record_id: z.string().trim().min(1),
+});
+
+export const markXchangeRecordReadOutputSchema = z.object({
+  session_id: z.string(),
+  record_id: z.string(),
+  updated: z.boolean(),
 });

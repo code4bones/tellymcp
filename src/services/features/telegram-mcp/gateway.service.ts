@@ -9,6 +9,7 @@ import type {
   SendPartnerNoteOutput,
 } from "./src/entities/collaboration/model/types";
 import { resolveGatewayInReplyTo } from "./src/features/distributed-gateway/model/gatewayReplyResolution";
+import { resolveGatewayScopeKey } from "./src/shared/lib/gatewayScope";
 import { TELEGRAM_MCP_ENSUREDB_SERVICE_NAME } from "./ensuredb.service";
 
 export const TELEGRAM_MCP_GATEWAY_SERVICE_NAME = "telegramMcp.gateway";
@@ -264,6 +265,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
       const clientUuid =
         this.normalizeOptionalText?.(input.client_uuid) || randomUUID();
       const now = new Date().toISOString();
+      const scopeKey = resolveGatewayScopeKey(input);
       const clientLabel = this.normalizeOptionalText?.(input.client_label);
       const botUsername = this.normalizeOptionalText?.(input.bot_username);
       const tokenFingerprint = this.normalizeOptionalText?.(input.bot_token_fingerprint);
@@ -279,11 +281,17 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .first();
 
       if (existing) {
+        const existingScopeKey = this.normalizeOptionalText?.(existing.scope_key);
+        if (existingScopeKey && scopeKey && existingScopeKey !== scopeKey) {
+          throw new Error("Client is already bound to a different gateway scope.");
+        }
+
         await this.db
           .withSchema(MCP_SCHEMA)
           .table("gateway_clients")
           .where({ client_uuid: clientUuid })
           .update({
+            ...(scopeKey ? { scope_key: scopeKey } : {}),
             ...(clientLabel ? { client_label: clientLabel } : {}),
             ...(botUsername ? { bot_username: botUsername } : {}),
             ...(tokenFingerprint ? { bot_token_fingerprint: tokenFingerprint } : {}),
@@ -301,6 +309,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
 
       await this.db.withSchema(MCP_SCHEMA).table("gateway_clients").insert({
         client_uuid: clientUuid,
+        ...(scopeKey ? { scope_key: scopeKey } : {}),
         ...(clientLabel ? { client_label: clientLabel } : {}),
         ...(botUsername ? { bot_username: botUsername } : {}),
         ...(tokenFingerprint ? { bot_token_fingerprint: tokenFingerprint } : {}),
@@ -404,14 +413,29 @@ const TelegramMcpGatewayService: ServiceSchema = {
       const memberDisplayName = this.normalizeOptionalText?.(
         clientMeta.telegram_display_name,
       );
+      const memberScopeKey = this.normalizeOptionalText?.(
+        (client as Record<string, unknown>).scope_key,
+      );
 
       const project = await this.db
         .withSchema(MCP_SCHEMA)
-        .table("gateway_projects")
-        .where({ invite_token: inviteToken, is_active: true })
+        .table("gateway_projects as p")
+        .leftJoin("gateway_clients as owner_client", "owner_client.client_uuid", "p.created_by_client_uuid")
+        .where({ "p.invite_token": inviteToken, "p.is_active": true })
+        .select(
+          "p.*",
+          "owner_client.scope_key as owner_scope_key",
+        )
         .first();
       if (!project) {
         throw new Error("Project invite token is invalid or inactive");
+      }
+
+      const ownerScopeKey = this.normalizeOptionalText?.(
+        (project as Record<string, unknown>).owner_scope_key,
+      );
+      if (memberScopeKey && ownerScopeKey && memberScopeKey !== ownerScopeKey) {
+        throw new Error("Project belongs to a different gateway scope.");
       }
 
       const existing = await this.db
@@ -615,18 +639,22 @@ const TelegramMcpGatewayService: ServiceSchema = {
       };
     },
 
-    async listClientsRecord(this: GatewayServiceCarrier) {
+    async listClientsRecord(
+      this: GatewayServiceCarrier,
+      input: Record<string, unknown> = {},
+    ) {
+      const scopeKey = resolveGatewayScopeKey(input);
       const rows = await this.db
         .withSchema(MCP_SCHEMA)
-        .table("gateway_sessions as s")
-        .leftJoin(
-          "gateway_clients as c",
-          "c.client_uuid",
-          "s.client_uuid",
-        )
-        .where("s.status", "active")
+        .table("gateway_clients as c")
+        .leftJoin("gateway_sessions as s", "c.client_uuid", "s.client_uuid")
+        .modify((query) => {
+          if (scopeKey) {
+            query.where("c.scope_key", scopeKey);
+          }
+        })
         .groupBy(
-          "s.client_uuid",
+          "c.client_uuid",
           "c.client_label",
           this.db.raw("nullif(c.meta->>'telegram_username', '')"),
           this.db.raw("nullif(c.meta->>'telegram_display_name', '')"),
@@ -635,23 +663,26 @@ const TelegramMcpGatewayService: ServiceSchema = {
           "c.updated_at",
         )
         .select(
-          "s.client_uuid",
+          "c.client_uuid",
           "c.client_label",
           this.db.raw("nullif(c.meta->>'telegram_username', '') as telegram_username"),
           this.db.raw("nullif(c.meta->>'telegram_display_name', '') as telegram_display_name"),
           "c.bot_username",
           "c.last_seen_at",
           "c.updated_at",
+          this.db.raw(
+            "count(case when s.status = 'active' then s.session_uuid end) as session_count",
+          ),
         )
-        .count("s.session_uuid as session_count")
         .orderBy("c.last_seen_at", "desc")
-        .orderBy("s.client_uuid", "asc");
+        .orderBy("c.client_uuid", "asc");
 
       this.logger.info("Gateway clients list queried", {
         count: rows.length,
         clientUuids: rows
           .map((row: Record<string, unknown>) => String(row.client_uuid ?? ""))
           .filter(Boolean),
+        ...(scopeKey ? { scopeKey } : {}),
       });
 
       return {
@@ -673,12 +704,19 @@ const TelegramMcpGatewayService: ServiceSchema = {
       input: Record<string, unknown>,
     ) {
       const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
+      const scopeKey = resolveGatewayScopeKey(input);
       const rows = await this.db
         .withSchema(MCP_SCHEMA)
         .table("gateway_sessions as s")
+        .join("gateway_clients as c", "c.client_uuid", "s.client_uuid")
         .leftJoin("gateway_projects as p", "p.project_uuid", "s.project_uuid")
         .where("s.client_uuid", clientUuid)
         .where("s.status", "active")
+        .modify((query) => {
+          if (scopeKey) {
+            query.where("c.scope_key", scopeKey);
+          }
+        })
         .select(
           "s.session_uuid",
           "s.client_uuid",
@@ -695,6 +733,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
       this.logger.info("Gateway client sessions queried", {
         clientUuid,
         count: rows.length,
+        ...(scopeKey ? { scopeKey } : {}),
         localSessionIds: rows
           .map((row: Record<string, unknown>) => String(row.local_session_id ?? ""))
           .filter(Boolean),
@@ -714,13 +753,22 @@ const TelegramMcpGatewayService: ServiceSchema = {
       };
     },
 
-    async listAllSessionsRecord(this: GatewayServiceCarrier) {
+    async listAllSessionsRecord(
+      this: GatewayServiceCarrier,
+      input: Record<string, unknown> = {},
+    ) {
+      const scopeKey = resolveGatewayScopeKey(input);
       const rows = await this.db
         .withSchema(MCP_SCHEMA)
         .table("gateway_sessions as s")
         .leftJoin("gateway_projects as p", "p.project_uuid", "s.project_uuid")
         .leftJoin("gateway_clients as c", "c.client_uuid", "s.client_uuid")
         .where("s.status", "active")
+        .modify((query) => {
+          if (scopeKey) {
+            query.where("c.scope_key", scopeKey);
+          }
+        })
         .select(
           "s.session_uuid",
           "s.client_uuid",
@@ -743,6 +791,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
 
       this.logger.info("Gateway all sessions queried", {
         count: rows.length,
+        ...(scopeKey ? { scopeKey } : {}),
       });
 
       return {
@@ -791,13 +840,20 @@ const TelegramMcpGatewayService: ServiceSchema = {
 
     async listProjectsRecord(this: GatewayServiceCarrier, input: Record<string, unknown>) {
       const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
+      const scopeKey = resolveGatewayScopeKey(input);
       const rows = await this.db
         .withSchema(MCP_SCHEMA)
         .table("gateway_project_members as m")
         .join("gateway_projects as p", "p.project_uuid", "m.project_uuid")
+        .join("gateway_clients as c", "c.client_uuid", "m.client_uuid")
         .where("m.client_uuid", clientUuid)
         .where("m.status", "active")
         .where("p.is_active", true)
+        .modify((query) => {
+          if (scopeKey) {
+            query.where("c.scope_key", scopeKey);
+          }
+        })
         .select(
           "p.project_uuid",
           "p.name",
@@ -809,7 +865,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .orderBy("p.name", "asc");
 
       return {
-        projects: rows.map((row) => ({
+        projects: rows.map((row: Record<string, unknown>) => ({
           project_uuid: row.project_uuid,
           name: row.name,
           invite_token: row.invite_token,

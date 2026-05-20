@@ -115,6 +115,7 @@ const TelegramMcpCollaborationService: ServiceSchema = {
             runtime.stateStore,
             runtime.config.distributed.gatewayPublicUrl,
             runtime.config.distributed.gatewayAuthToken,
+            runtime.config.distributed.gatewayToken,
             runtime.config.project.name,
             runtime.config.telegram.botUsername,
           )
@@ -137,6 +138,7 @@ const TelegramMcpCollaborationService: ServiceSchema = {
       runtime.stateStore,
       runtime.config.distributed.gatewayPublicUrl,
       runtime.config.distributed.gatewayAuthToken,
+      runtime.config.distributed.gatewayToken,
       runtime.config.project.name,
       runtime.config.telegram.botUsername,
     );

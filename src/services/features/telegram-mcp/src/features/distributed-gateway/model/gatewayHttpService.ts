@@ -673,6 +673,163 @@ export class GatewayHttpService {
       }
     }
 
+    if (pathname === "/gateway/relay/inbox") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = await this.readJsonBody(req);
+        const input = sendPartnerNoteInputSchema.parse(body);
+        const clientUuid =
+          typeof (body as { client_uuid?: unknown })?.client_uuid === "string"
+            ? String((body as { client_uuid: string }).client_uuid).trim()
+            : "";
+        const localSessionId =
+          typeof (body as { local_session_id?: unknown })?.local_session_id ===
+          "string"
+            ? String((body as { local_session_id: string }).local_session_id).trim()
+            : "";
+        const targetClientUuid =
+          typeof (body as { target_client_uuid?: unknown })?.target_client_uuid ===
+          "string"
+            ? String((body as { target_client_uuid: string }).target_client_uuid).trim()
+            : "";
+        const targetLocalSessionId =
+          typeof (body as { target_local_session_id?: unknown })
+            ?.target_local_session_id === "string"
+            ? String(
+                (
+                  body as { target_local_session_id: string }
+                ).target_local_session_id,
+              ).trim()
+            : "";
+        if (!clientUuid || !localSessionId || !targetClientUuid || !targetLocalSessionId) {
+          writeText(
+            res,
+            400,
+            "client_uuid, local_session_id, target_client_uuid, and target_local_session_id are required",
+          );
+          return true;
+        }
+
+        const output = await this.callBroker(
+          "telegramMcp.gatewaySocket.sendDirectPartnerNote",
+          {
+            clientUuid,
+            localSessionId,
+            ...(typeof (body as { source_actor_label?: unknown })?.source_actor_label ===
+            "string"
+              ? {
+                  sourceActorLabel: String(
+                    (body as { source_actor_label: string }).source_actor_label,
+                  ).trim(),
+                }
+              : {}),
+            targetClientUuid,
+            targetLocalSessionId,
+            kind: input.kind,
+            summary: input.summary,
+            message: input.message,
+            ...(input.expected_reply?.trim()
+              ? { expectedReply: input.expected_reply.trim() }
+              : {}),
+            ...(typeof input.requires_reply === "boolean"
+              ? { requiresReply: input.requires_reply }
+              : {}),
+            ...(input.in_reply_to?.trim()
+              ? { inReplyTo: input.in_reply_to.trim() }
+              : {}),
+            ...(Array.isArray(input.artifact_refs)
+              ? { artifactRefs: input.artifact_refs }
+              : {}),
+          },
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, output);
+      } catch (error) {
+        writeText(
+          res,
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      return true;
+    }
+
+    if (pathname === "/gateway/transport/notify") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = await this.readJsonBody(req);
+        const output = await this.callBroker(
+          "telegramMcp.notify.sendForGatewaySession",
+          body,
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, output);
+      } catch (error) {
+        writeText(
+          res,
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      return true;
+    }
+
+    if (pathname === "/gateway/transport/request") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = await this.readJsonBody(req);
+        const output = await this.callBroker(
+          "telegramMcp.notify.sendRequestForGatewaySession",
+          body,
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, output);
+      } catch (error) {
+        writeText(
+          res,
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      return true;
+    }
+
+    if (pathname === "/gateway/transport/reply") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = await this.readJsonBody(req);
+        const output = await this.callBroker(
+          "telegramMcp.gatewaySocket.notifyTransportReply",
+          body,
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, output);
+      } catch (error) {
+        writeText(
+          res,
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      return true;
+    }
+
     if (pathname === "/gateway/clients/list") {
       if (req.method !== "POST") {
         writeText(res, 405, "Method not allowed");
@@ -680,9 +837,10 @@ export class GatewayHttpService {
       }
 
       try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
         const result = await this.callBroker(
           "telegramMcp.gateway.listClients",
-          {},
+          body,
           { meta: { internal_call: true } },
         );
         writeJson(res, 200, result);
@@ -752,13 +910,16 @@ export class GatewayHttpService {
           typeof body.client_uuid === "string" && body.client_uuid.trim()
             ? body.client_uuid.trim()
             : null;
+        const scopeFilterRequested =
+          (typeof body.gateway_token === "string" && body.gateway_token.trim().length > 0) ||
+          (typeof body.scope_key === "string" && body.scope_key.trim().length > 0);
         const connectedOnly = typeof body.connected_only === "boolean"
           ? body.connected_only
           : false;
-        const [registeredResult, connectedResult] = await Promise.all([
+        const [registeredResult, connectedResult, scopedClientsResult] = await Promise.all([
           this.callBroker(
             "telegramMcp.gateway.listAllSessions",
-            {},
+            body,
             { meta: { internal_call: true } },
           ) as Promise<{
             sessions?: Array<{
@@ -790,7 +951,23 @@ export class GatewayHttpService {
               }>;
             }>;
           }>,
+          this.callBroker(
+            "telegramMcp.gateway.listClients",
+            body,
+            { meta: { internal_call: true } },
+          ) as Promise<{
+            clients?: Array<{
+              client_uuid: string;
+            }>;
+          }>,
         ]);
+        const allowedClientUuids = new Set(
+          Array.isArray(scopedClientsResult.clients)
+            ? scopedClientsResult.clients
+                .map((client) => client.client_uuid)
+                .filter((clientUuid): clientUuid is string => typeof clientUuid === "string")
+            : [],
+        );
 
         const merged = new Map<
           string,
@@ -850,6 +1027,12 @@ export class GatewayHttpService {
         for (const client of Array.isArray(connectedResult.clients)
           ? connectedResult.clients
           : []) {
+          if (
+            scopeFilterRequested &&
+            !allowedClientUuids.has(client.client_uuid)
+          ) {
+            continue;
+          }
           for (const sessionTool of Array.isArray(client.session_tools)
             ? client.session_tools
             : []) {

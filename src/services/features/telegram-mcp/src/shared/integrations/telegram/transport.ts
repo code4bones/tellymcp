@@ -9,6 +9,7 @@ import type { AppConfig } from "../../../app/config/env";
 import type { WebAppLaunchRegistry } from "../../../app/webapp/auth";
 import {
   buildLiveRelaySessionId,
+  parseLiveRelaySessionId,
   resolveGatewayWebAppBaseUrl,
 } from "../../../app/webapp/relay";
 import type { CollaborationService } from "../../../features/collaboration/model/collaborationService";
@@ -21,6 +22,7 @@ import type {
   TelegramInboxMessage,
   TelegramXchangeFileMeta,
 } from "../../../entities/inbox/model/types";
+import type { SessionContext } from "../../../entities/session/model/types";
 import type {
   SessionStore,
   TelegramAdminAuthStore,
@@ -96,6 +98,7 @@ type WaiterRecord = {
   telegramUserId: number;
   telegramMessageId: number;
   sentAtMs: number;
+  sourceClientUuid?: string;
   reply?: HumanTransportReply;
   resolve?: (reply: HumanTransportReply | null) => void;
   timeout?: NodeJS.Timeout;
@@ -285,6 +288,16 @@ type AdminClientSessionViewRecord = {
   is_collab?: boolean;
 };
 
+type GatewayRelayBindingPayload = {
+  sessionId: string;
+  targetSessionId: string;
+  targetSessionLabel: string;
+  targetClientUuid: string;
+  targetLocalSessionId: string;
+  projectUuid?: string;
+  projectName?: string;
+};
+
 type GatewayActorProfile = {
   telegramUsername?: string;
   telegramFirstName?: string;
@@ -413,6 +426,14 @@ function isHelpCommand(text: string): boolean {
 function parseAdminAuthCommand(text: string): string | null {
   const match = text.trim().match(/^\/auth(?:@\w+)?(?:\s+(.+))?$/i);
   return match?.[1]?.trim() || null;
+}
+
+function isGatewayLinkCommand(text: string): boolean {
+  return /^\/link(?:@\w+)?$/i.test(text.trim());
+}
+
+function isGatewayAdminCommand(text: string): boolean {
+  return /^\/admin(?:@\w+)?$/i.test(text.trim());
 }
 
 function readMenuPayloadKey(ctx: TelegramMenuContext): string | null {
@@ -716,6 +737,25 @@ export class TelegramTransport implements HumanTransport {
   private tmuxPromptScanTimer: NodeJS.Timeout | undefined;
   private tmuxPromptScanInFlight = false;
 
+  private isTelegramEnabled(): boolean {
+    return Boolean(this.config.telegram.botToken?.trim());
+  }
+
+  private ensureTelegramEnabledFor(action: string): void {
+    if (this.isTelegramEnabled()) {
+      return;
+    }
+
+    throw new Error(
+      `Telegram transport is disabled for this node; cannot ${action}.`,
+    );
+  }
+
+  private getRequiredBotToken(action: string): string {
+    this.ensureTelegramEnabledFor(action);
+    return this.config.telegram.botToken!.trim();
+  }
+
   private createMenuOptions(
     handler: (ctx: TelegramMenuContext) => Promise<void>,
   ): { onMenuOutdated: (ctx: TelegramMenuContext) => Promise<void> } {
@@ -753,7 +793,9 @@ export class TelegramTransport implements HumanTransport {
       this.logger,
     ) as unknown as TelegramClientFetch;
 
-    this.bot = new Bot<TelegramMenuContext>(this.config.telegram.botToken, {
+    this.bot = new Bot<TelegramMenuContext>(
+      this.config.telegram.botToken ?? "0:disabled",
+      {
       client: {
         fetch: this.telegramFetch,
       },
@@ -839,6 +881,9 @@ export class TelegramTransport implements HumanTransport {
     });
     this.bot.callbackQuery(/^admin-client-session-live:(.+)$/u, async (ctx) => {
       await this.handleAdminClientSessionLiveCallback(ctx);
+    });
+    this.bot.callbackQuery(/^admin-client-session-bind:(.+)$/u, async (ctx) => {
+      await this.handleAdminClientSessionBindCallback(ctx);
     });
     this.bot.callbackQuery(/^admin-client-session-open:(.+)$/u, async (ctx) => {
       await this.handleAdminClientSessionOpenCallback(ctx);
@@ -960,16 +1005,18 @@ export class TelegramTransport implements HumanTransport {
       return;
     }
 
-    if (text && isHelpCommand(text)) {
-      await this.replyText(ctx, await this.tForContext(ctx, "menu:admin.auth.help"), {
-        kind: "transport",
-      });
+    if (text && isGatewayAdminCommand(text)) {
+      await this.replyText(
+        ctx,
+        await this.tForContext(ctx, "menu:admin.auth.prompt"),
+        {
+          kind: "transport",
+        },
+      );
       return;
     }
 
-    await this.replyText(ctx, await this.tForContext(ctx, "menu:admin.auth.prompt"), {
-      kind: "transport",
-    });
+    await next();
   }
 
   public setCollaborationService(service: CollaborationService): void {
@@ -1060,6 +1107,9 @@ export class TelegramTransport implements HumanTransport {
         this.config.telegram.botUsername ||
         "telegram-mcp client",
       bot_username: this.config.telegram.botUsername,
+      ...(this.config.distributed.gatewayToken
+        ? { gateway_token: this.config.distributed.gatewayToken }
+        : {}),
       meta: {
         telegram_chat_id: principal.telegramChatId,
         telegram_user_id: principal.telegramUserId,
@@ -1362,6 +1412,18 @@ export class TelegramTransport implements HumanTransport {
       return;
     }
 
+    if (!this.isTelegramEnabled()) {
+      this.logger.info(
+        "Telegram transport is disabled for this node; skipping bot startup",
+        {
+          distributedMode: this.config.distributed.mode,
+        },
+      );
+      this.started = true;
+      this.startTmuxPromptScan();
+      return;
+    }
+
     this.logger.info("Telegram transport initialization started", {
       pollingTimeoutSeconds: 30,
       proxyEnabled: Boolean(this.config.telegram.proxy),
@@ -1378,12 +1440,19 @@ export class TelegramTransport implements HumanTransport {
       ...(this.isAdminAuthEnabled()
         ? [{ command: "auth", description: "Authenticate as gateway admin" }]
         : []),
+      ...(this.isAdminBotProfile()
+        ? [
+            { command: "link", description: "Open gateway clients list" },
+            { command: "admin", description: "Open gateway admin menu" },
+          ]
+        : []),
       { command: "menu", description: "Open session menu" },
       { command: "help", description: "Show help" },
     ]);
     this.logger.info("Telegram bot commands registered", {
       commands: [
         ...(this.isAdminAuthEnabled() ? ["/auth"] : []),
+        ...(this.isAdminBotProfile() ? ["/link", "/admin"] : []),
         "/menu",
         "/help",
       ],
@@ -1433,7 +1502,9 @@ export class TelegramTransport implements HumanTransport {
     this.logger.info("Telegram transport stopping");
     this.clearTmuxNudgeDebounceTimers();
     this.clearTmuxPromptScanTimer();
-    await this.bot.stop();
+    if (this.isTelegramEnabled()) {
+      await this.bot.stop();
+    }
     this.started = false;
     this.pollingTask = undefined;
     this.logger.info("Telegram transport stopped");
@@ -1443,6 +1514,7 @@ export class TelegramTransport implements HumanTransport {
     telegramChatId: number,
     telegramMessageId: number,
   ): Promise<void> {
+    this.ensureTelegramEnabledFor("delete Telegram messages");
     await this.bot.api.deleteMessage(telegramChatId, telegramMessageId);
   }
 
@@ -1451,6 +1523,7 @@ export class TelegramTransport implements HumanTransport {
     filePath: string,
     caption?: string,
   ): Promise<{ messageId: number }> {
+    this.ensureTelegramEnabledFor("send Telegram documents");
     const fileBuffer = await readFile(filePath);
     const response = await this.bot.api.sendDocument(
       telegramChatId,
@@ -1473,6 +1546,7 @@ export class TelegramTransport implements HumanTransport {
     text: string,
     options: TelegramEditMessageOptions = {},
   ): Promise<void> {
+    this.ensureTelegramEnabledFor("edit Telegram messages");
     let attempt = 0;
 
     while (true) {
@@ -1521,6 +1595,13 @@ export class TelegramTransport implements HumanTransport {
   }
 
   public async recoverPendingInboxNudges(): Promise<void> {
+    if (!this.isTelegramEnabled()) {
+      this.logger.debug(
+        "Startup inbox nudge recovery skipped because Telegram transport is disabled",
+      );
+      return;
+    }
+
     if (!this.config.tmux.nudgeEnabled) {
       this.logger.debug(
         "Startup inbox nudge recovery skipped because tmux nudging is disabled",
@@ -1575,6 +1656,13 @@ export class TelegramTransport implements HumanTransport {
   }
 
   public async sendStartupNotifications(): Promise<void> {
+    if (!this.isTelegramEnabled()) {
+      this.logger.debug(
+        "Startup notifications skipped because Telegram transport is disabled",
+      );
+      return;
+    }
+
     const packageVersion = getTellyMcpPackageVersion(__dirname);
     const availableUpdate = await detectAvailablePackageUpdate({
       currentVersion: packageVersion,
@@ -1743,6 +1831,10 @@ export class TelegramTransport implements HumanTransport {
     isNewClient: boolean;
     newSessions: AdminGatewayRegistrationSessionRecord[];
   }): Promise<void> {
+    if (!this.isTelegramEnabled()) {
+      return;
+    }
+
     if (!this.isAdminAuthEnabled()) {
       return;
     }
@@ -1832,6 +1924,11 @@ export class TelegramTransport implements HumanTransport {
   public async sendRequest(
     input: HumanTransportRequest,
   ): Promise<{ externalMessageId?: string | number }> {
+    if (!this.isTelegramEnabled()) {
+      return this.sendRequestViaGateway(input);
+    }
+
+    this.ensureTelegramEnabledFor("send Telegram requests");
     const text = formatTelegramMessage(input, {
       maxQuestionChars: this.config.telegram.maxQuestionChars,
       maxContextChars: this.config.telegram.maxContextChars,
@@ -1862,9 +1959,32 @@ export class TelegramTransport implements HumanTransport {
     return { externalMessageId: response.messageId };
   }
 
+  public async sendRequestForGatewayBoundSession(
+    input: HumanTransportRequest & { sourceClientUuid: string },
+  ): Promise<{ externalMessageId?: string | number }> {
+    const result = await this.sendRequest(input);
+    const waiter = this.waiters.get(input.requestId);
+    if (waiter) {
+      waiter.sourceClientUuid = input.sourceClientUuid;
+    }
+    return result;
+  }
+
   public async sendNotification(
     input: HumanTransportNotification,
   ): Promise<{ externalMessageId?: string | number }> {
+    if (!this.isTelegramEnabled()) {
+      this.logger.debug(
+        "Telegram notification skipped because transport is disabled",
+        {
+          sessionId: input.sessionId,
+          telegramChatId: input.recipient.telegramChatId,
+          telegramUserId: input.recipient.telegramUserId,
+        },
+      );
+      return {};
+    }
+
     const text = formatTelegramNotification(input, {
       maxQuestionChars: this.config.telegram.maxQuestionChars,
       maxContextChars: this.config.telegram.maxContextChars,
@@ -2764,12 +2884,103 @@ export class TelegramTransport implements HumanTransport {
     });
   }
 
+  public async handleGatewayTransportReplyEvent(input: {
+    request_id: string;
+    answer: string;
+    received_at: string;
+  }): Promise<void> {
+    const waiter = this.waiters.get(input.request_id);
+    if (!waiter) {
+      this.logger.debug("Gateway transport reply ignored because waiter was not found", {
+        requestId: input.request_id,
+      });
+      return;
+    }
+
+    const reply: HumanTransportReply = {
+      requestId: input.request_id,
+      answer: input.answer,
+      receivedAt: input.received_at,
+    };
+
+    this.logger.info("Gateway transport reply received", {
+      requestId: input.request_id,
+      telegramChatId: waiter.telegramChatId,
+      telegramUserId: waiter.telegramUserId,
+    });
+
+    if (waiter.resolve) {
+      waiter.resolve(reply);
+      return;
+    }
+
+    waiter.reply = reply;
+  }
+
   private clearWaiter(requestId: string): void {
     const waiter = this.waiters.get(requestId);
     if (waiter?.timeout) {
       clearTimeout(waiter.timeout);
     }
     this.waiters.delete(requestId);
+  }
+
+  private async sendRequestViaGateway(
+    input: HumanTransportRequest,
+  ): Promise<{ externalMessageId?: string | number }> {
+    if (!this.config.distributed.gatewayPublicUrl) {
+      throw new Error("Gateway is not configured for Telegram request proxying.");
+    }
+
+    const clientUuid = await this.maintenanceStore.getGatewayClientUuid();
+    if (!clientUuid) {
+      throw new Error("Gateway client UUID is unavailable for Telegram request proxying.");
+    }
+
+    this.waiters.set(input.requestId, {
+      requestId: input.requestId,
+      telegramChatId: input.recipient.telegramChatId,
+      telegramUserId: input.recipient.telegramUserId,
+      telegramMessageId: 0,
+      sentAtMs: Date.now(),
+    });
+
+    try {
+      const response = await this.callGatewayJson<{
+        message_id?: number | string;
+      }>("/transport/request", {
+        client_uuid: clientUuid,
+        local_session_id: input.sessionId,
+        request_id: input.requestId,
+        ...(input.sessionLabel ? { session_label: input.sessionLabel } : {}),
+        telegram_chat_id: input.recipient.telegramChatId,
+        telegram_user_id: input.recipient.telegramUserId,
+        question: input.question,
+        ...(input.task ? { task: input.task } : {}),
+        ...(input.context ? { context: input.context } : {}),
+        ...(input.affectedFiles ? { affected_files: input.affectedFiles } : {}),
+        ...(input.options ? { options: input.options } : {}),
+        ...(input.recommendedOption
+          ? { recommended_option: input.recommendedOption }
+          : {}),
+        ...(input.riskLevel ? { risk_level: input.riskLevel } : {}),
+      ...(input.fallbackIfTimeout
+          ? { fallback_if_timeout: input.fallbackIfTimeout }
+          : {}),
+      });
+
+      const waiter = this.waiters.get(input.requestId);
+      if (waiter && typeof response.message_id === "number") {
+        waiter.telegramMessageId = response.message_id;
+      }
+
+      return typeof response.message_id === "undefined"
+        ? {}
+        : { externalMessageId: response.message_id };
+    } catch (error) {
+      this.clearWaiter(input.requestId);
+      throw error;
+    }
   }
 
   private createMainMenu(): Menu<TelegramMenuContext> {
@@ -3943,8 +4154,10 @@ export class TelegramTransport implements HumanTransport {
     }
 
     if (this.isAdminBotProfile()) {
-      await this.handleAdminMessage(ctx, text);
-      return;
+      const handled = await this.handleGatewayTopLevelMessage(ctx, text);
+      if (handled) {
+        return;
+      }
     }
 
     if (text && (await this.handlePendingRename(ctx, text))) {
@@ -4003,24 +4216,139 @@ export class TelegramTransport implements HumanTransport {
     await this.handleInboxCapture(ctx);
   }
 
-  private async handleAdminMessage(
+  private async handleGatewayTopLevelMessage(
     ctx: TelegramMenuContext,
     text: string | null,
-  ): Promise<void> {
-    if (text && isMenuEntryCommand(text)) {
+  ): Promise<boolean> {
+    const principal = this.getPrincipalFromContext(ctx);
+
+    if (text && isGatewayLinkCommand(text)) {
+      await this.showAdminClientsMenu(ctx);
+      return true;
+    }
+
+    if (text && isGatewayAdminCommand(text)) {
       await this.showAdminMainMenu(ctx);
-      return;
+      return true;
+    }
+
+    if (text && isMenuEntryCommand(text)) {
+      const isAdminAuthorized =
+        await this.isPrincipalAdminAuthorized(principal);
+      const hasLinkedSessions = principal
+        ? (await this.bindingStore.listBoundSessionIdsForPrincipal(principal)).length >
+          0
+        : false;
+      if (hasLinkedSessions) {
+        this.clearPendingInteractionsForContext(ctx);
+        await this.showSessionsMenu(ctx);
+      } else if (isAdminAuthorized) {
+        await this.showAdminMainMenu(ctx);
+      } else {
+        this.clearPendingInteractionsForContext(ctx);
+        await this.showSessionsMenu(ctx);
+      }
+      return true;
     }
 
     if (text && isHelpCommand(text)) {
-      await this.showAdminMainMenu(
-        ctx,
-        await this.tForContext(ctx, "menu:admin.screen.help"),
-      );
-      return;
+      const isAdminAuthorized =
+        await this.isPrincipalAdminAuthorized(principal);
+      const hasLinkedSessions = principal
+        ? (await this.bindingStore.listBoundSessionIdsForPrincipal(principal)).length >
+          0
+        : false;
+      if (hasLinkedSessions) {
+        this.clearPendingInteractionsForContext(ctx);
+        await this.showHelp(ctx);
+      } else if (isAdminAuthorized) {
+        await this.showAdminMainMenu(
+          ctx,
+          await this.tForContext(ctx, "menu:admin.screen.help"),
+        );
+      } else {
+        await this.showHelp(ctx);
+      }
+      return true;
     }
 
-    await this.showAdminMainMenu(ctx);
+    return false;
+  }
+
+  private resolveGatewayTelegramSourceLabel(
+    ctx: TelegramMenuContext,
+  ): string {
+    const firstName = ctx.from?.first_name?.trim();
+    const lastName = ctx.from?.last_name?.trim();
+    const displayName = [firstName, lastName].filter(Boolean).join(" ").trim();
+    const username = ctx.from?.username?.trim();
+    if (displayName) {
+      return displayName;
+    }
+    if (username) {
+      return `@${username.replace(/^@/u, "")}`;
+    }
+    return `Telegram user ${ctx.from?.id ?? "unknown"}`;
+  }
+
+  private inferGatewayInboxKind(text: string): PartnerNoteKind {
+    return /\?\s*$/u.test(text.trim()) ? "question" : "request";
+  }
+
+  private buildGatewayInboxSummary(text: string): string {
+    const summary =
+      text
+        .split(/\r?\n/u)
+        .map((line) => line.trim())
+        .find(Boolean) ?? "Telegram message";
+    return summary.length > 140 ? `${summary.slice(0, 137).trimEnd()}...` : summary;
+  }
+
+  private async routeTelegramInboxToRelaySession(input: {
+    ctx: TelegramMenuContext;
+    principal: { telegramChatId: number; telegramUserId: number };
+    relayTarget: { clientUuid: string; localSessionId: string; sourceClientUuid?: string };
+    sourceSessionId: string;
+    messageText: string;
+    attachments: StoredAttachmentRecord[];
+  }): Promise<void> {
+    const sourceActorLabel = this.resolveGatewayTelegramSourceLabel(input.ctx);
+    const output = await this.callGatewayJson<SendPartnerNoteOutput>(
+      "/relay/inbox",
+      {
+        client_uuid: "gateway-telegram",
+        local_session_id: `telegram-user-${input.principal.telegramUserId}`,
+        source_actor_label: sourceActorLabel,
+        target_client_uuid: input.relayTarget.clientUuid,
+        target_local_session_id: input.relayTarget.localSessionId,
+        kind: this.inferGatewayInboxKind(input.messageText),
+        summary: this.buildGatewayInboxSummary(input.messageText),
+        message: input.messageText,
+        requires_reply: false,
+        artifact_refs: input.attachments.map((attachment) => ({
+          file_path: attachment.filePath,
+          ...(attachment.relativePath
+            ? { relative_path: attachment.relativePath }
+            : {}),
+          original_name: path.basename(attachment.relativePath || attachment.filePath),
+          ...(attachment.mimeType ? { mime_type: attachment.mimeType } : {}),
+          ...(typeof attachment.sizeBytes === "number"
+            ? { size_bytes: attachment.sizeBytes }
+            : {}),
+          ...(attachment.storageRef ? { storage_ref: attachment.storageRef } : {}),
+        })),
+      },
+    );
+
+    this.logger.info("Telegram message routed to gateway relay session", {
+      sessionId: input.sourceSessionId,
+      targetClientUuid: input.relayTarget.clientUuid,
+      targetLocalSessionId: input.relayTarget.localSessionId,
+      shareId: output.share_id,
+      deliveryStatus: output.delivery_status,
+      chatId: input.principal.telegramChatId,
+      userId: input.principal.telegramUserId,
+    });
   }
 
   private async handlePairingCommand(
@@ -4233,6 +4561,30 @@ export class TelegramTransport implements HumanTransport {
       receivedAt: new Date(message.date * 1000).toISOString(),
     };
 
+    if (matched.sourceClientUuid && this.config.distributed.gatewayPublicUrl) {
+      try {
+        await this.callGatewayJson("/transport/reply", {
+          client_uuid: matched.sourceClientUuid,
+          request_id: matched.requestId,
+          answer: reply.answer,
+          received_at: reply.receivedAt,
+        });
+      } catch (error) {
+        this.logger.error("Failed to forward gateway transport reply to client", {
+          requestId: matched.requestId,
+          sourceClientUuid: matched.sourceClientUuid,
+          chatId,
+          userId: fromUserId,
+          error:
+            error instanceof Error ? (error.stack ?? error.message) : String(error),
+        });
+        return false;
+      }
+
+      this.clearWaiter(matched.requestId);
+      return true;
+    }
+
     if (matched.resolve) {
       matched.resolve(reply);
       return true;
@@ -4282,6 +4634,7 @@ export class TelegramTransport implements HumanTransport {
     }
 
     const session = await this.sessionStore.getSession(sessionId);
+    const relayTarget = parseLiveRelaySessionId(sessionId);
     let attachments: StoredAttachmentRecord[] = [];
     try {
       attachments = await this.downloadIncomingAttachments(
@@ -4313,6 +4666,45 @@ export class TelegramTransport implements HumanTransport {
       text,
       attachments.map((attachment) => attachment.filePath),
     );
+
+    if (relayTarget) {
+      try {
+        await this.routeTelegramInboxToRelaySession({
+          ctx,
+          principal,
+          relayTarget,
+          sourceSessionId: sessionId,
+          messageText: normalizedText,
+          attachments,
+        });
+      } catch (error) {
+        this.logger.error("Failed to route Telegram message to gateway relay session", {
+          sessionId,
+          targetClientUuid: relayTarget.clientUuid,
+          targetLocalSessionId: relayTarget.localSessionId,
+          chatId,
+          userId: fromUserId,
+          messageId: message.message_id,
+          error:
+            error instanceof Error ? (error.stack ?? error.message) : String(error),
+        });
+        await this.replyText(
+          ctx,
+          await this.tForContext(ctx, "menu:system.gateway_relay_inbox_failed"),
+          { kind: "transport", sessionId },
+        );
+        return;
+      }
+
+      await this.replyText(
+        ctx,
+        await this.tForContext(ctx, "menu:system.gateway_relay_inbox_sent", {
+          sessionName: session?.label ?? relayTarget.localSessionId,
+        }),
+        { kind: "transport", sessionId },
+      );
+      return;
+    }
 
     await this.storeTelegramUploadMetas({
       sessionId,
@@ -5361,12 +5753,18 @@ export class TelegramTransport implements HumanTransport {
     ];
 
     const keyboard = new InlineKeyboard();
+    keyboard.text(
+      this.t(locale, "menu:admin.client_session_detail.bind"),
+      `admin-client-session-bind:${payloadKey}`,
+    );
     if (this.buildLiveViewUrlForSessionTarget({
       targetSessionId: input.targetSessionId,
       targetClientUuid: input.targetClientUuid,
       targetLocalSessionId: input.targetLocalSessionId,
     })) {
       keyboard.text("🖥 Live", `admin-client-session-live:${payloadKey}`).row();
+    } else {
+      keyboard.row();
     }
     keyboard.text(
       this.t(locale, "menu:admin.client_session_detail.back_to_sessions"),
@@ -5751,6 +6149,8 @@ export class TelegramTransport implements HumanTransport {
       `GATEWAY_PUBLIC_URL=${gatewayPublicUrl}`,
       `GATEWAY_WS_URL=${gatewayWsUrl}`,
       `GATEWAY_WS_PATH=${this.config.distributed.gatewayWsPath}`,
+      "# GATEWAY_TOKEN=",
+      `GATEWAY_TOKEN=${this.config.distributed.gatewayToken ?? ""}`,
       `GATEWAY_AUTH_TOKEN=${this.config.distributed.gatewayAuthToken ?? ""}`,
       "",
       `WEBAPP_ENABLED=${String(this.config.webapp.enabled)}`,
@@ -7476,7 +7876,9 @@ export class TelegramTransport implements HumanTransport {
     }
 
     const outputName = preferredName;
-    const fileUrl = `https://api.telegram.org/file/bot${this.config.telegram.botToken}/${telegramFile.file_path}`;
+    const fileUrl = `https://api.telegram.org/file/bot${this.getRequiredBotToken(
+      "download Telegram files",
+    )}/${telegramFile.file_path}`;
     const response = await this.telegramFetch(fileUrl);
 
     if (!response.ok) {
@@ -10835,15 +11237,7 @@ export class TelegramTransport implements HumanTransport {
 
   private async getAdminClientSessionPayloadByKey(
     payloadKey: string,
-  ): Promise<{
-    sessionId: string;
-    targetSessionId: string;
-    targetSessionLabel: string;
-    targetClientUuid: string;
-    targetLocalSessionId: string;
-    projectUuid?: string;
-    projectName?: string;
-  } | null> {
+  ): Promise<GatewayRelayBindingPayload | null> {
     const payload = await this.menuPayloadStore.getMenuPayload(payloadKey);
     if (
       !payload ||
@@ -10865,6 +11259,65 @@ export class TelegramTransport implements HumanTransport {
       ...(payload.projectUuid ? { projectUuid: payload.projectUuid } : {}),
       ...(payload.projectName ? { projectName: payload.projectName } : {}),
     };
+  }
+
+  private buildRelaySessionContext(
+    input: GatewayRelayBindingPayload,
+  ): SessionContext {
+    const relaySessionId = buildLiveRelaySessionId(
+      input.targetClientUuid,
+      input.targetLocalSessionId,
+    );
+    const now = new Date().toISOString();
+    return {
+      sessionId: relaySessionId,
+      label: input.targetSessionLabel,
+      ...(input.projectUuid ? { activeProjectUuid: input.projectUuid } : {}),
+      ...(input.projectName ? { activeProjectName: input.projectName } : {}),
+      updatedAt: now,
+    };
+  }
+
+  private async bindRelaySessionToPrincipal(input: {
+    principal: { telegramChatId: number; telegramUserId: number };
+    ctx: TelegramMenuContext;
+    payload: GatewayRelayBindingPayload;
+  }): Promise<SessionContext> {
+    const session = this.buildRelaySessionContext(input.payload);
+    const existingSession = await this.sessionStore.getSession(session.sessionId);
+    await this.sessionStore.setSession({
+      ...(existingSession ?? session),
+      ...session,
+      ...(existingSession?.cwd ? { cwd: existingSession.cwd } : {}),
+      ...(existingSession?.task ? { task: existingSession.task } : {}),
+      ...(existingSession?.summary ? { summary: existingSession.summary } : {}),
+      ...(existingSession?.files ? { files: existingSession.files } : {}),
+      ...(existingSession?.decisions
+        ? { decisions: existingSession.decisions }
+        : {}),
+      ...(existingSession?.risks ? { risks: existingSession.risks } : {}),
+      ...(existingSession?.lastSeenToolsHash
+        ? { lastSeenToolsHash: existingSession.lastSeenToolsHash }
+        : {}),
+      ...(existingSession?.lastNotifiedToolsHash
+        ? { lastNotifiedToolsHash: existingSession.lastNotifiedToolsHash }
+        : {}),
+      updatedAt: new Date().toISOString(),
+    });
+    await this.bindingStore.setBinding({
+      sessionId: session.sessionId,
+      telegramChatId: input.principal.telegramChatId,
+      telegramUserId: input.principal.telegramUserId,
+      ...(input.ctx.from?.username
+        ? { telegramUsername: input.ctx.from.username }
+        : {}),
+      linkedAt: new Date().toISOString(),
+    });
+    await this.bindingStore.setActiveSessionIdForPrincipal(
+      input.principal,
+      session.sessionId,
+    );
+    return session;
   }
 
   private extractCallbackSuffix(
@@ -11046,6 +11499,67 @@ export class TelegramTransport implements HumanTransport {
           ? { telegramMessageId: sent.message_id }
           : {}),
       },
+    );
+  }
+
+  private async handleAdminClientSessionBindCallback(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
+    const payloadKey = this.extractCallbackSuffix(
+      ctx,
+      "admin-client-session-bind:",
+    );
+    if (!payloadKey) {
+      await ctx.answerCallbackQuery({
+        text: this.t(locale, "menu:admin.client_sessions.invalid_action"),
+        show_alert: true,
+      });
+      return;
+    }
+
+    const payload = await this.getAdminClientSessionPayloadByKey(payloadKey);
+    if (!payload) {
+      await ctx.answerCallbackQuery({
+        text: this.t(locale, "menu:admin.client_sessions.not_found"),
+        show_alert: true,
+      });
+      return;
+    }
+
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal) {
+      await ctx.answerCallbackQuery({
+        text: this.t(locale, "common:errors.no_telegram_identity"),
+        show_alert: true,
+      });
+      return;
+    }
+
+    const session = await this.bindRelaySessionToPrincipal({
+      principal,
+      ctx,
+      payload,
+    });
+
+    this.logger.info("Gateway relay session linked to Telegram principal", {
+      sessionId: session.sessionId,
+      targetClientUuid: payload.targetClientUuid,
+      targetLocalSessionId: payload.targetLocalSessionId,
+      chatId: ctx.chat?.id,
+      userId: ctx.from?.id,
+    });
+
+    await ctx.answerCallbackQuery({
+      text: this.t(locale, "menu:admin.client_session_detail.bound", {
+        sessionName: payload.targetSessionLabel,
+      }),
+    });
+    await this.showMainMenu(
+      ctx,
+      this.t(locale, "menu:admin.client_session_detail.bound", {
+        sessionName: payload.targetSessionLabel,
+      }),
     );
   }
 

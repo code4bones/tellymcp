@@ -47,6 +47,7 @@ export async function ensureGatewayClientUuid(input: {
   gatewayAuthToken?: string;
   projectName?: string;
   botUsername?: string;
+  gatewayToken?: string;
 }): Promise<string> {
   const existing = await input.maintenanceStore.getGatewayClientUuid();
   if (existing) {
@@ -69,6 +70,7 @@ export async function ensureGatewayClientUuid(input: {
         input.botUsername ||
         "tellymcp client",
       ...(input.botUsername ? { bot_username: input.botUsername } : {}),
+      ...(input.gatewayToken ? { gateway_token: input.gatewayToken } : {}),
       meta: {},
     },
   });

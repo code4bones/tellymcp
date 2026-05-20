@@ -5,7 +5,7 @@ import * as z from "zod/v4";
 import type { QueueMode } from "../../shared/types/common";
 
 const envSchema = z.object({
-  TELEGRAM_BOT_TOKEN: z.string().min(1),
+  TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
   TELEGRAM_BOT_USERNAME: z.string().min(1).optional(),
   ADMIN_TOKEN: z.string().min(1).optional(),
   TELEGRAM_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
@@ -59,6 +59,7 @@ const envSchema = z.object({
     .string()
     .min(1)
     .default(`${(process.env.ROOT_PREFIX || "/api").replace(/\/+$/u, "")}/gateway/ws`),
+  GATEWAY_TOKEN: z.string().min(1).optional(),
   GATEWAY_AUTH_TOKEN: z.string().min(1).optional(),
   GATEWAY_DATABASE_URL: z.string().min(1).optional(),
   GATEWAY_S3_ENDPOINT: z.string().min(1).optional(),
@@ -162,7 +163,7 @@ const envSchema = z.object({
 
 export type AppConfig = {
   telegram: {
-    botToken: string;
+    botToken?: string;
     botUsername?: string;
     adminToken?: string;
     debugLanguage?: "en" | "ru";
@@ -203,6 +204,7 @@ export type AppConfig = {
     gatewayBindPort: number;
     gatewayWsUrl?: string;
     gatewayWsPath: string;
+    gatewayToken?: string;
     gatewayAuthToken?: string;
     gatewayDatabaseUrl?: string;
     gatewayS3Endpoint?: string;
@@ -279,6 +281,21 @@ export function loadConfig(): AppConfig {
 
   const parsed = envSchema.parse(process.env);
 
+  if (
+    parsed.DISTRIBUTED_MODE !== "client" &&
+    !parsed.TELEGRAM_BOT_TOKEN?.trim()
+  ) {
+    throw new Error(
+      "TELEGRAM_BOT_TOKEN is required for gateway and both distributed modes.",
+    );
+  }
+
+  if (parsed.ADMIN_TOKEN?.trim() && !parsed.TELEGRAM_BOT_TOKEN?.trim()) {
+    throw new Error(
+      "ADMIN_TOKEN requires TELEGRAM_BOT_TOKEN because admin mode runs through the gateway bot.",
+    );
+  }
+
   const telegramProxy =
     parsed.PROXY_USE === "http"
       ? parsed.HTTP_PROXY
@@ -302,7 +319,9 @@ export function loadConfig(): AppConfig {
 
   return {
     telegram: {
-      botToken: parsed.TELEGRAM_BOT_TOKEN,
+      ...(parsed.TELEGRAM_BOT_TOKEN
+        ? { botToken: parsed.TELEGRAM_BOT_TOKEN }
+        : {}),
       ...(parsed.TELEGRAM_BOT_USERNAME
         ? { botUsername: parsed.TELEGRAM_BOT_USERNAME }
         : {}),
@@ -350,6 +369,9 @@ export function loadConfig(): AppConfig {
         ? { gatewayWsUrl: parsed.GATEWAY_WS_URL }
         : {}),
       gatewayWsPath: parsed.GATEWAY_WS_PATH,
+      ...(parsed.GATEWAY_TOKEN
+        ? { gatewayToken: parsed.GATEWAY_TOKEN }
+        : {}),
       ...(parsed.GATEWAY_AUTH_TOKEN
         ? { gatewayAuthToken: parsed.GATEWAY_AUTH_TOKEN }
         : {}),

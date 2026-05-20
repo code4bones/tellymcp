@@ -52,6 +52,20 @@ const LIVE_REQUEST_TIMEOUT_MS = 20000;
 const TOOLS_SYNC_CHECK_INTERVAL_MS = 15000;
 const WS_HEARTBEAT_INTERVAL_MS = 10000;
 
+function requireTelegramBotToken(
+  runtime: ReturnType<TelegramMcpRuntimeServiceInstance["getRuntime"]>,
+  purpose: string,
+): string {
+  const token = runtime.config.telegram.botToken?.trim();
+  if (!token) {
+    throw new Error(
+      `Telegram bot token is unavailable on this node; cannot ${purpose}.`,
+    );
+  }
+
+  return token;
+}
+
 function sanitizeArtifactName(value: string): string {
   const withoutControlChars = Array.from(value)
     .map((char) => (char.charCodeAt(0) < 32 ? "-" : char))
@@ -226,6 +240,18 @@ type GatewaySocketLiveEvent = {
   payload: GatewaySocketLiveApprovalPayload;
 };
 
+type GatewaySocketTransportReplyPayload = {
+  request_id: string;
+  answer: string;
+  received_at: string;
+};
+
+type GatewaySocketTransportEvent = {
+  type: "transport_event";
+  event: "request_reply";
+  payload: GatewaySocketTransportReplyPayload;
+};
+
 type GatewaySocketToolsEventPayload = {
   local_session_id: string;
   session_label?: string;
@@ -259,6 +285,7 @@ type GatewaySocketMessage =
   | GatewaySocketLiveRequest
   | GatewaySocketLiveResponse
   | GatewaySocketLiveEvent
+  | GatewaySocketTransportEvent
   | GatewaySocketToolsEvent
   | GatewaySocketProjectEvent
   | GatewaySocketDeliveryEvent
@@ -335,6 +362,7 @@ type GatewaySocketCarrier = Service & {
   sendDirectPartnerNote?: (params: {
     clientUuid: string;
     localSessionId: string;
+    sourceActorLabel?: string;
     targetClientUuid: string;
     targetLocalSessionId: string;
     kind: string;
@@ -403,6 +431,10 @@ type GatewaySocketCarrier = Service & {
   notifyDeliveryStatus?: (params: {
     clientUuid: string;
     status: GatewaySocketDeliveryStatus;
+  }) => Promise<boolean>;
+  notifyTransportReply?: (params: {
+    clientUuid: string;
+    payload: GatewaySocketTransportReplyPayload;
   }) => Promise<boolean>;
   listConnectedClients?: () => Array<{
     client_uuid: string;
@@ -607,6 +639,26 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         return await this.notifyDeliveryStatus?.(ctx.params);
       },
     },
+    notifyTransportReply: {
+      params: {
+        client_uuid: "string",
+        request_id: "string",
+        answer: "string",
+        received_at: "string",
+      },
+      async handler(this: GatewaySocketCarrier, ctx) {
+        return {
+          delivered: await this.notifyTransportReply?.({
+            clientUuid: String(ctx.params.client_uuid),
+            payload: {
+              request_id: String(ctx.params.request_id),
+              answer: String(ctx.params.answer),
+              received_at: String(ctx.params.received_at),
+            },
+          }),
+        };
+      },
+    },
     listConnectedClients: {
       async handler(this: GatewaySocketCarrier) {
         return {
@@ -618,6 +670,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       params: {
         clientUuid: "string",
         localSessionId: "string",
+        sourceActorLabel: { type: "string", optional: true },
         targetClientUuid: "string",
         targetLocalSessionId: "string",
         kind: "string",
@@ -634,6 +687,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           params: {
             clientUuid: string;
             localSessionId: string;
+            sourceActorLabel?: string;
             targetClientUuid: string;
             targetLocalSessionId: string;
             kind: string;
@@ -831,6 +885,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       params: {
         clientUuid: string;
         localSessionId: string;
+        sourceActorLabel?: string;
         targetClientUuid: string;
         targetLocalSessionId: string;
         kind: string;
@@ -912,7 +967,9 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         share_id: shareId,
         route_mode: "direct",
         source_actor_label:
-          sourceInfo?.session_label ?? params.localSessionId,
+          params.sourceActorLabel?.trim() ||
+          sourceInfo?.session_label ||
+          params.localSessionId,
         source_client_uuid: params.clientUuid,
         target_client_uuid: params.targetClientUuid,
         kind: params.kind,
@@ -923,7 +980,9 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         ...(params.inReplyTo ? { in_reply_to: params.inReplyTo } : {}),
         source_session_uuid: `${params.clientUuid}:${params.localSessionId}`,
         source_session_label:
-          sourceInfo?.session_label ?? params.localSessionId,
+          params.sourceActorLabel?.trim() ||
+          sourceInfo?.session_label ||
+          params.localSessionId,
         source_local_session_id: params.localSessionId,
         target_session_uuid: `${params.targetClientUuid}:${params.targetLocalSessionId}`,
         target_local_session_id: params.targetLocalSessionId,
@@ -1301,7 +1360,10 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           const validated = validateTelegramWebAppInitData(
             initDataRaw,
             initDataUnsafe,
-            runtime.config.telegram.botToken,
+            requireTelegramBotToken(
+              runtime,
+              "validate Telegram WebApp relay bootstrap",
+            ),
             runtime.config.webapp.initDataTtlSeconds,
           );
           const launchRecord =
@@ -1371,7 +1433,10 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             const validated = validateTelegramWebAppInitData(
               initDataRaw,
               initDataUnsafe,
-              runtime.config.telegram.botToken,
+              requireTelegramBotToken(
+                runtime,
+                "validate Telegram WebApp relay bootstrap",
+              ),
               runtime.config.webapp.initDataTtlSeconds,
             );
             telegramUserId = validated.user.id;
@@ -2006,6 +2071,15 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         }
       }
 
+      if (parsed.type === "transport_event" && parsed.payload) {
+        if (parsed.event === "request_reply") {
+          await runtime.telegramTransport.handleGatewayTransportReplyEvent(
+            parsed.payload as GatewaySocketTransportReplyPayload,
+          );
+          return;
+        }
+      }
+
       if (parsed.type === "delivery_event") {
         const delivery = parsed.payload;
         if (!delivery) {
@@ -2349,6 +2423,36 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           type: "delivery_status_event",
           payload: params.status,
         } satisfies GatewaySocketDeliveryStatusEvent),
+      );
+      return true;
+    },
+
+    async notifyTransportReply(
+      this: GatewaySocketCarrier,
+      params: {
+        clientUuid: string;
+        payload: GatewaySocketTransportReplyPayload;
+      },
+    ): Promise<boolean> {
+      if (await this.isLocalGatewayClientUuid?.(params.clientUuid)) {
+        const runtime = this.getRuntimeOrThrow!();
+        await runtime.telegramTransport.handleGatewayTransportReplyEvent(
+          params.payload,
+        );
+        return true;
+      }
+
+      const socket = this.connectedClientsByUuid?.get(params.clientUuid);
+      if (!socket || socket.readyState !== 1) {
+        return false;
+      }
+
+      socket.send(
+        JSON.stringify({
+          type: "transport_event",
+          event: "request_reply",
+          payload: params.payload,
+        } satisfies GatewaySocketTransportEvent),
       );
       return true;
     },

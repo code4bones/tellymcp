@@ -24,6 +24,7 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
       if (!(await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_clients"))) {
         await this.db.schema.withSchema(MCP_SCHEMA).createTable("gateway_clients", (table) => {
           table.uuid("client_uuid").primary();
+          table.text("scope_key");
           table.text("client_label");
           table.text("bot_token_fingerprint");
           table.text("bot_username");
@@ -157,6 +158,18 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
       }
 
       if (
+        (await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_clients")) &&
+        !(await this.db.schema.withSchema(MCP_SCHEMA).hasColumn(
+          "gateway_clients",
+          "scope_key",
+        ))
+      ) {
+        await this.db.schema.withSchema(MCP_SCHEMA).alterTable("gateway_clients", (table) => {
+          table.text("scope_key");
+        });
+      }
+
+      if (
         (await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_projects")) &&
         !(await this.db.schema.withSchema(MCP_SCHEMA).hasColumn(
           "gateway_projects",
@@ -233,6 +246,13 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
             table.text("display_name");
           });
       }
+
+      await this.db.raw(
+        `
+        CREATE INDEX IF NOT EXISTS gateway_clients_scope_idx
+        ON "${MCP_SCHEMA}"."gateway_clients" ("scope_key")
+        `,
+      );
 
       await this.db.raw(
         `

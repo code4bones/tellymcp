@@ -513,6 +513,8 @@ export const ruMenu = {
       title: "🖥 Сессия клиента",
       session: "Сессия: <b>{{sessionName}}</b>",
       project: "Проект: <b>{{projectName}}</b>",
+      bind: "🔗 Привязать сюда",
+      bound: "Сессия привязана: {{sessionName}}",
       back_to_sessions: "⬅ Назад к сессиям",
     },
     tools: {
@@ -701,6 +703,10 @@ export const ruMenu = {
   system: {
     sessions_menu_unavailable:
       "Меню сессий временно недоступно. Попробуй /menu ещё раз.",
+    gateway_relay_inbox_sent:
+      "Сообщение отправлено в сессию {{sessionName}} через шлюз.",
+    gateway_relay_inbox_failed:
+      "Не удалось отправить сообщение в выбранную gateway-сессию.",
     error_prefix: "Ошибка: {{message}}",
     tmux_recreated_hint:
       "Обычно это значит, что pane/window/session был пересоздан.",

@@ -85,7 +85,8 @@ export class HumanApprovalOrchestrator {
       session_id: input.session_id,
     });
     const binding = await this.bindingStore.getBinding(resolved.sessionId);
-    if (!binding) {
+    const canUseGatewayProxy = Boolean(this.config.distributed.gatewayPublicUrl);
+    if (!binding && !canUseGatewayProxy) {
       throw new Error(
         "Session is not linked to Telegram. Call create_session_pair_code first.",
       );
@@ -124,8 +125,8 @@ export class HumanApprovalOrchestrator {
       ...(input.fallback_if_timeout
         ? { fallbackIfTimeout: redactSecrets(input.fallback_if_timeout) }
         : {}),
-      telegramChatId: binding.telegramChatId,
-      telegramUserId: binding.telegramUserId,
+      telegramChatId: binding?.telegramChatId ?? 0,
+      telegramUserId: binding?.telegramUserId ?? 0,
       queuedAt: new Date().toISOString(),
       status: this.config.mode === "queue" ? "queued" : "active",
     };

@@ -50,6 +50,20 @@ function formatTmuxHttpError(error: unknown, fallback: string): string {
   return fallback;
 }
 
+function requireTelegramBotToken(
+  runtime: AppRuntime,
+  purpose: string,
+): string {
+  const token = runtime.config.telegram.botToken?.trim();
+  if (!token) {
+    throw new Error(
+      `Telegram bot token is unavailable on this node; cannot ${purpose}.`,
+    );
+  }
+
+  return token;
+}
+
 function isInitializeRequest(body: unknown): boolean {
   if (!body || typeof body !== "object") {
     return false;
@@ -385,7 +399,10 @@ export function createMcpHttpHandler(
                 const validated = validateTelegramWebAppInitData(
                   initDataRaw,
                   initDataUnsafe,
-                  runtime.config.telegram.botToken,
+                  requireTelegramBotToken(
+                    runtime,
+                    "validate local Telegram WebApp bootstrap",
+                  ),
                   runtime.config.webapp.initDataTtlSeconds,
                 );
                 trustedTelegramUserId = validated.user.id;
@@ -482,7 +499,10 @@ export function createMcpHttpHandler(
           const validated = validateTelegramWebAppInitData(
             initDataRaw,
             initDataUnsafe,
-            runtime.config.telegram.botToken,
+            requireTelegramBotToken(
+              runtime,
+              "validate Telegram WebApp bootstrap",
+            ),
             runtime.config.webapp.initDataTtlSeconds,
           );
           runtime.logger.info("Telegram WebApp initData validation debug", {

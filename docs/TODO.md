@@ -148,3 +148,18 @@ Next session:
     - GUI dependency
     - ниже надёжность, чем у `tmux`
     - higher HITL / safety oversight
+
+- [ ] Следующий большой шаг: `gateway-bot-only` / `agent-only clients`
+  - ввести `GATEWAY_TOKEN` как visibility scope / tenant layer на шлюзе
+  - перевести client enrollment на `GATEWAY_TOKEN -> client_uuid/client_secret`
+  - оставить один Telegram bot на gateway, убрать обязательный local client bot
+  - перенести `/link` на gateway-side flow:
+    - пользователь авторизуется в gateway bot
+    - выбирает scope
+    - выбирает client/session, видимые только внутри своего `GATEWAY_TOKEN`
+  - оставить `ws` как transport/presence/live layer, не делать `Redis-over-WS`
+  - пока сохранить local Redis/client state как transition step
+  - позже отдельно решить:
+    - нужен ли переход client-local state с Redis на sqlite
+    - как хранить `active session` и bindings уже без local Telegram bot
+    - как revoke/rotate `client_secret` без смены `GATEWAY_TOKEN`

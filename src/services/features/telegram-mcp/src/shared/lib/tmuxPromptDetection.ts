@@ -21,6 +21,11 @@ type ScoreContribution = {
   reason: string;
 };
 
+type DetectionSignal = {
+  score: number;
+  reason: string;
+};
+
 const ANSI_ESCAPE_SEQUENCE_PATTERN =
   // eslint-disable-next-line no-control-regex
   /\u001B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/gu;
@@ -73,17 +78,17 @@ const STRONG_PATTERNS: Array<{ pattern: RegExp; score: number; reason: string }>
 const MEDIUM_PATTERNS: Array<{ pattern: RegExp; score: number; reason: string }> = [
   {
     pattern: /\b(confirm|approve|allow|continue|proceed|select|choose)\b/iu,
-    score: 2,
+    score: 1,
     reason: "action_keyword",
   },
   {
     pattern: /\?\s*$/u,
-    score: 2,
+    score: 1,
     reason: "question_mark",
   },
   {
     pattern: /\b(?:always\s+allow|allow\s+for\s+this\s+session|cancel\s+this\s+tool\s+call)\b/iu,
-    score: 2,
+    score: 1,
     reason: "tool_choice_keyword",
   },
 ];
@@ -115,7 +120,7 @@ function isNoiseLine(line: string): boolean {
   );
 }
 
-function scoreLine(line: string, strategy: TmuxPromptScanStrategy): ScoreContribution[] {
+function scoreStrongLine(line: string): ScoreContribution[] {
   const contributions: ScoreContribution[] = [];
 
   for (const candidate of STRONG_PATTERNS) {
@@ -126,6 +131,15 @@ function scoreLine(line: string, strategy: TmuxPromptScanStrategy): ScoreContrib
       });
     }
   }
+
+  return contributions;
+}
+
+function scoreMediumLine(
+  line: string,
+  strategy: TmuxPromptScanStrategy,
+): ScoreContribution[] {
+  const contributions: ScoreContribution[] = [];
 
   for (const candidate of MEDIUM_PATTERNS) {
     if (candidate.pattern.test(line)) {
@@ -147,6 +161,42 @@ function scoreLine(line: string, strategy: TmuxPromptScanStrategy): ScoreContrib
   }
 
   return contributions;
+}
+
+function isStrongReason(reason: string): boolean {
+  return STRONG_PATTERNS.some((candidate) => candidate.reason === reason);
+}
+
+function detectGroupedSignals(
+  candidateLines: string[],
+  strategy: TmuxPromptScanStrategy,
+): DetectionSignal[] {
+  const signals: DetectionSignal[] = [];
+  const hasPrimaryAllowChoice = candidateLines.some((line) =>
+    /^>?[\s\d.]*allow\b/iu.test(line),
+  );
+  const hasSecondaryApprovalChoice = candidateLines.some((line) =>
+    /\b(?:allow\s+once|allow\s+for\s+this\s+session|always\s+allow|cancel)\b/iu.test(line),
+  );
+  const hasSubmitCancelHint = candidateLines.some((line) =>
+    /\benter\s+to\s+submit\b.*\besc\s+to\s+cancel\b/iu.test(line),
+  );
+
+  if (hasPrimaryAllowChoice && hasSecondaryApprovalChoice) {
+    signals.push({
+      score: 5,
+      reason: "approval_choice_group",
+    });
+  }
+
+  if (hasSubmitCancelHint) {
+    signals.push({
+      score: strategy === "balanced" ? 2 : 3,
+      reason: "submit_cancel_hint",
+    });
+  }
+
+  return signals;
 }
 
 function collectCandidateLines(rawText: string, maxLines: number): string[] {
@@ -183,7 +233,7 @@ export function detectTmuxInteractivePrompt(
       continue;
     }
 
-    const contributions = scoreLine(line, strategy);
+    const contributions = scoreStrongLine(line);
     if (contributions.length === 0) {
       continue;
     }
@@ -202,6 +252,60 @@ export function detectTmuxInteractivePrompt(
   if (scoredLines.length > 0 && optionLineCount >= 2) {
     score += 3;
     reasons.add("multiple_options");
+  }
+
+  for (const signal of detectGroupedSignals(candidateLines, strategy)) {
+    score += signal.score;
+    reasons.add(signal.reason);
+  }
+
+  const hasStrongReason = Array.from(reasons).some(isStrongReason);
+  const hasGroupedReason =
+    reasons.has("approval_choice_group") || reasons.has("submit_cancel_hint");
+  const hasOnlyQuestionMarkReason =
+    reasons.size === 1 && reasons.has("question_mark");
+
+  if (strategy === "strict") {
+    if (hasOnlyQuestionMarkReason) {
+      return null;
+    }
+
+    if (!hasStrongReason) {
+      if (!hasGroupedReason) {
+        return null;
+      }
+    }
+  }
+
+  const canUseMediumSignals =
+    strategy === "balanced" ||
+    hasStrongReason ||
+    hasGroupedReason ||
+    reasons.has("multiple_options");
+
+  if (canUseMediumSignals) {
+    for (const line of candidateLines) {
+      if (isNoiseLine(line)) {
+        continue;
+      }
+
+      const contributions = scoreMediumLine(line, strategy);
+      if (contributions.length === 0) {
+        continue;
+      }
+
+      const existing = scoredLines.find((entry) => entry.line === line);
+      if (existing) {
+        existing.contributions.push(...contributions);
+      } else {
+        scoredLines.push({ line, contributions: [...contributions] });
+      }
+
+      for (const contribution of contributions) {
+        score += contribution.score;
+        reasons.add(contribution.reason);
+      }
+    }
   }
 
   if (score < minScore || scoredLines.length === 0) {

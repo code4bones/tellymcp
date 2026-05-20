@@ -70,4 +70,30 @@ enter to submit | esc to cancel
     expect(detection?.reasons).toContain("tool_continue_prompt");
     expect(detection?.score).toBeGreaterThanOrEqual(8);
   });
+
+  it("does not treat a plain user question as an interactive approval prompt", () => {
+    const detection = detectTmuxInteractivePrompt(`
+› спроси у leftDev сколько время ?
+`);
+
+    expect(detection).toBeNull();
+  });
+
+  it("detects allow-choice approval screens without relying on the action banner", () => {
+    const detection = detectTmuxInteractivePrompt(`
+Field 1/1
+Allow the telegramHuman MCP server to run tool "refresh_tools_markdown"?
+
+1. Allow                        Run the tool and continue.
+2. Allow for this session       Run the tool and remember this choice for this session.
+3. Always allow                 Run the tool and remember this choice for future tool calls.
+4. Cancel                       Cancel this tool call
+enter to submit | esc to cancel
+`);
+
+    expect(detection).not.toBeNull();
+    expect(detection?.reasons).toContain("approval_choice_group");
+    expect(detection?.reasons).toContain("submit_cancel_hint");
+    expect(detection?.score).toBeGreaterThanOrEqual(8);
+  });
 });

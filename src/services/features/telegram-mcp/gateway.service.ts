@@ -52,6 +52,8 @@ type GatewayServiceCarrier = Service & {
     clients: Array<{
       client_uuid: string;
       client_label: string | null;
+      namespace?: string | null;
+      node_id?: string | null;
       telegram_username: string | null;
       telegram_display_name: string | null;
       bot_username: string | null;
@@ -656,6 +658,8 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .groupBy(
           "c.client_uuid",
           "c.client_label",
+          this.db.raw("nullif(c.meta->>'namespace', '')"),
+          this.db.raw("nullif(c.meta->>'node_id', '')"),
           this.db.raw("nullif(c.meta->>'telegram_username', '')"),
           this.db.raw("nullif(c.meta->>'telegram_display_name', '')"),
           "c.bot_username",
@@ -665,6 +669,8 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .select(
           "c.client_uuid",
           "c.client_label",
+          this.db.raw("nullif(c.meta->>'namespace', '') as namespace"),
+          this.db.raw("nullif(c.meta->>'node_id', '') as node_id"),
           this.db.raw("nullif(c.meta->>'telegram_username', '') as telegram_username"),
           this.db.raw("nullif(c.meta->>'telegram_display_name', '') as telegram_display_name"),
           "c.bot_username",
@@ -689,6 +695,8 @@ const TelegramMcpGatewayService: ServiceSchema = {
         clients: rows.map((row: Record<string, unknown>) => ({
           client_uuid: String(row.client_uuid),
           client_label: row.client_label ? String(row.client_label) : null,
+          namespace: row.namespace ? String(row.namespace) : null,
+          node_id: row.node_id ? String(row.node_id) : null,
           telegram_username: row.telegram_username ? String(row.telegram_username) : null,
           telegram_display_name: row.telegram_display_name ? String(row.telegram_display_name) : null,
           bot_username: row.bot_username ? String(row.bot_username) : null,

@@ -229,6 +229,8 @@ type GatewayProjectSessionRecord = {
 type GatewayClientRecord = {
   client_uuid: string;
   client_label: string | null;
+  namespace?: string | null;
+  node_id?: string | null;
   telegram_username: string | null;
   telegram_display_name: string | null;
   bot_username: string | null;
@@ -261,6 +263,7 @@ type AdminGatewayRegistrationSessionRecord = {
 
 type GatewayConnectedClientRecord = {
   client_uuid: string;
+  namespace?: string;
   node_id?: string;
   package_version?: string;
   protocol_version?: string;
@@ -1201,6 +1204,8 @@ export class TelegramTransport implements HumanTransport {
       merged.set(client.client_uuid, {
         client_uuid: client.client_uuid,
         client_label: existing?.client_label ?? null,
+        namespace: existing?.namespace ?? client.namespace ?? null,
+        node_id: existing?.node_id ?? client.node_id ?? null,
         telegram_username: existing?.telegram_username ?? null,
         telegram_display_name: existing?.telegram_display_name ?? null,
         bot_username: existing?.bot_username ?? null,
@@ -5889,11 +5894,20 @@ export class TelegramTransport implements HumanTransport {
     const displayName = client.telegram_display_name?.trim() || "";
     const telegramUsername = client.telegram_username?.trim().replace(/^@/u, "") || "";
     const botUsername = client.bot_username?.trim().replace(/^@/u, "") || "";
-    const fallback = (client.client_label ?? client.client_uuid).trim();
+    const clientLabel = client.client_label?.trim() || "";
+    const namespace = client.namespace?.trim() || "";
+    const nodeId = client.node_id?.trim() || "";
+    const runtimeLabel =
+      [namespace, nodeId].filter(Boolean).join("/") || nodeId || "";
+    const fallback = (clientLabel || runtimeLabel || client.client_uuid).trim();
 
     const identityParts = [
       displayName || null,
       !displayName && telegramUsername ? `@${telegramUsername}` : null,
+      !displayName && !telegramUsername && clientLabel ? clientLabel : null,
+      !displayName && !telegramUsername && !clientLabel && runtimeLabel
+        ? runtimeLabel
+        : null,
       botUsername ? `🤖@${botUsername}` : null,
     ].filter(Boolean);
 
@@ -8677,6 +8691,10 @@ export class TelegramTransport implements HumanTransport {
       return null;
     }
 
+    const relayTarget = parseLiveRelaySessionId(input.sessionId);
+    const allowForeignBinding =
+      input.allowForeignBinding === true || Boolean(relayTarget);
+
     const liveSessionId =
       useGatewayRelay && clientUuid
         ? buildLiveRelaySessionId(clientUuid, input.sessionId)
@@ -8712,7 +8730,7 @@ export class TelegramTransport implements HumanTransport {
       this.config.webapp.initDataTtlSeconds,
       {
         telegramChatId: input.principal.telegramChatId,
-        ...(input.allowForeignBinding === true
+        ...(allowForeignBinding
           ? { allowForeignBinding: true }
           : {}),
         telegramMessageId: sent.message_id,

@@ -48,7 +48,11 @@ export async function ensureGatewayClientUuid(input: {
   projectName?: string;
   botUsername?: string;
   gatewayToken?: string;
+  namespace?: string;
+  nodeId?: string;
 }): Promise<string> {
+  const namespace = input.namespace || process.env.NAMESPACE || undefined;
+  const nodeId = input.nodeId || process.env.NODE_ID || undefined;
   const existing = await input.maintenanceStore.getGatewayClientUuid();
   if (existing) {
     return existing;
@@ -67,11 +71,15 @@ export async function ensureGatewayClientUuid(input: {
     body: {
       client_label:
         input.projectName ||
+        [namespace, nodeId].filter(Boolean).join("/") ||
         input.botUsername ||
         "tellymcp client",
       ...(input.botUsername ? { bot_username: input.botUsername } : {}),
       ...(input.gatewayToken ? { gateway_token: input.gatewayToken } : {}),
-      meta: {},
+      meta: {
+        ...(namespace ? { namespace } : {}),
+        ...(nodeId ? { node_id: nodeId } : {}),
+      },
     },
   });
 

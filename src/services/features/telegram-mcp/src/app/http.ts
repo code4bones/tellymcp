@@ -420,16 +420,22 @@ export function createMcpHttpHandler(
                 ...(trustedTelegramUserId !== null
                   ? { telegramUserId: trustedTelegramUserId }
                   : {}),
-                ...(launchRecord?.allowForeignBinding === true
-                  ? { allowForeignBinding: true }
-                  : {}),
-                ...(relayTarget.sourceClientUuid &&
-                relayTarget.sourceClientUuid !== relayTarget.clientUuid
-                  ? { allowForeignBinding: true }
-                  : {}),
+                // Relay sessions are already gateway-bound to a Telegram principal.
+                // Do not rely on the per-user launch registry here because it can be
+                // overwritten by other menu interactions before the WebApp opens.
+                allowForeignBinding: true,
                 initDataRaw,
                 initDataUnsafe,
               });
+            runtime.logger.info("Telegram WebApp relay bootstrap forwarded", {
+              sessionId,
+              clientUuid: relayTarget.clientUuid,
+              localSessionId: relayTarget.localSessionId,
+              trustedTelegramUserId,
+              hasLaunchRecord: launchRecord !== null,
+              launchRecordAllowForeignBinding:
+                launchRecord?.allowForeignBinding === true,
+            });
             const record = webAppSessions.create(
               sessionId,
               relayBootstrap.telegram_user_id,

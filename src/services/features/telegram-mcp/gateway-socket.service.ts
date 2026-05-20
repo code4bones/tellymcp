@@ -110,6 +110,7 @@ type GatewaySocketHello = {
   role: "client" | "gateway";
   client_uuid?: string;
   project_name?: string;
+  namespace?: string;
   node_id?: string;
   package_version?: string;
   protocol_version?: string;
@@ -813,6 +814,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
     listConnectedClients(this: GatewaySocketCarrier) {
       const result: Array<{
         client_uuid: string;
+        namespace?: string;
         node_id?: string;
         package_version?: string;
         protocol_version?: string;
@@ -827,6 +829,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
         result.push({
           client_uuid: hello.client_uuid,
+          ...(hello.namespace ? { namespace: hello.namespace } : {}),
           ...(hello.node_id ? { node_id: hello.node_id } : {}),
           ...(hello.package_version
             ? { package_version: hello.package_version }
@@ -1206,6 +1209,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         ...(runtime.config.project.name
           ? { project_name: runtime.config.project.name }
           : {}),
+        ...(this.broker.namespace ? { namespace: this.broker.namespace } : {}),
         ...(this.broker.nodeID ? { node_id: this.broker.nodeID } : {}),
         package_version: versionInfo.packageVersion,
         protocol_version: versionInfo.protocolVersion,

@@ -107,6 +107,7 @@ export interface TelegramAdminAuthStore {
   isAdminAuthorized(principal: TelegramPrincipal): Promise<boolean>;
   setAdminAuthorized(principal: TelegramPrincipal): Promise<void>;
   clearAdminAuthorized(principal: TelegramPrincipal): Promise<void>;
+  listAdminAuthorizedPrincipals(): Promise<TelegramPrincipal[]>;
 }
 
 export interface TelegramXchangeFileMetaStore {

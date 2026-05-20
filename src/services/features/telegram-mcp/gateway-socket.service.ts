@@ -1342,6 +1342,14 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             : {}),
         };
         const previous = this.connectedClients?.get(socket);
+        const previousByClientUuid =
+          hello.client_uuid
+            ? this.connectedClientsByUuid?.get(hello.client_uuid)
+            : null;
+        const previousHelloForClient =
+          previousByClientUuid && previousByClientUuid !== socket
+            ? this.connectedClients?.get(previousByClientUuid)
+            : previous;
         if (previous?.client_uuid) {
           this.connectedClientsByUuid?.delete(previous.client_uuid);
         }
@@ -1350,6 +1358,32 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           this.connectedClientsByUuid?.set(hello.client_uuid, socket);
         }
         runtime.logger.info("Gateway WS hello received", hello);
+        if (hello.client_uuid) {
+          const previousSessionIds = new Set(
+            Array.isArray(previousHelloForClient?.session_tools)
+              ? previousHelloForClient.session_tools.map((item) => item.local_session_id)
+              : [],
+          );
+          const currentSessions = Array.isArray(hello.session_tools)
+            ? hello.session_tools
+            : [];
+          const newSessions = currentSessions.filter(
+            (item) => !previousSessionIds.has(item.local_session_id),
+          );
+
+          if (!previousHelloForClient || newSessions.length > 0) {
+            await runtime.telegramTransport.sendAdminGatewayRegistrationNotifications({
+              clientUuid: hello.client_uuid,
+              ...(hello.node_id ? { nodeId: hello.node_id } : {}),
+              ...(hello.package_version
+                ? { packageVersion: hello.package_version }
+                : {}),
+              totalSessions: currentSessions.length,
+              isNewClient: !previousHelloForClient,
+              newSessions,
+            });
+          }
+        }
         const localVersionInfo = this.getLocalVersionInfo?.() ?? {
           packageVersion: "0.0.0-unknown",
           protocolVersion: TELLYMCP_PROTOCOL_VERSION,

@@ -83,6 +83,10 @@ function adminAuthorizedKey(principal: TelegramPrincipal): string {
   return `${KEY_PREFIX}:admin-auth:${principal.telegramChatId}:${principal.telegramUserId}`;
 }
 
+function adminAuthorizedMatchPattern(): string {
+  return `${KEY_PREFIX}:admin-auth:*:*`;
+}
+
 function gatewayClientUuidKey(): string {
   return `${KEY_PREFIX}:gateway:client-uuid`;
 }
@@ -233,6 +237,44 @@ export class RedisStateStore
     principal: TelegramPrincipal,
   ): Promise<void> {
     await this.redis.del(adminAuthorizedKey(principal));
+  }
+
+  public async listAdminAuthorizedPrincipals(): Promise<TelegramPrincipal[]> {
+    const principals: TelegramPrincipal[] = [];
+    let cursor = "0";
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        adminAuthorizedMatchPattern(),
+        "COUNT",
+        100,
+      );
+      cursor = nextCursor;
+
+      for (const key of keys) {
+        const match = key.match(
+          /^telegram-mcp:admin-auth:(-?\d+):(-?\d+)$/u,
+        );
+        if (!match) {
+          continue;
+        }
+
+        const telegramChatId = Number(match[1]);
+        const telegramUserId = Number(match[2]);
+        if (!Number.isFinite(telegramChatId) || !Number.isFinite(telegramUserId)) {
+          continue;
+        }
+
+        principals.push({
+          telegramChatId,
+          telegramUserId,
+        });
+      }
+    } while (cursor !== "0");
+
+    return principals;
   }
 
   public async setBinding(binding: SessionBinding): Promise<void> {

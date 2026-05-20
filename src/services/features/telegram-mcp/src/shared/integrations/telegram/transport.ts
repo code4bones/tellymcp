@@ -246,6 +246,11 @@ type GatewayConnectedClientSessionTool = {
   tools_hash?: string;
 };
 
+type AdminGatewayRegistrationSessionRecord = {
+  local_session_id: string;
+  session_label?: string;
+};
+
 type GatewayConnectedClientRecord = {
   client_uuid: string;
   node_id?: string;
@@ -1734,6 +1739,100 @@ export class TelegramTransport implements HumanTransport {
         this.logger.warn("Failed to deliver Telegram startup notification", {
           telegramChatId: recipientGroup.binding.telegramChatId,
           telegramUserId: recipientGroup.binding.telegramUserId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  public async sendAdminGatewayRegistrationNotifications(input: {
+    clientUuid: string;
+    nodeId?: string;
+    packageVersion?: string;
+    totalSessions: number;
+    isNewClient: boolean;
+    newSessions: AdminGatewayRegistrationSessionRecord[];
+  }): Promise<void> {
+    if (!this.isAdminAuthEnabled()) {
+      return;
+    }
+
+    const principals = await this.adminAuthStore.listAdminAuthorizedPrincipals();
+    if (principals.length === 0) {
+      this.logger.debug(
+        "Skipping gateway registration admin notifications because no admins are authorized",
+        {
+          clientUuid: input.clientUuid,
+        },
+      );
+      return;
+    }
+
+    const notifiedChats = new Set<string>();
+    for (const principal of principals) {
+      const dedupeKey = `${principal.telegramChatId}:${principal.telegramUserId}`;
+      if (notifiedChats.has(dedupeKey)) {
+        continue;
+      }
+
+      const locale = await this.resolveLocaleForTelegramUserId(
+        principal.telegramUserId,
+      );
+      const lines = [
+        this.t(
+          locale,
+          input.isNewClient
+            ? "menu:notices.admin.gateway_client_registered_title"
+            : "menu:notices.admin.gateway_session_registered_title",
+        ),
+        this.t(locale, "menu:notices.admin.gateway_client_uuid", {
+          value: input.clientUuid,
+        }),
+        ...(input.nodeId
+          ? [
+              this.t(locale, "menu:notices.admin.gateway_node_id", {
+                value: input.nodeId,
+              }),
+            ]
+          : []),
+        ...(input.packageVersion
+          ? [
+              this.t(locale, "menu:notices.admin.gateway_package_version", {
+                value: input.packageVersion,
+              }),
+            ]
+          : []),
+        this.t(locale, "menu:notices.admin.gateway_session_count", {
+          count: input.totalSessions,
+        }),
+        ...(input.newSessions.length > 0
+          ? [
+              "",
+              this.t(locale, "menu:notices.admin.gateway_new_sessions"),
+              ...input.newSessions.map((session) =>
+                this.t(locale, "menu:notices.admin.gateway_session_item", {
+                  label:
+                    session.session_label?.trim() || session.local_session_id,
+                  localSessionId: session.local_session_id,
+                }),
+              ),
+            ]
+          : []),
+      ];
+
+      try {
+        await this.sendNotification({
+          sessionId: `gateway-admin:${input.clientUuid}`,
+          sessionLabel: "Gateway Admin",
+          recipient: principal,
+          message: lines.join("\n"),
+        });
+        notifiedChats.add(dedupeKey);
+      } catch (error) {
+        this.logger.warn("Failed to deliver gateway registration admin notification", {
+          telegramChatId: principal.telegramChatId,
+          telegramUserId: principal.telegramUserId,
+          clientUuid: input.clientUuid,
           error: error instanceof Error ? error.message : String(error),
         });
       }

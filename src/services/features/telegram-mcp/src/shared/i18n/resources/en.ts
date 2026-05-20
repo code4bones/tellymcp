@@ -360,6 +360,16 @@ export const enMenu = {
     },
   },
   notices: {
+    admin: {
+      gateway_client_registered_title: "🆕 New gateway client registered",
+      gateway_session_registered_title: "🆕 New gateway session registered",
+      gateway_client_uuid: "Client UUID: {{value}}",
+      gateway_node_id: "Node: {{value}}",
+      gateway_package_version: "Package: {{value}}",
+      gateway_session_count: "Sessions in hello: {{count}}",
+      gateway_new_sessions: "New sessions:",
+      gateway_session_item: "• {{label}} ({{localSessionId}})",
+    },
     startup: {
       title: "✅ TellyMCP is running.",
       version: "Version: {{packageVersion}}",

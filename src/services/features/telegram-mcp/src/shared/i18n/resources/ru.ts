@@ -365,6 +365,16 @@ export const ruMenu = {
     },
   },
   notices: {
+    admin: {
+      gateway_client_registered_title: "🆕 Зарегистрирован новый gateway client",
+      gateway_session_registered_title: "🆕 Зарегистрирована новая gateway session",
+      gateway_client_uuid: "Client UUID: {{value}}",
+      gateway_node_id: "Node: {{value}}",
+      gateway_package_version: "Package: {{value}}",
+      gateway_session_count: "Сессий в hello: {{count}}",
+      gateway_new_sessions: "Новые сессии:",
+      gateway_session_item: "• {{label}} ({{localSessionId}})",
+    },
     startup: {
       title: "✅ TellyMCP запущен.",
       version: "Версия: {{packageVersion}}",

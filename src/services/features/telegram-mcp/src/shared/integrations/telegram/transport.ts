@@ -262,6 +262,19 @@ type AdminClientViewRecord = GatewayClientRecord & {
   connected_session_labels?: string[];
 };
 
+type AdminClientSessionViewRecord = {
+  session_uuid: string;
+  client_uuid: string;
+  local_session_id: string;
+  label: string | null;
+  status: string;
+  project_uuid?: string;
+  project_name?: string | null;
+  updated_at?: string;
+  is_connected?: boolean;
+  is_collab?: boolean;
+};
+
 type GatewayActorProfile = {
   telegramUsername?: string;
   telegramFirstName?: string;
@@ -832,7 +845,28 @@ export class TelegramTransport implements HumanTransport {
     this.bot.callbackQuery(/^admin-client-session-live:(.+)$/u, async (ctx) => {
       await this.handleAdminClientSessionLiveCallback(ctx);
     });
+    this.bot.callbackQuery(/^admin-client-session-open:(.+)$/u, async (ctx) => {
+      await this.handleAdminClientSessionOpenCallback(ctx);
+    });
+    this.bot.callbackQuery("admin-client-sessions-collab", async (ctx) => {
+      await ctx.answerCallbackQuery({
+        text: await this.tForContext(ctx, "menu:admin.actions.open_client_sessions"),
+      });
+      await this.showAdminClientSessionList(ctx, "collab");
+    });
+    this.bot.callbackQuery("admin-client-sessions-all", async (ctx) => {
+      await ctx.answerCallbackQuery({
+        text: await this.tForContext(ctx, "menu:admin.actions.open_client_sessions"),
+      });
+      await this.showAdminClientSessionList(ctx, "all");
+    });
     this.bot.callbackQuery("admin-client-sessions-back", async (ctx) => {
+      await ctx.answerCallbackQuery({
+        text: await this.tForContext(ctx, "menu:admin.actions.back_to_client_sessions"),
+      });
+      await this.showAdminClientSessionsMenu(ctx);
+    });
+    this.bot.callbackQuery("admin-client-session-list-back", async (ctx) => {
       await ctx.answerCallbackQuery({
         text: await this.tForContext(ctx, "menu:admin.actions.back_to_client_sessions"),
       });
@@ -2798,93 +2832,25 @@ export class TelegramTransport implements HumanTransport {
     return new Menu<TelegramMenuContext>("telegram-admin-client-sessions-menu", {
       ...this.createMenuOptions((ctx) => this.showAdminClientSessionsMenu(ctx)),
     })
-      .dynamic(async (ctx) => {
-        const range = new MenuRange<TelegramMenuContext>();
-        const principal = this.getPrincipalFromContext(ctx);
-        if (!principal) {
-          range.text(
-            await this.tForContext(ctx, "common:errors.no_telegram_identity"),
-            async (innerCtx) => {
-              await innerCtx.answerCallbackQuery({
-                text: await this.tForContext(
-                  innerCtx,
-                  "common:errors.no_telegram_identity",
-                ),
-                show_alert: true,
-              });
-            },
-          );
-          return range;
-        }
-
-        const client = this.adminClientViewByPrincipal.get(buildPrincipalKey(principal));
-        if (!client) {
-          range.text(
-            await this.tForContext(ctx, "menu:admin.client_sessions.no_client_selected"),
-            async (innerCtx) => {
-              await innerCtx.answerCallbackQuery({
-                text: await this.tForContext(
-                  innerCtx,
-                  "menu:admin.client_sessions.no_client_selected",
-                ),
-                show_alert: true,
-              });
-            },
-          );
-          return range;
-        }
-
-        let sessions: GatewayClientSessionRecord[];
-        try {
-          sessions = await this.listGatewayClientSessions(client.client_uuid);
-        } catch {
-          range.text(
-            await this.tForContext(ctx, "menu:admin.client_sessions.unavailable"),
-            async (innerCtx) => {
-              await innerCtx.answerCallbackQuery({
-                text: await this.tForContext(
-                  innerCtx,
-                  "menu:admin.client_sessions.unavailable",
-                ),
-                show_alert: true,
-              });
-            },
-          );
-          return range;
-        }
-
-        if (sessions.length === 0) {
-          range.text(
-            await this.tForContext(ctx, "menu:admin.client_sessions.empty"),
-            async (innerCtx) => {
-              await innerCtx.answerCallbackQuery({
-                text: await this.tForContext(
-                  innerCtx,
-                  "menu:admin.client_sessions.empty",
-                ),
-              });
-            },
-          );
-          return range;
-        }
-
-        for (const session of sessions) {
-          const payloadKey = await this.createAdminClientSessionMenuPayload(session);
-          range
-            .text(
-              {
-                text: this.buildAdminClientSessionButtonLabel(session),
-                payload: async () => payloadKey,
-              },
-              async (innerCtx) => {
-                await this.handleAdminClientSessionOpenCallback(innerCtx);
-              },
-            )
-            .row();
-        }
-
-        return range;
-      })
+      .text(
+        async (ctx) => this.tForContext(ctx, "menu:admin.client_sessions.buttons.collab"),
+        async (ctx) => {
+          await ctx.answerCallbackQuery({
+            text: await this.tForContext(ctx, "menu:admin.actions.open_client_sessions"),
+          });
+          await this.showAdminClientSessionList(ctx, "collab");
+        },
+      )
+      .text(
+        async (ctx) => this.tForContext(ctx, "menu:admin.client_sessions.buttons.all"),
+        async (ctx) => {
+          await ctx.answerCallbackQuery({
+            text: await this.tForContext(ctx, "menu:admin.actions.open_client_sessions"),
+          });
+          await this.showAdminClientSessionList(ctx, "all");
+        },
+      )
+      .row()
       .text(async (ctx) => this.tForContext(ctx, "common:menu.back"), async (ctx) => {
         await ctx.answerCallbackQuery({
           text: await this.tForContext(ctx, "menu:admin.actions.back_to_clients"),
@@ -5365,7 +5331,10 @@ export class TelegramTransport implements HumanTransport {
   }
 
   private buildAdminClientSessionButtonLabel(
-    session: GatewayClientSessionRecord,
+    session: Pick<
+      AdminClientSessionViewRecord,
+      "label" | "local_session_id" | "project_name"
+    >,
   ): string {
     const sessionName = (session.label?.trim() || session.local_session_id).trim();
     const projectName = session.project_name?.trim() || null;
@@ -5387,8 +5356,194 @@ export class TelegramTransport implements HumanTransport {
         client: escapeHtml(clientTitle),
       }),
       "",
-      this.t(locale, "menu:admin.client_sessions.choose"),
+      this.t(locale, "menu:admin.client_sessions.choose_scope"),
     ].join("\n");
+  }
+
+  private async listGatewayAdminClientSessions(
+    clientUuid: string,
+    scope: "collab" | "all",
+  ): Promise<AdminClientSessionViewRecord[]> {
+    const collabSessions = await this.listGatewayClientSessions(clientUuid);
+
+    if (scope === "collab") {
+      return collabSessions.map((session) => ({
+        ...session,
+        is_collab: true,
+      }));
+    }
+
+    const connectedClients = await this.listGatewayConnectedClients();
+    const connectedClient = connectedClients.find(
+      (client) => client.client_uuid === clientUuid,
+    );
+
+    const merged = new Map<string, AdminClientSessionViewRecord>();
+
+    for (const session of collabSessions) {
+      merged.set(session.local_session_id, {
+        ...session,
+        is_collab: true,
+      });
+    }
+
+    for (const sessionTool of connectedClient?.session_tools ?? []) {
+      const key = sessionTool.local_session_id;
+      const existing = merged.get(key);
+
+      merged.set(key, {
+        session_uuid: existing?.session_uuid ?? key,
+        client_uuid: clientUuid,
+        local_session_id: key,
+        label: existing?.label ?? sessionTool.session_label ?? key,
+        status: existing?.status ?? "connected",
+        ...(existing?.project_uuid ? { project_uuid: existing.project_uuid } : {}),
+        ...(existing?.project_name ? { project_name: existing.project_name } : {}),
+        ...(existing?.updated_at ? { updated_at: existing.updated_at } : {}),
+        is_connected: true,
+        is_collab: existing?.is_collab ?? false,
+      });
+    }
+
+    return Array.from(merged.values()).sort((left, right) =>
+      (left.label ?? left.local_session_id).localeCompare(
+        right.label ?? right.local_session_id,
+      ),
+    );
+  }
+
+  private buildAdminClientSessionViewButtonLabel(
+    session: AdminClientSessionViewRecord,
+  ): string {
+    const markers = [
+      session.is_connected ? "🟢" : null,
+      session.is_collab ? "👥" : null,
+    ]
+      .filter(Boolean)
+      .join("");
+    const prefix = markers ? `${markers} ` : "";
+    return `${prefix}${this.buildAdminClientSessionButtonLabel(session)}`.slice(0, 56);
+  }
+
+  private async showAdminClientSessionList(
+    ctx: TelegramMenuContext,
+    scope: "collab" | "all",
+  ): Promise<void> {
+    const locale = await this.resolveLocaleForContext(ctx);
+    const principal = this.getPrincipalFromContext(ctx);
+    if (!principal) {
+      await this.showAdminClientsMenu(ctx);
+      return;
+    }
+
+    const client = this.adminClientViewByPrincipal.get(buildPrincipalKey(principal));
+    if (!client) {
+      await this.showAdminClientsMenu(
+        ctx,
+        await this.tForContext(ctx, "menu:admin.client_sessions.no_client_selected"),
+      );
+      return;
+    }
+
+    let sessions: AdminClientSessionViewRecord[];
+    try {
+      sessions = await this.listGatewayAdminClientSessions(client.client_uuid, scope);
+    } catch (error) {
+      this.logger.warn("Failed to load admin client session list", {
+        chatId: ctx.chat?.id,
+        userId: ctx.from?.id,
+        clientUuid: client.client_uuid,
+        scope,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      const text = [
+        this.t(locale, "menu:admin.client_sessions.title"),
+        "",
+        this.t(locale, "menu:admin.client_sessions.unavailable"),
+      ].join("\n");
+      const replyMarkup = new InlineKeyboard().text(
+        this.t(locale, "menu:admin.client_sessions.back_to_scope"),
+        "admin-client-session-list-back",
+      );
+      if (ctx.callbackQuery?.message) {
+        await this.editText(ctx, text, { kind: "menu" }, {
+          parse_mode: "HTML",
+          reply_markup: replyMarkup,
+        });
+      } else {
+        await this.replyText(
+          ctx,
+          text,
+          { kind: "menu" },
+          {
+            parse_mode: "HTML",
+            reply_markup: replyMarkup,
+          },
+        );
+      }
+      return;
+    }
+
+    const titleKey =
+      scope === "all"
+        ? "menu:admin.client_sessions.scope_all"
+        : "menu:admin.client_sessions.scope_collab";
+
+    const lines = [
+      this.t(locale, "menu:admin.client_sessions.title"),
+      "",
+      this.t(locale, titleKey),
+      this.t(locale, "menu:admin.client_sessions.client", {
+        client: escapeHtml(this.buildAdminClientTitle(client)),
+      }),
+      "",
+    ];
+
+    if (sessions.length === 0) {
+      lines.push(
+        this.t(
+          locale,
+          scope === "all"
+            ? "menu:admin.client_sessions.empty_all"
+            : "menu:admin.client_sessions.empty",
+        ),
+      );
+    } else {
+      lines.push(this.t(locale, "menu:admin.client_sessions.choose"));
+    }
+
+    const keyboard = new InlineKeyboard();
+    for (const session of sessions) {
+      const payloadKey = await this.createAdminClientSessionMenuPayload(session);
+      keyboard
+        .text(
+          this.buildAdminClientSessionViewButtonLabel(session),
+          `admin-client-session-open:${payloadKey}`,
+        )
+        .row();
+    }
+    keyboard.text(
+      this.t(locale, "menu:admin.client_sessions.back_to_scope"),
+      "admin-client-session-list-back",
+    );
+
+    const text = lines.join("\n");
+    if (ctx.callbackQuery?.message) {
+      await this.editText(ctx, text, { kind: "menu" }, {
+        parse_mode: "HTML",
+        reply_markup: keyboard,
+      });
+      return;
+    }
+    await this.replyText(
+      ctx,
+      text,
+      { kind: "menu" },
+      {
+        parse_mode: "HTML",
+        reply_markup: keyboard,
+      },
+    );
   }
 
   private async showAdminToolsMenu(
@@ -5872,7 +6027,7 @@ export class TelegramTransport implements HumanTransport {
   }
 
   private async createAdminClientSessionMenuPayload(
-    session: GatewayClientSessionRecord,
+    session: AdminClientSessionViewRecord,
   ): Promise<string> {
     const key = createMenuPayloadKey();
     const now = new Date();
@@ -5881,7 +6036,7 @@ export class TelegramTransport implements HumanTransport {
         key,
         kind: "admin-client-session",
         sessionId: session.local_session_id,
-        targetSessionId: session.session_uuid,
+        targetSessionId: session.session_uuid || session.local_session_id,
         targetClientUuid: session.client_uuid,
         targetLocalSessionId: session.local_session_id,
         title: session.label ?? session.local_session_id,
@@ -10619,7 +10774,9 @@ export class TelegramTransport implements HumanTransport {
     ctx: TelegramMenuContext,
   ): Promise<void> {
     const locale = await this.resolveLocaleForContext(ctx);
-    const payloadKey = readMenuPayloadKey(ctx);
+    const payloadKey =
+      this.extractCallbackSuffix(ctx, "admin-client-session-open:") ??
+      readMenuPayloadKey(ctx);
     if (!payloadKey) {
       await ctx.answerCallbackQuery({
         text: this.t(locale, "menu:admin.client_sessions.invalid_action"),

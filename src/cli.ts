@@ -862,13 +862,14 @@ async function runSystemPrune(args: string[]): Promise<void> {
 
   let truncatedTables: string[] = [];
   if (dbHost && dbUser && dbName) {
-    const { Client: PgClient } = require("pg") as {
+    const pgModule = (await import("pg")) as unknown as {
       Client: new (config: Record<string, unknown>) => {
         connect(): Promise<void>;
         query(sql: string): Promise<void>;
         end(): Promise<void>;
       };
     };
+    const { Client: PgClient } = pgModule;
     const pg = new PgClient({
       host: dbHost,
       port: dbPort,

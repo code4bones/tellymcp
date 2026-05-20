@@ -38,11 +38,11 @@ build:onebot:
     - yarn lint
     - yarn test
     - yarn build
+    - npm pack
   artifacts:
     expire_in: 1 day
     paths:
-      - dist/
-      - node_modules/
+      - deadragdoll-tellymcp-*.tgz
 
 deploy:onebot:
   stage: deploy

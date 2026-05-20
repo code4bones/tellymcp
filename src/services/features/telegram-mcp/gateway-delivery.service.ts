@@ -28,9 +28,11 @@ type GatewayDelivery = {
   delivery_uuid: string;
   message_uuid: string;
   share_id: string;
+  route_mode?: "project" | "direct";
   project_uuid?: string;
   project_name?: string;
   source_actor_label?: string;
+  source_client_uuid?: string;
   kind: string;
   summary: string;
   message: string;
@@ -40,6 +42,7 @@ type GatewayDelivery = {
   source_session_uuid: string;
   source_session_label: string;
   source_local_session_id: string;
+  target_client_uuid?: string;
   target_session_uuid: string;
   target_local_session_id: string;
   target_session_label: string;
@@ -76,6 +79,7 @@ function buildNoteContent(input: {
   delivery: GatewayDelivery;
   copiedArtifacts: string[];
 }): string {
+  const isDirectRoute = input.delivery.route_mode === "direct";
   const lines = ["---"];
   lines.push(`message_uuid: ${JSON.stringify(input.delivery.message_uuid)}`);
   lines.push(`kind: ${JSON.stringify(input.delivery.kind)}`);
@@ -107,8 +111,15 @@ function buildNoteContent(input: {
       "",
       "# Reply Params",
       `message_uuid: ${input.delivery.message_uuid}`,
-      `target_session_id: ${input.delivery.source_session_uuid}`,
-      ...(input.delivery.project_uuid
+      ...(isDirectRoute
+        ? [
+            ...(input.delivery.source_client_uuid
+              ? [`target_client_uuid: ${input.delivery.source_client_uuid}`]
+              : []),
+            `target_local_session_id: ${input.delivery.source_local_session_id}`,
+          ]
+        : [`target_session_id: ${input.delivery.source_session_uuid}`]),
+      ...(!isDirectRoute && input.delivery.project_uuid
         ? [`project_uuid: ${input.delivery.project_uuid}`]
         : []),
       "",
@@ -116,17 +127,35 @@ function buildNoteContent(input: {
       "You must send a reply via send_partner_note.",
       "Your task is not complete until send_partner_note succeeds.",
       "Do not stop after local analysis or a chat explanation.",
-      "Do not rely on linked partner.",
-      "Pass target_session_id explicitly.",
+      ...(isDirectRoute
+        ? [
+            "Do not rely on linked partner or project-scoped target_session_id.",
+            "Pass target_client_uuid and target_local_session_id explicitly.",
+          ]
+        : [
+            "Do not rely on linked partner.",
+            "Pass target_session_id explicitly.",
+          ]),
       "If possible, also pass in_reply_to=message_uuid.",
       "Only after the tool succeeds may you say that the reply was sent.",
       "",
       "# Reply Tool Call Example",
       "send_partner_note(",
       `  session_id=${JSON.stringify(input.delivery.target_local_session_id)},`,
-      `  target_session_id=${JSON.stringify(input.delivery.source_session_uuid)},`,
+      ...(isDirectRoute
+        ? [
+            ...(input.delivery.source_client_uuid
+              ? [
+                  `  target_client_uuid=${JSON.stringify(input.delivery.source_client_uuid)},`,
+                ]
+              : []),
+            `  target_local_session_id=${JSON.stringify(input.delivery.source_local_session_id)},`,
+          ]
+        : [
+            `  target_session_id=${JSON.stringify(input.delivery.source_session_uuid)},`,
+          ]),
       `  kind=${JSON.stringify("reply")},`,
-      ...(input.delivery.project_uuid
+      ...(!isDirectRoute && input.delivery.project_uuid
         ? [`  project_uuid=${JSON.stringify(input.delivery.project_uuid)},`]
         : []),
       `  in_reply_to=${JSON.stringify(input.delivery.message_uuid)},`,
@@ -166,6 +195,7 @@ function buildPartnerInboxText(input: {
   notePath: string;
   copiedArtifacts: string[];
 }): string {
+  const isDirectRoute = input.delivery.route_mode === "direct";
   const sourceActorLabel =
     input.delivery.source_actor_label || input.delivery.source_session_label;
   const kindTitle =
@@ -196,14 +226,30 @@ function buildPartnerInboxText(input: {
       ? [
           "",
           `Reply message_uuid: ${input.delivery.message_uuid}`,
-          `Reply target_session_id: ${input.delivery.source_session_uuid}`,
-          ...(input.delivery.project_uuid
+          ...(isDirectRoute
+            ? [
+                ...(input.delivery.source_client_uuid
+                  ? [
+                      `Reply target_client_uuid: ${input.delivery.source_client_uuid}`,
+                    ]
+                  : []),
+                `Reply target_local_session_id: ${input.delivery.source_local_session_id}`,
+              ]
+            : [`Reply target_session_id: ${input.delivery.source_session_uuid}`]),
+          ...(!isDirectRoute && input.delivery.project_uuid
             ? [`Reply project_uuid: ${input.delivery.project_uuid}`]
             : []),
           "Обязательно отправь reply через send_partner_note.",
           "Задача не завершена, пока send_partner_note не отработал успешно.",
           "Не останавливайся на локальном объяснении.",
-          "Не используй linked partner для ответа. Передай эти параметры явно в send_partner_note.",
+          ...(isDirectRoute
+            ? [
+                "Не используй linked partner или project-scoped target_session_id для ответа.",
+                "Передай target_client_uuid и target_local_session_id явно в send_partner_note.",
+              ]
+            : [
+                "Не используй linked partner для ответа. Передай эти параметры явно в send_partner_note.",
+              ]),
           "Только после успешного tool call можно считать ответ отправленным.",
         ]
       : []),
@@ -215,6 +261,7 @@ function buildTelegramDeliveryNotification(input: {
   notePath: string;
   copiedArtifacts: string[];
 }): string {
+  const isDirectRoute = input.delivery.route_mode === "direct";
   const sourceActorLabel =
     input.delivery.source_actor_label || input.delivery.source_session_label;
   const kindTitle =
@@ -249,8 +296,17 @@ function buildTelegramDeliveryNotification(input: {
       ? [
           "",
           `Reply message_uuid: ${input.delivery.message_uuid}`,
-          `Reply target_session_id: ${input.delivery.source_session_uuid}`,
-          ...(input.delivery.project_uuid
+          ...(isDirectRoute
+            ? [
+                ...(input.delivery.source_client_uuid
+                  ? [
+                      `Reply target_client_uuid: ${input.delivery.source_client_uuid}`,
+                    ]
+                  : []),
+                `Reply target_local_session_id: ${input.delivery.source_local_session_id}`,
+              ]
+            : [`Reply target_session_id: ${input.delivery.source_session_uuid}`]),
+          ...(!isDirectRoute && input.delivery.project_uuid
             ? [`Reply project_uuid: ${input.delivery.project_uuid}`]
             : []),
         ]

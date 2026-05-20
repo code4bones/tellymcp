@@ -29,6 +29,7 @@ import { BrowserComputedStyleTool } from "../../../features/browser/model/browse
 import { BrowserScreenshotTool } from "../../../features/browser/model/browserScreenshotTool";
 import { BrowserCloseTool } from "../../../features/browser/model/browserCloseTool";
 import { SendPartnerFileTool } from "../../../features/collaboration/model/sendPartnerFileTool";
+import { ListGatewaySessionsTool } from "../../../features/collaboration/model/listGatewaySessionsTool";
 import { SendPartnerNoteTool } from "../../../features/collaboration/model/sendPartnerNoteTool";
 import { RefreshToolsMarkdownTool } from "../../../features/tools-sync/model/refreshToolsMarkdownTool";
 import type { ToolModule } from "../../../shared/api/tool-registry/types";
@@ -75,6 +76,7 @@ export type AppToolModules = {
   browserScreenshotTool: BrowserScreenshotTool;
   browserCloseTool: BrowserCloseTool;
   sendPartnerFileTool: SendPartnerFileTool;
+  listGatewaySessionsTool: ListGatewaySessionsTool;
   sendPartnerNoteTool: SendPartnerNoteTool;
   refreshToolsMarkdownTool: RefreshToolsMarkdownTool;
 };

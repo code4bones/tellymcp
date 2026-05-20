@@ -44,6 +44,33 @@ export const notifyTelegramOutputSchema = z.object({
   message_id: z.number().int().positive().optional(),
 });
 
+export const listGatewaySessionsInputSchema = z.object({
+  client_uuid: z.string().trim().min(1).optional(),
+  connected_only: z.boolean().optional(),
+});
+
+export const listGatewaySessionsOutputSchema = z.object({
+  total: z.number().int().nonnegative(),
+  sessions: z.array(
+    z.object({
+      session_id: z.string().trim().min(1),
+      client_uuid: z.string().trim().min(1),
+      local_session_id: z.string().trim().min(1),
+      session_label: z.string().nullable().optional(),
+      client_label: z.string().nullable().optional(),
+      telegram_username: z.string().nullable().optional(),
+      telegram_display_name: z.string().nullable().optional(),
+      bot_username: z.string().nullable().optional(),
+      node_id: z.string().trim().min(1).optional(),
+      package_version: z.string().trim().min(1).optional(),
+      project_uuids: z.array(z.string().trim().min(1)).optional(),
+      project_names: z.array(z.string().trim().min(1)).optional(),
+      connected: z.boolean(),
+      registered: z.boolean(),
+    }),
+  ),
+});
+
 export const refreshToolsMarkdownInputSchema = z.object({
   session_id: z.string().trim().min(1).optional(),
   cwd: z.string().trim().min(1).optional(),
@@ -527,6 +554,8 @@ export const browserCloseOutputSchema = z.object({
 export const sendPartnerNoteInputSchema = z.object({
   session_id: z.string().trim().min(1).optional(),
   target_session_id: z.string().trim().min(1).optional(),
+  target_client_uuid: z.string().trim().min(1).optional(),
+  target_local_session_id: z.string().trim().min(1).optional(),
   project_uuid: z.string().trim().min(1).optional(),
   kind: partnerNoteKindSchema,
   summary: z.string().trim().min(1),
@@ -553,6 +582,8 @@ export const sendPartnerNoteInputSchema = z.object({
 export const sendPartnerFileInputSchema = z.object({
   session_id: z.string().trim().min(1).optional(),
   target_session_id: z.string().trim().min(1).optional(),
+  target_client_uuid: z.string().trim().min(1).optional(),
+  target_local_session_id: z.string().trim().min(1).optional(),
   project_uuid: z.string().trim().min(1).optional(),
   cwd: z.string().trim().min(1).optional(),
   file_path: z.string().trim().min(1),
@@ -567,6 +598,8 @@ export const sendPartnerFileInputSchema = z.object({
 export const sendPartnerNoteOutputSchema = z.object({
   session_id: z.string(),
   partner_session_id: z.string(),
+  target_client_uuid: z.string().optional(),
+  target_local_session_id: z.string().optional(),
   project_name: z.string().optional(),
   target_actor_label: z.string().optional(),
   target_session_label: z.string().optional(),

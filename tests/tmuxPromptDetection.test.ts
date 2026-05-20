@@ -49,4 +49,25 @@ Choose one option below
     expect(detection).not.toBeNull();
     expect(detection?.score).toBeGreaterThanOrEqual(4);
   });
+
+  it("detects codex action-required tool approval prompts", () => {
+    const detection = detectTmuxInteractivePrompt(`
+Field 1/1 (1 required unanswered)
+Allow the leechmcp MCP server to run tool "notify_telegram"?
+
+1. Allow                        Run the tool and continue.
+2. Allow for this session       Run the tool and remember this choice for this session.
+3. Always allow                 Run the tool and remember this choice for future tool calls.
+4. Cancel                       Cancel this tool call
+enter to submit | esc to cancel
+
+"[ ! ] Action Required"
+`);
+
+    expect(detection).not.toBeNull();
+    expect(detection?.reasons).toContain("action_required_banner");
+    expect(detection?.reasons).toContain("required_unanswered_field");
+    expect(detection?.reasons).toContain("tool_continue_prompt");
+    expect(detection?.score).toBeGreaterThanOrEqual(8);
+  });
 });

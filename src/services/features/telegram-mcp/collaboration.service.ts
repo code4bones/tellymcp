@@ -6,6 +6,7 @@ import {
 } from "./runtime.service";
 import { CollaborationService } from "./src/features/collaboration/model/collaborationService";
 import { SendPartnerFileService } from "./src/features/collaboration/model/sendPartnerFileService";
+import { GatewaySessionsService } from "./src/features/collaboration/model/gatewaySessionsService";
 import { GatewayCollaborationBackend } from "./src/features/distributed-client/model/gatewayCollaborationBackend";
 import { LocalCollaborationBackend } from "./src/features/collaboration/model/localCollaborationBackend";
 
@@ -15,15 +16,19 @@ export const TELEGRAM_MCP_COLLABORATION_SERVICE_NAME =
 export type TelegramMcpCollaborationServiceInstance = Service & {
   collaborationService: CollaborationService | null;
   sendPartnerFileService: SendPartnerFileService | null;
+  gatewaySessionsService: GatewaySessionsService | null;
   getCollaborationService: () => CollaborationService;
   getSendPartnerFileService: () => SendPartnerFileService;
+  getGatewaySessionsService: () => GatewaySessionsService;
 };
 
 type CollaborationServiceCarrier = Service & {
   collaborationService?: CollaborationService | null;
   sendPartnerFileService?: SendPartnerFileService | null;
+  gatewaySessionsService?: GatewaySessionsService | null;
   getCollaborationService?: () => CollaborationService;
   getSendPartnerFileService?: () => SendPartnerFileService;
+  getGatewaySessionsService?: () => GatewaySessionsService;
 };
 
 const TelegramMcpCollaborationService: ServiceSchema = {
@@ -33,6 +38,7 @@ const TelegramMcpCollaborationService: ServiceSchema = {
   created(this: CollaborationServiceCarrier) {
     this.collaborationService = null;
     this.sendPartnerFileService = null;
+    this.gatewaySessionsService = null;
   },
 
   methods: {
@@ -57,6 +63,17 @@ const TelegramMcpCollaborationService: ServiceSchema = {
       }
 
       return this.sendPartnerFileService;
+    },
+    getGatewaySessionsService(
+      this: CollaborationServiceCarrier,
+    ): GatewaySessionsService {
+      if (!this.gatewaySessionsService) {
+        throw new Error(
+          "telegram_mcp gateway sessions service is not initialized yet",
+        );
+      }
+
+      return this.gatewaySessionsService;
     },
   },
 
@@ -98,6 +115,8 @@ const TelegramMcpCollaborationService: ServiceSchema = {
             runtime.stateStore,
             runtime.config.distributed.gatewayPublicUrl,
             runtime.config.distributed.gatewayAuthToken,
+            runtime.config.project.name,
+            runtime.config.telegram.botUsername,
           )
         : localBackend;
 
@@ -112,6 +131,14 @@ const TelegramMcpCollaborationService: ServiceSchema = {
       runtime.logger,
       runtime.projectIdentityResolver,
       this.collaborationService,
+    );
+    this.gatewaySessionsService = new GatewaySessionsService(
+      runtime.logger,
+      runtime.stateStore,
+      runtime.config.distributed.gatewayPublicUrl,
+      runtime.config.distributed.gatewayAuthToken,
+      runtime.config.project.name,
+      runtime.config.telegram.botUsername,
     );
     runtime.telegramTransport.setCollaborationService(
       this.collaborationService,

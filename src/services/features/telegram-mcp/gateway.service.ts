@@ -71,6 +71,22 @@ type GatewayServiceCarrier = Service & {
       updated_at?: string;
     }>;
   }>;
+  listAllSessionsRecord?: () => Promise<{
+    sessions: Array<{
+      session_uuid: string;
+      client_uuid: string;
+      local_session_id: string;
+      label: string | null;
+      status: string;
+      client_label: string | null;
+      telegram_username: string | null;
+      telegram_display_name: string | null;
+      bot_username: string | null;
+      project_uuid?: string;
+      project_name?: string | null;
+      updated_at?: string;
+    }>;
+  }>;
   listProjectsRecord?: (input: Record<string, unknown>) => Promise<{
     projects: Array<{
       project_uuid: string;
@@ -692,6 +708,59 @@ const TelegramMcpGatewayService: ServiceSchema = {
           local_session_id: String(row.local_session_id),
           label: row.label ? String(row.label) : null,
           status: String(row.status),
+          ...(row.project_uuid ? { project_uuid: String(row.project_uuid) } : {}),
+          ...(row.project_name ? { project_name: String(row.project_name) } : {}),
+          ...(row.updated_at ? { updated_at: String(row.updated_at) } : {}),
+        })),
+      };
+    },
+
+    async listAllSessionsRecord(this: GatewayServiceCarrier) {
+      const rows = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_sessions as s")
+        .leftJoin("gateway_projects as p", "p.project_uuid", "s.project_uuid")
+        .leftJoin("gateway_clients as c", "c.client_uuid", "s.client_uuid")
+        .where("s.status", "active")
+        .select(
+          "s.session_uuid",
+          "s.client_uuid",
+          "s.local_session_id",
+          "s.label",
+          "s.status",
+          "s.project_uuid",
+          "s.updated_at",
+          "p.name as project_name",
+          "c.client_label",
+          "c.bot_username",
+          this.db.raw("nullif(c.meta->>'telegram_username', '') as telegram_username"),
+          this.db.raw(
+            "nullif(c.meta->>'telegram_display_name', '') as telegram_display_name",
+          ),
+        )
+        .orderBy("s.client_uuid", "asc")
+        .orderByRaw("coalesce(s.label, s.local_session_id) asc")
+        .orderBy("s.updated_at", "desc");
+
+      this.logger.info("Gateway all sessions queried", {
+        count: rows.length,
+      });
+
+      return {
+        sessions: rows.map((row: Record<string, unknown>) => ({
+          session_uuid: String(row.session_uuid),
+          client_uuid: String(row.client_uuid),
+          local_session_id: String(row.local_session_id),
+          label: row.label ? String(row.label) : null,
+          status: String(row.status),
+          client_label: row.client_label ? String(row.client_label) : null,
+          telegram_username: row.telegram_username
+            ? String(row.telegram_username)
+            : null,
+          telegram_display_name: row.telegram_display_name
+            ? String(row.telegram_display_name)
+            : null,
+          bot_username: row.bot_username ? String(row.bot_username) : null,
           ...(row.project_uuid ? { project_uuid: String(row.project_uuid) } : {}),
           ...(row.project_name ? { project_name: String(row.project_name) } : {}),
           ...(row.updated_at ? { updated_at: String(row.updated_at) } : {}),
@@ -1625,6 +1694,14 @@ const TelegramMcpGatewayService: ServiceSchema = {
           throw new Error("Gateway service is disabled in client mode");
         }
         return this.listClientSessionsRecord?.(ctx.params as Record<string, unknown>);
+      },
+    },
+    listAllSessions: {
+      async handler(this: GatewayServiceCarrier) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
+        return this.listAllSessionsRecord?.();
       },
     },
     unregisterSession: {

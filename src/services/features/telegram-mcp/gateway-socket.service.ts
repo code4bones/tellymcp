@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import type { IncomingMessage, Server as HttpServer } from "node:http";
 import type { Socket } from "node:net";
-import { join, resolve } from "node:path";
+import { basename, extname, join, resolve } from "node:path";
 
 import type { Service, ServiceSchema } from "moleculer";
 
@@ -33,6 +33,7 @@ import {
   type TellyMcpCapability,
   type VersionCompatibility,
 } from "./src/shared/lib/version/versionHandshake";
+import type { PartnerArtifactRef } from "./src/entities/collaboration/model/types";
 
 const wsLib = require("ws") as {
   WebSocket: new (
@@ -50,6 +51,38 @@ const CLIENT_RECONNECT_DELAY_MS = 3000;
 const LIVE_REQUEST_TIMEOUT_MS = 20000;
 const TOOLS_SYNC_CHECK_INTERVAL_MS = 15000;
 const WS_HEARTBEAT_INTERVAL_MS = 10000;
+
+function sanitizeArtifactName(value: string): string {
+  const withoutControlChars = Array.from(value)
+    .map((char) => (char.charCodeAt(0) < 32 ? "-" : char))
+    .join("");
+  return withoutControlChars
+    .trim()
+    .replace(/[/\\]+/gu, "-")
+    .replace(/\s+/gu, " ")
+    .replace(/^\.+$/u, "file")
+    .slice(0, 180) || "file";
+}
+
+function allocateArtifactRelativePath(
+  shareId: string,
+  preferredName: string,
+  usedNames: Set<string>,
+): string {
+  const sanitized = sanitizeArtifactName(preferredName);
+  const ext = extname(sanitized);
+  const base = ext ? sanitized.slice(0, -ext.length) : sanitized;
+  let candidate = sanitized;
+  let index = 1;
+
+  while (usedNames.has(candidate.toLowerCase())) {
+    candidate = `${base}--${index}${ext}`;
+    index += 1;
+  }
+
+  usedNames.add(candidate.toLowerCase());
+  return `shares/files/${shareId}/${candidate}`;
+}
 
 type GatewaySocketSessionTools = {
   local_session_id: string;
@@ -132,9 +165,11 @@ type GatewaySocketDelivery = {
   delivery_uuid: string;
   message_uuid: string;
   share_id: string;
+  route_mode?: "project" | "direct";
   project_uuid?: string;
   project_name?: string;
   source_actor_label?: string;
+  source_client_uuid?: string;
   kind: string;
   summary: string;
   message: string;
@@ -144,6 +179,7 @@ type GatewaySocketDelivery = {
   source_session_uuid: string;
   source_session_label: string;
   source_local_session_id: string;
+  target_client_uuid?: string;
   target_session_uuid: string;
   target_local_session_id: string;
   target_session_label: string;
@@ -288,7 +324,28 @@ type GatewaySocketCarrier = Service & {
     protocolVersion: string;
     capabilities: TellyMcpCapability[];
   };
+  findConnectedSessionTool?: (params: {
+    clientUuid: string;
+    localSessionId: string;
+  }) => {
+    session_label?: string;
+    node_id?: string;
+    package_version?: string;
+  } | null;
   sendClientHello?: (socket: any) => Promise<void>;
+  sendDirectPartnerNote?: (params: {
+    clientUuid: string;
+    localSessionId: string;
+    targetClientUuid: string;
+    targetLocalSessionId: string;
+    kind: string;
+    summary: string;
+    message: string;
+    expectedReply?: string;
+    requiresReply?: boolean;
+    inReplyTo?: string;
+    artifactRefs?: PartnerArtifactRef[];
+  }) => Promise<Record<string, unknown>>;
   handleGatewayWsServerMessage?: (
     socket: any,
     raw: unknown,
@@ -558,6 +615,41 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         };
       },
     },
+    sendDirectPartnerNote: {
+      params: {
+        clientUuid: "string",
+        localSessionId: "string",
+        targetClientUuid: "string",
+        targetLocalSessionId: "string",
+        kind: "string",
+        summary: "string",
+        message: "string",
+        expectedReply: { type: "string", optional: true },
+        requiresReply: { type: "boolean", optional: true },
+        inReplyTo: { type: "string", optional: true },
+        artifactRefs: { type: "array", optional: true, items: "object" },
+      },
+      async handler(
+        this: GatewaySocketCarrier,
+        ctx: {
+          params: {
+            clientUuid: string;
+            localSessionId: string;
+            targetClientUuid: string;
+            targetLocalSessionId: string;
+            kind: string;
+            summary: string;
+            message: string;
+            expectedReply?: string;
+            requiresReply?: boolean;
+            inReplyTo?: string;
+            artifactRefs?: PartnerArtifactRef[];
+          };
+        },
+      ) {
+        return await this.sendDirectPartnerNote?.(ctx.params);
+      },
+    },
   },
 
   created(this: GatewaySocketCarrier) {
@@ -701,6 +793,176 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       return result.sort((left, right) =>
         left.client_uuid.localeCompare(right.client_uuid),
       );
+    },
+
+    findConnectedSessionTool(
+      this: GatewaySocketCarrier,
+      params: { clientUuid: string; localSessionId: string },
+    ) {
+      for (const hello of this.connectedClients?.values() ?? []) {
+        if (hello?.client_uuid !== params.clientUuid) {
+          continue;
+        }
+
+        const sessionTool = Array.isArray(hello.session_tools)
+          ? hello.session_tools.find(
+              (item) => item.local_session_id === params.localSessionId,
+            )
+          : null;
+        if (!sessionTool) {
+          continue;
+        }
+
+        return {
+          ...(sessionTool.session_label
+            ? { session_label: sessionTool.session_label }
+            : {}),
+          ...(hello.node_id ? { node_id: hello.node_id } : {}),
+          ...(hello.package_version
+            ? { package_version: hello.package_version }
+            : {}),
+        };
+      }
+
+      return null;
+    },
+
+    async sendDirectPartnerNote(
+      this: GatewaySocketCarrier,
+      params: {
+        clientUuid: string;
+        localSessionId: string;
+        targetClientUuid: string;
+        targetLocalSessionId: string;
+        kind: string;
+        summary: string;
+        message: string;
+        expectedReply?: string;
+        requiresReply?: boolean;
+        inReplyTo?: string;
+        artifactRefs?: PartnerArtifactRef[];
+      },
+    ): Promise<Record<string, unknown>> {
+      const sourceInfo = this.findConnectedSessionTool?.({
+        clientUuid: params.clientUuid,
+        localSessionId: params.localSessionId,
+      });
+      const targetInfo = this.findConnectedSessionTool?.({
+        clientUuid: params.targetClientUuid,
+        localSessionId: params.targetLocalSessionId,
+      });
+      const targetIsLocal = await this.isLocalGatewayClientUuid?.(
+        params.targetClientUuid,
+      );
+
+      if (!targetInfo && !targetIsLocal) {
+        throw new Error(
+          `Target gateway session '${params.targetClientUuid}/${params.targetLocalSessionId}' is not connected.`,
+        );
+      }
+
+      const requiresReply =
+        typeof params.requiresReply === "boolean"
+          ? params.requiresReply
+          : params.kind === "question" || params.kind === "request";
+      const shareId = randomUUID();
+      const messageUuid = randomUUID();
+      const deliveryUuid = randomUUID();
+      const createdAt = new Date().toISOString();
+      const usedArtifactNames = new Set<string>();
+      const artifacts = (Array.isArray(params.artifactRefs)
+        ? params.artifactRefs
+        : []
+      ).map((artifact) => {
+        const originalName =
+          typeof artifact.original_name === "string" && artifact.original_name.trim()
+            ? artifact.original_name.trim()
+            : typeof artifact.relative_path === "string" &&
+                artifact.relative_path.trim()
+              ? artifact.relative_path.trim()
+              : typeof artifact.file_path === "string" && artifact.file_path.trim()
+                ? artifact.file_path.trim()
+                : "file";
+        return {
+          artifact_uuid: randomUUID(),
+          original_name: basename(originalName),
+          ...(typeof artifact.mime_type === "string" && artifact.mime_type.trim()
+            ? { mime_type: artifact.mime_type.trim() }
+            : {}),
+          ...(typeof artifact.size_bytes === "number"
+            ? { size_bytes: artifact.size_bytes }
+            : {}),
+          ...(typeof artifact.storage_ref === "string" && artifact.storage_ref.trim()
+            ? { storage_ref: artifact.storage_ref.trim() }
+            : {}),
+          relative_path: allocateArtifactRelativePath(
+            shareId,
+            basename(originalName),
+            usedArtifactNames,
+          ),
+          ...(typeof artifact.content_base64 === "string" &&
+          artifact.content_base64.trim()
+            ? { content_base64: artifact.content_base64.trim() }
+            : {}),
+        };
+      });
+
+      const delivery: GatewaySocketDelivery = {
+        delivery_uuid: deliveryUuid,
+        message_uuid: messageUuid,
+        share_id: shareId,
+        route_mode: "direct",
+        source_actor_label:
+          sourceInfo?.session_label ?? params.localSessionId,
+        source_client_uuid: params.clientUuid,
+        target_client_uuid: params.targetClientUuid,
+        kind: params.kind,
+        summary: params.summary,
+        message: params.message,
+        ...(params.expectedReply ? { expected_reply: params.expectedReply } : {}),
+        requires_reply: requiresReply,
+        ...(params.inReplyTo ? { in_reply_to: params.inReplyTo } : {}),
+        source_session_uuid: `${params.clientUuid}:${params.localSessionId}`,
+        source_session_label:
+          sourceInfo?.session_label ?? params.localSessionId,
+        source_local_session_id: params.localSessionId,
+        target_session_uuid: `${params.targetClientUuid}:${params.targetLocalSessionId}`,
+        target_local_session_id: params.targetLocalSessionId,
+        target_session_label:
+          targetInfo?.session_label ?? params.targetLocalSessionId,
+        created_at: createdAt,
+        note_relative_path: `shares/${shareId}.md`,
+        share_index_file_name: "SHARED_INDEX.md",
+        artifacts,
+      };
+
+      const delivered = await this.notifyDeliveryQueued?.({
+        clientUuid: params.targetClientUuid,
+        delivery,
+      });
+      if (!delivered) {
+        throw new Error(
+          `Target gateway session '${params.targetClientUuid}/${params.targetLocalSessionId}' is not connected.`,
+        );
+      }
+
+      return {
+        session_id: params.localSessionId,
+        partner_session_id: `${params.targetClientUuid}:${params.targetLocalSessionId}`,
+        target_client_uuid: params.targetClientUuid,
+        target_local_session_id: params.targetLocalSessionId,
+        target_session_label:
+          targetInfo?.session_label ?? params.targetLocalSessionId,
+        kind: params.kind,
+        share_id: shareId,
+        delivery_status: "delivered",
+        note_path: `gateway://shares/${shareId}.md`,
+        share_index_path: "gateway://SHARED_INDEX.md",
+        copied_artifacts: artifacts.map((artifact) => artifact.original_name),
+        inbox_message_id: deliveryUuid,
+        requires_reply: requiresReply,
+        delivery_uuid: deliveryUuid,
+      };
     },
 
     async fetchGatewayToolsHashForClient(

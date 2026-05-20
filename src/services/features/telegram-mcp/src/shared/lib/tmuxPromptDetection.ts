@@ -48,6 +48,26 @@ const STRONG_PATTERNS: Array<{ pattern: RegExp; score: number; reason: string }>
     score: 4,
     reason: "direct_question_phrase",
   },
+  {
+    pattern: /\[\s*!\s*\]\s*action\s+required\b/iu,
+    score: 5,
+    reason: "action_required_banner",
+  },
+  {
+    pattern: /\bfield\s+\d+\/\d+\s+\(\d+\s+required\s+unanswered\)/iu,
+    score: 5,
+    reason: "required_unanswered_field",
+  },
+  {
+    pattern: /\ballow\s+the\s+.+\?\s*$/iu,
+    score: 4,
+    reason: "allow_question",
+  },
+  {
+    pattern: /\brun\s+the\s+tool\s+and\s+continue\b/iu,
+    score: 4,
+    reason: "tool_continue_prompt",
+  },
 ];
 
 const MEDIUM_PATTERNS: Array<{ pattern: RegExp; score: number; reason: string }> = [
@@ -60,6 +80,11 @@ const MEDIUM_PATTERNS: Array<{ pattern: RegExp; score: number; reason: string }>
     pattern: /\?\s*$/u,
     score: 2,
     reason: "question_mark",
+  },
+  {
+    pattern: /\b(?:always\s+allow|allow\s+for\s+this\s+session|cancel\s+this\s+tool\s+call)\b/iu,
+    score: 2,
+    reason: "tool_choice_keyword",
   },
 ];
 

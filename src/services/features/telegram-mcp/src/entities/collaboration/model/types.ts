@@ -18,6 +18,8 @@ export type PartnerArtifactRef = {
 export type SendPartnerNoteInput = {
   session_id?: string | undefined;
   target_session_id?: string | undefined;
+  target_client_uuid?: string | undefined;
+  target_local_session_id?: string | undefined;
   project_uuid?: string | undefined;
   kind: PartnerNoteKind;
   summary: string;
@@ -32,6 +34,8 @@ export type SendPartnerNoteInput = {
 export type SendPartnerFileInput = {
   session_id?: string | undefined;
   target_session_id?: string | undefined;
+  target_client_uuid?: string | undefined;
+  target_local_session_id?: string | undefined;
   project_uuid?: string | undefined;
   cwd?: string | undefined;
   file_path: string;
@@ -46,6 +50,8 @@ export type SendPartnerFileInput = {
 export type SendPartnerNoteOutput = {
   session_id: string;
   partner_session_id: string;
+  target_client_uuid?: string | undefined;
+  target_local_session_id?: string | undefined;
   project_name?: string | undefined;
   target_actor_label?: string | undefined;
   target_session_label?: string | undefined;
@@ -57,4 +63,31 @@ export type SendPartnerNoteOutput = {
   copied_artifacts: string[];
   inbox_message_id: string;
   requires_reply: boolean;
+};
+
+export type ListGatewaySessionsInput = {
+  client_uuid?: string | undefined;
+  connected_only?: boolean | undefined;
+};
+
+export type GatewayKnownSessionRecord = {
+  session_id: string;
+  client_uuid: string;
+  local_session_id: string;
+  session_label?: string | null | undefined;
+  client_label?: string | null | undefined;
+  telegram_username?: string | null | undefined;
+  telegram_display_name?: string | null | undefined;
+  bot_username?: string | null | undefined;
+  node_id?: string | undefined;
+  package_version?: string | undefined;
+  project_uuids?: string[] | undefined;
+  project_names?: string[] | undefined;
+  connected: boolean;
+  registered: boolean;
+};
+
+export type ListGatewaySessionsOutput = {
+  total: number;
+  sessions: GatewayKnownSessionRecord[];
 };

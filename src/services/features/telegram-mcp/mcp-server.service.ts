@@ -53,6 +53,7 @@ import { BrowserScreenshotTool } from "./src/features/browser/model/browserScree
 import { BrowserWaitForTool } from "./src/features/browser/model/browserWaitForTool";
 import { BrowserWaitForUrlTool } from "./src/features/browser/model/browserWaitForUrlTool";
 import { SendPartnerFileTool } from "./src/features/collaboration/model/sendPartnerFileTool";
+import { ListGatewaySessionsTool } from "./src/features/collaboration/model/listGatewaySessionsTool";
 import { SendPartnerNoteTool } from "./src/features/collaboration/model/sendPartnerNoteTool";
 import { DeleteTelegramInboxMessageTool } from "./src/features/inbox/model/deleteTelegramInboxMessageTool";
 import { GetTelegramInboxCountTool } from "./src/features/inbox/model/getTelegramInboxCountTool";
@@ -171,6 +172,9 @@ const TelegramMcpMcpServerService: ServiceSchema = {
         new BrowserCloseTool(browserService.getBrowserService()),
         new SendPartnerNoteTool(
           collaborationService.getCollaborationService(),
+        ),
+        new ListGatewaySessionsTool(
+          collaborationService.getGatewaySessionsService(),
         ),
         new SendPartnerFileTool(
           collaborationService.getSendPartnerFileService(),

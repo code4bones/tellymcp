@@ -40,6 +40,7 @@ Browser runtime rule:
 
 Collaboration tools:
 
+- `list_gateway_sessions`
 - `send_partner_note`
 - `send_partner_file`
 
@@ -348,6 +349,55 @@ Output:
 
 ## `send_partner_note`
 
+## `list_gateway_sessions`
+
+Purpose:
+
+- List all sessions currently known to the configured gateway.
+- Merge:
+  - connected sessions from gateway WS presence
+  - registered project sessions from the gateway database
+- Use this before direct cross-session communication outside one collab project.
+
+Input:
+
+- `client_uuid?`
+- `connected_only?`
+
+Output:
+
+- `total`
+- `sessions[]`
+  - `session_id`
+  - `client_uuid`
+  - `local_session_id`
+  - `session_label?`
+  - `client_label?`
+  - `telegram_username?`
+  - `telegram_display_name?`
+  - `bot_username?`
+  - `node_id?`
+  - `package_version?`
+  - `project_uuids?`
+  - `project_names?`
+  - `connected`
+  - `registered`
+
+Rules:
+
+- use this when the user asks to contact a session that is not the current linked partner and not necessarily part of the current collab project
+- for direct gateway-wide routing, resolve the target from this list and then call:
+  - `send_partner_note`
+  - or `send_partner_file`
+- in that direct mode, pass:
+  - `target_client_uuid`
+  - `target_local_session_id`
+- do not invent `target_session_id` for direct gateway-wide routing
+- prefer connected sessions for direct gateway-wide messaging
+- if a session is not connected, do not assume direct delivery will succeed
+
+## `send_partner_note`
+
 Purpose:
 
 - Send a structured collaboration note to another session.
@@ -360,6 +410,8 @@ Input:
 
 - `session_id?`
 - `target_session_id?`
+- `target_client_uuid?`
+- `target_local_session_id?`
 - `project_uuid?`
 - `kind`
   - `share`
@@ -400,15 +452,22 @@ Required agent practice:
 How to find the partner correctly:
 
 - never guess the target session from labels, menu text, or memory
-- there are two valid targeting modes:
+- there are three valid targeting modes:
   - local linked mode:
     - call `get_session_context`
     - use `context.linked_session_id`
   - project / collab mode:
     - use the explicit `target_session_id` that came from the project note, Telegram prompt, or task context
     - if available, also pass `project_uuid`
+  - direct gateway-wide mode:
+    - call `list_gateway_sessions`
+    - resolve the exact target from the returned `client_uuid` + `local_session_id`
+    - pass them as:
+      - `target_client_uuid`
+      - `target_local_session_id`
 - for project replies, do not fall back to `linked_session_id`
 - if `target_session_id` is explicitly known, it has priority over any linked partner
+- if `target_client_uuid` + `target_local_session_id` are explicitly known, they define direct gateway-wide routing and have priority over linked partner memory
 - if neither `target_session_id` nor `linked_session_id` is available:
   - do not retry blindly
   - tell the user the target session is unknown
@@ -419,6 +478,7 @@ Minimal safe sequence:
 1. Call `get_session_context`.
 2. Resolve the target:
    - prefer explicit `target_session_id` for project/collab work
+   - for gateway-wide direct work, use explicit `target_client_uuid` + `target_local_session_id`
    - otherwise use `linked_session_id` for local partner work
 3. Decide the correct note kind: `question`, `reply`, `share`, `request`, or `handoff`.
 4. Call `send_partner_note`.
@@ -445,11 +505,14 @@ Reply rule for project asks:
   - `Reply message_uuid: ...`
   - `Reply target_session_id: ...`
   - `Reply project_uuid: ...`
+  - `Reply target_client_uuid: ...`
+  - `Reply target_local_session_id: ...`
   or a `Reply Params` section with the same data
 - then reply with those exact values
 - if `in_reply_to` is available, prefer `Reply message_uuid`
 - if only the note `share_id` is available, gateway now also accepts that value in `in_reply_to`
 - do not use `linked_session_id` for that reply
+- if direct reply params contain `target_client_uuid` + `target_local_session_id`, do not replace them with `target_session_id`
 - if the note contains an `Action Required` section, treat it as mandatory execution guidance, not as optional commentary
 - do not stop after local analysis when `Action Required` says to reply
 - when `Reply Params` are present, prefer an explicit `send_partner_note(...)` call with those exact values
@@ -489,6 +552,8 @@ Input:
 
 - `session_id?`
 - `target_session_id?`
+- `target_client_uuid?`
+- `target_local_session_id?`
 - `project_uuid?`
 - `cwd?`
 - `file_path`
@@ -515,10 +580,12 @@ Minimal file-delivery rule:
 Routing priority:
 
 1. explicit `Reply target_session_id`
-2. explicit `target_session_id` from the current project/task context
-3. local `linked_session_id`
+2. explicit `Reply target_client_uuid` + `Reply target_local_session_id`
+3. explicit `target_session_id` from the current project/task context
+4. explicit `target_client_uuid` + `target_local_session_id` from `list_gateway_sessions`
+5. local `linked_session_id`
 
-For project/collab traffic, step 3 is fallback only when no explicit target exists.
+For project/collab traffic, step 5 is fallback only when no explicit target exists.
 
 Canonical example for a project reply:
 

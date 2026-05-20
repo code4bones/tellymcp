@@ -91,6 +91,12 @@ export class SendPartnerFileService {
       ...(input.target_session_id?.trim()
         ? { target_session_id: input.target_session_id.trim() }
         : {}),
+      ...(input.target_client_uuid?.trim()
+        ? { target_client_uuid: input.target_client_uuid.trim() }
+        : {}),
+      ...(input.target_local_session_id?.trim()
+        ? { target_local_session_id: input.target_local_session_id.trim() }
+        : {}),
       ...(input.project_uuid?.trim()
         ? { project_uuid: input.project_uuid.trim() }
         : {}),

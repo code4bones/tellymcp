@@ -6,17 +6,10 @@ import type { MaintenanceStore } from "../../../shared/api/storage/contract";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import type { ResolvedSessionDefaults } from "../../../shared/lib/project-identity/projectIdentity";
 import type { CollaborationBackend } from "../../collaboration/model/backend";
-
-function normalizeGatewayBaseUrl(value: string): URL {
-  const url = new URL(value);
-  url.pathname = url.pathname.replace(/\/+$/u, "");
-
-  if (!url.pathname.endsWith("/gateway")) {
-    url.pathname = `${url.pathname}/gateway`.replace(/\/{2,}/gu, "/");
-  }
-
-  return url;
-}
+import {
+  ensureGatewayClientUuid,
+  normalizeGatewayBaseUrl,
+} from "./gatewayClientAccess";
 
 export class GatewayCollaborationBackend implements CollaborationBackend {
   public constructor(
@@ -24,6 +17,8 @@ export class GatewayCollaborationBackend implements CollaborationBackend {
     private readonly maintenanceStore: MaintenanceStore,
     private readonly gatewayPublicUrl?: string,
     private readonly gatewayAuthToken?: string,
+    private readonly projectName?: string,
+    private readonly botUsername?: string,
   ) {}
 
   public async sendPartnerNote(
@@ -38,12 +33,15 @@ export class GatewayCollaborationBackend implements CollaborationBackend {
 
     const url = normalizeGatewayBaseUrl(this.gatewayPublicUrl);
     url.pathname = `${url.pathname}/partner-note`.replace(/\/{2,}/gu, "/");
-    const clientUuid = await this.maintenanceStore.getGatewayClientUuid();
-    if (!clientUuid) {
-      throw new Error(
-        "Gateway collaboration requires a registered client_uuid. Join or create a project first.",
-      );
-    }
+    const clientUuid = await ensureGatewayClientUuid({
+      maintenanceStore: this.maintenanceStore,
+      gatewayPublicUrl: this.gatewayPublicUrl,
+      ...(this.gatewayAuthToken
+        ? { gatewayAuthToken: this.gatewayAuthToken }
+        : {}),
+      ...(this.projectName ? { projectName: this.projectName } : {}),
+      ...(this.botUsername ? { botUsername: this.botUsername } : {}),
+    });
 
     const response = await fetch(url, {
       method: "POST",

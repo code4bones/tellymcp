@@ -460,12 +460,53 @@ export class GatewayHttpService {
       try {
         const body = await this.readJsonBody(req);
         const input = sendPartnerNoteInputSchema.parse(body);
+        const useDirectGatewayDelivery =
+          typeof (body as { client_uuid?: unknown })?.client_uuid === "string" &&
+          typeof (body as { target_client_uuid?: unknown })?.target_client_uuid ===
+            "string" &&
+          typeof (body as { target_local_session_id?: unknown })
+            ?.target_local_session_id === "string";
         const useQueuedGatewayDelivery =
+          !useDirectGatewayDelivery &&
           typeof (body as { client_uuid?: unknown })?.client_uuid === "string" &&
           typeof input.target_session_id === "string" &&
           input.target_session_id.trim().length > 0;
 
-        const output = useQueuedGatewayDelivery
+        const output = useDirectGatewayDelivery
+          ? await this.callBroker(
+              "telegramMcp.gatewaySocket.sendDirectPartnerNote",
+              {
+                clientUuid: String(
+                  (body as { client_uuid: string }).client_uuid,
+                ).trim(),
+                localSessionId: input.session_id?.trim() || "",
+                targetClientUuid: String(
+                  (body as { target_client_uuid: string }).target_client_uuid,
+                ).trim(),
+                targetLocalSessionId: String(
+                  (
+                    body as { target_local_session_id: string }
+                  ).target_local_session_id,
+                ).trim(),
+                kind: input.kind,
+                summary: input.summary,
+                message: input.message,
+                ...(input.expected_reply?.trim()
+                  ? { expectedReply: input.expected_reply.trim() }
+                  : {}),
+                ...(typeof input.requires_reply === "boolean"
+                  ? { requiresReply: input.requires_reply }
+                  : {}),
+                ...(input.in_reply_to?.trim()
+                  ? { inReplyTo: input.in_reply_to.trim() }
+                  : {}),
+                ...(Array.isArray(input.artifact_refs)
+                  ? { artifactRefs: input.artifact_refs }
+                  : {}),
+              },
+              { meta: { internal_call: true } },
+            )
+          : useQueuedGatewayDelivery
           ? await this.callBroker(
               "telegramMcp.gateway.sendPartnerNote",
               body,
@@ -688,6 +729,180 @@ export class GatewayHttpService {
           { meta: { internal_call: true } },
         );
         writeJson(res, 200, result);
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/sessions/known") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const filterClientUuid =
+          typeof body.client_uuid === "string" && body.client_uuid.trim()
+            ? body.client_uuid.trim()
+            : null;
+        const connectedOnly = typeof body.connected_only === "boolean"
+          ? body.connected_only
+          : false;
+        const [registeredResult, connectedResult] = await Promise.all([
+          this.callBroker(
+            "telegramMcp.gateway.listAllSessions",
+            {},
+            { meta: { internal_call: true } },
+          ) as Promise<{
+            sessions?: Array<{
+              session_uuid: string;
+              client_uuid: string;
+              local_session_id: string;
+              label: string | null;
+              status: string;
+              client_label: string | null;
+              telegram_username: string | null;
+              telegram_display_name: string | null;
+              bot_username: string | null;
+              project_uuid?: string;
+              project_name?: string | null;
+            }>;
+          }>,
+          this.callBroker(
+            "telegramMcp.gatewaySocket.listConnectedClients",
+            {},
+            { meta: { internal_call: true } },
+          ) as Promise<{
+            clients?: Array<{
+              client_uuid: string;
+              node_id?: string;
+              package_version?: string;
+              session_tools?: Array<{
+                local_session_id: string;
+                session_label?: string;
+              }>;
+            }>;
+          }>,
+        ]);
+
+        const merged = new Map<
+          string,
+          {
+            session_id: string;
+            client_uuid: string;
+            local_session_id: string;
+            session_label?: string | null;
+            client_label?: string | null;
+            telegram_username?: string | null;
+            telegram_display_name?: string | null;
+            bot_username?: string | null;
+            node_id?: string;
+            package_version?: string;
+            project_uuids: string[];
+            project_names: string[];
+            connected: boolean;
+            registered: boolean;
+          }
+        >();
+
+        for (const session of Array.isArray(registeredResult.sessions)
+          ? registeredResult.sessions
+          : []) {
+          const key = `${session.client_uuid}:${session.local_session_id}`;
+          const current = merged.get(key);
+          const projectUuids = new Set(current?.project_uuids ?? []);
+          const projectNames = new Set(current?.project_names ?? []);
+          if (session.project_uuid) {
+            projectUuids.add(session.project_uuid);
+          }
+          if (session.project_name) {
+            projectNames.add(session.project_name);
+          }
+          merged.set(key, {
+            session_id: current?.session_id ?? session.session_uuid,
+            client_uuid: session.client_uuid,
+            local_session_id: session.local_session_id,
+            session_label: current?.session_label ?? session.label,
+            client_label: current?.client_label ?? session.client_label,
+            telegram_username:
+              current?.telegram_username ?? session.telegram_username,
+            telegram_display_name:
+              current?.telegram_display_name ?? session.telegram_display_name,
+            bot_username: current?.bot_username ?? session.bot_username,
+            ...(current?.node_id ? { node_id: current.node_id } : {}),
+            ...(current?.package_version
+              ? { package_version: current.package_version }
+              : {}),
+            project_uuids: Array.from(projectUuids),
+            project_names: Array.from(projectNames),
+            connected: current?.connected ?? false,
+            registered: true,
+          });
+        }
+
+        for (const client of Array.isArray(connectedResult.clients)
+          ? connectedResult.clients
+          : []) {
+          for (const sessionTool of Array.isArray(client.session_tools)
+            ? client.session_tools
+            : []) {
+            const key = `${client.client_uuid}:${sessionTool.local_session_id}`;
+            const current = merged.get(key);
+            merged.set(key, {
+              session_id:
+                current?.session_id ??
+                `${client.client_uuid}:${sessionTool.local_session_id}`,
+              client_uuid: client.client_uuid,
+              local_session_id: sessionTool.local_session_id,
+              session_label:
+                current?.session_label ?? sessionTool.session_label ?? null,
+              ...(current?.client_label
+                ? { client_label: current.client_label }
+                : {}),
+              ...(current?.telegram_username
+                ? { telegram_username: current.telegram_username }
+                : {}),
+              ...(current?.telegram_display_name
+                ? { telegram_display_name: current.telegram_display_name }
+                : {}),
+              ...(current?.bot_username
+                ? { bot_username: current.bot_username }
+                : {}),
+              ...(client.node_id ? { node_id: client.node_id } : {}),
+              ...(client.package_version
+                ? { package_version: client.package_version }
+                : {}),
+              project_uuids: current?.project_uuids ?? [],
+              project_names: current?.project_names ?? [],
+              connected: true,
+              registered: current?.registered ?? false,
+            });
+          }
+        }
+
+        const sessions = Array.from(merged.values())
+          .filter((session) =>
+            filterClientUuid ? session.client_uuid === filterClientUuid : true,
+          )
+          .filter((session) => (connectedOnly ? session.connected : true))
+          .sort((left, right) => {
+            const leftLabel = left.session_label?.trim() || left.local_session_id;
+            const rightLabel =
+              right.session_label?.trim() || right.local_session_id;
+            return `${left.client_uuid}:${leftLabel}`.localeCompare(
+              `${right.client_uuid}:${rightLabel}`,
+            );
+          });
+
+        writeJson(res, 200, {
+          total: sessions.length,
+          sessions,
+        });
         return true;
       } catch (error) {
         writeJson(res, 400, {

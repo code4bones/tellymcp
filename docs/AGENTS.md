@@ -137,17 +137,17 @@ How to react on the receiving side:
 
 - a partner collaboration wake-up is not the same as a Telegram inbox wake-up
 - if the tmux wake-up mentions:
-  - `SHARED_INDEX.md`
+  - `xchange records`
   - `partner note`
   - `partner notes`
   then do not start with `get_telegram_inbox`
 - instead:
-  1. open `.mcp-xchange/SHARED_INDEX.md`
-  2. find the newest collaboration note
-  3. open that note
-  4. read any referenced artifacts
+  1. call `list_xchange_records`
+  2. call `get_xchange_record` for the newest collaboration record
+  3. read `body_text`, `action_desc`, and attachments
+  4. open raw note/artifact files only if needed
 
-Use `get_telegram_inbox` for ordinary human Telegram traffic, not for partner note delivery.
+Use `get_telegram_inbox` for ordinary human Telegram traffic, not for partner xchange delivery.
 
 After reading a partner note, do not stop at passive interpretation.
 

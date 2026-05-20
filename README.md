@@ -70,7 +70,7 @@ Telegram HITL is still supported, but it is not the whole story:
 - Telegram ask/notify/inbox
 - `Live` tmux control
 - browser inspection and screenshots
-- partner notes and partner files
+- xchange records, partner notes, and partner files
 - tools sync and version checks
 
 The full MCP tool surface is documented later in this README and through the MCP server itself.
@@ -679,15 +679,14 @@ Local partner menu behavior:
   - remaining text = full message body
 - partner wake-up semantics:
   - `TMUX_PARTNER_NUDGE_MESSAGE` is for collaboration notes, not for human Telegram inbox
-  - the receiving agent should read `.mcp-xchange/SHARED_INDEX.md` and the newest note first
+  - the receiving agent should call `list_xchange_records` and then `get_xchange_record`
 
 Linked-session collaboration contract:
 
 - `send_partner_note` writes one note per event into the partner workspace
 - collaborative notes live under `.mcp-xchange/shares/`
 - copied artifacts live under `.mcp-xchange/shares/files/<share_id>/`
-- `.mcp-xchange/SHARED_INDEX.md` acts as the append-only index of partner-facing notes
-- `.mcp-xchange/LOCAL_INDEX.md` acts as the append-only index of local agent-facing handoffs
+- `.mcp-xchange/xchange.sqlite3` is the structured source of truth for partner-facing notes and local handoffs
 - supported note kinds are:
   - `share`
   - `question`

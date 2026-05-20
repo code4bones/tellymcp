@@ -12,7 +12,7 @@ Current state:
   - link
   - `Ask / Share / File`
   - `Передать агенту`
-  - `LOCAL_INDEX.md`
+  - sqlite-backed xchange records
 - `👥 Collab` flow работает:
   - projects
   - members

@@ -50,7 +50,7 @@
   - сессия
   - отправитель
   - список файлов
-- Добавлены `LOCAL_INDEX.md` и `SHARED_INDEX.md` для унифицированного note-based обмена.
+- Добавлен унифицированный note-based обмен; позже он переведён на structured xchange records на sqlite.
 - Добавлен `send_partner_file` для реальной передачи локального файла через partner delivery.
 - Добавлена `TOOLS.md` hash-синхронизация между gateway и client:
   - `session_tools` в `ws hello`

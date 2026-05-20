@@ -680,6 +680,12 @@ export class BrowserService {
 
     let telegramMessageId: number | undefined;
     if (input.send_to_telegram === true) {
+      if (this.config.distributed.mode === "client") {
+        throw new Error(
+          "send_to_telegram is not available on headless client nodes. Open the file from the gateway bot or send it through a gateway-mediated flow instead.",
+        );
+      }
+
       const binding = await this.bindingStore.getBinding(sessionId);
       if (!binding) {
         throw new Error(

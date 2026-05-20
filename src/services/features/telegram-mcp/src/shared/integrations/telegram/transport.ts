@@ -91,603 +91,82 @@ import {
   buildLocalHandoffTools,
 } from "../../lib/xchangeRecordHints";
 import { upsertXchangeRecord } from "../xchange/sqliteRecordStore";
-
-type WaiterRecord = {
-  requestId: string;
-  telegramChatId: number;
-  telegramUserId: number;
-  telegramMessageId: number;
-  sentAtMs: number;
-  sourceClientUuid?: string;
-  reply?: HumanTransportReply;
-  resolve?: (reply: HumanTransportReply | null) => void;
-  timeout?: NodeJS.Timeout;
-};
-
-type SentChunk = {
-  messageId: number;
-  textLength: number;
-};
-
-type TelegramSendMessageOptions = NonNullable<
-  Parameters<Bot<TelegramMenuContext>["api"]["sendMessage"]>[2]
->;
-type TelegramEditMessageOptions = NonNullable<
-  Parameters<Bot<TelegramMenuContext>["api"]["editMessageText"]>[3]
->;
-
-type TelegramClientFetch = NonNullable<
-  NonNullable<NonNullable<ConstructorParameters<typeof Bot>[1]>["client"]>["fetch"]
->;
-
-type SendMessageMeta = {
-  kind: "request" | "notification" | "pairing" | "menu" | "inbox" | "transport";
-  sessionId?: string;
-  requestId?: string;
-  chunkIndex?: number;
-  chunkCount?: number;
-};
-
-type TelegramMenuContext = Context & MenuFlavor;
-
-type PendingRenameRecord = {
-  sessionId: string;
-};
-
-type PendingBroadcastRecord = {
-  initiatedAt: string;
-  promptMessageId?: number;
-  menuMessageId?: number;
-  scope: "linked" | "project";
-  sessionId?: string;
-  projectUuid?: string;
-  projectName?: string;
-  localTargetSessionIds?: string[];
-  remoteTargets?: PendingProjectBroadcastRemoteTarget[];
-};
-
-type PendingProjectBroadcastRemoteTarget = {
-  sessionUuid: string;
-  sessionLabel: string;
-  clientUuid: string;
-  localSessionId: string;
-  projectUuid: string;
-  projectName?: string;
-};
-
-type LiveApprovalEventPayload = {
-  project_uuid?: string;
-  project_name?: string;
-  source_session_id: string;
-  source_session_label: string;
-  source_client_uuid: string;
-  source_local_session_id: string;
-  target_session_id: string;
-  target_session_label: string;
-  target_client_uuid: string;
-  target_local_session_id: string;
-};
-
-type PendingPartnerNoteRecord = {
-  sessionId: string;
-  kind: PartnerNoteKind;
-  initiatedAt: string;
-  promptMessageId?: number;
-  targetSessionId?: string;
-  targetSessionLabel?: string;
-  projectUuid?: string;
-};
-
-type PendingFileHandoffRecord = {
-  sessionId: string;
-  filePath: string;
-  target: "agent" | "partner";
-  initiatedAt: string;
-  promptMessageId?: number;
-  targetSessionId?: string;
-  targetSessionLabel?: string;
-  projectUuid?: string;
-};
-
-type CurrentAttachmentTargetRecord = {
-  sessionId: string;
-  targetSessionId: string;
-  targetSessionLabel: string;
-  projectUuid?: string;
-};
-
-type PendingProjectRecord = {
-  sessionId: string;
-  mode: "create" | "join";
-  initiatedAt: string;
-  promptMessageId?: number;
-};
-
-type GatewayProjectRecord = {
-  project_uuid: string;
-  name: string;
-  invite_token: string;
-  role: string;
-  status: string;
-  joined_at?: string;
-};
-
-type GatewayProjectSessionRecord = {
-  session_uuid: string;
-  project_uuid: string;
-  client_uuid: string;
-  local_session_id: string;
-  label: string | null;
-  status: string;
-  client_label: string | null;
-  telegram_username: string | null;
-  bot_username: string | null;
-  joined_at?: string;
-  updated_at?: string;
-};
-
-type GatewayClientRecord = {
-  client_uuid: string;
-  client_label: string | null;
-  namespace?: string | null;
-  node_id?: string | null;
-  telegram_username: string | null;
-  telegram_display_name: string | null;
-  bot_username: string | null;
-  last_seen_at?: string;
-  updated_at?: string;
-  session_count?: number;
-};
-
-type GatewayClientSessionRecord = {
-  session_uuid: string;
-  client_uuid: string;
-  local_session_id: string;
-  label: string | null;
-  status: string;
-  project_uuid?: string;
-  project_name?: string | null;
-  updated_at?: string;
-};
-
-type GatewayConnectedClientSessionTool = {
-  local_session_id: string;
-  session_label?: string;
-  tools_hash?: string;
-};
-
-type AdminGatewayRegistrationSessionRecord = {
-  local_session_id: string;
-  session_label?: string;
-};
-
-type GatewayConnectedClientRecord = {
-  client_uuid: string;
-  namespace?: string;
-  node_id?: string;
-  package_version?: string;
-  protocol_version?: string;
-  session_tools: GatewayConnectedClientSessionTool[];
-  capabilities: string[];
-};
-
-type AdminClientViewRecord = GatewayClientRecord & {
-  is_connected?: boolean;
-  is_registered?: boolean;
-  connected_session_count?: number;
-  connected_session_labels?: string[];
-};
-
-type AdminClientSessionViewRecord = {
-  session_uuid: string;
-  client_uuid: string;
-  local_session_id: string;
-  label: string | null;
-  status: string;
-  project_uuid?: string;
-  project_name?: string | null;
-  updated_at?: string;
-  is_connected?: boolean;
-  is_collab?: boolean;
-};
-
-type GatewayRelayBindingPayload = {
-  sessionId: string;
-  targetSessionId: string;
-  targetSessionLabel: string;
-  targetClientUuid: string;
-  targetLocalSessionId: string;
-  projectUuid?: string;
-  projectName?: string;
-};
-
-type GatewayActorProfile = {
-  telegramUsername?: string;
-  telegramFirstName?: string;
-  telegramLastName?: string;
-  telegramDisplayName?: string;
-};
-
-type TmuxCaptureScope =
-  | { mode: "visible" }
-  | { mode: "lines"; lines: number }
-  | { mode: "full" };
-
-type TelegramAttachmentDescriptor = {
-  fileId: string;
-  preferredName: string;
-  mimeType?: string | undefined;
-};
-
-type StoredAttachmentRecord = {
-  filePath: string;
-  relativePath: string;
-  storageRef?: string | undefined;
-  bucketName?: string | undefined;
-  objectName?: string | undefined;
-  vfsNodeId?: number | undefined;
-  vfsPublicUrl?: string | undefined;
-  vfsParentId?: number | undefined;
-  sizeBytes: number;
-  mimeType?: string | undefined;
-};
-
-type WebAppLaunchMode = "default" | "expand" | "fullscreen";
+import type {
+  AdminClientSessionViewRecord,
+  AdminClientViewRecord,
+  AdminGatewayRegistrationSessionRecord,
+  CurrentAttachmentTargetRecord,
+  GatewayActorProfile,
+  GatewayClientRecord,
+  GatewayClientSessionRecord,
+  GatewayConnectedClientRecord,
+  GatewayProjectRecord,
+  GatewayProjectSessionRecord,
+  GatewayRelayBindingPayload,
+  LiveApprovalEventPayload,
+  PendingBroadcastRecord,
+  PendingFileHandoffRecord,
+  PendingPartnerNoteRecord,
+  PendingProjectBroadcastRemoteTarget,
+  PendingProjectRecord,
+  PendingRenameRecord,
+  SendMessageMeta,
+  SentChunk,
+  StoredAttachmentRecord,
+  TelegramAttachmentDescriptor,
+  TelegramClientFetch,
+  TelegramEditMessageOptions,
+  TelegramMenuContext,
+  TelegramSendMessageOptions,
+  TmuxCaptureScope,
+  WaiterRecord,
+  WebAppLaunchMode,
+} from "./transportTypes";
+import {
+  buildAdminClientSessionButtonLabel,
+  buildAdminClientSessionViewButtonLabel,
+  buildInboxText,
+  formatFilePreviewLabel,
+  formatInboxPreviewLabel,
+  formatSessionMenuLabel,
+  formatStoragePreviewLabel,
+  parsePartnerNoteText,
+} from "./transportFormatting";
+import {
+  buildAdminClientsMenuText,
+  mergeGatewayAdminClients,
+  mergeGatewayAdminClientSessions,
+} from "./transportAdminView";
+import {
+  buildAdminClientButtonLabel,
+  buildAdminClientTitle,
+  buildDatedRelativePath,
+  buildLocalHandoffId,
+  buildLocalNoteContent,
+  buildPrincipalKey,
+  escapeHtml,
+  formatMenuTimestamp,
+  formatTmuxBridgeError,
+  isGatewayAdminCommand,
+  isGatewayLinkCommand,
+  isHelpCommand,
+  isMenuEntryCommand,
+  joinHttpPath,
+  normalizeBasePath,
+  normalizeGatewayBaseUrl,
+  parseAdminAuthCommand,
+  parsePairingCode,
+  readMenuPayloadKey,
+  renderMarkdownChunk,
+  resolveGatewayControlBaseUrl,
+  resolveWebAppPublicBaseUrl,
+  shouldNudge,
+  slugifyFilenamePart,
+  splitLongTelegramText,
+  splitTitleAndBody,
+} from "./transportUtils";
 const TMUX_NUDGE_FAILURE_NOTICE_COOLDOWN_MS = 5 * 60 * 1000;
 const TMUX_PROMPT_SCAN_MATCHED_LINES_LIMIT = 6;
-
-function trimTrailingSlashes(value: string): string {
-  return value.replace(/\/+$/u, "");
-}
-
-function normalizeBasePath(value: string): string {
-  const trimmed = trimTrailingSlashes(value.trim());
-  return trimmed.startsWith("/") ? trimmed || "/" : `/${trimmed || ""}`;
-}
-
-function joinHttpPath(prefix: string, suffix: string): string {
-  const normalizedPrefix = prefix ? normalizeBasePath(prefix) : "";
-  const normalizedSuffix = normalizeBasePath(suffix);
-
-  if (!normalizedPrefix || normalizedPrefix === "/") {
-    return normalizedSuffix;
-  }
-
-  return `${normalizedPrefix}${normalizedSuffix}`.replace(/\/{2,}/gu, "/");
-}
-
-function resolveWebAppPublicBaseUrl(config: AppConfig): string | null {
-  if (!config.webapp.publicUrl) {
-    return null;
-  }
-
-  const rootPrefix = normalizeBasePath(process.env.ROOT_PREFIX || "/api");
-  const webAppBasePath = normalizeBasePath(config.webapp.basePath || "/webapp");
-  const expectedPath = trimTrailingSlashes(
-    `${rootPrefix === "/" ? "" : rootPrefix}${webAppBasePath}`,
-  ) || "/";
-
-  const url = new URL(config.webapp.publicUrl);
-  const currentPath = normalizeBasePath(url.pathname || "/");
-
-  if (currentPath === expectedPath) {
-    return trimTrailingSlashes(url.toString());
-  }
-
-  if (currentPath === webAppBasePath) {
-    url.pathname = expectedPath;
-    return trimTrailingSlashes(url.toString());
-  }
-
-  if (currentPath.endsWith(webAppBasePath)) {
-    url.pathname = expectedPath;
-    return trimTrailingSlashes(url.toString());
-  }
-
-  url.pathname = expectedPath;
-  return trimTrailingSlashes(url.toString());
-}
-
-function resolveGatewayControlBaseUrl(config: AppConfig): string | null {
-  if (
-    config.distributed.mode === "gateway" ||
-    config.distributed.mode === "both"
-  ) {
-    const runtimePort = Number(process.env.PORT || config.mcp.httpPort);
-    const rootPrefix = normalizeBasePath(process.env.ROOT_PREFIX || "/api");
-    const gatewayPath = joinHttpPath(rootPrefix, "/gateway");
-    return trimTrailingSlashes(`http://127.0.0.1:${runtimePort}${gatewayPath}`);
-  }
-
-  if (!config.distributed.gatewayPublicUrl) {
-    return null;
-  }
-
-  const url = new URL(config.distributed.gatewayPublicUrl);
-  url.pathname = url.pathname.replace(/\/+$/u, "");
-  if (!url.pathname.endsWith("/gateway")) {
-    url.pathname = `${url.pathname}/gateway`.replace(/\/{2,}/gu, "/");
-  }
-  return trimTrailingSlashes(url.toString());
-}
-
-function parsePairingCode(text: string): string | null {
-  const match = text
-    .trim()
-    .match(/^\/(?:start|link)(?:@\w+)?(?:\s+([A-Za-z0-9-]+))?$/i);
-  return match?.[1]?.trim().toUpperCase() ?? null;
-}
-
-function isMenuEntryCommand(text: string): boolean {
-  return /^\/(?:menu|start)(?:@\w+)?$/i.test(text.trim());
-}
-
-function isHelpCommand(text: string): boolean {
-  return /^\/help(?:@\w+)?$/i.test(text.trim());
-}
-
-function parseAdminAuthCommand(text: string): string | null {
-  const match = text.trim().match(/^\/auth(?:@\w+)?(?:\s+(.+))?$/i);
-  return match?.[1]?.trim() || null;
-}
-
-function isGatewayLinkCommand(text: string): boolean {
-  return /^\/link(?:@\w+)?$/i.test(text.trim());
-}
-
-function isGatewayAdminCommand(text: string): boolean {
-  return /^\/admin(?:@\w+)?$/i.test(text.trim());
-}
-
-function readMenuPayloadKey(ctx: TelegramMenuContext): string | null {
-  const payload = (ctx as TelegramMenuContext & { match?: string }).match;
-  return typeof payload === "string" && payload.length > 0 ? payload : null;
-}
-
-function buildDatedRelativePath(fileName: string, date = new Date()): string {
-  const dateSegment = date.toISOString().slice(0, 10);
-  const timeSegment = date.toTimeString().slice(0, 8).replace(/:/gu, "-");
-  return `${dateSegment}/${timeSegment}/${fileName}`;
-}
-
-function buildPrincipalKey(principal: {
-  telegramChatId: number;
-  telegramUserId: number;
-}): string {
-  return `${principal.telegramChatId}:${principal.telegramUserId}`;
-}
-
-function formatTmuxBridgeError(
-  _config: AppConfig,
-  error: unknown,
-  fallback: string,
-): string {
-  if (isTmuxUnavailableError(error)) {
-    return "tmux is unavailable right now.";
-  }
-
-  return fallback;
-}
-
-function splitLongTelegramText(text: string, maxChars: number): string[] {
-  const normalized = text.trim();
-  if (normalized.length <= maxChars) {
-    return [normalized];
-  }
-
-  const paragraphs = normalized.split("\n\n");
-  const chunks: string[] = [];
-  let current = "";
-
-  const flush = (): void => {
-    const trimmed = current.trim();
-    if (trimmed) {
-      chunks.push(trimmed);
-    }
-    current = "";
-  };
-
-  const appendSegment = (segment: string): void => {
-    if (!segment) {
-      return;
-    }
-
-    if (segment.length <= maxChars) {
-      const candidate = current ? `${current}\n\n${segment}` : segment;
-      if (candidate.length <= maxChars) {
-        current = candidate;
-        return;
-      }
-
-      flush();
-      current = segment;
-      return;
-    }
-
-    flush();
-
-    const lines = segment.split("\n");
-    let lineChunk = "";
-    for (const line of lines) {
-      if (line.length > maxChars) {
-        if (lineChunk) {
-          chunks.push(lineChunk.trim());
-          lineChunk = "";
-        }
-
-        for (let index = 0; index < line.length; index += maxChars) {
-          chunks.push(line.slice(index, index + maxChars).trim());
-        }
-        continue;
-      }
-
-      const candidate = lineChunk ? `${lineChunk}\n${line}` : line;
-      if (candidate.length <= maxChars) {
-        lineChunk = candidate;
-      } else {
-        chunks.push(lineChunk.trim());
-        lineChunk = line;
-      }
-    }
-
-    if (lineChunk) {
-      current = lineChunk;
-    }
-  };
-
-  for (const paragraph of paragraphs) {
-    appendSegment(paragraph);
-  }
-
-  flush();
-  return chunks.filter((chunk) => chunk.length > 0);
-}
-
-function escapeMarkdownV2(text: string): string {
-  const specialChars = new Set([
-    "_",
-    "*",
-    "[",
-    "]",
-    "(",
-    ")",
-    "~",
-    "`",
-    ">",
-    "#",
-    "+",
-    "-",
-    "=",
-    "|",
-    "{",
-    "}",
-    ".",
-    "!",
-    "\\",
-  ]);
-
-  return Array.from(text, (char) =>
-    specialChars.has(char) ? `\\${char}` : char,
-  ).join("");
-}
-
-function escapeMarkdownV2CodeBlock(text: string): string {
-  return text.replace(/\\/g, "\\\\").replace(/`/g, "\\`");
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function splitTitleAndBody(text: string): { title: string; body: string } {
-  const normalized = text.trim();
-  const [firstLine = "", ...rest] = normalized.split("\n");
-  const title = firstLine.trim() || "Codex";
-  const body = rest.join("\n").trim();
-
-  return {
-    title,
-    body: body || firstLine.trim(),
-  };
-}
-
-function renderMarkdownChunk(title: string, body: string): string {
-  return `*${escapeMarkdownV2(title)}*\n\n\`\`\`\n${escapeMarkdownV2CodeBlock(body)}\n\`\`\``;
-}
-
-function shouldNudge(
-  lastNudgeAt: string | undefined,
-  cooldownSeconds: number,
-  nowMs: number,
-): boolean {
-  if (!lastNudgeAt) {
-    return true;
-  }
-
-  const lastMs = Date.parse(lastNudgeAt);
-  if (Number.isNaN(lastMs)) {
-    return true;
-  }
-
-  return nowMs - lastMs >= cooldownSeconds * 1000;
-}
-
-function slugifyFilenamePart(input: string): string {
-  return input
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48);
-}
-
-function formatMenuTimestamp(timestamp: string | undefined): string | null {
-  if (!timestamp) {
-    return null;
-  }
-
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  const day = String(date.getDate()).padStart(2, "0");
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const year = date.getFullYear();
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-
-  return `${day}.${month}.${year} ${hours}:${minutes}`;
-}
-
-function normalizeGatewayBaseUrl(value: string): URL {
-  const url = new URL(value);
-  url.pathname = url.pathname.replace(/\/+$/u, "");
-
-  if (!url.pathname.endsWith("/gateway")) {
-    url.pathname = `${url.pathname}/gateway`.replace(/\/{2,}/gu, "/");
-  }
-
-  return url;
-}
-
-function buildLocalHandoffId(fileName: string, now: Date): string {
-  const timestamp = now.toISOString().replace(/[:.]/gu, "-");
-  return `${timestamp}-${slugifyFilenamePart(fileName) || "file-handoff"}`;
-}
-
-function buildLocalNoteContent(input: {
-  handoffId: string;
-  createdAt: string;
-  sessionId: string;
-  sessionLabel?: string | undefined;
-  filePath: string;
-  description: string;
-}): string {
-  return [
-    "---",
-    `handoff_id: ${JSON.stringify(input.handoffId)}`,
-    `kind: "local-file"`,
-    `created_at: ${JSON.stringify(input.createdAt)}`,
-    `session_id: ${JSON.stringify(input.sessionId)}`,
-    `session_label: ${JSON.stringify(input.sessionLabel ?? input.sessionId)}`,
-    `artifacts:\n  - ${JSON.stringify(input.filePath)}`,
-    "---",
-    "",
-    "# Summary",
-    `Local file handoff: ${path.basename(input.filePath)}`,
-    "",
-    "# Message",
-    input.description.trim(),
-    "",
-    "# Artifacts",
-    `- ${input.filePath}`,
-    "",
-  ].join("\n");
-}
 
 export class TelegramTransport implements HumanTransport {
   private readonly telegramFetch: TelegramClientFetch;
@@ -741,6 +220,9 @@ export class TelegramTransport implements HumanTransport {
   private tmuxPromptScanInFlight = false;
 
   private isTelegramEnabled(): boolean {
+    if (this.config.distributed.mode === "client") {
+      return false;
+    }
     return Boolean(this.config.telegram.botToken?.trim());
   }
 
@@ -1184,46 +666,10 @@ export class TelegramTransport implements HumanTransport {
       this.listGatewayClients(),
       this.listGatewayConnectedClients(),
     ]);
-
-    const merged = new Map<string, AdminClientViewRecord>();
-
-    for (const client of registeredClients) {
-      merged.set(client.client_uuid, {
-        ...client,
-        is_registered: true,
-      });
-    }
-
-    for (const client of connectedClients) {
-      const existing = merged.get(client.client_uuid);
-      const connectedSessionLabels = client.session_tools
-        .map((item) => item.session_label?.trim() || item.local_session_id.trim())
-        .filter(Boolean)
-        .slice(0, 3);
-
-      merged.set(client.client_uuid, {
-        client_uuid: client.client_uuid,
-        client_label: existing?.client_label ?? null,
-        namespace: existing?.namespace ?? client.namespace ?? null,
-        node_id: existing?.node_id ?? client.node_id ?? null,
-        telegram_username: existing?.telegram_username ?? null,
-        telegram_display_name: existing?.telegram_display_name ?? null,
-        bot_username: existing?.bot_username ?? null,
-        ...(existing?.last_seen_at ? { last_seen_at: existing.last_seen_at } : {}),
-        ...(existing?.updated_at ? { updated_at: existing.updated_at } : {}),
-        ...(typeof existing?.session_count === "number"
-          ? { session_count: existing.session_count }
-          : {}),
-        is_registered: existing?.is_registered ?? false,
-        is_connected: true,
-        connected_session_count: client.session_tools.length,
-        connected_session_labels: connectedSessionLabels,
-      });
-    }
-
-    return Array.from(merged.values()).sort((left, right) =>
-      this.buildAdminClientTitle(left).localeCompare(this.buildAdminClientTitle(right)),
-    );
+    return mergeGatewayAdminClients({
+      registeredClients,
+      connectedClients,
+    });
   }
 
   private async listGatewayClientSessions(
@@ -3114,7 +2560,7 @@ export class TelegramTransport implements HumanTransport {
           range
             .text(
               {
-                text: this.buildAdminClientButtonLabel(client),
+                text: buildAdminClientButtonLabel(client),
                 payload: async () => payloadKey,
               },
               async (innerCtx) => {
@@ -5577,6 +5023,13 @@ export class TelegramTransport implements HumanTransport {
   }
 
   private async sendTypingForSession(sessionId: string): Promise<void> {
+    if (!this.isTelegramEnabled()) {
+      this.logger.debug("Telegram typing skipped because transport is disabled", {
+        sessionId,
+      });
+      return;
+    }
+
     const binding = await this.bindingStore.getBinding(sessionId);
     if (!binding) {
       this.logger.debug("Telegram typing skipped because session is unbound", {
@@ -5867,62 +5320,18 @@ export class TelegramTransport implements HumanTransport {
         this.t(locale, "menu:admin.clients.unavailable"),
       ].join("\n");
     }
-    const lines = [this.t(locale, "menu:admin.clients.title"), ""];
-
-    if (clients.length === 0) {
-      lines.push(this.t(locale, "menu:admin.clients.empty"));
-      return lines.join("\n");
-    }
-
-    lines.push(
-      this.t(locale, "menu:admin.clients.connected_count", {
+    return buildAdminClientsMenuText({
+      title: this.t(locale, "menu:admin.clients.title"),
+      empty: this.t(locale, "menu:admin.clients.empty"),
+      connectedCountLabel: this.t(locale, "menu:admin.clients.connected_count", {
         count: clients.filter((client) => client.is_connected).length,
       }),
-    );
-    lines.push(
-      this.t(locale, "menu:admin.clients.registered_count", {
+      registeredCountLabel: this.t(locale, "menu:admin.clients.registered_count", {
         count: clients.filter((client) => client.is_registered).length,
       }),
-    );
-    lines.push("");
-    lines.push(this.t(locale, "menu:admin.clients.legend"));
-
-    return lines.join("\n");
-  }
-
-  private buildAdminClientTitle(client: AdminClientViewRecord): string {
-    const displayName = client.telegram_display_name?.trim() || "";
-    const telegramUsername = client.telegram_username?.trim().replace(/^@/u, "") || "";
-    const botUsername = client.bot_username?.trim().replace(/^@/u, "") || "";
-    const clientLabel = client.client_label?.trim() || "";
-    const namespace = client.namespace?.trim() || "";
-    const nodeId = client.node_id?.trim() || "";
-    const runtimeLabel =
-      [namespace, nodeId].filter(Boolean).join("/") || nodeId || "";
-    const fallback = (clientLabel || runtimeLabel || client.client_uuid).trim();
-
-    const identityParts = [
-      displayName || null,
-      !displayName && telegramUsername ? `@${telegramUsername}` : null,
-      !displayName && !telegramUsername && clientLabel ? clientLabel : null,
-      !displayName && !telegramUsername && !clientLabel && runtimeLabel
-        ? runtimeLabel
-        : null,
-      botUsername ? `🤖@${botUsername}` : null,
-    ].filter(Boolean);
-
-    return identityParts.length > 0 ? identityParts.join(" · ") : fallback;
-  }
-
-  private buildAdminClientButtonLabel(client: AdminClientViewRecord): string {
-    const markers = [
-      client.is_connected ? "🟢" : null,
-      client.is_registered ? "🗂" : null,
-    ]
-      .filter(Boolean)
-      .join("");
-    const prefix = markers ? `${markers} ` : "";
-    return `${prefix}${this.buildAdminClientTitle(client)}`.slice(0, 56);
+      legend: this.t(locale, "menu:admin.clients.legend"),
+      clients,
+    });
   }
 
   private buildAdminClientSessionButtonLabel(
@@ -5931,11 +5340,7 @@ export class TelegramTransport implements HumanTransport {
       "label" | "local_session_id" | "project_name"
     >,
   ): string {
-    const sessionName = (session.label?.trim() || session.local_session_id).trim();
-    const projectName = session.project_name?.trim() || null;
-    return projectName
-      ? `${sessionName} · ${projectName}`.slice(0, 56)
-      : sessionName.slice(0, 56);
+    return buildAdminClientSessionButtonLabel(session);
   }
 
   private async buildAdminClientSessionsMenuText(
@@ -5943,7 +5348,7 @@ export class TelegramTransport implements HumanTransport {
     client: AdminClientViewRecord,
   ): Promise<string> {
     const locale = await this.resolveLocaleForContext(ctx);
-    const clientTitle = this.buildAdminClientTitle(client);
+    const clientTitle = buildAdminClientTitle(client);
     return [
       this.t(locale, "menu:admin.client_sessions.title"),
       "",
@@ -5960,64 +5365,26 @@ export class TelegramTransport implements HumanTransport {
     scope: "collab" | "all",
   ): Promise<AdminClientSessionViewRecord[]> {
     const collabSessions = await this.listGatewayClientSessions(clientUuid);
+    const connectedClients = scope === "all"
+      ? await this.listGatewayConnectedClients()
+      : [];
+    const connectedClient =
+      scope === "all"
+        ? connectedClients.find((client) => client.client_uuid === clientUuid) ?? null
+        : null;
 
-    if (scope === "collab") {
-      return collabSessions.map((session) => ({
-        ...session,
-        is_collab: true,
-      }));
-    }
-
-    const connectedClients = await this.listGatewayConnectedClients();
-    const connectedClient = connectedClients.find(
-      (client) => client.client_uuid === clientUuid,
-    );
-
-    const merged = new Map<string, AdminClientSessionViewRecord>();
-
-    for (const session of collabSessions) {
-      merged.set(session.local_session_id, {
-        ...session,
-        is_collab: true,
-      });
-    }
-
-    for (const sessionTool of connectedClient?.session_tools ?? []) {
-      const key = sessionTool.local_session_id;
-      const existing = merged.get(key);
-
-      merged.set(key, {
-        session_uuid: existing?.session_uuid ?? key,
-        client_uuid: clientUuid,
-        local_session_id: key,
-        label: existing?.label ?? sessionTool.session_label ?? key,
-        status: existing?.status ?? "connected",
-        ...(existing?.project_uuid ? { project_uuid: existing.project_uuid } : {}),
-        ...(existing?.project_name ? { project_name: existing.project_name } : {}),
-        ...(existing?.updated_at ? { updated_at: existing.updated_at } : {}),
-        is_connected: true,
-        is_collab: existing?.is_collab ?? false,
-      });
-    }
-
-    return Array.from(merged.values()).sort((left, right) =>
-      (left.label ?? left.local_session_id).localeCompare(
-        right.label ?? right.local_session_id,
-      ),
-    );
+    return mergeGatewayAdminClientSessions({
+      clientUuid,
+      scope,
+      collabSessions,
+      connectedClient,
+    });
   }
 
   private buildAdminClientSessionViewButtonLabel(
     session: AdminClientSessionViewRecord,
   ): string {
-    const markers = [
-      session.is_connected ? "🟢" : null,
-      session.is_collab ? "👥" : null,
-    ]
-      .filter(Boolean)
-      .join("");
-    const prefix = markers ? `${markers} ` : "";
-    return `${prefix}${this.buildAdminClientSessionButtonLabel(session)}`.slice(0, 56);
+    return buildAdminClientSessionViewButtonLabel(session);
   }
 
   private async showAdminClientSessionList(
@@ -6089,7 +5456,7 @@ export class TelegramTransport implements HumanTransport {
       "",
       this.t(locale, titleKey),
       this.t(locale, "menu:admin.client_sessions.client", {
-        client: escapeHtml(this.buildAdminClientTitle(client)),
+        client: escapeHtml(buildAdminClientTitle(client)),
       }),
       "",
     ];
@@ -6611,7 +5978,7 @@ export class TelegramTransport implements HumanTransport {
         kind: "admin-client",
         sessionId: client.client_uuid,
         targetClientUuid: client.client_uuid,
-        title: this.buildAdminClientTitle(client),
+        title: buildAdminClientTitle(client),
         createdAt: now.toISOString(),
         expiresAt: new Date(
           now.getTime() + this.config.telegram.menuPayloadTtlSeconds * 1000,
@@ -7631,11 +6998,7 @@ export class TelegramTransport implements HumanTransport {
   }
 
   private formatInboxPreviewLabel(message: TelegramInboxMessage): string {
-    const compact = message.text.replace(/\s+/g, " ").trim();
-    const preview =
-      compact.length > 28 ? `${compact.slice(0, 28).trimEnd()}...` : compact;
-    const label = preview.length > 0 ? preview : "(empty message)";
-    return message.attachments?.length ? `📎 ${label}` : label;
+    return formatInboxPreviewLabel(message);
   }
 
   private formatFilePreviewLabel(
@@ -7645,25 +7008,14 @@ export class TelegramTransport implements HumanTransport {
       relativePath?: string | undefined;
     } | null,
   ): string {
-    return (
-      meta?.originalName ||
-      (meta?.relativePath ? path.basename(meta.relativePath) : undefined) ||
-      path.basename(filePath)
-    );
+    return formatFilePreviewLabel(filePath, meta);
   }
 
   private formatStoragePreviewLabel(
     filePath: string,
     meta?: TelegramXchangeFileMeta | null,
   ): string {
-    const base = this.formatFilePreviewLabel(filePath, meta);
-    const prefix =
-      meta?.source === "browser-screenshot"
-        ? "📸 "
-        : meta?.source === "partner-artifact"
-          ? "🤝 "
-          : "📄 ";
-    return `${prefix}${base}`.slice(0, 56);
+    return formatStoragePreviewLabel(filePath, meta);
   }
 
   private formatStorageDetail(
@@ -7695,13 +7047,7 @@ export class TelegramTransport implements HumanTransport {
     active: boolean;
     inboxCount: number;
   }): string {
-    const baseName = input.sessionLabel ?? input.sessionId;
-    const base = input.linkedSessionLabel
-      ? `${baseName} → ${input.linkedSessionLabel}`
-      : baseName;
-    const activePrefix = input.active ? "✅ " : "📁 ";
-    const inboxSuffix = input.inboxCount > 0 ? ` (${input.inboxCount})` : "";
-    return `${activePrefix}${base}${inboxSuffix}`;
+    return formatSessionMenuLabel(input);
   }
 
   private formatInboxDetail(message: TelegramInboxMessage): string {
@@ -7813,25 +7159,7 @@ export class TelegramTransport implements HumanTransport {
   }
 
   private buildInboxText(text: string | null, attachments: string[]): string {
-    const lines: string[] = [];
-
-    if (text) {
-      lines.push(text);
-    }
-
-    if (attachments.length > 0) {
-      if (lines.length > 0) {
-        lines.push("");
-      }
-      lines.push("Files saved in .mcp-xchange:");
-      lines.push(...attachments.map((attachment) => `- ${attachment}`));
-    }
-
-    if (lines.length === 0) {
-      return "Files uploaded from Telegram.";
-    }
-
-    return lines.join("\n");
+    return buildInboxText(text, attachments);
   }
 
   private async storeTelegramUploadMetas(input: {
@@ -10437,15 +9765,7 @@ export class TelegramTransport implements HumanTransport {
     summary: string;
     message: string;
   } {
-    const normalized = text.trim();
-    const lines = normalized.split("\n");
-    const summary = lines[0]?.trim() || normalized;
-    const body = lines.slice(1).join("\n").replace(/^\s*\n/u, "").trim();
-
-    return {
-      summary,
-      message: body || normalized,
-    };
+    return parsePartnerNoteText(text);
   }
 
   private async beginPartnerNoteMode(

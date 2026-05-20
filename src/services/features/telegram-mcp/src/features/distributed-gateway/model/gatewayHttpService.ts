@@ -652,6 +652,28 @@ export class GatewayHttpService {
       }
     }
 
+    if (pathname === "/gateway/clients/connected") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const result = await this.callBroker(
+          "telegramMcp.gatewaySocket.listConnectedClients",
+          {},
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, result);
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
     if (pathname === "/gateway/clients/sessions") {
       if (req.method !== "POST") {
         writeText(res, 405, "Method not allowed");

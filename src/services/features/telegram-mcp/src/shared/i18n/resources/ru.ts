@@ -460,6 +460,8 @@ export const ruMenu = {
       help:
         "Используй admin-меню, чтобы смотреть клиентов шлюза и экспортировать клиентский .env.",
       gateway_clients: "Известных клиентов: {{count}}",
+      gateway_clients_connected: "Подключены по gateway WS: {{count}}",
+      gateway_clients_registered: "Зарегистрированы active sessions: {{count}}",
       gateway_clients_unavailable: "Список клиентов шлюза сейчас недоступен.",
       hint: "Выбери нужный раздел ниже.",
     },
@@ -467,6 +469,9 @@ export const ruMenu = {
       title: "🖥 Клиенты шлюза",
       empty: "Шлюз пока не знает ни одного клиента.",
       unavailable: "Список клиентов шлюза сейчас недоступен.",
+      connected_count: "Подключены по gateway WS: {{count}}",
+      registered_count: "Зарегистрированы active sessions: {{count}}",
+      legend: "Легенда: 🟢 сейчас подключён, 🗂 есть зарегистрированные active sessions.",
       item: "• {{label}}",
       bot: "  Бот: {{botUsername}}",
       sessions: "  Сессий: {{count}}",

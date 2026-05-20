@@ -240,6 +240,28 @@ type GatewayClientSessionRecord = {
   updated_at?: string;
 };
 
+type GatewayConnectedClientSessionTool = {
+  local_session_id: string;
+  session_label?: string;
+  tools_hash?: string;
+};
+
+type GatewayConnectedClientRecord = {
+  client_uuid: string;
+  node_id?: string;
+  package_version?: string;
+  protocol_version?: string;
+  session_tools: GatewayConnectedClientSessionTool[];
+  capabilities: string[];
+};
+
+type AdminClientViewRecord = GatewayClientRecord & {
+  is_connected?: boolean;
+  is_registered?: boolean;
+  connected_session_count?: number;
+  connected_session_labels?: string[];
+};
+
 type GatewayActorProfile = {
   telegramUsername?: string;
   telegramFirstName?: string;
@@ -675,7 +697,7 @@ export class TelegramTransport implements HumanTransport {
   private readonly pendingPartnerNotes = new Map<string, PendingPartnerNoteRecord>();
   private readonly pendingFileHandoffs = new Map<string, PendingFileHandoffRecord>();
   private readonly pendingProjects = new Map<string, PendingProjectRecord>();
-  private readonly adminClientViewByPrincipal = new Map<string, GatewayClientRecord>();
+  private readonly adminClientViewByPrincipal = new Map<string, AdminClientViewRecord>();
   private readonly currentAttachmentTargets = new Map<
     string,
     CurrentAttachmentTargetRecord
@@ -1057,6 +1079,66 @@ export class TelegramTransport implements HumanTransport {
       clientUuids: clients.map((client) => client.client_uuid),
     });
     return clients;
+  }
+
+  private async listGatewayConnectedClients(): Promise<GatewayConnectedClientRecord[]> {
+    this.logger.info("Telegram admin requested connected gateway clients list", {
+      gatewayBaseUrl: resolveGatewayControlBaseUrl(this.config),
+    });
+    const response = await this.callGatewayJson<{
+      clients: GatewayConnectedClientRecord[];
+    }>("/clients/connected", {});
+    const clients = Array.isArray(response.clients) ? response.clients : [];
+    this.logger.info("Telegram admin received connected gateway clients list", {
+      count: clients.length,
+      clientUuids: clients.map((client) => client.client_uuid),
+    });
+    return clients;
+  }
+
+  private async listGatewayAdminClients(): Promise<AdminClientViewRecord[]> {
+    const [registeredClients, connectedClients] = await Promise.all([
+      this.listGatewayClients(),
+      this.listGatewayConnectedClients(),
+    ]);
+
+    const merged = new Map<string, AdminClientViewRecord>();
+
+    for (const client of registeredClients) {
+      merged.set(client.client_uuid, {
+        ...client,
+        is_registered: true,
+      });
+    }
+
+    for (const client of connectedClients) {
+      const existing = merged.get(client.client_uuid);
+      const connectedSessionLabels = client.session_tools
+        .map((item) => item.session_label?.trim() || item.local_session_id.trim())
+        .filter(Boolean)
+        .slice(0, 3);
+
+      merged.set(client.client_uuid, {
+        client_uuid: client.client_uuid,
+        client_label: existing?.client_label ?? null,
+        telegram_username: existing?.telegram_username ?? null,
+        telegram_display_name: existing?.telegram_display_name ?? null,
+        bot_username: existing?.bot_username ?? null,
+        ...(existing?.last_seen_at ? { last_seen_at: existing.last_seen_at } : {}),
+        ...(existing?.updated_at ? { updated_at: existing.updated_at } : {}),
+        ...(typeof existing?.session_count === "number"
+          ? { session_count: existing.session_count }
+          : {}),
+        is_registered: existing?.is_registered ?? false,
+        is_connected: true,
+        connected_session_count: client.session_tools.length,
+        connected_session_labels: connectedSessionLabels,
+      });
+    }
+
+    return Array.from(merged.values()).sort((left, right) =>
+      this.buildAdminClientTitle(left).localeCompare(this.buildAdminClientTitle(right)),
+    );
   }
 
   private async listGatewayClientSessions(
@@ -2653,9 +2735,9 @@ export class TelegramTransport implements HumanTransport {
     })
       .dynamic(async (ctx) => {
         const range = new MenuRange<TelegramMenuContext>();
-        let clients: GatewayClientRecord[];
+        let clients: AdminClientViewRecord[];
         try {
-          clients = await this.listGatewayClients();
+          clients = await this.listGatewayAdminClients();
         } catch {
           range.text(
             await this.tForContext(ctx, "menu:admin.clients.unavailable"),
@@ -5075,9 +5157,9 @@ export class TelegramTransport implements HumanTransport {
     ctx: TelegramMenuContext,
   ): Promise<string> {
     const locale = await this.resolveLocaleForContext(ctx);
-    let clients: GatewayClientRecord[] | null = null;
+    let clients: AdminClientViewRecord[] | null = null;
     try {
-      clients = await this.listGatewayClients();
+      clients = await this.listGatewayAdminClients();
     } catch (error) {
       this.logger.warn("Failed to load gateway clients for admin main menu", {
         chatId: ctx.chat?.id,
@@ -5092,6 +5174,12 @@ export class TelegramTransport implements HumanTransport {
         ? [
             this.t(locale, "menu:admin.screen.gateway_clients", {
               count: clients.length,
+            }),
+            this.t(locale, "menu:admin.screen.gateway_clients_connected", {
+              count: clients.filter((client) => client.is_connected).length,
+            }),
+            this.t(locale, "menu:admin.screen.gateway_clients_registered", {
+              count: clients.filter((client) => client.is_registered).length,
             }),
           ]
         : [this.t(locale, "menu:admin.screen.gateway_clients_unavailable")]),
@@ -5116,7 +5204,7 @@ export class TelegramTransport implements HumanTransport {
 
   private async showAdminClientSessionsMenu(
     ctx: TelegramMenuContext,
-    client?: GatewayClientRecord,
+    client?: AdminClientViewRecord,
   ): Promise<void> {
     const principal = this.getPrincipalFromContext(ctx);
     if (!principal) {
@@ -5212,9 +5300,9 @@ export class TelegramTransport implements HumanTransport {
     ctx: TelegramMenuContext,
   ): Promise<string> {
     const locale = await this.resolveLocaleForContext(ctx);
-    let clients: GatewayClientRecord[];
+    let clients: AdminClientViewRecord[];
     try {
-      clients = await this.listGatewayClients();
+      clients = await this.listGatewayAdminClients();
     } catch (error) {
       this.logger.warn("Failed to load gateway clients for admin clients menu", {
         chatId: ctx.chat?.id,
@@ -5227,51 +5315,30 @@ export class TelegramTransport implements HumanTransport {
         this.t(locale, "menu:admin.clients.unavailable"),
       ].join("\n");
     }
-    const lines = [
-      this.t(locale, "menu:admin.clients.title"),
-      "",
-    ];
+    const lines = [this.t(locale, "menu:admin.clients.title"), ""];
 
     if (clients.length === 0) {
       lines.push(this.t(locale, "menu:admin.clients.empty"));
       return lines.join("\n");
     }
 
-    for (const client of clients) {
-      lines.push(
-        this.t(locale, "menu:admin.clients.item", {
-          label: escapeHtml(client.client_label ?? client.client_uuid),
-          clientUuid: escapeHtml(client.client_uuid),
-        }),
-      );
-      if (client.bot_username) {
-        lines.push(
-          this.t(locale, "menu:admin.clients.bot", {
-            botUsername: escapeHtml(client.bot_username),
-          }),
-        );
-      }
-      if (typeof client.session_count === "number") {
-        lines.push(
-          this.t(locale, "menu:admin.clients.sessions", {
-            count: client.session_count,
-          }),
-        );
-      }
-      if (client.last_seen_at) {
-        lines.push(
-          this.t(locale, "menu:admin.clients.last_seen", {
-            value: escapeHtml(client.last_seen_at),
-          }),
-        );
-      }
-      lines.push("");
-    }
+    lines.push(
+      this.t(locale, "menu:admin.clients.connected_count", {
+        count: clients.filter((client) => client.is_connected).length,
+      }),
+    );
+    lines.push(
+      this.t(locale, "menu:admin.clients.registered_count", {
+        count: clients.filter((client) => client.is_registered).length,
+      }),
+    );
+    lines.push("");
+    lines.push(this.t(locale, "menu:admin.clients.legend"));
 
     return lines.join("\n");
   }
 
-  private buildAdminClientTitle(client: GatewayClientRecord): string {
+  private buildAdminClientTitle(client: AdminClientViewRecord): string {
     const displayName = client.telegram_display_name?.trim() || "";
     const telegramUsername = client.telegram_username?.trim().replace(/^@/u, "") || "";
     const botUsername = client.bot_username?.trim().replace(/^@/u, "") || "";
@@ -5286,8 +5353,15 @@ export class TelegramTransport implements HumanTransport {
     return identityParts.length > 0 ? identityParts.join(" · ") : fallback;
   }
 
-  private buildAdminClientButtonLabel(client: GatewayClientRecord): string {
-    return this.buildAdminClientTitle(client).slice(0, 56);
+  private buildAdminClientButtonLabel(client: AdminClientViewRecord): string {
+    const markers = [
+      client.is_connected ? "🟢" : null,
+      client.is_registered ? "🗂" : null,
+    ]
+      .filter(Boolean)
+      .join("");
+    const prefix = markers ? `${markers} ` : "";
+    return `${prefix}${this.buildAdminClientTitle(client)}`.slice(0, 56);
   }
 
   private buildAdminClientSessionButtonLabel(
@@ -5302,7 +5376,7 @@ export class TelegramTransport implements HumanTransport {
 
   private async buildAdminClientSessionsMenuText(
     ctx: TelegramMenuContext,
-    client: GatewayClientRecord,
+    client: AdminClientViewRecord,
   ): Promise<string> {
     const locale = await this.resolveLocaleForContext(ctx);
     const clientTitle = this.buildAdminClientTitle(client);
@@ -5775,7 +5849,7 @@ export class TelegramTransport implements HumanTransport {
   }
 
   private async createAdminClientMenuPayload(
-    client: GatewayClientRecord,
+    client: AdminClientViewRecord,
   ): Promise<string> {
     const key = createMenuPayloadKey();
     const now = new Date();
@@ -10509,9 +10583,9 @@ export class TelegramTransport implements HumanTransport {
       return;
     }
 
-    let clients: GatewayClientRecord[];
+    let clients: AdminClientViewRecord[];
     try {
-      clients = await this.listGatewayClients();
+      clients = await this.listGatewayAdminClients();
     } catch (error) {
       this.logger.warn("Failed to resolve admin client selection", {
         chatId: ctx.chat?.id,

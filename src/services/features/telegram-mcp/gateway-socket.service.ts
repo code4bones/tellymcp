@@ -348,6 +348,14 @@ type GatewaySocketCarrier = Service & {
     clientUuid: string;
     status: GatewaySocketDeliveryStatus;
   }) => Promise<boolean>;
+  listConnectedClients?: () => Array<{
+    client_uuid: string;
+    node_id?: string;
+    package_version?: string;
+    protocol_version?: string;
+    session_tools: GatewaySocketSessionTools[];
+    capabilities: TellyMcpCapability[];
+  }>;
 };
 
 function normalizeWebSocketUrl(value: string, defaultPath: string): string {
@@ -543,6 +551,13 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         return await this.notifyDeliveryStatus?.(ctx.params);
       },
     },
+    listConnectedClients: {
+      async handler(this: GatewaySocketCarrier) {
+        return {
+          clients: this.listConnectedClients?.() ?? [],
+        };
+      },
+    },
   },
 
   created(this: GatewaySocketCarrier) {
@@ -648,6 +663,44 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         protocolVersion: TELLYMCP_PROTOCOL_VERSION,
         capabilities: [...TELLYMCP_CAPABILITIES],
       };
+    },
+
+    listConnectedClients(this: GatewaySocketCarrier) {
+      const result: Array<{
+        client_uuid: string;
+        node_id?: string;
+        package_version?: string;
+        protocol_version?: string;
+        session_tools: GatewaySocketSessionTools[];
+        capabilities: TellyMcpCapability[];
+      }> = [];
+
+      for (const hello of this.connectedClients?.values() ?? []) {
+        if (!hello?.client_uuid) {
+          continue;
+        }
+
+        result.push({
+          client_uuid: hello.client_uuid,
+          ...(hello.node_id ? { node_id: hello.node_id } : {}),
+          ...(hello.package_version
+            ? { package_version: hello.package_version }
+            : {}),
+          ...(hello.protocol_version
+            ? { protocol_version: hello.protocol_version }
+            : {}),
+          session_tools: Array.isArray(hello.session_tools)
+            ? hello.session_tools
+            : [],
+          capabilities: Array.isArray(hello.capabilities)
+            ? hello.capabilities
+            : [],
+        });
+      }
+
+      return result.sort((left, right) =>
+        left.client_uuid.localeCompare(right.client_uuid),
+      );
     },
 
     async fetchGatewayToolsHashForClient(

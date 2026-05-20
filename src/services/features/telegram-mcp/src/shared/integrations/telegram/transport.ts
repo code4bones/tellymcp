@@ -10317,6 +10317,43 @@ export class TelegramTransport implements HumanTransport {
         await this.bindingStore.listBoundSessionIdsForPrincipal(principal);
 
       for (const sessionId of sessionIds) {
+        const relayTarget = parseLiveRelaySessionId(sessionId);
+        if (relayTarget) {
+          try {
+            await this.routeTelegramInboxToRelaySession({
+              ctx,
+              principal,
+              relayTarget,
+              sourceSessionId: sessionId,
+              messageText: broadcastText,
+              attachments: [],
+            });
+            remoteCount += 1;
+            this.logger.info("Telegram broadcast routed to gateway relay session", {
+              sessionId,
+              chatId: principal.telegramChatId,
+              userId: principal.telegramUserId,
+              targetClientUuid: relayTarget.clientUuid,
+              targetLocalSessionId: relayTarget.localSessionId,
+              text: redactSecrets(broadcastText),
+            });
+            continue;
+          } catch (error) {
+            this.logger.error("Failed to route Telegram broadcast to gateway relay session", {
+              sessionId,
+              chatId: principal.telegramChatId,
+              userId: principal.telegramUserId,
+              targetClientUuid: relayTarget.clientUuid,
+              targetLocalSessionId: relayTarget.localSessionId,
+              error:
+                error instanceof Error
+                  ? (error.stack ?? error.message)
+                  : String(error),
+            });
+            continue;
+          }
+        }
+
         const inboxMessage: TelegramInboxMessage = {
           id: createInboxMessageId(),
           sessionId,
@@ -10386,7 +10423,7 @@ export class TelegramTransport implements HumanTransport {
             }),
           ].join("\n")
         : await this.tForContext(ctx, "menu:broadcast.completed_linked", {
-            count: storedCount,
+            count: storedCount + remoteCount,
           }),
       {
         kind: "menu",

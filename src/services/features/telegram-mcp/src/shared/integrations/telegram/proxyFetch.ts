@@ -26,26 +26,26 @@ export function createTelegramFetch(
   config: AppConfig,
   logger: Logger,
 ): typeof globalThis.fetch {
-  if (!config.telegram.proxy) {
-    logger.debug("Telegram proxy disabled");
-    return globalThis.fetch.bind(globalThis);
-  }
-
-  const agent: FetchAgent =
-    config.telegram.proxy.type === "http"
+  const agent: FetchAgent | undefined = config.telegram.proxy
+    ? config.telegram.proxy.type === "http"
       ? new HttpsProxyAgent(config.telegram.proxy.url)
-      : new SocksProxyAgent(config.telegram.proxy.url);
+      : new SocksProxyAgent(config.telegram.proxy.url)
+    : undefined;
 
-  logger.info("Telegram proxy configured", {
-    proxyType: config.telegram.proxy.type,
-    proxyUrl: maskProxyUrl(config.telegram.proxy.url),
-  });
+  if (config.telegram.proxy) {
+    logger.info("Telegram proxy configured", {
+      proxyType: config.telegram.proxy.type,
+      proxyUrl: maskProxyUrl(config.telegram.proxy.url),
+    });
+  } else {
+    logger.debug("Telegram proxy disabled");
+  }
 
   const proxiedFetch = async (...args: Parameters<typeof globalThis.fetch>) => {
     const [input, init] = args;
     const requestInit = {
       ...(init ? (init as Record<string, unknown>) : {}),
-      agent,
+      ...(agent ? { agent } : {}),
     };
 
     return fetch(

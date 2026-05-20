@@ -4,10 +4,29 @@ import * as z from "zod/v4";
 
 import type { QueueMode } from "../../shared/types/common";
 
+const emptyStringToUndefined = (value: unknown): unknown => {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  return trimmed === "" ? undefined : trimmed;
+};
+
+const optionalNonEmptyString = z.preprocess(
+  emptyStringToUndefined,
+  z.string().min(1).optional(),
+);
+
+const optionalUrlString = z.preprocess(
+  emptyStringToUndefined,
+  z.string().url().optional(),
+);
+
 const envSchema = z.object({
-  TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
-  TELEGRAM_BOT_USERNAME: z.string().min(1).optional(),
-  ADMIN_TOKEN: z.string().min(1).optional(),
+  TELEGRAM_BOT_TOKEN: optionalNonEmptyString,
+  TELEGRAM_BOT_USERNAME: optionalNonEmptyString,
+  ADMIN_TOKEN: optionalNonEmptyString,
   TELEGRAM_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
   TELEGRAM_DEFAULT_TIMEOUT_SECONDS: z.coerce
     .number()
@@ -28,19 +47,22 @@ const envSchema = z.object({
     .int()
     .positive()
     .default(300),
-  DEBUG_LANGUAGE: z.enum(["en", "ru"]).optional(),
+  DEBUG_LANGUAGE: z.preprocess(
+    emptyStringToUndefined,
+    z.enum(["en", "ru"]).optional(),
+  ),
   REDIS_HOST: z.string().min(1),
   REDIS_PORT: z.coerce.number().int().positive(),
   REDIS_DB: z.coerce.number().int().nonnegative(),
-  REDIS_USERNAME: z.string().min(1).optional(),
-  REDIS_PASSWORD: z.string().min(1).optional(),
+  REDIS_USERNAME: optionalNonEmptyString,
+  REDIS_PASSWORD: optionalNonEmptyString,
   MODE: z.enum(["queue", "reject"]).default("queue"),
   PAIR_CODE_TTL_SECONDS: z.coerce.number().int().positive().default(600),
-  PROJECT_NAME: z.string().min(1).optional(),
+  PROJECT_NAME: optionalNonEmptyString,
   MCP_HTTP_HOST: z.string().min(1).default("127.0.0.1"),
   MCP_HTTP_PORT: z.coerce.number().int().positive().default(8787),
   MCP_HTTP_PATH: z.string().min(1).default("/mcp"),
-  MCP_HTTP_BEARER_TOKEN: z.string().min(1).optional(),
+  MCP_HTTP_BEARER_TOKEN: optionalNonEmptyString,
   MCP_HTTP_ENABLE_DEBUG_ROUTES: z
     .string()
     .optional()
@@ -51,33 +73,33 @@ const envSchema = z.object({
     .transform((value) => value === "true"),
   MCP_VFS_SCOPE: z.string().min(1).default("mcp"),
   DISTRIBUTED_MODE: z.enum(["client", "gateway", "both"]).default("client"),
-  GATEWAY_PUBLIC_URL: z.string().url().optional(),
+  GATEWAY_PUBLIC_URL: optionalUrlString,
   GATEWAY_BIND_HOST: z.string().min(1).default("127.0.0.1"),
   GATEWAY_BIND_PORT: z.coerce.number().int().positive().default(8790),
-  GATEWAY_WS_URL: z.string().url().optional(),
+  GATEWAY_WS_URL: optionalUrlString,
   GATEWAY_WS_PATH: z
     .string()
     .min(1)
     .default(`${(process.env.ROOT_PREFIX || "/api").replace(/\/+$/u, "")}/gateway/ws`),
-  GATEWAY_TOKEN: z.string().min(1).optional(),
-  GATEWAY_AUTH_TOKEN: z.string().min(1).optional(),
-  GATEWAY_DATABASE_URL: z.string().min(1).optional(),
-  GATEWAY_S3_ENDPOINT: z.string().min(1).optional(),
-  GATEWAY_S3_BUCKET: z.string().min(1).optional(),
-  GATEWAY_S3_ACCESS_KEY: z.string().min(1).optional(),
-  GATEWAY_S3_SECRET_KEY: z.string().min(1).optional(),
-  RMQ_HOST: z.string().min(1).optional(),
+  GATEWAY_TOKEN: optionalNonEmptyString,
+  GATEWAY_AUTH_TOKEN: optionalNonEmptyString,
+  GATEWAY_DATABASE_URL: optionalNonEmptyString,
+  GATEWAY_S3_ENDPOINT: optionalNonEmptyString,
+  GATEWAY_S3_BUCKET: optionalNonEmptyString,
+  GATEWAY_S3_ACCESS_KEY: optionalNonEmptyString,
+  GATEWAY_S3_SECRET_KEY: optionalNonEmptyString,
+  RMQ_HOST: optionalNonEmptyString,
   RMQ_PORT: z.coerce.number().int().positive().optional(),
-  RMQ_USER: z.string().min(1).optional(),
-  RMQ_PASSWORD: z.string().min(1).optional(),
-  RMQ_VHOST: z.string().optional(),
+  RMQ_USER: optionalNonEmptyString,
+  RMQ_PASSWORD: optionalNonEmptyString,
+  RMQ_VHOST: z.preprocess(emptyStringToUndefined, z.string().optional()),
   RMQ_EXCHANGE: z.string().min(1).default("telegram_mcp.gateway"),
   WEBAPP_ENABLED: z
     .string()
     .optional()
     .transform((value) => value === "true"),
   WEBAPP_BASE_PATH: z.string().min(1).default("/webapp"),
-  WEBAPP_PUBLIC_URL: z.string().url().optional(),
+  WEBAPP_PUBLIC_URL: optionalUrlString,
   WEBAPP_INITDATA_TTL_SECONDS: z.coerce
     .number()
     .int()
@@ -99,7 +121,7 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((value) => value !== "false"),
-  TMUX_SOCKET_PATH: z.string().min(1).optional(),
+  TMUX_SOCKET_PATH: optionalNonEmptyString,
   TMUX_NUDGE_DEBOUNCE_SECONDS: z.coerce.number().int().positive().default(10),
   TMUX_NUDGE_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(30),
   TMUX_NUDGE_MESSAGE: z.string().min(1).default("проверь inbox"),
@@ -139,18 +161,24 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((value) => value === "true"),
-  BROWSER_ADDRESS: z.string().url().optional(),
+  BROWSER_ADDRESS: optionalUrlString,
   BROWSER_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
   BROWSER_MAX_EVENTS: z.coerce.number().int().positive().default(200),
   BROWSER_WAIT_UNTIL: z
     .enum(["load", "domcontentloaded", "networkidle", "commit"])
     .default("load"),
-  BROWSER_EXECUTABLE_PATH: z.string().min(1).optional(),
-  BROWSER_CHANNEL: z.enum(["chrome", "chromium", "msedge"]).optional(),
+  BROWSER_EXECUTABLE_PATH: optionalNonEmptyString,
+  BROWSER_CHANNEL: z.preprocess(
+    emptyStringToUndefined,
+    z.enum(["chrome", "chromium", "msedge"]).optional(),
+  ),
   BROWSER_SLOW_MO_MS: z.coerce.number().int().nonnegative().default(0),
-  PROXY_USE: z.enum(["http", "socks5"]).optional(),
-  HTTP_PROXY: z.string().min(1).optional(),
-  SOCKS5_PROXY: z.string().min(1).optional(),
+  PROXY_USE: z.preprocess(
+    emptyStringToUndefined,
+    z.enum(["http", "socks5"]).optional(),
+  ),
+  HTTP_PROXY: optionalNonEmptyString,
+  SOCKS5_PROXY: optionalNonEmptyString,
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),

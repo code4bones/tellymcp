@@ -826,6 +826,7 @@ export class TelegramTransport implements HumanTransport {
     this.storageMessageMenu = this.createStorageMessageMenu();
     this.screenshotMessageMenu = this.createScreenshotMessageMenu();
     this.mainMenu.register([
+      this.adminMainMenu,
       this.inboxMenu,
       this.storageMenu,
       this.browserMenu,
@@ -957,7 +958,7 @@ export class TelegramTransport implements HumanTransport {
   }
 
   private getRootMenu(): Menu<TelegramMenuContext> {
-    return this.isAdminBotProfile() ? this.adminMainMenu : this.mainMenu;
+    return this.mainMenu;
   }
 
   private async isPrincipalAdminAuthorized(

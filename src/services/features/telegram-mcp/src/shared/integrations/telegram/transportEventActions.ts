@@ -278,7 +278,7 @@ export class TransportEventActions {
 
     const binding = await this.host.bindingStore.getBinding(targetSession.sessionId);
     if (!binding) {
-      this.host.logger.warn("Skipping live approval request because target session is not paired", {
+      this.host.logger.warn("Skipping live approval request because target session has no active Telegram route", {
         sessionId: targetSession.sessionId,
         sourceLocalSessionId: input.source_local_session_id,
       });
@@ -359,7 +359,7 @@ export class TransportEventActions {
 
     const binding = await this.host.bindingStore.getBinding(sourceSession.sessionId);
     if (!binding) {
-      this.host.logger.warn("Skipping live approval resolution because source session is not paired", {
+      this.host.logger.warn("Skipping live approval resolution because source session has no active Telegram route", {
         sessionId: sourceSession.sessionId,
         targetLocalSessionId: input.target_local_session_id,
       });

@@ -432,32 +432,6 @@ export class TransportProjectState {
     };
   }
 
-  public async getAdminClientSessionPayloadByKey(
-    payloadKey: string,
-  ): Promise<GatewayRelayBindingPayload | null> {
-    const payload = await this.host.menuPayloadStore.getMenuPayload(payloadKey);
-    if (
-      !payload ||
-      payload.kind !== "admin-client-session" ||
-      !payload.sessionId ||
-      !payload.targetSessionId ||
-      !payload.targetClientUuid ||
-      !payload.targetLocalSessionId
-    ) {
-      return null;
-    }
-
-    return {
-      sessionId: String(payload.sessionId),
-      targetSessionId: String(payload.targetSessionId),
-      targetSessionLabel: String(payload.title ?? payload.targetLocalSessionId),
-      targetClientUuid: String(payload.targetClientUuid),
-      targetLocalSessionId: String(payload.targetLocalSessionId),
-      ...(payload.projectUuid ? { projectUuid: String(payload.projectUuid) } : {}),
-      ...(payload.projectName ? { projectName: String(payload.projectName) } : {}),
-    };
-  }
-
   public buildRelaySessionContext(
     input: GatewayRelayBindingPayload,
   ): SessionContext {

@@ -82,13 +82,6 @@ export function resolveGatewayControlBaseUrl(config: AppConfig): string | null {
   return trimTrailingSlashes(url.toString());
 }
 
-export function parsePairingCode(text: string): string | null {
-  const match = text
-    .trim()
-    .match(/^\/(?:start|link)(?:@\w+)?(?:\s+([A-Za-z0-9-]+))?$/i);
-  return match?.[1]?.trim().toUpperCase() ?? null;
-}
-
 export function isMenuEntryCommand(text: string): boolean {
   return /^\/(?:menu|start)(?:@\w+)?$/i.test(text.trim());
 }
@@ -100,14 +93,6 @@ export function isHelpCommand(text: string): boolean {
 export function parseAdminAuthCommand(text: string): string | null {
   const match = text.trim().match(/^\/auth(?:@\w+)?(?:\s+(.+))?$/i);
   return match?.[1]?.trim() || null;
-}
-
-export function isGatewayLinkCommand(text: string): boolean {
-  return /^\/link(?:@\w+)?$/i.test(text.trim());
-}
-
-export function isGatewayAdminCommand(text: string): boolean {
-  return /^\/admin(?:@\w+)?$/i.test(text.trim());
 }
 
 export function readMenuPayloadKey(ctx: TelegramMenuContext): string | null {

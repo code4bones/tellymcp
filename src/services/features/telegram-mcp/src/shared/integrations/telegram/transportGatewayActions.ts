@@ -4,21 +4,15 @@ import type {
   SendPartnerNoteOutput,
 } from "../../../entities/collaboration/model/types";
 import type {
-  AdminClientViewRecord,
   GatewayActorProfile,
-  GatewayClientRecord,
-  GatewayClientSessionRecord,
-  GatewayConnectedClientRecord,
   GatewayProjectRecord,
   GatewayProjectSessionRecord,
 } from "./transportTypes";
-import type { TransportGatewayDirectory } from "./transportGatewayDirectory";
 import type { TransportProjectState } from "./transportProjectState";
 
 export interface TransportGatewayActionsHost {
   getCollaborationService(): CollaborationService | undefined;
   projectState: TransportProjectState;
-  gatewayDirectory: TransportGatewayDirectory;
 }
 
 export class TransportGatewayActions {
@@ -47,24 +41,6 @@ export class TransportGatewayActions {
     actor?: GatewayActorProfile,
   ): Promise<GatewayProjectRecord[]> {
     return this.host.projectState.listGatewayProjects(principal, actor);
-  }
-
-  public async listGatewayClients(): Promise<GatewayClientRecord[]> {
-    return this.host.gatewayDirectory.listGatewayClients();
-  }
-
-  public async listGatewayConnectedClients(): Promise<GatewayConnectedClientRecord[]> {
-    return this.host.gatewayDirectory.listGatewayConnectedClients();
-  }
-
-  public async listGatewayAdminClients(): Promise<AdminClientViewRecord[]> {
-    return this.host.gatewayDirectory.listGatewayAdminClients();
-  }
-
-  public async listGatewayClientSessions(
-    clientUuid: string,
-  ): Promise<GatewayClientSessionRecord[]> {
-    return this.host.gatewayDirectory.listGatewayClientSessions(clientUuid);
   }
 
   public async listGatewayProjectSessions(

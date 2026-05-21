@@ -210,7 +210,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
     this.logger.info("Starting telegram_mcp browser service");
     this.browserService = new BrowserService(
       runtime.config,
-      runtime.stateStore,
+      runtime.sessionStore,
       runtime.stateStore,
       runtime.stateStore,
       runtime.objectStore,

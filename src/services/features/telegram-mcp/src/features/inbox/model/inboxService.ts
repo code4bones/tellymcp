@@ -13,6 +13,10 @@ import type {
 } from "../../../shared/api/storage/contract";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
+import {
+  listXchangeRecords,
+  markXchangeRecordRead,
+} from "../../../shared/integrations/xchange/sqliteRecordStore";
 
 type RemoteConsoleInvoker = {
   invokeForRelaySession<T>(
@@ -44,7 +48,7 @@ export class InboxService {
     if (remote) {
       return remote;
     }
-    const total = await this.inboxStore.countInboxMessages(resolved.sessionId);
+    const total = await this.countTelegramMessageRecords(resolved.sessionId);
 
     this.logger.info("Telegram inbox count fetched", {
       sessionId: resolved.sessionId,
@@ -71,37 +75,49 @@ export class InboxService {
       return remote;
     }
     const limit = this.config.telegram.inboxBatchSize;
-    const messages = await this.inboxStore.listInboxMessages(
+    const workspaceDir = await this.resolveWorkspaceDir(resolved.sessionId);
+    const records = await listXchangeRecords(
+      this.config.tmux,
+      workspaceDir,
+      this.config.exchange.dir,
       resolved.sessionId,
-      limit,
+      {
+        status: "new",
+        category: "telegram_message",
+        direction: "incoming",
+        limit,
+      },
     );
-    const total = await this.inboxStore.countInboxMessages(resolved.sessionId);
+    const total = await this.countTelegramMessageRecords(resolved.sessionId);
 
     this.logger.info("Telegram inbox fetched", {
       sessionId: resolved.sessionId,
       sessionIdDerived: resolved.sessionIdDerived,
       limit,
-      returned: messages.length,
+      returned: records.length,
       total,
     });
 
     return {
       session_id: resolved.sessionId,
       total,
-      has_more: total > messages.length,
-      messages: messages.map((message) => ({
-        message_id: message.id,
+      has_more: total > records.length,
+      messages: records.map((record) => ({
+        message_id: record.record_id,
         source: "telegram",
-        message_kind:
-          message.sourceTelegramMessageId > 0 ? "human" : "system",
-        telegram_chat_id: message.telegramChatId,
-        telegram_user_id: message.telegramUserId,
-        telegram_message_id: message.sourceTelegramMessageId,
-        text: message.text,
-        ...(message.attachments?.length
-          ? { attachments: message.attachments }
+        message_kind: "human",
+        telegram_chat_id: 0,
+        telegram_user_id: 0,
+        telegram_message_id: 0,
+        text: record.body_text,
+        ...(record.attachments?.length
+          ? {
+              attachments: record.attachments.map(
+                (attachment) => attachment.file_path,
+              ),
+            }
           : {}),
-        received_at: message.receivedAt,
+        received_at: record.created_at,
       })),
     };
   }
@@ -118,7 +134,11 @@ export class InboxService {
     if (remote) {
       return remote;
     }
-    const deleted = await this.inboxStore.deleteInboxMessage(
+    const workspaceDir = await this.resolveWorkspaceDir(resolved.sessionId);
+    const deleted = await markXchangeRecordRead(
+      this.config.tmux,
+      workspaceDir,
+      this.config.exchange.dir,
       resolved.sessionId,
       input.message_id,
     );
@@ -135,5 +155,31 @@ export class InboxService {
       session_id: resolved.sessionId,
       message_id: input.message_id,
     };
+  }
+
+  private async countTelegramMessageRecords(sessionId: string): Promise<number> {
+    const workspaceDir = await this.resolveWorkspaceDir(sessionId);
+    const records = await listXchangeRecords(
+      this.config.tmux,
+      workspaceDir,
+      this.config.exchange.dir,
+      sessionId,
+      {
+        status: "new",
+        category: "telegram_message",
+        direction: "incoming",
+      },
+    );
+    return records.length;
+  }
+
+  private async resolveWorkspaceDir(sessionId: string): Promise<string> {
+    const getSession = (this._sessionStore as { getSession?: (sessionId: string) => Promise<{ cwd?: string } | null> }).getSession;
+    if (!getSession) {
+      return process.cwd();
+    }
+    const session = await getSession(sessionId);
+    const workspaceDir = session?.cwd?.trim();
+    return workspaceDir || process.cwd();
   }
 }

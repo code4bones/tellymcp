@@ -27,7 +27,7 @@ export class AskUserTelegramTool implements ToolModule {
       {
         title: "Ask User Telegram",
         description:
-          "Send a clarification request to the Telegram user for the provided console session and wait for a reply. Pass session_id explicitly for the active console; do not rely on implicit defaults unless cwd is also correct for this agent workspace.",
+          "Send a clarification request to the Telegram user for the provided console and wait for a reply. Pass session_id explicitly for the active console; do not rely on implicit defaults unless cwd is also correct for this agent workspace.",
         inputSchema: askUserTelegramInputSchema,
         outputSchema: askUserTelegramOutputSchema,
       },

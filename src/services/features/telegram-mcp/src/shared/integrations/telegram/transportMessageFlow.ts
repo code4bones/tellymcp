@@ -3,7 +3,7 @@ import path from "node:path";
 import { createInboxMessageId } from "../../lib/ids/ids";
 import type { Logger } from "../../lib/logger/logger";
 import { redactSecrets } from "../../lib/redact-secrets/redactSecrets";
-import type { PartnerNoteKind, SendPartnerNoteOutput } from "../../../entities/collaboration/model/types";
+import type { PartnerNoteKind } from "../../../entities/collaboration/model/types";
 import type { TelegramInboxMessage } from "../../../entities/inbox/model/types";
 import type {
   SessionBindingStore,
@@ -299,34 +299,28 @@ export class TransportMessageFlow {
     attachments: StoredAttachmentRecord[];
   }): Promise<void> {
     const sourceActorLabel = this.resolveGatewayTelegramSourceLabel(input.ctx);
-    const output = await this.host.callGatewayJson<SendPartnerNoteOutput>("/relay/inbox", {
-      client_uuid: "gateway-telegram",
-      local_session_id: `telegram-user-${input.principal.telegramUserId}`,
+    const output = await this.host.callGatewayJson<{
+      ok: true;
+      session_id: string;
+      terminal_target: string;
+      submitted_text: string;
+    }>("/relay/console-message", {
       source_actor_label: sourceActorLabel,
       target_client_uuid: input.relayTarget.clientUuid,
       target_local_session_id: input.relayTarget.localSessionId,
-      kind: this.inferGatewayInboxKind(input.messageText),
-      summary: this.buildGatewayInboxSummary(input.messageText),
       message: input.messageText,
-      requires_reply: false,
-      artifact_refs: input.attachments.map((attachment) => ({
-        file_path: attachment.filePath,
-        ...(attachment.relativePath ? { relative_path: attachment.relativePath } : {}),
-        original_name: path.basename(attachment.relativePath || attachment.filePath),
-        ...(attachment.mimeType ? { mime_type: attachment.mimeType } : {}),
-        ...(typeof attachment.sizeBytes === "number"
-          ? { size_bytes: attachment.sizeBytes }
-          : {}),
-        ...(attachment.storageRef ? { storage_ref: attachment.storageRef } : {}),
-      })),
+      ...(input.attachments.length > 0
+        ? {
+            attachments: input.attachments.map((attachment) => attachment.filePath),
+          }
+        : {}),
     });
 
     this.host.logger.info("Telegram message routed to gateway relay session", {
       sessionId: input.sourceSessionId,
       targetClientUuid: input.relayTarget.clientUuid,
       targetLocalSessionId: input.relayTarget.localSessionId,
-      shareId: output.share_id,
-      deliveryStatus: output.delivery_status,
+      terminalTarget: output.terminal_target,
       chatId: input.principal.telegramChatId,
       userId: input.principal.telegramUserId,
     });

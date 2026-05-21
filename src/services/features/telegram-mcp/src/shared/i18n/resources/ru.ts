@@ -171,10 +171,10 @@ export const ruMenu = {
       info: "ℹ Info",
       rename: "✏ Rename",
       unpair: "🗑 Unpair",
-      confirm_unpair: "⚠ Подтвердить отвязку",
+      confirm_unpair: "⚠ Подтвердить удаление маршрута",
     },
     actions: {
-      confirm_unpair: "Подтверди отвязку.",
+      confirm_unpair: "Подтверди удаление маршрута.",
       back_to_settings: "Назад к настройкам.",
       rename_prompt: "Отправь новое название сессии.",
       rename_body:
@@ -542,7 +542,7 @@ export const ruMenu = {
     label: "📌 Label: {{value}}",
     session_id: "🆔 Session ID: {{value}}",
     inbox_count: "📥 Сообщений в inbox: {{count}}",
-    paired: "🔗 Привязана: {{value}}",
+    route: "🔗 Telegram route: {{value}}",
     partner: "🤝 Напарник: {{value}}",
     tmux_target: "🖥 tmux target: {{value}}",
     tmux_session: "📺 tmux session: {{value}}",
@@ -554,20 +554,20 @@ export const ruMenu = {
     not_set: "не задан",
   },
   unpair: {
-    title: "⚠ Подтверди отвязку",
+    title: "⚠ Подтверди удаление маршрута",
     active_session: "📌 Активная сессия: {{sessionName}}",
-    body_1: "Это удалит Telegram binding для активной сессии.",
+    body_1: "Это удалит активный Telegram route для выбранной консоли.",
     body_2:
       "Метаданные сессии и записи inbox останутся в Redis, пока ты не удалишь их отдельно.",
-    done: "Отвязано: {{sessionName}}",
-    shown: "Сессия отвязана: {{sessionName}}",
+    done: "Telegram route удалён: {{sessionName}}",
+    shown: "Telegram route удалён: {{sessionName}}",
   },
   prune: {
     title: "⚠ Подтверди prune",
     linked_sessions: "🔗 Видимых здесь привязанных сессий: {{count}}",
     body_1: "Это очистит каждый Redis key внутри namespace telegram-mcp.",
     body_2:
-      "Будут удалены pair codes, bindings, sessions, inbox, menu payloads и pending requests.",
+      "Будут удалены bindings, sessions, inbox, menu payloads и pending requests.",
     done: "Prune завершён. Удалено Redis keys: {{count}}.",
   },
   history: {

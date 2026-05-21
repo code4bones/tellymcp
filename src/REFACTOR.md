@@ -27,8 +27,7 @@
    - `${ROOT_PREFIX}/mcp`, `${ROOT_PREFIX}/webapp`, `${ROOT_PREFIX}/healthz`, `${ROOT_PREFIX}/gateway` обслуживаются текущим standalone HTTP слоем
    - текущая сервисная схема:
      - `telegramMcp.runtime` — config, redis, state store, telegram transport, shared runtime dependencies
-     - `telegramMcp.pair` — pair-code and pairing lifecycle
-     - `telegramMcp.sessionContext` — session metadata and tmux target management
+     - `telegramMcp.sessionContext` — session metadata management
      - `telegramMcp.notify` — Telegram notify delivery
      - `telegramMcp.inbox` — inbox read/count/delete service
      - `telegramMcp.approval` — ask-user / human approval orchestration

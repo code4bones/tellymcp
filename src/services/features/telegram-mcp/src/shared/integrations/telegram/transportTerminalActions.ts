@@ -100,8 +100,7 @@ export class TransportTerminalActions {
   public async nudgeForInboxMessage(sessionId: string): Promise<void> {
     await this.nudgeForSession(sessionId, {
       message: this.host.config.tmux.nudgeMessage,
-      reason: "inbox_message",
-      requireInboxMessage: true,
+      reason: "human_message",
     });
   }
 
@@ -109,8 +108,7 @@ export class TransportTerminalActions {
     sessionId: string,
     input: {
       message: string;
-      reason: "inbox_message" | "partner_note";
-      requireInboxMessage: boolean;
+      reason: "human_message" | "partner_note";
     },
   ): Promise<void> {
     if (!this.host.config.tmux.nudgeEnabled) {
@@ -142,15 +140,6 @@ export class TransportTerminalActions {
       }
     }
 
-    const inboxCount = await this.host.inboxStore.countInboxMessages(sessionId);
-    if (input.requireInboxMessage && inboxCount === 0) {
-      this.host.logger.debug("terminal nudge skipped because inbox is empty", {
-        sessionId,
-        reason: input.reason,
-      });
-      return;
-    }
-
     const nowMs = Date.now();
     if (
       !shouldNudge(
@@ -163,7 +152,6 @@ export class TransportTerminalActions {
         sessionId,
         reason: input.reason,
         terminalTarget: normalizedSession.tmuxTarget,
-        inboxCount,
         lastTmuxNudgeAt: normalizedSession.lastTmuxNudgeAt,
       });
       return;
@@ -223,7 +211,6 @@ export class TransportTerminalActions {
       message: input.message,
       tmuxSessionName: normalizedSession.tmuxSessionName,
       terminalTarget,
-      inboxCount,
       lastTmuxNudgeAt,
     });
   }

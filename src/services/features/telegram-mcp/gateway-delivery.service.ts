@@ -10,7 +10,9 @@ import type { TelegramInboxMessage } from "./src/entities/inbox/model/types";
 import { createInboxMessageId } from "./src/shared/lib/ids/ids";
 import {
   buildIncomingPartnerActionDesc,
+  buildIncomingTelegramMessageActionDesc,
   buildIncomingPartnerTools,
+  buildIncomingTelegramMessageTools,
 } from "./src/shared/lib/xchangeRecordHints";
 import { writeXchangeRelativeFile } from "./src/shared/integrations/tmux/client";
 import { upsertXchangeRecord } from "./src/shared/integrations/xchange/sqliteRecordStore";
@@ -84,6 +86,7 @@ function buildNoteContent(input: {
   copiedArtifacts: string[];
 }): string {
   const isDirectRoute = input.delivery.route_mode === "direct";
+  const isTelegramHumanSource = input.delivery.source_client_uuid === "gateway-telegram";
   const lines = ["---"];
   lines.push(`message_uuid: ${JSON.stringify(input.delivery.message_uuid)}`);
   lines.push(`kind: ${JSON.stringify(input.delivery.kind)}`);
@@ -110,7 +113,14 @@ function buildNoteContent(input: {
     lines.push("", "# Expected Reply", input.delivery.expected_reply.trim());
   }
 
-  if (input.delivery.requires_reply) {
+  if (isTelegramHumanSource) {
+    lines.push(
+      "",
+      "# Human Reply Route",
+      "Reply to the human with notify_telegram after you finish the requested work.",
+      "Do not use send_partner_note for a human Telegram reply.",
+    );
+  } else if (input.delivery.requires_reply) {
     lines.push(
       "",
       "# Reply Params",
@@ -401,14 +411,13 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
         targetSession.sessionId,
       );
       if (!targetBinding) {
-        runtime.logger.warn(
-          "Skipping gateway delivery because target session is not paired with Telegram",
+        runtime.logger.info(
+          "Gateway delivery will be materialized without Telegram route",
           {
             deliveryUuid: delivery.delivery_uuid,
             sessionId: targetSession.sessionId,
           },
         );
-        return;
       }
 
       const workspaceDir = runtime.objectStore.resolveWorkspaceDir(targetSession);
@@ -468,10 +477,15 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
         mimeType: "text/markdown",
         sizeBytes: Buffer.byteLength(noteContent, "utf8"),
       });
-      const actionDesc = buildIncomingPartnerActionDesc(
-        delivery.kind as Parameters<typeof buildIncomingPartnerActionDesc>[0],
-        delivery.requires_reply,
-      );
+      const isTelegramHumanSource = delivery.source_client_uuid === "gateway-telegram";
+      const actionDesc = isTelegramHumanSource
+        ? buildIncomingTelegramMessageActionDesc(
+            delivery.kind as Parameters<typeof buildIncomingTelegramMessageActionDesc>[0],
+          )
+        : buildIncomingPartnerActionDesc(
+            delivery.kind as Parameters<typeof buildIncomingPartnerActionDesc>[0],
+            delivery.requires_reply,
+          );
       await upsertXchangeRecord(
         runtime.config.tmux,
         workspaceDir,
@@ -479,17 +493,21 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
         {
           record_id: delivery.share_id,
           session_id: targetSession.sessionId,
-          category: "partner_note",
+          category: isTelegramHumanSource ? "telegram_message" : "partner_note",
           direction: "incoming",
           status: "new",
           kind: delivery.kind,
           summary: delivery.summary,
           body_text: noteContent,
           action_desc: actionDesc,
-          tools: buildIncomingPartnerTools(
-            delivery.kind as Parameters<typeof buildIncomingPartnerTools>[0],
-            delivery.requires_reply,
-          ),
+          tools: isTelegramHumanSource
+            ? buildIncomingTelegramMessageTools(
+                delivery.kind as Parameters<typeof buildIncomingTelegramMessageTools>[0],
+              )
+            : buildIncomingPartnerTools(
+                delivery.kind as Parameters<typeof buildIncomingPartnerTools>[0],
+                delivery.requires_reply,
+              ),
           note_path: notePath,
           note_relative_path: delivery.note_relative_path,
           source_session_id: delivery.source_session_uuid,
@@ -543,48 +561,50 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
         },
       );
 
-      const inboxMessage: TelegramInboxMessage = {
-        id: createInboxMessageId(new Date(delivery.created_at)),
-        sessionId: targetSession.sessionId,
-        telegramChatId: targetBinding.telegramChatId,
-        telegramUserId: targetBinding.telegramUserId,
-        sourceTelegramMessageId: Date.now(),
-        text: buildPartnerInboxText({
-          delivery,
-          recordId: delivery.share_id,
-          actionDesc,
-          notePath,
-          copiedArtifacts,
-        }),
-        attachments: [notePath, ...copiedArtifacts],
-        receivedAt: delivery.created_at,
-      };
-      await runtime.inboxStore.createInboxMessage(inboxMessage);
-
-      try {
-        await runtime.telegramTransport.sendNotification({
+      if (targetBinding && !isTelegramHumanSource) {
+        const inboxMessage: TelegramInboxMessage = {
+          id: createInboxMessageId(new Date(delivery.created_at)),
           sessionId: targetSession.sessionId,
-          sessionLabel: delivery.source_session_label,
-          recipient: {
-            telegramChatId: targetBinding.telegramChatId,
-            telegramUserId: targetBinding.telegramUserId,
-          },
-          message: buildTelegramDeliveryNotification({
+          telegramChatId: targetBinding.telegramChatId,
+          telegramUserId: targetBinding.telegramUserId,
+          sourceTelegramMessageId: Date.now(),
+          text: buildPartnerInboxText({
             delivery,
+            recordId: delivery.share_id,
+            actionDesc,
             notePath,
             copiedArtifacts,
           }),
-        });
-      } catch (error) {
-        runtime.logger.warn(
-          "Failed to send Telegram notification for gateway delivery",
-          {
-            deliveryUuid: delivery.delivery_uuid,
+          attachments: [notePath, ...copiedArtifacts],
+          receivedAt: delivery.created_at,
+        };
+        await runtime.inboxStore.createInboxMessage(inboxMessage);
+
+        try {
+          await runtime.telegramTransport.sendNotification({
             sessionId: targetSession.sessionId,
-            error:
-              error instanceof Error ? (error.stack ?? error.message) : String(error),
-          },
-        );
+            sessionLabel: delivery.source_session_label,
+            recipient: {
+              telegramChatId: targetBinding.telegramChatId,
+              telegramUserId: targetBinding.telegramUserId,
+            },
+            message: buildTelegramDeliveryNotification({
+              delivery,
+              notePath,
+              copiedArtifacts,
+            }),
+          });
+        } catch (error) {
+          runtime.logger.warn(
+            "Failed to send Telegram notification for gateway delivery",
+            {
+              deliveryUuid: delivery.delivery_uuid,
+              sessionId: targetSession.sessionId,
+              error:
+                error instanceof Error ? (error.stack ?? error.message) : String(error),
+            },
+          );
+        }
       }
       try {
         await runtime.telegramTransport.nudgeSessionPartnerNote(

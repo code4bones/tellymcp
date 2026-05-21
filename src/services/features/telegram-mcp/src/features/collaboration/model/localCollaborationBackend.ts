@@ -277,7 +277,7 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     );
     if (!targetBinding) {
       throw new Error(
-        `Linked partner session ${targetSession.sessionId} is not paired with Telegram.`,
+        `Linked partner session ${targetSession.sessionId} has no active Telegram route.`,
       );
     }
 

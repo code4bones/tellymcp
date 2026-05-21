@@ -75,6 +75,13 @@ type LiveRelayCaptureBufferResult = {
   scope_description: string;
 };
 
+type RelayConsoleMessageResult = {
+  ok: true;
+  session_id: string;
+  terminal_target: string;
+  submitted_text: string;
+};
+
 function unwrapLiveRelayResult<T>(response: unknown): T | null {
   if (!response || typeof response !== "object") {
     return null;
@@ -801,29 +808,6 @@ export class GatewayHttpService {
       }
     }
 
-    if (pathname === "/gateway/pair-codes/register") {
-      if (req.method !== "POST") {
-        writeText(res, 405, "Method not allowed");
-        return true;
-      }
-
-      try {
-        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
-        const result = await this.callBroker(
-          "telegramMcp.pair.registerRemotePairCode",
-          body,
-          { meta: { internal_call: true } },
-        );
-        writeJson(res, 200, result);
-        return true;
-      } catch (error) {
-        writeJson(res, 400, {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return true;
-      }
-    }
-
     if (pathname === "/gateway/relay/inbox") {
       if (req.method !== "POST") {
         writeText(res, 405, "Method not allowed");
@@ -907,6 +891,67 @@ export class GatewayHttpService {
         );
       }
       return true;
+    }
+
+    if (pathname === "/gateway/relay/console-message") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const targetClientUuid =
+          typeof body.target_client_uuid === "string"
+            ? body.target_client_uuid.trim()
+            : "";
+        const targetLocalSessionId =
+          typeof body.target_local_session_id === "string"
+            ? body.target_local_session_id.trim()
+            : "";
+        const text =
+          typeof body.message === "string" ? body.message.trim() : "";
+        const attachments = Array.isArray(body.attachments)
+          ? body.attachments.filter(
+              (item): item is string =>
+                typeof item === "string" && item.trim().length > 0,
+            )
+          : [];
+        const sourceLabel =
+          typeof body.source_actor_label === "string"
+            ? body.source_actor_label.trim()
+            : undefined;
+
+        if (!targetClientUuid || !targetLocalSessionId || !text) {
+          writeJson(res, 400, {
+            error:
+              "target_client_uuid, target_local_session_id, and message are required",
+          });
+          return true;
+        }
+
+        const result = await this.callBroker<RelayConsoleMessageResult>(
+          "telegramMcp.gatewaySocket.requestClientAction",
+          {
+            clientUuid: targetClientUuid,
+            actionName: "telegramMcp.terminalInput.submitHumanMessageRemote",
+            params: {
+              session_id: targetLocalSessionId,
+              text,
+              ...(attachments.length > 0 ? { attachments } : {}),
+              ...(sourceLabel ? { source_label: sourceLabel } : {}),
+            },
+          },
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, result);
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
     }
 
     if (pathname === "/gateway/transport/notify") {

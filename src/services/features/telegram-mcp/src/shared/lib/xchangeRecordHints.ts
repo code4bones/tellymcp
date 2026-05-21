@@ -67,3 +67,25 @@ export function buildLocalHandoffActionDesc(): string {
 export function buildLocalHandoffTools(): string[] {
   return ["get_xchange_record", "mark_xchange_record_read"];
 }
+
+export function buildIncomingTelegramMessageActionDesc(
+  kind: PartnerNoteKind,
+): string {
+  if (kind === "question" || kind === "request") {
+    return "Read body_text and attachments, carry out the requested work in this session, then reply to the human through notify_telegram. The task is not complete until notify_telegram succeeds.";
+  }
+
+  return "Read the Telegram message and attachments, continue the task in this session, and use notify_telegram only if a human-facing reply is needed.";
+}
+
+export function buildIncomingTelegramMessageTools(
+  kind: PartnerNoteKind,
+): string[] {
+  const tools = ["get_xchange_record", "mark_xchange_record_read"];
+
+  if (kind === "question" || kind === "request") {
+    tools.push("notify_telegram");
+  }
+
+  return tools;
+}

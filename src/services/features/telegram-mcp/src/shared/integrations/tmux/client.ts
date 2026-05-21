@@ -692,8 +692,12 @@ export async function sendTmuxLiteralLine(
   text: string,
 ): Promise<void> {
   if (shouldUsePty(config, target)) {
-    await sendTmuxLiteralText(config, target, text);
-    sendPtyText(target, "\r");
+    const normalized = text.replace(/\r?\n/g, " ");
+    if (normalized.length > 0) {
+      sendPtyText(target, normalized);
+      await delay(ENTER_AFTER_PASTE_DELAY_MS);
+    }
+    sendPtyAction(target, "enter");
     return;
   }
 

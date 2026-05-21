@@ -95,7 +95,7 @@ const TelegramMcpCollaborationService: ServiceSchema = {
     this.logger.info("Starting telegram_mcp collaboration service");
     const localBackend = new LocalCollaborationBackend(
       runtime.config,
-      runtime.stateStore,
+      runtime.sessionStore,
       runtime.stateStore,
       runtime.stateStore,
       runtime.stateStore,

@@ -1,4 +1,7 @@
-export type XchangeRecordCategory = "partner_note" | "local_handoff";
+export type XchangeRecordCategory =
+  | "partner_note"
+  | "local_handoff"
+  | "telegram_message";
 
 export type XchangeRecordDirection = "incoming" | "outgoing" | "local";
 

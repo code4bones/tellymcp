@@ -25,7 +25,7 @@ export class GetTelegramInboxCountTool implements ToolModule {
       {
         title: "Get Telegram Inbox Count",
         description:
-          "Use this to cheaply check whether ordinary human Telegram messages are waiting for the console session. Pass session_id explicitly; do not rely on implicit defaults unless cwd is also correct for this agent workspace. Do not use it for partner-note or local handoff wakeups; use list_xchange_records instead.",
+          "Compatibility count for unread human Telegram messages for the console session. Human Telegram input is now stored as telegram_message records in .mcp-xchange. Prefer list_xchange_records when you are ready to inspect actual work items. Pass session_id explicitly; do not rely on implicit defaults unless cwd is also correct for this agent workspace.",
         inputSchema: getTelegramInboxCountInputSchema,
         outputSchema: getTelegramInboxCountOutputSchema,
       },

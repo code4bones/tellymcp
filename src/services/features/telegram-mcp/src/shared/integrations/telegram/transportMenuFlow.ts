@@ -637,7 +637,7 @@ export class TransportMenuFlow {
         this.host.t(locale, "menu:session_info.inbox_count", {
           count: inboxCount,
         }),
-        this.host.t(locale, "menu:session_info.paired", {
+        this.host.t(locale, "menu:session_info.route", {
           value: binding
             ? this.host.t(locale, "menu:session_info.yes")
             : this.host.t(locale, "menu:session_info.no"),

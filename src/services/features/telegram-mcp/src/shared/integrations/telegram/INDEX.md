@@ -14,7 +14,7 @@ This directory holds the decomposed Telegram transport. `transport.ts` is now th
   Creates delegate graph, menu graph, menu registration, and the cross-wired closures between Telegram transport modules.
 
 - `transportTypes.ts`
-  Transport-only types for menu context, gateway/admin records, pending interaction records, attachment descriptors, waiter records, and related shapes.
+  Transport-only types for menu context, gateway console records, pending interaction records, attachment descriptors, waiter records, and related shapes.
 
 ## Pure Helpers
 
@@ -37,10 +37,6 @@ This directory holds the decomposed Telegram transport. `transport.ts` is now th
   Pure Live/WebApp helpers:
   live availability checks, live URL construction, launcher keyboard/text builders.
 
-- `transportAdminView.ts`
-  Admin merge/view helpers:
-  registered + connected gateway clients, collab + all session views, admin client list text.
-
 - `transportMenuFingerprints.ts`
   Dynamic menu fingerprint and label helpers.
 
@@ -58,9 +54,6 @@ This directory holds the decomposed Telegram transport. `transport.ts` is now th
 
 - `transportMenuFactories.ts`
   Non-project grammy menu factories.
-
-- `transportAdminMenus.ts`
-  Admin grammy menu factories.
 
 - `transportProjectMenus.ts`
   Project/collab grammy menu factories.
@@ -110,10 +103,6 @@ This directory holds the decomposed Telegram transport. `transport.ts` is now th
   Project/collab callbacks and pending project actions:
   member open/note/live, live approval, project delete/leave/detail, create/join completion.
 
-- `transportAdminActions.ts`
-  Gateway-admin flow:
-  client/session admin menus, client session detail/live/bind callbacks, `.env-client` export.
-
 - `transportEventActions.ts`
   Runtime/gateway event delivery:
   tools mismatch notices, version mismatch notices, live approval request/resolution notices.
@@ -128,17 +117,13 @@ This directory holds the decomposed Telegram transport. `transport.ts` is now th
 
 - `transportMessageFlow.ts`
   Inbound Telegram message flow:
-  top-level message routing, `/menu`/`/help`/`/link`/`/admin`/`/auth`, waiter replies, relay inbox routing, attachment upload/capture.
+  top-level message routing, `/menu`/`/help`/`/auth`, waiter replies, relay inbox routing, attachment upload/capture.
 
 - `transportConsoleRegistry.ts`
   Gateway console registry flow:
-  scope-based remote console discovery, synthetic relay session materialization, and auto-binding of gateway consoles to a Telegram principal without pair codes.
+  scope-based remote console discovery, synthetic relay session materialization, and auto-binding of gateway consoles to a Telegram principal.
 
 ## Gateway/Project State
-
-- `transportGatewayDirectory.ts`
-  Gateway admin directory queries:
-  gateway client listing, connected client listing, merged admin client view, client session listing.
 
 - `transportProjectState.ts`
   Gateway/project/session state helpers:
@@ -167,7 +152,7 @@ This directory holds the decomposed Telegram transport. `transport.ts` is now th
 
 - `transportDocumentActions.ts`
   Document send/retry helpers:
-  Telegram document retry with backoff for menu/admin/project flows.
+  Telegram document retry with backoff for menu/project flows.
 
 - `transportXchangeState.ts`
   Session xchange/storage state:
@@ -221,7 +206,7 @@ The safe order has been:
 ## Next Recommended Extractions
 
 - `transportLifecycleShell.ts`
-  Start/stop/admin-access middleware and the remaining top-level runtime shell still live in `transport.ts`.
+  Start/stop/auth-access middleware and the remaining top-level runtime shell still live in `transport.ts`.
 
 - `transportToolsSyncEvents.ts`
   TOOLS/version mismatch event glue can be split further now that constructor wiring is out.

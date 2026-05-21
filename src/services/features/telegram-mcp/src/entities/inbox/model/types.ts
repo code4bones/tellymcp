@@ -76,8 +76,6 @@ export type TelegramMenuPayloadRecord = {
     | "active-session"
     | "file-entry"
     | "link-target"
-    | "admin-client"
-    | "admin-client-session"
     | "project-entry"
     | "project-delete-entry"
     | "project-member"

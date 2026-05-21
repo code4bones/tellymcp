@@ -131,11 +131,16 @@ const envSchema = z.object({
   TMUX_SOCKET_PATH: optionalNonEmptyString,
   TMUX_NUDGE_DEBOUNCE_SECONDS: z.coerce.number().int().positive().default(10),
   TMUX_NUDGE_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(30),
-  TMUX_NUDGE_MESSAGE: z.string().min(1).default("проверь inbox"),
+  TMUX_NUDGE_MESSAGE: z
+    .string()
+    .min(1)
+    .default("проверь xchange records: telegram_message"),
   TMUX_PARTNER_NUDGE_MESSAGE: z
     .string()
     .min(1)
-    .default("не inbox: проверь xchange records и partner note"),
+    .default(
+      "проверь xchange records: telegram_message для человека, partner_note для агента",
+    ),
   TMUX_CAPTURE_MODE: z.enum(["visible", "lines"]).default("visible"),
   TMUX_CAPTURE_LINES: z.coerce.number().int().positive().default(300),
   TMUX_PROMPT_SCAN_ENABLED: z

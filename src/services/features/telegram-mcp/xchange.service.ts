@@ -89,7 +89,7 @@ const TelegramMcpXchangeService: ServiceSchema = {
     this.logger.info("Starting telegram_mcp xchange service");
     this.xchangeService = new XchangeService(
       runtime.config,
-      runtime.stateStore,
+      runtime.sessionStore,
       runtime.logger,
       runtime.projectIdentityResolver,
       new RemoteConsoleActionClient((actionName, params) =>

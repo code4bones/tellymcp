@@ -9,10 +9,8 @@ import { SessionContextService } from "./src/features/session-context/model/sess
 import type {
   ClearSessionContextInput,
   GetSessionContextInput,
-  GetTmuxTargetInput,
   RenameSessionInput,
   SetSessionContextInput,
-  SetTmuxTargetInput,
 } from "./src/entities/session/model/types";
 
 export const TELEGRAM_MCP_SESSION_CONTEXT_SERVICE_NAME =
@@ -69,24 +67,6 @@ const TelegramMcpSessionContextService: ServiceSchema = {
         return this.getSessionContextService!().clearContext(ctx.params);
       },
     },
-    getTmuxTargetRemote: {
-      params: { type: "object" },
-      async handler(
-        this: SessionContextServiceCarrier,
-        ctx: { params: GetTmuxTargetInput },
-      ) {
-        return this.getSessionContextService!().getTmuxTarget(ctx.params);
-      },
-    },
-    setTmuxTargetRemote: {
-      params: { type: "object" },
-      async handler(
-        this: SessionContextServiceCarrier,
-        ctx: { params: SetTmuxTargetInput },
-      ) {
-        return this.getSessionContextService!().setTmuxTarget(ctx.params);
-      },
-    },
   },
 
   created(this: SessionContextServiceCarrier) {
@@ -124,7 +104,7 @@ const TelegramMcpSessionContextService: ServiceSchema = {
 
     this.logger.info("Starting telegram_mcp session-context service");
     this.sessionContextService = new SessionContextService(
-      runtime.stateStore,
+      runtime.sessionStore,
       runtime.stateStore,
       runtime.logger,
       runtime.projectIdentityResolver,

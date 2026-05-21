@@ -150,7 +150,7 @@ export class TransportLifecycleActions {
     }
 
     if (groupedRecipients.size === 0) {
-      this.host.logger.info("Skipping startup notifications because no Telegram sessions are paired");
+      this.host.logger.info("Skipping startup notifications because no sessions have an active Telegram route");
       return;
     }
 

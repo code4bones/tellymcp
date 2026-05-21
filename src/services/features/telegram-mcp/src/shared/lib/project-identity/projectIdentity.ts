@@ -292,6 +292,14 @@ export class ProjectIdentityResolver {
     sessionLabel?: string | undefined;
     cwd: string;
   }): void {
+    if (!existsSync(inputCwd)) {
+      this.logger.debug("Skipping .mcpsession.json write because cwd does not exist locally", {
+        cwd: inputCwd,
+        sessionId: input.localSessionId,
+      });
+      return;
+    }
+
     const markerPath = join(inputCwd, SESSION_MARKER_FILE_NAME);
     const now = new Date().toISOString();
     const current = this.readSessionMarker(inputCwd);

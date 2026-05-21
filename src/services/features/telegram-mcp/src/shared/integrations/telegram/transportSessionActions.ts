@@ -76,7 +76,7 @@ export class TransportSessionActions {
     }
     await this.host.bindingStore.clearBinding(sessionId);
 
-    this.host.logger.info("Telegram active session unpaired from menu", {
+    this.host.logger.info("Telegram active session route cleared from menu", {
       sessionId,
       chatId: ctx.chat?.id,
       userId: ctx.from?.id,

@@ -36,6 +36,7 @@ import {
   TELLYMCP_CAPABILITIES,
   TELLYMCP_PROTOCOL_VERSION,
   evaluateVersionCompatibility,
+  getTellyMcpPackageRoot,
   getTellyMcpPackageVersion,
   type TellyMcpCapability,
   type VersionCompatibility,
@@ -468,6 +469,16 @@ type GatewaySocketCarrier = Service & {
     actionName: string;
     payload: Record<string, unknown>;
   }) => Promise<unknown>;
+  resolveConnectedSessionTarget?: (params: {
+    sessionId: string;
+  }) => Promise<
+    | {
+        client_uuid: string;
+        local_session_id: string;
+        session_label?: string;
+      }
+    | null
+  >;
   notifyProjectMemberJoined?: (params: {
     clientUuids: string[];
     projectUuid: string;
@@ -558,6 +569,15 @@ function computeToolsHashForDir(workspaceDir: string): string | null {
 
   const content = readFileSync(toolsPath, "utf8");
   return createHash("sha256").update(content).digest("hex");
+}
+
+function computePackageToolsHash(currentDir: string): string | null {
+  const packageRoot = getTellyMcpPackageRoot(currentDir);
+  if (!packageRoot) {
+    return null;
+  }
+
+  return computeToolsHashForDir(packageRoot);
 }
 
 function normalizeGatewayBaseUrl(value: string): URL {
@@ -692,6 +712,19 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             ctx.params.params && typeof ctx.params.params === "object"
               ? (ctx.params.params as Record<string, unknown>)
               : {},
+        });
+      },
+    },
+    resolveConnectedSessionTarget: {
+      params: {
+        sessionId: "string",
+      },
+      async handler(
+        this: GatewaySocketCarrier,
+        ctx: { params: { sessionId: string } },
+      ) {
+        return await this.resolveConnectedSessionTarget?.({
+          sessionId: String(ctx.params.sessionId),
         });
       },
     },
@@ -1020,7 +1053,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
     },
 
     getGatewayToolsHash(this: GatewaySocketCarrier): string | null {
-      return computeToolsHashForDir(process.cwd());
+      return computePackageToolsHash(__dirname);
     },
 
     getLocalVersionInfo(this: GatewaySocketCarrier) {
@@ -1101,6 +1134,68 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       }
 
       return null;
+    },
+
+    async resolveConnectedSessionTarget(
+      this: GatewaySocketCarrier,
+      params: { sessionId: string },
+    ): Promise<
+      | {
+          client_uuid: string;
+          local_session_id: string;
+          session_label?: string;
+        }
+      | null
+    > {
+      const sessionId = params.sessionId.trim();
+      if (!sessionId || sessionId.startsWith("relay~")) {
+        return null;
+      }
+
+      const matches = new Map<
+        string,
+        {
+          client_uuid: string;
+          local_session_id: string;
+          session_label?: string;
+        }
+      >();
+
+      for (const hello of this.connectedClients?.values() ?? []) {
+        if (!hello?.client_uuid || !Array.isArray(hello.session_tools)) {
+          continue;
+        }
+
+        const sessionTool = hello.session_tools.find(
+          (item) => item.local_session_id === sessionId,
+        );
+        if (!sessionTool) {
+          continue;
+        }
+
+        const key = `${hello.client_uuid}:${sessionTool.local_session_id}`;
+        if (!matches.has(key)) {
+          matches.set(key, {
+            client_uuid: hello.client_uuid,
+            local_session_id: sessionTool.local_session_id,
+            ...(sessionTool.session_label
+              ? { session_label: sessionTool.session_label }
+              : {}),
+          });
+        }
+      }
+
+      if (matches.size === 0) {
+        return null;
+      }
+
+      if (matches.size > 1) {
+        throw new Error(
+          `Console session_id '${sessionId}' is ambiguous across connected clients`,
+        );
+      }
+
+      return [...matches.values()][0] ?? null;
     },
 
     async sendDirectPartnerNote(

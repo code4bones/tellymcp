@@ -17,10 +17,6 @@ import {
   type TelegramMcpCollaborationServiceInstance,
 } from "./collaboration.service";
 import {
-  TELEGRAM_MCP_INBOX_SERVICE_NAME,
-  type TelegramMcpInboxServiceInstance,
-} from "./inbox.service";
-import {
   TELEGRAM_MCP_NOTIFY_SERVICE_NAME,
   type TelegramMcpNotifyServiceInstance,
 } from "./notify.service";
@@ -55,16 +51,11 @@ import { BrowserWaitForUrlTool } from "./src/features/browser/model/browserWaitF
 import { SendPartnerFileTool } from "./src/features/collaboration/model/sendPartnerFileTool";
 import { ListGatewaySessionsTool } from "./src/features/collaboration/model/listGatewaySessionsTool";
 import { SendPartnerNoteTool } from "./src/features/collaboration/model/sendPartnerNoteTool";
-import { DeleteTelegramInboxMessageTool } from "./src/features/inbox/model/deleteTelegramInboxMessageTool";
-import { GetTelegramInboxCountTool } from "./src/features/inbox/model/getTelegramInboxCountTool";
-import { GetTelegramInboxTool } from "./src/features/inbox/model/getTelegramInboxTool";
 import { NotifyTelegramTool } from "./src/features/notify/model/notifyTelegramTool";
 import { ClearSessionContextTool } from "./src/features/session-context/model/clearSessionContextTool";
 import { GetSessionContextTool } from "./src/features/session-context/model/getSessionContextTool";
-import { GetTmuxTargetTool } from "./src/features/session-context/model/getTmuxTargetTool";
 import { RenameSessionTool } from "./src/features/session-context/model/renameSessionTool";
 import { SetSessionContextTool } from "./src/features/session-context/model/setSessionContextTool";
-import { SetTmuxTargetTool } from "./src/features/session-context/model/setTmuxTargetTool";
 import { RefreshToolsMarkdownTool } from "./src/features/tools-sync/model/refreshToolsMarkdownTool";
 import { GetXchangeRecordTool } from "./src/features/xchange/model/getXchangeRecordTool";
 import { ListXchangeRecordsTool } from "./src/features/xchange/model/listXchangeRecordsTool";
@@ -86,7 +77,6 @@ const TelegramMcpMcpServerService: ServiceSchema = {
   dependencies: [
     TELEGRAM_MCP_SESSION_CONTEXT_SERVICE_NAME,
     TELEGRAM_MCP_NOTIFY_SERVICE_NAME,
-    TELEGRAM_MCP_INBOX_SERVICE_NAME,
     TELEGRAM_MCP_APPROVAL_SERVICE_NAME,
     TELEGRAM_MCP_BROWSER_SERVICE_NAME,
     TELEGRAM_MCP_COLLABORATION_SERVICE_NAME,
@@ -102,9 +92,6 @@ const TelegramMcpMcpServerService: ServiceSchema = {
       const notifyService = this.broker.getLocalService(
         TELEGRAM_MCP_NOTIFY_SERVICE_NAME,
       ) as TelegramMcpNotifyServiceInstance | null;
-      const inboxService = this.broker.getLocalService(
-        TELEGRAM_MCP_INBOX_SERVICE_NAME,
-      ) as TelegramMcpInboxServiceInstance | null;
       const approvalService = this.broker.getLocalService(
         TELEGRAM_MCP_APPROVAL_SERVICE_NAME,
       ) as TelegramMcpApprovalServiceInstance | null;
@@ -124,7 +111,6 @@ const TelegramMcpMcpServerService: ServiceSchema = {
       if (
         !sessionContextService ||
         !notifyService ||
-        !inboxService ||
         !approvalService ||
         !browserService ||
         !collaborationService ||
@@ -139,10 +125,6 @@ const TelegramMcpMcpServerService: ServiceSchema = {
           sessionContextService.getSessionContextService(),
         ),
         new RenameSessionTool(sessionContextService.getSessionContextService()),
-        new SetTmuxTargetTool(
-          sessionContextService.getSessionContextService(),
-        ),
-        new GetTmuxTargetTool(sessionContextService.getSessionContextService()),
         new GetSessionContextTool(
           sessionContextService.getSessionContextService(),
         ),
@@ -150,9 +132,6 @@ const TelegramMcpMcpServerService: ServiceSchema = {
           sessionContextService.getSessionContextService(),
         ),
         new NotifyTelegramTool(notifyService.getNotifyService()),
-        new GetTelegramInboxCountTool(inboxService.getInboxService()),
-        new GetTelegramInboxTool(inboxService.getInboxService()),
-        new DeleteTelegramInboxMessageTool(inboxService.getInboxService()),
         new AskUserTelegramTool(approvalService.getApprovalOrchestrator()),
         new BrowserOpenTool(browserService.getBrowserService()),
         new BrowserReloadTool(browserService.getBrowserService()),
@@ -194,7 +173,6 @@ const TelegramMcpMcpServerService: ServiceSchema = {
     await this.broker.waitForServices([
       TELEGRAM_MCP_SESSION_CONTEXT_SERVICE_NAME,
       TELEGRAM_MCP_NOTIFY_SERVICE_NAME,
-      TELEGRAM_MCP_INBOX_SERVICE_NAME,
       TELEGRAM_MCP_APPROVAL_SERVICE_NAME,
       TELEGRAM_MCP_BROWSER_SERVICE_NAME,
       TELEGRAM_MCP_COLLABORATION_SERVICE_NAME,

@@ -17,9 +17,11 @@ import type {
 import type { HumanTransportNotification } from "../../api/transport/contract";
 import type { Logger } from "../../lib/logger/logger";
 import type { MinioExchangeStore } from "../object-storage/minioExchangeStore";
-import { createTelegramFetch } from "./proxyFetch";
+import {
+  createTelegramBaseFetchConfig,
+  createTelegramFetch,
+} from "./proxyFetch";
 import type {
-  AdminClientViewRecord,
   CurrentAttachmentTargetRecord,
   PendingBroadcastRecord,
   PendingFileHandoffRecord,
@@ -46,8 +48,6 @@ import {
   formatScreenshotDetail,
   formatStorageDetail,
 } from "./transportContent";
-import { TransportAdminActions } from "./transportAdminActions";
-import { TransportAdminMenus } from "./transportAdminMenus";
 import { TransportAttachmentStore } from "./transportAttachmentStore";
 import { TransportBroadcastActions } from "./transportBroadcastActions";
 import { TransportContext } from "./transportContext";
@@ -56,7 +56,6 @@ import { TransportDocumentActions } from "./transportDocumentActions";
 import { TransportEventActions } from "./transportEventActions";
 import { TransportFileHandoffActions } from "./transportFileHandoffActions";
 import { TransportGatewayActions } from "./transportGatewayActions";
-import { TransportGatewayDirectory } from "./transportGatewayDirectory";
 import { TransportLifecycleActions } from "./transportLifecycleActions";
 import { TransportLinkingActions } from "./transportLinkingActions";
 import { TransportLiveActions } from "./transportLiveActions";
@@ -105,7 +104,6 @@ export interface TransportConstructorWiringHost {
   pendingPartnerNotes: Map<string, PendingPartnerNoteRecord>;
   pendingFileHandoffs: Map<string, PendingFileHandoffRecord>;
   pendingProjects: Map<string, PendingProjectRecord>;
-  adminClientViewByPrincipal: Map<string, AdminClientViewRecord>;
   currentAttachmentTargets: Map<string, CurrentAttachmentTargetRecord>;
   getCollaborationService(): CollaborationService | undefined;
   createMenuOptions(
@@ -142,11 +140,6 @@ export interface TransportConstructorWiringResult {
   telegramFetch: TelegramClientFetch;
   bot: Bot<TelegramMenuContext>;
   mainMenu: Menu<TelegramMenuContext>;
-  adminMainMenu: Menu<TelegramMenuContext>;
-  adminClientsMenu: Menu<TelegramMenuContext>;
-  adminClientSessionsMenu: Menu<TelegramMenuContext>;
-  adminClientSessionDetailMenu: Menu<TelegramMenuContext>;
-  adminToolsMenu: Menu<TelegramMenuContext>;
   inboxMenu: Menu<TelegramMenuContext>;
   storageMenu: Menu<TelegramMenuContext>;
   browserMenu: Menu<TelegramMenuContext>;
@@ -169,8 +162,6 @@ export interface TransportConstructorWiringResult {
   tmuxActions: TransportTmuxActions;
   liveActions: TransportLiveActions;
   lifecycleActions: TransportLifecycleActions;
-  adminActions: TransportAdminActions;
-  adminMenus: TransportAdminMenus;
   attachmentStore: TransportAttachmentStore;
   broadcastActions: TransportBroadcastActions;
   context: TransportContext;
@@ -184,7 +175,6 @@ export interface TransportConstructorWiringResult {
   menuFlow: TransportMenuFlow;
   menuShell: TransportMenuShell;
   consoleRegistry: TransportConsoleRegistry;
-  gatewayDirectory: TransportGatewayDirectory;
   gatewayActions: TransportGatewayActions;
   messageFlow: TransportMessageFlow;
   menuCallbacks: TransportMenuCallbacks;
@@ -206,15 +196,24 @@ export interface TransportConstructorWiringResult {
 export function buildTransportConstructorWiring(
   host: TransportConstructorWiringHost,
 ): TransportConstructorWiringResult {
+  const telegramBaseFetchConfig = createTelegramBaseFetchConfig(
+    host.config,
+    host.logger,
+  );
   const telegramFetch = createTelegramFetch(
     host.config,
     host.logger,
   ) as unknown as TelegramClientFetch;
-  const bot = new Bot<TelegramMenuContext>(host.config.telegram.botToken ?? "0:disabled", {
-    client: {
-      fetch: telegramFetch,
-    },
-  });
+  const bot = Object.keys(telegramBaseFetchConfig).length > 0
+    ? new Bot<TelegramMenuContext>(
+        host.config.telegram.botToken ?? "0:disabled",
+        ({
+          client: {
+            baseFetchConfig: telegramBaseFetchConfig,
+          },
+        } as never),
+      )
+    : new Bot<TelegramMenuContext>(host.config.telegram.botToken ?? "0:disabled");
 
   const context = new TransportContext({
     config: host.config,
@@ -292,24 +291,6 @@ export function buildTransportConstructorWiring(
       xchangeState.listActiveSessionStorageEntries(sessionId),
     listActiveSessionScreenshots: (sessionId) =>
       xchangeState.listActiveSessionScreenshots(sessionId),
-  });
-
-  const adminMenus: TransportAdminMenus = new TransportAdminMenus({
-    createMenuOptions: (onMenuOutdated) => host.createMenuOptions(onMenuOutdated),
-    tForContext: (ctx, key, vars) => context.tForContext(ctx, key, vars),
-    showAdminMainMenu: (ctx) => adminActions.showMainMenu(ctx),
-    showAdminClientsMenu: (ctx) => adminActions.showClientsMenu(ctx),
-    showAdminClientSessionsMenu: (ctx) => adminActions.showClientSessionsMenu(ctx),
-    showAdminClientSessionList: (ctx, scope) =>
-      adminActions.showClientSessionList(ctx, scope),
-    showAdminToolsMenu: (ctx) => adminActions.showToolsMenu(ctx),
-    listGatewayAdminClients: () => gatewayActions.listGatewayAdminClients(),
-    createAdminClientMenuPayload: (client) =>
-      payloadState.createAdminClientMenuPayload(client),
-    handleAdminClientSelectCallback: (ctx) =>
-      adminActions.handleClientSelectCallback(ctx, readMenuPayloadKey),
-    adminHandleClientEnvExport: (ctx) =>
-      adminActions.handleClientEnvExport(ctx),
   });
 
   const documentActions = new TransportDocumentActions({
@@ -461,11 +442,6 @@ export function buildTransportConstructorWiring(
   const inboxMessageMenu: Menu<TelegramMenuContext> = menuFactories.createInboxMessageMenu();
   const storageMessageMenu: Menu<TelegramMenuContext> = menuFactories.createStorageMessageMenu();
   const screenshotMessageMenu: Menu<TelegramMenuContext> = menuFactories.createScreenshotMessageMenu();
-  const adminMainMenu: Menu<TelegramMenuContext> = adminMenus.createAdminMainMenu();
-  const adminClientsMenu: Menu<TelegramMenuContext> = adminMenus.createAdminClientsMenu();
-  const adminClientSessionsMenu: Menu<TelegramMenuContext> = adminMenus.createAdminClientSessionsMenu();
-  const adminClientSessionDetailMenu: Menu<TelegramMenuContext> = adminMenus.createAdminClientSessionDetailMenu();
-  const adminToolsMenu: Menu<TelegramMenuContext> = adminMenus.createAdminToolsMenu();
   const projectsMenu: Menu<TelegramMenuContext> = projectMenus.createProjectsMenu();
   const collabToolsMenu: Menu<TelegramMenuContext> = projectMenus.createCollabToolsMenu();
   const collabDeleteMenu: Menu<TelegramMenuContext> = projectMenus.createCollabDeleteMenu();
@@ -523,15 +499,9 @@ export function buildTransportConstructorWiring(
     maintenanceStore: host.maintenanceStore,
     menuPayloadStore: host.menuPayloadStore,
   });
-  const gatewayDirectory = new TransportGatewayDirectory({
-    logger: host.logger,
-    config: host.config,
-    callGatewayJson: (path, payload) => host.callGatewayJson(path, payload),
-  });
   const gatewayActions: TransportGatewayActions = new TransportGatewayActions({
     getCollaborationService: () => host.getCollaborationService(),
     projectState,
-    gatewayDirectory,
   });
 
   const attachmentStore = new TransportAttachmentStore({
@@ -662,42 +632,6 @@ export function buildTransportConstructorWiring(
         session_id: sessionId,
         scope,
       }),
-  });
-
-  const adminActions: TransportAdminActions = new TransportAdminActions({
-    config: host.config,
-    adminClientViewByPrincipal: host.adminClientViewByPrincipal,
-    adminMainMenu,
-    adminClientsMenu,
-    adminClientSessionsMenu,
-    adminToolsMenu,
-    liveActions,
-    resolveLocaleForContext: (ctx) => context.resolveLocaleForContext(ctx),
-    getPrincipalFromContext: (ctx) => context.getPrincipalFromContext(ctx),
-    t: (locale, key, vars) => context.t(locale, key, vars),
-    tForContext: (ctx, key) => context.tForContext(ctx, key),
-    listGatewayAdminClients: () => gatewayActions.listGatewayAdminClients(),
-    listGatewayClientSessions: (clientUuid) =>
-      gatewayActions.listGatewayClientSessions(clientUuid),
-    listGatewayConnectedClients: () => gatewayActions.listGatewayConnectedClients(),
-    createAdminClientSessionMenuPayload: (session) =>
-      payloadState.createAdminClientSessionMenuPayload(session),
-    renderMenuHtmlScreen: (ctx, text, meta, menu) =>
-      menuFlow.renderMenuHtmlScreen(ctx, text, meta, menu as Menu<TelegramMenuContext>),
-    editText: (ctx, text, meta, options) =>
-      outputActions.editText(ctx, text, meta, options as TelegramEditMessageOptions),
-    replyText: (ctx, text, meta, options) =>
-      outputActions.replyText(ctx, text, meta, options as TelegramSendMessageOptions),
-    replyDocumentWithRetry: (ctx, document, options, meta) =>
-      documentActions.replyDocumentWithRetry(ctx, document, options, meta),
-    showAdminClientsMenu: (ctx, introText) => adminActions.showClientsMenu(ctx, introText),
-    showMainMenu: (ctx, introText) => menuState.showMainMenu(ctx, introText),
-    getAdminClientSessionPayloadByKey: (payloadKey) =>
-      projectState.getAdminClientSessionPayloadByKey(payloadKey),
-    getMenuPayloadByKey: (payloadKey) => host.menuPayloadStore.getMenuPayload(payloadKey),
-    extractCallbackSuffix: (ctx, prefix) => extractCallbackSuffix(ctx, prefix),
-    bindRelaySessionToPrincipal: (input) => projectState.bindRelaySessionToPrincipal(input),
-    webAppLaunchRegistry: host.webAppLaunchRegistry,
   });
 
   const broadcastActions: TransportBroadcastActions = new TransportBroadcastActions({
@@ -1010,20 +944,10 @@ export function buildTransportConstructorWiring(
     tForContext: (ctx, key) => context.tForContext(ctx, key),
     showPartnerMenu: (ctx) => menuFlow.showPartnerMenu(ctx),
     showProjectsMenu: (ctx) => menuFlow.showProjectsMenu(ctx),
-    showAdminClientSessionList: (ctx, scope) =>
-      adminActions.showClientSessionList(ctx, scope),
-    showAdminClientSessionsMenu: (ctx) =>
-      adminActions.showClientSessionsMenu(ctx),
     handleMessage: (ctx) => messageFlow.handleMessage(ctx),
     cancelPendingBroadcast: (ctx) => broadcastActions.cancelPendingBroadcast(ctx),
     cancelPendingPartnerNote: (ctx) => partnerActions.cancelPendingPartnerNote(ctx),
     cancelPendingFileHandoff: (ctx) => fileHandoffActions.cancelPending(ctx),
-    handleAdminClientSessionLiveCallback: (ctx) =>
-      adminActions.handleClientSessionLiveCallback(ctx),
-    handleAdminClientSessionBindCallback: (ctx) =>
-      adminActions.handleClientSessionBindCallback(ctx),
-    handleAdminClientSessionOpenCallback: (ctx, readPayloadKey) =>
-      adminActions.handleClientSessionOpenCallback(ctx, readPayloadKey),
     handleProjectSetCallback: (ctx) =>
       projectActions.handleProjectSetCallback(ctx),
     handleProjectMembersCallback: (ctx) =>
@@ -1045,7 +969,6 @@ export function buildTransportConstructorWiring(
   });
 
   mainMenu.register([
-    adminMainMenu,
     inboxMenu,
     storageMenu,
     browserMenu,
@@ -1066,22 +989,11 @@ export function buildTransportConstructorWiring(
     storageMessageMenu,
     screenshotMessageMenu,
   ]);
-  adminMainMenu.register([
-    adminClientsMenu,
-    adminClientSessionsMenu,
-    adminClientSessionDetailMenu,
-    adminToolsMenu,
-  ]);
 
   return {
     telegramFetch,
     bot,
     mainMenu,
-    adminMainMenu,
-    adminClientsMenu,
-    adminClientSessionsMenu,
-    adminClientSessionDetailMenu,
-    adminToolsMenu,
     inboxMenu,
     storageMenu,
     browserMenu,
@@ -1104,8 +1016,6 @@ export function buildTransportConstructorWiring(
     tmuxActions,
     liveActions,
     lifecycleActions,
-    adminActions,
-    adminMenus,
     attachmentStore,
     broadcastActions,
     context,
@@ -1119,7 +1029,6 @@ export function buildTransportConstructorWiring(
     menuFlow,
     menuShell,
     consoleRegistry,
-    gatewayDirectory,
     gatewayActions,
     messageFlow,
     menuCallbacks,

@@ -20,7 +20,7 @@ export class GetXchangeRecordTool implements ToolModule {
       {
         title: "Get Xchange Record",
         description:
-          "Read one structured .mcp-xchange record by record_id. Use this to get the full body_text, action_desc, tools, attachments, routing metadata, and reply requirements for a collaboration or handoff item.",
+          "Read one structured .mcp-xchange record by record_id. Use this to get the full body_text, action_desc, tools, attachments, routing metadata, and reply requirements for a collaboration item, local handoff, or human Telegram message.",
         inputSchema: getXchangeRecordInputSchema,
         outputSchema: getXchangeRecordOutputSchema,
       },

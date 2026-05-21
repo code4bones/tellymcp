@@ -165,7 +165,7 @@ export class NotifyService {
     );
     const binding = await this.bindingStore.getBinding(relaySessionId);
     if (!binding) {
-      throw new Error("Gateway relay session is not linked to Telegram yet.");
+      throw new Error("Gateway relay session has no active Telegram route yet.");
     }
 
     const session = await this.sessionStore.getSession(relaySessionId);
@@ -213,7 +213,7 @@ export class NotifyService {
     );
     const binding = await this.bindingStore.getBinding(relaySessionId);
     if (!binding) {
-      throw new Error("Gateway relay session is not linked to Telegram yet.");
+      throw new Error("Gateway relay session has no active Telegram route yet.");
     }
 
     const session = await this.sessionStore.getSession(relaySessionId);

@@ -2,9 +2,6 @@ import type { Bot } from "grammy";
 
 import type { Logger } from "../../lib/logger/logger";
 import type { TelegramMenuContext } from "./transportTypes";
-import { readMenuPayloadKey } from "./transportUtils";
-
-type SessionScope = "collab" | "all";
 
 type TransportMenuShellHost = {
   logger: Logger;
@@ -14,25 +11,10 @@ type TransportMenuShellHost = {
   ) => Promise<string>;
   showPartnerMenu: (ctx: TelegramMenuContext) => Promise<void>;
   showProjectsMenu: (ctx: TelegramMenuContext) => Promise<void>;
-  showAdminClientSessionList: (
-    ctx: TelegramMenuContext,
-    scope: SessionScope,
-  ) => Promise<void>;
-  showAdminClientSessionsMenu: (ctx: TelegramMenuContext) => Promise<void>;
   handleMessage: (ctx: TelegramMenuContext) => Promise<void>;
   cancelPendingBroadcast: (ctx: TelegramMenuContext) => Promise<void>;
   cancelPendingPartnerNote: (ctx: TelegramMenuContext) => Promise<void>;
   cancelPendingFileHandoff: (ctx: TelegramMenuContext) => Promise<void>;
-  handleAdminClientSessionLiveCallback: (
-    ctx: TelegramMenuContext,
-  ) => Promise<void>;
-  handleAdminClientSessionBindCallback: (
-    ctx: TelegramMenuContext,
-  ) => Promise<void>;
-  handleAdminClientSessionOpenCallback: (
-    ctx: TelegramMenuContext,
-    readPayloadKey: (ctx: TelegramMenuContext) => string | null,
-  ) => Promise<void>;
   handleProjectSetCallback: (ctx: TelegramMenuContext) => Promise<void>;
   handleProjectMembersCallback: (ctx: TelegramMenuContext) => Promise<void>;
   handleProjectMemberOpenCallback: (
@@ -79,54 +61,6 @@ export class TransportMenuShell {
     });
     bot.callbackQuery("file-handoff-cancel", async (ctx) => {
       await this.host.cancelPendingFileHandoff(ctx);
-    });
-    bot.callbackQuery(/^admin-client-session-live:(.+)$/u, async (ctx) => {
-      await this.host.handleAdminClientSessionLiveCallback(ctx);
-    });
-    bot.callbackQuery(/^admin-client-session-bind:(.+)$/u, async (ctx) => {
-      await this.host.handleAdminClientSessionBindCallback(ctx);
-    });
-    bot.callbackQuery(/^admin-client-session-open:(.+)$/u, async (ctx) => {
-      await this.host.handleAdminClientSessionOpenCallback(
-        ctx,
-        readMenuPayloadKey,
-      );
-    });
-    bot.callbackQuery("admin-client-sessions-collab", async (ctx) => {
-      await ctx.answerCallbackQuery({
-        text: await this.host.tForContext(
-          ctx,
-          "menu:admin.actions.open_client_sessions",
-        ),
-      });
-      await this.host.showAdminClientSessionList(ctx, "collab");
-    });
-    bot.callbackQuery("admin-client-sessions-all", async (ctx) => {
-      await ctx.answerCallbackQuery({
-        text: await this.host.tForContext(
-          ctx,
-          "menu:admin.actions.open_client_sessions",
-        ),
-      });
-      await this.host.showAdminClientSessionList(ctx, "all");
-    });
-    bot.callbackQuery("admin-client-sessions-back", async (ctx) => {
-      await ctx.answerCallbackQuery({
-        text: await this.host.tForContext(
-          ctx,
-          "menu:admin.actions.back_to_client_sessions",
-        ),
-      });
-      await this.host.showAdminClientSessionsMenu(ctx);
-    });
-    bot.callbackQuery("admin-client-session-list-back", async (ctx) => {
-      await ctx.answerCallbackQuery({
-        text: await this.host.tForContext(
-          ctx,
-          "menu:admin.actions.back_to_client_sessions",
-        ),
-      });
-      await this.host.showAdminClientSessionsMenu(ctx);
     });
     bot.callbackQuery(/^project-set:(.+)$/u, async (ctx) => {
       await this.host.handleProjectSetCallback(ctx);

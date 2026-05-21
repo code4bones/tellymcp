@@ -27,7 +27,7 @@ export class ListGatewaySessionsTool implements ToolModule {
       {
         title: "List Gateway Sessions",
         description:
-          "List all known sessions from the configured gateway. Use this before direct cross-session communication outside a single collab project. The result includes connected sessions from gateway WS and registered project sessions from the gateway database. For direct messaging, use target_client_uuid and target_local_session_id from this list.",
+          "List all known consoles from the configured gateway. Use this before direct cross-console communication outside a single collab project. The result includes live connected consoles and project-registered consoles known to the gateway. For direct routing, use target_client_uuid and target_local_session_id from this list.",
         inputSchema: listGatewaySessionsInputSchema,
         outputSchema: listGatewaySessionsOutputSchema,
       },

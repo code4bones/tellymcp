@@ -139,7 +139,7 @@ const TelegramMcpNotifyService: ServiceSchema = {
     this.logger.info("Starting telegram_mcp notify service");
     this.notifyService = new NotifyService(
       runtime.config,
-      runtime.stateStore,
+      runtime.sessionStore,
       runtime.stateStore,
       runtime.stateStore,
       runtime.telegramTransport,

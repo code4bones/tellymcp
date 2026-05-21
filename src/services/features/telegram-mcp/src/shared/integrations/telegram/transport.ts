@@ -30,7 +30,6 @@ import type { Logger } from "../../lib/logger/logger";
 import type { MinioExchangeStore } from "../object-storage/minioExchangeStore";
 import { isExecutorTargetKind } from "./collabSemantics";
 import type {
-  AdminClientViewRecord,
   AdminGatewayRegistrationSessionRecord,
   CurrentAttachmentTargetRecord,
   LiveApprovalEventPayload,
@@ -47,8 +46,6 @@ import type {
 import { parsePartnerNoteText } from "./transportFormatting";
 import { TransportLiveActions } from "./transportLiveActions";
 import { TransportLifecycleActions } from "./transportLifecycleActions";
-import { TransportAdminActions } from "./transportAdminActions";
-import { TransportAdminMenus } from "./transportAdminMenus";
 import { TransportAttachmentStore } from "./transportAttachmentStore";
 import { TransportBroadcastActions } from "./transportBroadcastActions";
 import { TransportDocumentActions } from "./transportDocumentActions";
@@ -60,7 +57,6 @@ import { TransportMenuFactories } from "./transportMenuFactories";
 import { TransportMenuFingerprints } from "./transportMenuFingerprints";
 import { TransportMenuFlow } from "./transportMenuFlow";
 import { TransportMenuShell } from "./transportMenuShell";
-import { TransportGatewayDirectory } from "./transportGatewayDirectory";
 import { TransportGatewayActions } from "./transportGatewayActions";
 import { TransportMessageFlow } from "./transportMessageFlow";
 import { TransportMenuState } from "./transportMenuState";
@@ -88,11 +84,6 @@ export class TelegramTransport implements HumanTransport {
   private readonly telegramFetch: TelegramClientFetch;
   private readonly bot: Bot<TelegramMenuContext>;
   private readonly mainMenu: Menu<TelegramMenuContext>;
-  private readonly adminMainMenu: Menu<TelegramMenuContext>;
-  private readonly adminClientsMenu: Menu<TelegramMenuContext>;
-  private readonly adminClientSessionsMenu: Menu<TelegramMenuContext>;
-  private readonly adminClientSessionDetailMenu: Menu<TelegramMenuContext>;
-  private readonly adminToolsMenu: Menu<TelegramMenuContext>;
   private readonly inboxMenu: Menu<TelegramMenuContext>;
   private readonly storageMenu: Menu<TelegramMenuContext>;
   private readonly browserMenu: Menu<TelegramMenuContext>;
@@ -115,8 +106,6 @@ export class TelegramTransport implements HumanTransport {
   private readonly tmuxActions: TransportTmuxActions;
   private readonly liveActions: TransportLiveActions;
   private readonly lifecycleActions: TransportLifecycleActions;
-  private readonly adminActions: TransportAdminActions;
-  private readonly adminMenus: TransportAdminMenus;
   private readonly attachmentStore: TransportAttachmentStore;
   private readonly broadcastActions: TransportBroadcastActions;
   private readonly context: TransportContext;
@@ -129,7 +118,6 @@ export class TelegramTransport implements HumanTransport {
   private readonly menuFingerprints: TransportMenuFingerprints;
   private readonly menuFlow: TransportMenuFlow;
   private readonly menuShell: TransportMenuShell;
-  private readonly gatewayDirectory: TransportGatewayDirectory;
   private readonly gatewayActions: TransportGatewayActions;
   private readonly messageFlow: TransportMessageFlow;
   private readonly menuCallbacks: TransportMenuCallbacks;
@@ -158,7 +146,6 @@ export class TelegramTransport implements HumanTransport {
   private readonly pendingPartnerNotes = new Map<string, PendingPartnerNoteRecord>();
   private readonly pendingFileHandoffs = new Map<string, PendingFileHandoffRecord>();
   private readonly pendingProjects = new Map<string, PendingProjectRecord>();
-  private readonly adminClientViewByPrincipal = new Map<string, AdminClientViewRecord>();
   private readonly currentAttachmentTargets = new Map<
     string,
     CurrentAttachmentTargetRecord
@@ -245,7 +232,6 @@ export class TelegramTransport implements HumanTransport {
       pendingPartnerNotes: this.pendingPartnerNotes,
       pendingFileHandoffs: this.pendingFileHandoffs,
       pendingProjects: this.pendingProjects,
-      adminClientViewByPrincipal: this.adminClientViewByPrincipal,
       currentAttachmentTargets: this.currentAttachmentTargets,
       getCollaborationService: () => this.collaborationService,
       createMenuOptions: (handler) => this.createMenuOptions(handler),
@@ -269,11 +255,6 @@ export class TelegramTransport implements HumanTransport {
     this.telegramFetch = composition.telegramFetch;
     this.bot = composition.bot;
     this.mainMenu = composition.mainMenu;
-    this.adminMainMenu = composition.adminMainMenu;
-    this.adminClientsMenu = composition.adminClientsMenu;
-    this.adminClientSessionsMenu = composition.adminClientSessionsMenu;
-    this.adminClientSessionDetailMenu = composition.adminClientSessionDetailMenu;
-    this.adminToolsMenu = composition.adminToolsMenu;
     this.inboxMenu = composition.inboxMenu;
     this.storageMenu = composition.storageMenu;
     this.browserMenu = composition.browserMenu;
@@ -296,8 +277,6 @@ export class TelegramTransport implements HumanTransport {
     this.tmuxActions = composition.tmuxActions;
     this.liveActions = composition.liveActions;
     this.lifecycleActions = composition.lifecycleActions;
-    this.adminActions = composition.adminActions;
-    this.adminMenus = composition.adminMenus;
     this.attachmentStore = composition.attachmentStore;
     this.broadcastActions = composition.broadcastActions;
     this.context = composition.context;
@@ -310,7 +289,6 @@ export class TelegramTransport implements HumanTransport {
     this.menuFingerprints = composition.menuFingerprints;
     this.menuFlow = composition.menuFlow;
     this.menuShell = composition.menuShell;
-    this.gatewayDirectory = composition.gatewayDirectory;
     this.gatewayActions = composition.gatewayActions;
     this.messageFlow = composition.messageFlow;
     this.menuCallbacks = composition.menuCallbacks;
@@ -994,7 +972,6 @@ export class TelegramTransport implements HumanTransport {
     await this.tmuxActions.nudgeForSession(sessionId, {
       message: this.config.tmux.partnerNudgeMessage,
       reason: "partner_note",
-      requireInboxMessage: false,
     });
   }
 

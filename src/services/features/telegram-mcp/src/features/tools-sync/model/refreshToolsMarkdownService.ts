@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 import type { AppConfig } from "../../../app/config/env";
 import type {
@@ -11,6 +11,14 @@ import type { SessionStore } from "../../../shared/api/storage/contract";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
 import { getTellyMcpPackageRoot } from "../../../shared/lib/version/versionHandshake";
+
+type RemoteConsoleInvoker = {
+  invokeForRelaySession<T>(
+    sessionId: string,
+    actionName: string,
+    params: Record<string, unknown>,
+  ): Promise<T | null>;
+};
 
 function normalizeGatewayBaseUrl(value: string): URL {
   const url = new URL(value);
@@ -33,18 +41,27 @@ export class RefreshToolsMarkdownService {
     private readonly sessionStore: SessionStore,
     private readonly logger: Logger,
     private readonly projectIdentityResolver: ProjectIdentityResolver,
+    private readonly remoteConsoleInvoker?: RemoteConsoleInvoker,
   ) {}
 
   public async refresh(
     input: RefreshToolsMarkdownInput = {},
   ): Promise<RefreshToolsMarkdownOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<RefreshToolsMarkdownOutput>(
+      resolved.sessionId,
+      "telegramMcp.toolsSync.refreshToolsMarkdownRemote",
+      input as Record<string, unknown>,
+    );
+    if (remote) {
+      return remote;
+    }
     const session = await this.sessionStore.getSession(resolved.sessionId);
     const workspaceDir = input.cwd?.trim()
       ? resolve(input.cwd.trim())
       : session?.cwd?.trim()
         ? resolve(session.cwd.trim())
-        : undefined;
+        : resolved.cwd;
     const saveLocally = input.save_locally !== false;
     const gatewayToolsPath = join(
       getTellyMcpPackageRoot(__dirname) ?? process.cwd(),
@@ -82,13 +99,14 @@ export class RefreshToolsMarkdownService {
 
     if (!workspaceDir) {
       throw new Error(
-        "Could not resolve target workspace for TOOLS.md. Pair the session with cwd first or pass cwd/session_id explicitly.",
+        "Could not resolve target workspace for TOOLS.md. Pass cwd explicitly or ensure the console session has a workspace cwd.",
       );
     }
 
     const toolsPath = join(workspaceDir, "TOOLS.md");
 
     if (saveLocally) {
+      mkdirSync(dirname(toolsPath), { recursive: true });
       writeFileSync(toolsPath, content, "utf8");
       const appliedHash = computeContentHash(content);
       await this.sessionStore.setSession({

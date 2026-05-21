@@ -12,16 +12,12 @@ import { redactSecrets } from "../../../shared/lib/redact-secrets/redactSecrets"
 import type {
   ClearSessionContextInput,
   ClearSessionContextOutput,
-  GetTmuxTargetInput,
-  GetTmuxTargetOutput,
   GetSessionContextInput,
   GetSessionContextOutput,
   SetSessionContextInput,
   SetSessionContextOutput,
   RenameSessionInput,
   RenameSessionOutput,
-  SetTmuxTargetInput,
-  SetTmuxTargetOutput,
 } from "../../../entities/session/model/types";
 
 type RemoteConsoleInvoker = {
@@ -357,7 +353,7 @@ export class SessionContextService {
     this.logger.info("Session context cleared", {
       sessionId: resolved.sessionId,
       sessionIdDerived: resolved.sessionIdDerived,
-      clearedPairing: true,
+      clearedTelegramRoute: true,
     });
 
     return {
@@ -367,156 +363,4 @@ export class SessionContextService {
     };
   }
 
-  public async setTmuxTarget(
-    input: SetTmuxTargetInput,
-  ): Promise<SetTmuxTargetOutput> {
-    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<SetTmuxTargetOutput>(
-      resolved.sessionId,
-      "telegramMcp.sessionContext.setTmuxTargetRemote",
-      input as Record<string, unknown>,
-    );
-    if (remote) {
-      return remote;
-    }
-    const existing = await this.sessionStore.getSession(resolved.sessionId);
-    const updatedAt = new Date().toISOString();
-    const sanitizedTarget = redactSecrets(input.tmux_target);
-    const sanitizedSessionName = input.tmux_session_name
-      ? redactSecrets(input.tmux_session_name)
-      : existing?.tmuxSessionName;
-    const sanitizedWindowName = input.tmux_window_name
-      ? redactSecrets(input.tmux_window_name)
-      : existing?.tmuxWindowName;
-    const sanitizedPaneId = input.tmux_pane_id
-      ? redactSecrets(input.tmux_pane_id)
-      : existing?.tmuxPaneId;
-
-    await this.sessionStore.setSession({
-      sessionId: resolved.sessionId,
-      ...(existing?.label
-        ? { label: existing.label }
-        : resolved.sessionLabel
-          ? { label: redactSecrets(resolved.sessionLabel) }
-          : {}),
-      ...(existing?.cwd ? { cwd: existing.cwd } : { cwd: resolved.cwd }),
-      ...(existing?.linkedSessionId
-        ? { linkedSessionId: existing.linkedSessionId }
-        : {}),
-      ...(existing?.activeProjectUuid
-        ? { activeProjectUuid: existing.activeProjectUuid }
-        : {}),
-      ...(existing?.activeProjectName
-        ? { activeProjectName: existing.activeProjectName }
-        : {}),
-      ...(existing?.task ? { task: existing.task } : {}),
-      ...(existing?.summary ? { summary: existing.summary } : {}),
-      ...(existing?.files ? { files: existing.files } : {}),
-      ...(existing?.decisions ? { decisions: existing.decisions } : {}),
-      ...(existing?.risks ? { risks: existing.risks } : {}),
-      ...(sanitizedSessionName
-        ? { tmuxSessionName: sanitizedSessionName }
-        : {}),
-      ...(sanitizedWindowName ? { tmuxWindowName: sanitizedWindowName } : {}),
-      ...(typeof input.tmux_window_index === "number"
-        ? { tmuxWindowIndex: input.tmux_window_index }
-        : typeof existing?.tmuxWindowIndex === "number"
-          ? { tmuxWindowIndex: existing.tmuxWindowIndex }
-          : {}),
-      ...(sanitizedPaneId ? { tmuxPaneId: sanitizedPaneId } : {}),
-      ...(typeof input.tmux_pane_index === "number"
-        ? { tmuxPaneIndex: input.tmux_pane_index }
-        : typeof existing?.tmuxPaneIndex === "number"
-          ? { tmuxPaneIndex: existing.tmuxPaneIndex }
-          : {}),
-      tmuxTarget: sanitizedTarget,
-      ...(existing?.lastTmuxNudgeAt
-        ? { lastTmuxNudgeAt: existing.lastTmuxNudgeAt }
-        : {}),
-      updatedAt,
-    });
-    this.projectIdentityResolver.persistSessionMarker({
-      cwd: resolved.cwd,
-      sessionId: resolved.sessionId,
-      sessionLabel: existing?.label || resolved.sessionLabel,
-    });
-
-    this.logger.info("Session tmux target saved", {
-      sessionId: resolved.sessionId,
-      sessionIdDerived: resolved.sessionIdDerived,
-      tmuxSessionName: sanitizedSessionName,
-      tmuxWindowName: sanitizedWindowName,
-      tmuxWindowIndex: input.tmux_window_index,
-      tmuxPaneId: sanitizedPaneId,
-      tmuxPaneIndex: input.tmux_pane_index,
-      tmuxTarget: sanitizedTarget,
-    });
-
-    return {
-      session_id: resolved.sessionId,
-      tmux_target: sanitizedTarget,
-      ...(sanitizedSessionName
-        ? { tmux_session_name: sanitizedSessionName }
-        : {}),
-      ...(sanitizedWindowName
-        ? { tmux_window_name: sanitizedWindowName }
-        : {}),
-      ...(typeof input.tmux_window_index === "number"
-        ? { tmux_window_index: input.tmux_window_index }
-        : {}),
-      ...(sanitizedPaneId ? { tmux_pane_id: sanitizedPaneId } : {}),
-      ...(typeof input.tmux_pane_index === "number"
-        ? { tmux_pane_index: input.tmux_pane_index }
-        : {}),
-      status_message:
-        "tmux target saved for this session. For a paired session, the service can now nudge this tmux pane when a new non-reply Telegram message is stored in inbox.",
-    };
-  }
-
-  public async getTmuxTarget(
-    input: GetTmuxTargetInput,
-  ): Promise<GetTmuxTargetOutput> {
-    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<GetTmuxTargetOutput>(
-      resolved.sessionId,
-      "telegramMcp.sessionContext.getTmuxTargetRemote",
-      input as Record<string, unknown>,
-    );
-    if (remote) {
-      return remote;
-    }
-    const session = await this.sessionStore.getSession(resolved.sessionId);
-    const configured = Boolean(session?.tmuxTarget);
-
-    this.logger.debug("Session tmux target requested", {
-      sessionId: resolved.sessionId,
-      sessionIdDerived: resolved.sessionIdDerived,
-      configured,
-    });
-
-    return {
-      session_id: resolved.sessionId,
-      configured,
-      ...(session?.tmuxTarget ? { tmux_target: session.tmuxTarget } : {}),
-      ...(session?.tmuxSessionName
-        ? { tmux_session_name: session.tmuxSessionName }
-        : {}),
-      ...(session?.tmuxWindowName
-        ? { tmux_window_name: session.tmuxWindowName }
-        : {}),
-      ...(typeof session?.tmuxWindowIndex === "number"
-        ? { tmux_window_index: session.tmuxWindowIndex }
-        : {}),
-      ...(session?.tmuxPaneId ? { tmux_pane_id: session.tmuxPaneId } : {}),
-      ...(typeof session?.tmuxPaneIndex === "number"
-        ? { tmux_pane_index: session.tmuxPaneIndex }
-        : {}),
-      ...(session?.lastTmuxNudgeAt
-        ? { last_nudge_at: session.lastTmuxNudgeAt }
-        : {}),
-      status_message: configured
-        ? "tmux target is configured for this session."
-        : "tmux target is not configured for this session.",
-    };
-  }
 }

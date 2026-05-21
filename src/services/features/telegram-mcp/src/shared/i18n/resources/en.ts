@@ -169,10 +169,10 @@ export const enMenu = {
       info: "ℹ Info",
       rename: "✏ Rename",
       unpair: "🗑 Unpair",
-      confirm_unpair: "⚠ Confirm unpair",
+      confirm_unpair: "⚠ Confirm route removal",
     },
     actions: {
-      confirm_unpair: "Confirm unpair.",
+      confirm_unpair: "Confirm route removal.",
       back_to_settings: "Back to settings.",
       rename_prompt: "Send the new session title.",
       rename_body:
@@ -182,7 +182,7 @@ export const enMenu = {
       title: "⚙ Settings",
       active_session: "📌 Active session: {{sessionName}}",
       hint:
-        "Open session info, rename it, or unpair it from Telegram.",
+        "Open console info, rename it, or remove its Telegram route.",
     },
   },
   local: {
@@ -201,9 +201,9 @@ export const enMenu = {
       link_status: "🤝 Link: {{linkedSessionName}}",
       link_status_none: "🤝 Link: not configured",
       hint_title: "Local collaboration inside one bot lives here:",
-      hint_body: "session pairing, note exchange, and file handoff without a gateway.",
+      hint_body: "console linking, note exchange, and file handoff without a gateway.",
       unavailable: "Local collaboration is unavailable for this chat.",
-      no_active_session: "No active session is selected. Pair it first via /start.",
+      no_active_session: "No active console is selected. Open /menu and choose one first.",
     },
   },
   link: {
@@ -534,7 +534,7 @@ export const enMenu = {
     label: "📌 Label: {{value}}",
     session_id: "🆔 Session ID: {{value}}",
     inbox_count: "📥 Inbox count: {{count}}",
-    paired: "🔗 Paired: {{value}}",
+    route: "🔗 Telegram route: {{value}}",
     partner: "🤝 Partner: {{value}}",
     tmux_target: "🖥 tmux target: {{value}}",
     tmux_session: "📺 tmux session: {{value}}",
@@ -546,20 +546,20 @@ export const enMenu = {
     not_set: "not set",
   },
   unpair: {
-    title: "⚠ Confirm unpair",
+    title: "⚠ Confirm route removal",
     active_session: "📌 Active session: {{sessionName}}",
-    body_1: "This removes the Telegram binding for the active session.",
+    body_1: "This removes the active Telegram route for the selected console.",
     body_2:
       "Session metadata and inbox records remain in Redis until you delete them separately.",
-    done: "Unpaired: {{sessionName}}",
-    shown: "Session unpaired: {{sessionName}}",
+    done: "Telegram route removed: {{sessionName}}",
+    shown: "Telegram route removed: {{sessionName}}",
   },
   prune: {
     title: "⚠ Confirm prune",
     linked_sessions: "🔗 Linked sessions visible here: {{count}}",
     body_1: "This clears every Redis key under the telegram-mcp namespace.",
     body_2:
-      "Pair codes, bindings, sessions, inbox, menu payloads, and pending requests will all be deleted.",
+      "Bindings, sessions, inbox, menu payloads, and pending requests will all be deleted.",
     done: "Prune complete. Deleted {{count}} Redis keys.",
   },
   history: {

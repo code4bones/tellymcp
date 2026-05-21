@@ -1,9 +1,4 @@
 import { createMenuPayloadKey } from "../../lib/ids/ids";
-import type {
-  AdminClientSessionViewRecord,
-  AdminClientViewRecord,
-} from "./transportTypes";
-import { buildAdminClientTitle } from "./transportUtils";
 
 export interface TransportPayloadStateHost {
   menuPayloadStore: {
@@ -55,32 +50,6 @@ export class TransportPayloadState {
       kind: "link-target",
       sessionId,
       targetSessionId,
-    });
-  }
-
-  public async createAdminClientMenuPayload(
-    client: AdminClientViewRecord,
-  ): Promise<string> {
-    return this.createPayload({
-      kind: "admin-client",
-      sessionId: client.client_uuid,
-      targetClientUuid: client.client_uuid,
-      title: buildAdminClientTitle(client),
-    });
-  }
-
-  public async createAdminClientSessionMenuPayload(
-    session: AdminClientSessionViewRecord,
-  ): Promise<string> {
-    return this.createPayload({
-      kind: "admin-client-session",
-      sessionId: session.local_session_id,
-      targetSessionId: session.session_uuid || session.local_session_id,
-      targetClientUuid: session.client_uuid,
-      targetLocalSessionId: session.local_session_id,
-      title: session.label ?? session.local_session_id,
-      ...(session.project_uuid ? { projectUuid: session.project_uuid } : {}),
-      ...(session.project_name ? { projectName: session.project_name } : {}),
     });
   }
 

@@ -75,4 +75,55 @@ describe("InboxService", () => {
       ],
     });
   });
+
+  it("routes relay inbox requests through remote console invoker", async () => {
+    const invokeForRelaySession = vi
+      .fn()
+      .mockResolvedValue({ session_id: "relay~client~LEFT", total: 7 });
+
+    const service = new InboxService(
+      {
+        telegram: {
+          inboxBatchSize: 20,
+        },
+      } as AppConfig,
+      {
+        countInboxMessages: vi.fn(),
+      } as unknown as TelegramInboxStore,
+      {} as SessionStore,
+      {
+        info: vi.fn(),
+      } as unknown as Logger,
+      {
+        resolveSessionDefaults: vi
+          .fn<ProjectIdentityResolver["resolveSessionDefaults"]>()
+          .mockReturnValue({
+            sessionId: "relay~client~LEFT",
+            sessionLabel: "LEFT",
+            cwd: "/tmp/workspace",
+            sessionIdDerived: false,
+            sessionLabelDerived: false,
+          }),
+      } as unknown as ProjectIdentityResolver,
+      {
+        invokeForRelaySession,
+      },
+    );
+
+    const output = await service.getInboxCount({
+      session_id: "relay~client~LEFT",
+    });
+
+    expect(invokeForRelaySession).toHaveBeenCalledWith(
+      "relay~client~LEFT",
+      "telegramMcp.inbox.getInboxCountRemote",
+      {
+        session_id: "relay~client~LEFT",
+      },
+    );
+    expect(output).toEqual({
+      session_id: "relay~client~LEFT",
+      total: 7,
+    });
+  });
 });

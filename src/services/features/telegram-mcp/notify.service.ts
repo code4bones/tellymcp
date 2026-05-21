@@ -4,6 +4,7 @@ import {
   TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
   type TelegramMcpRuntimeServiceInstance,
 } from "./runtime.service";
+import { RemoteConsoleActionClient } from "./src/features/distributed-gateway/model/remoteConsoleActionClient";
 import { NotifyService } from "./src/features/notify/model/notifyService";
 import type { RiskLevel } from "./src/shared/types/common";
 
@@ -144,6 +145,9 @@ const TelegramMcpNotifyService: ServiceSchema = {
       runtime.telegramTransport,
       runtime.logger,
       runtime.projectIdentityResolver,
+      new RemoteConsoleActionClient((actionName, params) =>
+        this.broker.call(actionName, params, { meta: { internal_call: true } }),
+      ),
     );
     this.logger.info("telegram_mcp notify service is ready");
   },

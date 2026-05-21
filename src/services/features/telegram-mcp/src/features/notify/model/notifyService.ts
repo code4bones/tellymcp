@@ -3,7 +3,10 @@ import type {
   NotifyTelegramInput,
   NotifyTelegramOutput,
 } from "../../../entities/request/model/types";
-import type { SessionContext } from "../../../entities/session/model/types";
+import type {
+  GetSessionContextOutput,
+  SessionContext,
+} from "../../../entities/session/model/types";
 import type {
   MaintenanceStore,
   SessionBindingStore,
@@ -61,6 +64,14 @@ function mergeSavedContext(
   };
 }
 
+type RemoteConsoleInvoker = {
+  invokeForRelaySession<T>(
+    sessionId: string,
+    actionName: string,
+    params: Record<string, unknown>,
+  ): Promise<T | null>;
+};
+
 export class NotifyService {
   public constructor(
     private readonly _config: AppConfig,
@@ -70,6 +81,7 @@ export class NotifyService {
     private readonly transport: HumanTransport,
     private readonly logger: Logger,
     private readonly projectIdentityResolver: ProjectIdentityResolver,
+    private readonly remoteConsoleInvoker?: RemoteConsoleInvoker,
   ) {}
 
   public async send(input: NotifyTelegramInput): Promise<NotifyTelegramOutput> {
@@ -92,7 +104,9 @@ export class NotifyService {
       );
     }
 
-    const session = await this.sessionStore.getSession(resolved.sessionId);
+    const session = await this.resolveSessionContextForNotification(
+      resolved.sessionId,
+    );
     const merged = mergeSavedContext(input, session);
 
     this.logger.info("Telegram notification requested", {
@@ -300,5 +314,45 @@ export class NotifyService {
     }
 
     return (await response.json()) as NotifyTelegramOutput;
+  }
+
+  private async resolveSessionContextForNotification(
+    sessionId: string,
+  ): Promise<SessionContext | null> {
+    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<GetSessionContextOutput>(
+      sessionId,
+      "telegramMcp.sessionContext.getContextRemote",
+      { session_id: sessionId },
+    );
+    if (remote?.context) {
+      return {
+        sessionId: remote.session_id,
+        ...(remote.context.session_label
+          ? { label: remote.context.session_label }
+          : {}),
+        ...(remote.context.cwd ? { cwd: remote.context.cwd } : {}),
+        ...(remote.context.linked_session_id
+          ? { linkedSessionId: remote.context.linked_session_id }
+          : {}),
+        ...(remote.context.active_project_uuid
+          ? { activeProjectUuid: remote.context.active_project_uuid }
+          : {}),
+        ...(remote.context.active_project_name
+          ? { activeProjectName: remote.context.active_project_name }
+          : {}),
+        ...(remote.context.task ? { task: remote.context.task } : {}),
+        ...(remote.context.summary ? { summary: remote.context.summary } : {}),
+        ...(remote.context.files ? { files: remote.context.files } : {}),
+        ...(remote.context.decisions
+          ? { decisions: remote.context.decisions }
+          : {}),
+        ...(remote.context.risks ? { risks: remote.context.risks } : {}),
+        ...(remote.context.updated_at
+          ? { updatedAt: remote.context.updated_at }
+          : { updatedAt: new Date().toISOString() }),
+      };
+    }
+
+    return this.sessionStore.getSession(sessionId);
   }
 }

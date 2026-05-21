@@ -4,6 +4,12 @@ import {
   TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
   type TelegramMcpRuntimeServiceInstance,
 } from "./runtime.service";
+import { RemoteConsoleActionClient } from "./src/features/distributed-gateway/model/remoteConsoleActionClient";
+import type {
+  DeleteTelegramInboxMessageInput,
+  GetTelegramInboxCountInput,
+  GetTelegramInboxInput,
+} from "./src/entities/inbox/model/types";
 import { InboxService } from "./src/features/inbox/model/inboxService";
 
 export const TELEGRAM_MCP_INBOX_SERVICE_NAME = "telegramMcp.inbox";
@@ -21,6 +27,36 @@ type InboxServiceCarrier = Service & {
 const TelegramMcpInboxService: ServiceSchema = {
   name: TELEGRAM_MCP_INBOX_SERVICE_NAME,
   dependencies: [TELEGRAM_MCP_RUNTIME_SERVICE_NAME],
+
+  actions: {
+    getInboxCountRemote: {
+      params: { type: "object" },
+      async handler(
+        this: InboxServiceCarrier,
+        ctx: { params: GetTelegramInboxCountInput },
+      ) {
+        return this.getInboxService!().getInboxCount(ctx.params);
+      },
+    },
+    getInboxRemote: {
+      params: { type: "object" },
+      async handler(
+        this: InboxServiceCarrier,
+        ctx: { params: GetTelegramInboxInput },
+      ) {
+        return this.getInboxService!().getInbox(ctx.params);
+      },
+    },
+    deleteInboxMessageRemote: {
+      params: { type: "object" },
+      async handler(
+        this: InboxServiceCarrier,
+        ctx: { params: DeleteTelegramInboxMessageInput },
+      ) {
+        return this.getInboxService!().deleteInboxMessage(ctx.params);
+      },
+    },
+  },
 
   created(this: InboxServiceCarrier) {
     this.inboxService = null;
@@ -58,6 +94,9 @@ const TelegramMcpInboxService: ServiceSchema = {
       runtime.stateStore,
       runtime.logger,
       runtime.projectIdentityResolver,
+      new RemoteConsoleActionClient((actionName, params) =>
+        this.broker.call(actionName, params, { meta: { internal_call: true } }),
+      ),
     );
     this.logger.info("telegram_mcp inbox service is ready");
   },

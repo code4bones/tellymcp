@@ -164,6 +164,14 @@ function escapeCssAttributeValue(value: string): string {
   return value.replace(/\\/gu, "\\\\").replace(/"/gu, '\\"');
 }
 
+type RemoteConsoleInvoker = {
+  invokeForRelaySession<T>(
+    sessionId: string,
+    actionName: string,
+    params: Record<string, unknown>,
+  ): Promise<T | null>;
+};
+
 export class BrowserService {
   private playwrightModulePromise: Promise<PlaywrightModule> | undefined;
 
@@ -180,11 +188,20 @@ export class BrowserService {
     private readonly telegramTransport: TelegramTransport,
     private readonly logger: Logger,
     private readonly projectIdentityResolver: ProjectIdentityResolver,
+    private readonly remoteConsoleInvoker?: RemoteConsoleInvoker,
   ) {}
 
   public async open(input: BrowserOpenInput): Promise<BrowserOpenOutput> {
-    this.ensureEnabled();
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.invokeRemote<BrowserOpenOutput>(
+      resolved.sessionId,
+      "telegramMcp.browser.openRemote",
+      input,
+    );
+    if (remote) {
+      return remote;
+    }
+    this.ensureEnabled();
     const existingState = this.sessionStates.get(resolved.sessionId);
     const shouldReset = input.reset_context === true;
     const targetUrl = this.resolveBrowserUrl(input.url);
@@ -230,6 +247,15 @@ export class BrowserService {
   public async getConsole(
     input: BrowserConsoleInput,
   ): Promise<BrowserConsoleOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.invokeRemote<BrowserConsoleOutput>(
+      resolved.sessionId,
+      "telegramMcp.browser.getConsoleRemote",
+      input,
+    );
+    if (remote) {
+      return remote;
+    }
     this.ensureEnabled();
     const { sessionId, state } = await this.requireSessionState(input);
 
@@ -248,6 +274,15 @@ export class BrowserService {
   }
 
   public async click(input: BrowserClickInput): Promise<BrowserClickOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.invokeRemote<BrowserClickOutput>(
+      resolved.sessionId,
+      "telegramMcp.browser.clickRemote",
+      input,
+    );
+    if (remote) {
+      return remote;
+    }
     this.ensureEnabled();
     const { sessionId, state } = await this.requireSessionState(input);
     const locator = this.resolveLocator(state.page, input);
@@ -271,6 +306,15 @@ export class BrowserService {
   }
 
   public async fill(input: BrowserFillInput): Promise<BrowserFillOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.invokeRemote<BrowserFillOutput>(
+      resolved.sessionId,
+      "telegramMcp.browser.fillRemote",
+      input,
+    );
+    if (remote) {
+      return remote;
+    }
     this.ensureEnabled();
     const { sessionId, state } = await this.requireSessionState(input);
     const locator = this.resolveLocator(state.page, input);
@@ -295,6 +339,15 @@ export class BrowserService {
   }
 
   public async press(input: BrowserPressInput): Promise<BrowserPressOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.invokeRemote<BrowserPressOutput>(
+      resolved.sessionId,
+      "telegramMcp.browser.pressRemote",
+      input,
+    );
+    if (remote) {
+      return remote;
+    }
     this.ensureEnabled();
     const { sessionId, state } = await this.requireSessionState(input);
 
@@ -326,6 +379,15 @@ export class BrowserService {
   public async reload(
     input: BrowserReloadInput,
   ): Promise<BrowserReloadOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.invokeRemote<BrowserReloadOutput>(
+      resolved.sessionId,
+      "telegramMcp.browser.reloadRemote",
+      input,
+    );
+    if (remote) {
+      return remote;
+    }
     this.ensureEnabled();
     const { sessionId, state } = await this.requireSessionState(input);
     const waitUntil = (input.wait_until ??
@@ -358,6 +420,15 @@ export class BrowserService {
   public async waitFor(
     input: BrowserWaitForInput,
   ): Promise<BrowserWaitForOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.invokeRemote<BrowserWaitForOutput>(
+      resolved.sessionId,
+      "telegramMcp.browser.waitForRemote",
+      input,
+    );
+    if (remote) {
+      return remote;
+    }
     this.ensureEnabled();
     const { sessionId, state } = await this.requireSessionState(input);
     const locator = this.resolveLocator(state.page, input);
@@ -387,6 +458,15 @@ export class BrowserService {
   public async waitForUrl(
     input: BrowserWaitForUrlInput,
   ): Promise<BrowserWaitForUrlOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.invokeRemote<BrowserWaitForUrlOutput>(
+      resolved.sessionId,
+      "telegramMcp.browser.waitForUrlRemote",
+      input,
+    );
+    if (remote) {
+      return remote;
+    }
     this.ensureEnabled();
     const { sessionId, state } = await this.requireSessionState(input);
     const timeout = this.resolveTimeoutMs(input.timeout_ms);
@@ -427,6 +507,15 @@ export class BrowserService {
   public async getErrors(
     input: BrowserErrorsInput,
   ): Promise<BrowserErrorsOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.invokeRemote<BrowserErrorsOutput>(
+      resolved.sessionId,
+      "telegramMcp.browser.getErrorsRemote",
+      input,
+    );
+    if (remote) {
+      return remote;
+    }
     this.ensureEnabled();
     const { sessionId, state } = await this.requireSessionState(input);
 
@@ -446,6 +535,15 @@ export class BrowserService {
   public async getNetworkFailures(
     input: BrowserNetworkFailuresInput,
   ): Promise<BrowserNetworkFailuresOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.invokeRemote<BrowserNetworkFailuresOutput>(
+      resolved.sessionId,
+      "telegramMcp.browser.getNetworkFailuresRemote",
+      input,
+    );
+    if (remote) {
+      return remote;
+    }
     this.ensureEnabled();
     const { sessionId, state } = await this.requireSessionState(input);
 
@@ -470,6 +568,15 @@ export class BrowserService {
   public async clearLogs(
     input: BrowserClearLogsInput,
   ): Promise<BrowserClearLogsOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.invokeRemote<BrowserClearLogsOutput>(
+      resolved.sessionId,
+      "telegramMcp.browser.clearLogsRemote",
+      input,
+    );
+    if (remote) {
+      return remote;
+    }
     this.ensureEnabled();
     const { sessionId, state } = await this.requireSessionState(input);
     const consoleMessagesCleared = state.consoleMessages.length;
@@ -491,6 +598,15 @@ export class BrowserService {
   }
 
   public async getDom(input: BrowserDomInput): Promise<BrowserDomOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.invokeRemote<BrowserDomOutput>(
+      resolved.sessionId,
+      "telegramMcp.browser.getDomRemote",
+      input,
+    );
+    if (remote) {
+      return remote;
+    }
     this.ensureEnabled();
     const { sessionId, state } = await this.requireSessionState(input);
     const selector = input.selector?.trim() || "body";
@@ -558,6 +674,15 @@ export class BrowserService {
   public async getComputedStyle(
     input: BrowserComputedStyleInput,
   ): Promise<BrowserComputedStyleOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.invokeRemote<BrowserComputedStyleOutput>(
+      resolved.sessionId,
+      "telegramMcp.browser.getComputedStyleRemote",
+      input,
+    );
+    if (remote) {
+      return remote;
+    }
     this.ensureEnabled();
     const { sessionId, state } = await this.requireSessionState(input);
     const properties = input.properties?.length
@@ -627,6 +752,15 @@ export class BrowserService {
   public async screenshot(
     input: BrowserScreenshotInput,
   ): Promise<BrowserScreenshotOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.invokeRemote<BrowserScreenshotOutput>(
+      resolved.sessionId,
+      "telegramMcp.browser.screenshotRemote",
+      input,
+    );
+    if (remote) {
+      return remote;
+    }
     this.ensureEnabled();
     const { sessionId, state, session } = await this.requireSessionState(input);
     const fileName = sanitizeScreenshotName(input.file_name);
@@ -715,8 +849,16 @@ export class BrowserService {
   }
 
   public async close(input: BrowserCloseInput): Promise<BrowserCloseOutput> {
-    this.ensureEnabled();
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.invokeRemote<BrowserCloseOutput>(
+      resolved.sessionId,
+      "telegramMcp.browser.closeRemote",
+      input,
+    );
+    if (remote) {
+      return remote;
+    }
+    this.ensureEnabled();
     const state = this.sessionStates.get(resolved.sessionId);
 
     if (state) {
@@ -913,6 +1055,20 @@ export class BrowserService {
 
   private resolveWorkspaceDir(session: SessionContext | null): string {
     return session?.cwd?.trim() || process.cwd();
+  }
+
+  private async invokeRemote<T>(
+    sessionId: string,
+    actionName: string,
+    input: Record<string, unknown>,
+  ): Promise<T | null> {
+    return (
+      (await this.remoteConsoleInvoker?.invokeForRelaySession<T>(
+        sessionId,
+        actionName,
+        input,
+      )) ?? null
+    );
   }
 
   private ensureEnabled(): void {

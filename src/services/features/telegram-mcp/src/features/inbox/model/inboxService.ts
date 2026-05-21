@@ -14,6 +14,14 @@ import type {
 import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
 
+type RemoteConsoleInvoker = {
+  invokeForRelaySession<T>(
+    sessionId: string,
+    actionName: string,
+    params: Record<string, unknown>,
+  ): Promise<T | null>;
+};
+
 export class InboxService {
   public constructor(
     private readonly config: AppConfig,
@@ -21,12 +29,21 @@ export class InboxService {
     private readonly _sessionStore: SessionStore,
     private readonly logger: Logger,
     private readonly projectIdentityResolver: ProjectIdentityResolver,
+    private readonly remoteConsoleInvoker?: RemoteConsoleInvoker,
   ) {}
 
   public async getInboxCount(
     input: GetTelegramInboxCountInput,
   ): Promise<GetTelegramInboxCountOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<GetTelegramInboxCountOutput>(
+      resolved.sessionId,
+      "telegramMcp.inbox.getInboxCountRemote",
+      input as Record<string, unknown>,
+    );
+    if (remote) {
+      return remote;
+    }
     const total = await this.inboxStore.countInboxMessages(resolved.sessionId);
 
     this.logger.info("Telegram inbox count fetched", {
@@ -45,6 +62,14 @@ export class InboxService {
     input: GetTelegramInboxInput,
   ): Promise<GetTelegramInboxOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<GetTelegramInboxOutput>(
+      resolved.sessionId,
+      "telegramMcp.inbox.getInboxRemote",
+      input as Record<string, unknown>,
+    );
+    if (remote) {
+      return remote;
+    }
     const limit = this.config.telegram.inboxBatchSize;
     const messages = await this.inboxStore.listInboxMessages(
       resolved.sessionId,
@@ -85,6 +110,14 @@ export class InboxService {
     input: DeleteTelegramInboxMessageInput,
   ): Promise<DeleteTelegramInboxMessageOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<DeleteTelegramInboxMessageOutput>(
+      resolved.sessionId,
+      "telegramMcp.inbox.deleteInboxMessageRemote",
+      input as Record<string, unknown>,
+    );
+    if (remote) {
+      return remote;
+    }
     const deleted = await this.inboxStore.deleteInboxMessage(
       resolved.sessionId,
       input.message_id,

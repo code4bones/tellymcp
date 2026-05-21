@@ -5,26 +5,20 @@ import type { Logger } from "../../lib/logger/logger";
 import { redactSecrets } from "../../lib/redact-secrets/redactSecrets";
 import type { PartnerNoteKind, SendPartnerNoteOutput } from "../../../entities/collaboration/model/types";
 import type { TelegramInboxMessage } from "../../../entities/inbox/model/types";
-import type { SessionContext } from "../../../entities/session/model/types";
 import type {
   SessionBindingStore,
   SessionStore,
-  TelegramAdminAuthStore,
   TelegramInboxStore,
 } from "../../api/storage/contract";
 import type { HumanTransportReply } from "../../api/transport/contract";
 import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
 import {
   buildPrincipalKey,
-  isGatewayAdminCommand,
-  isGatewayLinkCommand,
   isHelpCommand,
   isMenuEntryCommand,
   parseAdminAuthCommand,
-  parsePairingCode,
 } from "./transportUtils";
 import type {
-  GatewayRelayBindingPayload,
   StoredAttachmentRecord,
   TelegramAttachmentDescriptor,
   TelegramMenuContext,
@@ -36,13 +30,22 @@ import type {
 export interface TransportMessageFlowHost {
   logger: Logger;
   config: {
-    distributed: { gatewayPublicUrl?: string | null };
-    telegram: { adminToken?: string | null };
+    distributed: {
+      gatewayPublicUrl?: string | null;
+      gatewayToken?: string | null;
+    };
   };
   bindingStore: SessionBindingStore;
   sessionStore: SessionStore;
   inboxStore: TelegramInboxStore;
-  adminAuthStore: TelegramAdminAuthStore;
+  isAdminAuthEnabled(): boolean;
+  isPrincipalAdminAuthorized(
+    principal: { telegramChatId: number; telegramUserId: number } | null,
+  ): Promise<boolean>;
+  setPrincipalAdminAuthorized(principal: {
+    telegramChatId: number;
+    telegramUserId: number;
+  }): Promise<void>;
   waiters: Map<string, WaiterRecord>;
   currentAttachmentTargets: Map<
     string,
@@ -53,11 +56,7 @@ export interface TransportMessageFlowHost {
       projectUuid?: string;
     }
   >;
-  isAdminAuthEnabled(): boolean;
   isAdminBotProfile(): boolean;
-  isPrincipalAdminAuthorized(
-    principal: { telegramChatId: number; telegramUserId: number } | null,
-  ): Promise<boolean>;
   getPrincipalFromContext(
     ctx: TelegramMenuContext,
   ): { telegramChatId: number; telegramUserId: number } | null;
@@ -87,18 +86,11 @@ export interface TransportMessageFlowHost {
   ): Promise<string>;
   showSessionsMenu(ctx: TelegramMenuContext, introText?: string): Promise<void>;
   showHelp(ctx: TelegramMenuContext): Promise<void>;
-  showAdminMainMenu(ctx: TelegramMenuContext, introText?: string): Promise<void>;
-  showAdminClientsMenu(ctx: TelegramMenuContext, introText?: string): Promise<void>;
   ensureGatewayScopeConsolesBound(input: {
     principal: { telegramChatId: number; telegramUserId: number };
     ctx: TelegramMenuContext;
   }): Promise<{ sessionIds: string[]; activeSessionId: string | null }>;
   getMainMenu(): unknown;
-  bindRelaySessionToPrincipal(input: {
-    principal: { telegramChatId: number; telegramUserId: number };
-    ctx: TelegramMenuContext;
-    payload: GatewayRelayBindingPayload;
-  }): Promise<SessionContext>;
   clearWaiter(requestId: string): void;
   callGatewayJson<T>(path: string, payload?: unknown): Promise<T>;
   scheduleTmuxNudgeForInboxMessage(
@@ -148,13 +140,6 @@ export class TransportMessageFlow {
       activeWaiters: this.host.waiters.size,
     });
 
-    const principal = this.host.getPrincipalFromContext(ctx);
-    const authToken = text ? parseAdminAuthCommand(text) : null;
-    if (this.host.isAdminAuthEnabled() && principal && authToken) {
-      await this.handleAdminAuthCommand(ctx, principal, authToken);
-      return;
-    }
-
     if (this.host.isAdminBotProfile()) {
       const handled = await this.handleGatewayTopLevelMessage(ctx, text);
       if (handled) {
@@ -180,17 +165,6 @@ export class TransportMessageFlow {
       return;
     }
 
-    const pairingCode = text ? parsePairingCode(text) : null;
-    if (pairingCode) {
-      this.host.logger.debug("Telegram message identified as pairing command", {
-        chatId: ctx.chat?.id,
-        userId: ctx.from?.id,
-        messageId: ctx.message?.message_id,
-      });
-      await this.handlePairingCommand(ctx, pairingCode);
-      return;
-    }
-
     const replyMatched = text ? await this.handleReply(ctx) : false;
     if (replyMatched) {
       return;
@@ -209,20 +183,53 @@ export class TransportMessageFlow {
     text: string | null,
   ): Promise<boolean> {
     const principal = this.host.getPrincipalFromContext(ctx);
+    const authToken = text ? parseAdminAuthCommand(text) : null;
+    if (authToken !== null) {
+      if (!this.host.isAdminAuthEnabled()) {
+        await this.host.replyText(
+          ctx,
+          await this.host.tForContext(ctx, "menu:admin.auth.disabled"),
+          { sessionId: "gateway-auth", kind: "transport" },
+        );
+        return true;
+      }
 
-    if (text && isGatewayLinkCommand(text)) {
-      await this.host.showAdminClientsMenu(ctx);
+      if (authToken !== this.host.config.distributed.gatewayToken) {
+        await this.host.replyText(
+          ctx,
+          await this.host.tForContext(ctx, "menu:admin.auth.invalid"),
+          { sessionId: "gateway-auth", kind: "transport" },
+        );
+        return true;
+      }
+
+      if (!principal) {
+        return true;
+      }
+
+      await this.host.setPrincipalAdminAuthorized(principal);
+      await this.host.replyText(
+        ctx,
+        await this.host.tForContext(ctx, "menu:admin.auth.success"),
+        { sessionId: "gateway-auth", kind: "transport" },
+      );
       return true;
     }
 
-    if (text && isGatewayAdminCommand(text)) {
-      await this.host.showAdminMainMenu(ctx);
+    if (
+      this.host.isAdminAuthEnabled() &&
+      !(await this.host.isPrincipalAdminAuthorized(principal))
+    ) {
+      await this.host.replyText(
+        ctx,
+        await this.host.tForContext(ctx, "menu:admin.auth.prompt"),
+        { sessionId: "gateway-auth", kind: "transport" },
+      );
       return true;
     }
 
     if (text && isMenuEntryCommand(text)) {
-      const isAdminAuthorized = await this.host.isPrincipalAdminAuthorized(principal);
-      if (principal && isAdminAuthorized) {
+      if (principal) {
         await this.host.ensureGatewayScopeConsolesBound({ principal, ctx });
       }
       const activeSessionId = principal
@@ -236,44 +243,24 @@ export class TransportMessageFlow {
       this.host.logger.info("Gateway /menu routing evaluated", {
         chatId: ctx.chat?.id,
         userId: ctx.from?.id,
-        isAdminAuthorized,
         activeSessionId,
         boundSessionCount: boundSessionIds.length,
         boundSessionIds,
       });
 
-      if (hasLinkedSessions) {
-        this.host.clearPendingInteractionsForContext(ctx);
-        await this.host.showSessionsMenu(ctx);
-      } else if (isAdminAuthorized) {
-        await this.host.showAdminMainMenu(ctx);
-      } else {
-        this.host.clearPendingInteractionsForContext(ctx);
-        await this.host.showSessionsMenu(ctx);
-      }
+      void hasLinkedSessions;
+      this.host.clearPendingInteractionsForContext(ctx);
+      await this.host.showSessionsMenu(ctx);
       return true;
     }
 
     if (text && isHelpCommand(text)) {
-      const isAdminAuthorized = await this.host.isPrincipalAdminAuthorized(principal);
-      const activeSessionId = principal
-        ? await this.host.bindingStore.getActiveSessionIdForPrincipal(principal)
-        : null;
-      const boundSessionIds = principal
-        ? await this.host.bindingStore.listBoundSessionIdsForPrincipal(principal)
-        : [];
-      const hasLinkedSessions = Boolean(activeSessionId) || boundSessionIds.length > 0;
-      if (hasLinkedSessions) {
-        this.host.clearPendingInteractionsForContext(ctx);
-        await this.host.showHelp(ctx);
-      } else if (isAdminAuthorized) {
-        await this.host.showAdminMainMenu(
-          ctx,
-          await this.host.tForContext(ctx, "menu:admin.screen.help"),
-        );
-      } else {
-        await this.host.showHelp(ctx);
+      const principal = this.host.getPrincipalFromContext(ctx);
+      if (principal) {
+        await this.host.ensureGatewayScopeConsolesBound({ principal, ctx });
       }
+      this.host.clearPendingInteractionsForContext(ctx);
+      await this.host.showHelp(ctx);
       return true;
     }
 
@@ -343,172 +330,6 @@ export class TransportMessageFlow {
       chatId: input.principal.telegramChatId,
       userId: input.principal.telegramUserId,
     });
-  }
-
-  public async handlePairingCommand(
-    ctx: TelegramMenuContext,
-    code: string,
-  ): Promise<void> {
-    const pairCode = await this.host.bindingStore.consumePairCode(code);
-    if (!pairCode) {
-      this.host.logger.warn("Invalid or expired pairing code", {
-        chatId: ctx.chat?.id,
-        userId: ctx.from?.id,
-        code,
-      });
-      await this.host.replyText(ctx, "Pairing code is invalid or expired.", {
-        kind: "pairing",
-      });
-      return;
-    }
-
-    const fromUserId = ctx.from?.id;
-    const chatId = ctx.chat?.id;
-    if (!fromUserId || !chatId) {
-      await this.host.replyText(ctx, "Unable to determine Telegram user or chat.", {
-        kind: "transport",
-      });
-      return;
-    }
-
-    if (pairCode.targetClientUuid && pairCode.targetLocalSessionId) {
-      const principal = {
-        telegramChatId: chatId,
-        telegramUserId: fromUserId,
-      };
-
-      const session = await this.host.bindRelaySessionToPrincipal({
-        principal,
-        ctx,
-        payload: {
-          sessionId: pairCode.sessionId,
-          targetSessionId: pairCode.targetLocalSessionId,
-          targetSessionLabel:
-            pairCode.sessionLabel ?? pairCode.targetLocalSessionId,
-          targetClientUuid: pairCode.targetClientUuid,
-          targetLocalSessionId: pairCode.targetLocalSessionId,
-        },
-      });
-
-      this.host.logger.info("Gateway relay session linked via pairing code", {
-        code,
-        sessionId: session.sessionId,
-        targetClientUuid: pairCode.targetClientUuid,
-        targetLocalSessionId: pairCode.targetLocalSessionId,
-        telegramChatId: chatId,
-        telegramUserId: fromUserId,
-      });
-
-      await this.host.showSessionsMenu(
-        ctx,
-        "Pairing complete. Choose the active session from the menu.",
-      );
-      return;
-    }
-
-    await this.host.bindingStore.setBinding({
-      sessionId: pairCode.sessionId,
-      telegramChatId: chatId,
-      telegramUserId: fromUserId,
-      ...(ctx.from?.username ? { telegramUsername: ctx.from.username } : {}),
-      linkedAt: new Date().toISOString(),
-    });
-    await this.host.bindingStore.setActiveSessionIdForPrincipal(
-      { telegramChatId: chatId, telegramUserId: fromUserId },
-      pairCode.sessionId,
-    );
-
-    this.host.logger.info("Session linked to Telegram user", {
-      sessionId: pairCode.sessionId,
-      telegramChatId: chatId,
-      telegramUserId: fromUserId,
-    });
-
-    const existingSession = await this.host.sessionStore.getSession(pairCode.sessionId);
-    await this.host.sessionStore.setSession({
-      sessionId: pairCode.sessionId,
-      ...(existingSession?.label || pairCode.sessionLabel
-        ? { label: existingSession?.label ?? pairCode.sessionLabel }
-        : {}),
-      ...(existingSession?.cwd ? { cwd: existingSession.cwd } : {}),
-      ...(existingSession?.linkedSessionId
-        ? { linkedSessionId: existingSession.linkedSessionId }
-        : {}),
-      ...(existingSession?.task ? { task: existingSession.task } : {}),
-      ...(existingSession?.summary ? { summary: existingSession.summary } : {}),
-      ...(existingSession?.files ? { files: existingSession.files } : {}),
-      ...(existingSession?.decisions ? { decisions: existingSession.decisions } : {}),
-      ...(existingSession?.risks ? { risks: existingSession.risks } : {}),
-      ...(existingSession?.tmuxSessionName
-        ? { tmuxSessionName: existingSession.tmuxSessionName }
-        : {}),
-      ...(existingSession?.tmuxWindowName
-        ? { tmuxWindowName: existingSession.tmuxWindowName }
-        : {}),
-      ...(typeof existingSession?.tmuxWindowIndex === "number"
-        ? { tmuxWindowIndex: existingSession.tmuxWindowIndex }
-        : {}),
-      ...(existingSession?.tmuxPaneId ? { tmuxPaneId: existingSession.tmuxPaneId } : {}),
-      ...(typeof existingSession?.tmuxPaneIndex === "number"
-        ? { tmuxPaneIndex: existingSession.tmuxPaneIndex }
-        : {}),
-      ...(existingSession?.tmuxTarget ? { tmuxTarget: existingSession.tmuxTarget } : {}),
-      ...(existingSession?.lastTmuxNudgeAt
-        ? { lastTmuxNudgeAt: existingSession.lastTmuxNudgeAt }
-        : {}),
-      updatedAt: new Date().toISOString(),
-    });
-
-    await this.host.replyText(
-      ctx,
-      pairCode.sessionLabel
-        ? `Session linked: ${pairCode.sessionLabel}`
-        : `Session linked: ${pairCode.sessionId}`,
-      { kind: "pairing", sessionId: pairCode.sessionId },
-    );
-    await this.host.showSessionsMenu(
-      ctx,
-      "Pairing complete. Choose the active session from the menu.",
-    );
-  }
-
-  public async handleAdminAuthCommand(
-    ctx: TelegramMenuContext,
-    principal: { telegramChatId: number; telegramUserId: number },
-    token: string,
-  ): Promise<void> {
-    const expected = this.host.config.telegram.adminToken?.trim();
-    if (!expected) {
-      await this.host.replyText(
-        ctx,
-        await this.host.tForContext(ctx, "menu:admin.auth.disabled"),
-        { kind: "transport" },
-      );
-      return;
-    }
-
-    if (token !== expected) {
-      this.host.logger.warn("Telegram admin auth rejected", {
-        chatId: principal.telegramChatId,
-        userId: principal.telegramUserId,
-      });
-      await this.host.replyText(
-        ctx,
-        await this.host.tForContext(ctx, "menu:admin.auth.invalid"),
-        { kind: "transport" },
-      );
-      return;
-    }
-
-    await this.host.adminAuthStore.setAdminAuthorized(principal);
-    this.host.logger.info("Telegram admin auth granted", {
-      chatId: principal.telegramChatId,
-      userId: principal.telegramUserId,
-    });
-    await this.host.showAdminMainMenu(
-      ctx,
-      await this.host.tForContext(ctx, "menu:admin.auth.success"),
-    );
   }
 
   public async handleReply(ctx: TelegramMenuContext): Promise<boolean> {
@@ -623,8 +444,12 @@ export class TransportMessageFlow {
     }
 
     const principal = { telegramChatId: chatId, telegramUserId: fromUserId };
-    const sessionId =
+    let sessionId =
       await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
+    if (!sessionId && this.host.isAdminBotProfile()) {
+      const synced = await this.host.ensureGatewayScopeConsolesBound({ principal, ctx });
+      sessionId = synced.activeSessionId;
+    }
     if (!sessionId) {
       this.host.logger.debug(
         "Telegram message ignored because no active session is linked for principal",
@@ -632,7 +457,7 @@ export class TransportMessageFlow {
       );
       await this.host.replyText(
         ctx,
-        "No active session is linked yet. Use a pairing code first, then open the menu.",
+        "No active console selected yet. Open /menu and choose a console first.",
         { kind: "transport" },
       );
       return;
@@ -788,12 +613,16 @@ export class TransportMessageFlow {
 
     const principal = { telegramChatId: chatId, telegramUserId: fromUserId };
     const principalKey = buildPrincipalKey(principal);
-    const sessionId =
+    let sessionId =
       await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
+    if (!sessionId && this.host.isAdminBotProfile()) {
+      const synced = await this.host.ensureGatewayScopeConsolesBound({ principal, ctx });
+      sessionId = synced.activeSessionId;
+    }
     if (!sessionId) {
       await this.host.replyText(
         ctx,
-        "No active session is linked yet. Use a pairing code first, then open the menu.",
+        "No active console selected yet. Open /menu and choose a console first.",
         { kind: "transport" },
       );
       return;

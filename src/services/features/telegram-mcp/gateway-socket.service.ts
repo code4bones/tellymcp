@@ -415,6 +415,11 @@ type GatewaySocketCarrier = Service & {
     node_id?: string;
     package_version?: string;
   } | null;
+  listConnectedSocketsForClient?: (clientUuid: string) => any[];
+  findConnectedSocketForSession?: (params: {
+    clientUuid: string;
+    localSessionId: string;
+  }) => any | null;
   sendClientHello?: (socket: any) => Promise<void>;
   sendDirectPartnerNote?: (params: {
     clientUuid: string;
@@ -564,6 +569,53 @@ function normalizeGatewayBaseUrl(value: string): URL {
   }
 
   return url;
+}
+
+function listConnectedSocketsForClient(
+  carrier: Pick<GatewaySocketCarrier, "connectedClients" | "connectedClientsByUuid">,
+  clientUuid: string,
+): any[] {
+  const sockets: any[] = [];
+  for (const [socket, hello] of carrier.connectedClients?.entries() ?? []) {
+    if (hello?.client_uuid !== clientUuid) {
+      continue;
+    }
+    if (socket?.readyState !== undefined && socket.readyState !== 1) {
+      continue;
+    }
+    sockets.push(socket);
+  }
+  if (sockets.length === 0) {
+    const fallback = carrier.connectedClientsByUuid?.get(clientUuid);
+    if (fallback && (fallback.readyState === undefined || fallback.readyState === 1)) {
+      sockets.push(fallback);
+    }
+  }
+  return sockets;
+}
+
+function findConnectedSocketForSession(
+  carrier: Pick<GatewaySocketCarrier, "connectedClients" | "connectedClientsByUuid">,
+  params: { clientUuid: string; localSessionId: string },
+): any | null {
+  for (const [socket, hello] of carrier.connectedClients?.entries() ?? []) {
+    if (
+      hello?.client_uuid !== params.clientUuid ||
+      (socket?.readyState !== undefined && socket.readyState !== 1)
+    ) {
+      continue;
+    }
+
+    const hasSession = Array.isArray(hello.session_tools)
+      ? hello.session_tools.some(
+          (item) => item.local_session_id === params.localSessionId,
+        )
+      : false;
+    if (hasSession) {
+      return socket;
+    }
+  }
+  return null;
 }
 
 const TelegramMcpGatewaySocketService: ServiceSchema = {
@@ -913,20 +965,38 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       snapshot: string;
     }> {
       const runtime = this.getRuntimeOrThrow!();
-      const sessions = await runtime.sessionStore.listSessions();
       const sessionsForHello =
         runtime.config.distributed.mode === "client"
-          ? sessions
+          ? await (async () => {
+              const resolved = runtime.projectIdentityResolver.resolveSessionDefaults({
+                cwd: process.cwd(),
+              });
+              const session =
+                await runtime.sessionStore.getSession(resolved.sessionId);
+
+              return [
+                session ?? {
+                  sessionId: resolved.sessionId,
+                  label: resolved.sessionLabel,
+                  cwd: resolved.cwd,
+                  updatedAt: new Date().toISOString(),
+                },
+              ];
+            })()
           : (
-              await Promise.all(
-                sessions.map(async (session) =>
+            await Promise.all(
+                (await runtime.sessionStore.listSessions()).map(async (session) =>
                   (await runtime.bindingStore.getBinding(session.sessionId))
                     ? session
                     : null,
                 ),
               )
             ).filter(
-              (session): session is (typeof sessions)[number] => Boolean(session),
+              (
+                session,
+              ): session is Awaited<
+                ReturnType<typeof runtime.sessionStore.listSessions>
+              >[number] => Boolean(session),
             );
       const sessionTools = sessionsForHello
         .map((session) => {
@@ -1964,32 +2034,6 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           this.connectedClientsByUuid?.set(hello.client_uuid, socket);
         }
         runtime.logger.info("Gateway WS hello received", hello);
-        if (hello.client_uuid) {
-          const previousSessionIds = new Set(
-            Array.isArray(previousHelloForClient?.session_tools)
-              ? previousHelloForClient.session_tools.map((item) => item.local_session_id)
-              : [],
-          );
-          const currentSessions = Array.isArray(hello.session_tools)
-            ? hello.session_tools
-            : [];
-          const newSessions = currentSessions.filter(
-            (item) => !previousSessionIds.has(item.local_session_id),
-          );
-
-          if (!previousHelloForClient || newSessions.length > 0) {
-            await runtime.telegramTransport.sendAdminGatewayRegistrationNotifications({
-              clientUuid: hello.client_uuid,
-              ...(hello.node_id ? { nodeId: hello.node_id } : {}),
-              ...(hello.package_version
-                ? { packageVersion: hello.package_version }
-                : {}),
-              totalSessions: currentSessions.length,
-              isNewClient: !previousHelloForClient,
-              newSessions,
-            });
-          }
-        }
         const localVersionInfo = this.getLocalVersionInfo?.() ?? {
           packageVersion: "0.0.0-unknown",
           protocolVersion: TELLYMCP_PROTOCOL_VERSION,
@@ -2043,6 +2087,42 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             }
           }, 50);
           return;
+        }
+        if (hello.client_uuid) {
+          const previousSessionIds = new Set(
+            Array.isArray(previousHelloForClient?.session_tools)
+              ? previousHelloForClient.session_tools
+                  .map((session) => session.local_session_id)
+                  .filter(
+                    (sessionId): sessionId is string =>
+                      typeof sessionId === "string" && sessionId.trim().length > 0,
+                  )
+              : [],
+          );
+          const currentSessions = Array.isArray(hello.session_tools)
+            ? hello.session_tools.filter(
+                (session): session is GatewaySocketSessionTools =>
+                  typeof session?.local_session_id === "string" &&
+                  session.local_session_id.trim().length > 0,
+              )
+            : [];
+          const newSessions = currentSessions.filter(
+            (session) => !previousSessionIds.has(session.local_session_id),
+          );
+          const isNewClient = !previousHelloForClient;
+
+          if (isNewClient || newSessions.length > 0) {
+            await runtime.telegramTransport.sendAdminGatewayRegistrationNotifications({
+              clientUuid: hello.client_uuid,
+              ...(hello.node_id ? { nodeId: hello.node_id } : {}),
+              ...(hello.package_version
+                ? { packageVersion: hello.package_version }
+                : {}),
+              totalSessions: currentSessions.length,
+              isNewClient,
+              newSessions,
+            });
+          }
         }
         await this.notifyToolsMismatchForSocket?.(socket, hello);
         if (hello.client_uuid) {
@@ -2506,10 +2586,13 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       },
     ): Promise<unknown> {
       const runtime = this.getRuntimeOrThrow!();
-      const socket = this.connectedClientsByUuid?.get(params.clientUuid);
+      const socket = findConnectedSocketForSession(this, {
+        clientUuid: params.clientUuid,
+        localSessionId: params.localSessionId,
+      });
       if (!socket || socket.readyState !== 1) {
         throw new Error(
-          `Gateway WS client '${params.clientUuid}' is not connected`,
+          `Gateway WS console '${params.clientUuid}/${params.localSessionId}' is not connected`,
         );
       }
 
@@ -2600,10 +2683,21 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         payload: Record<string, unknown>;
       },
     ): Promise<unknown> {
-      const socket = this.connectedClientsByUuid?.get(params.clientUuid);
+      const localSessionId =
+        typeof params.payload?.session_id === "string" && params.payload.session_id.trim()
+          ? params.payload.session_id.trim()
+          : null;
+      const socket = localSessionId
+        ? findConnectedSocketForSession(this, {
+            clientUuid: params.clientUuid,
+            localSessionId,
+          })
+        : (this.connectedClientsByUuid?.get(params.clientUuid) ?? null);
       if (!socket || socket.readyState !== 1) {
         throw new Error(
-          `Gateway WS client '${params.clientUuid}' is not connected`,
+          localSessionId
+            ? `Gateway WS console '${params.clientUuid}/${localSessionId}' is not connected`
+            : `Gateway WS client '${params.clientUuid}' is not connected`,
         );
       }
 
@@ -2666,12 +2760,14 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           delivered += 1;
           continue;
         }
-        const socket = this.connectedClientsByUuid?.get(clientUuid);
-        if (!socket || socket.readyState !== 1) {
+        const sockets = listConnectedSocketsForClient(this, clientUuid);
+        if (sockets.length === 0) {
           continue;
         }
-        socket.send(JSON.stringify(message));
-        delivered += 1;
+        for (const socket of sockets) {
+          socket.send(JSON.stringify(message));
+          delivered += 1;
+        }
       }
       return delivered;
     },
@@ -2705,18 +2801,20 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       for (const clientUuid of params.clientUuids) {
         if (await this.isLocalGatewayClientUuid?.(clientUuid)) {
           const runtime = this.getRuntimeOrThrow!();
-          await runtime.telegramTransport.handleProjectMemberLeftEvent(
-            message.payload,
-          );
-          delivered += 1;
-          continue;
-        }
-        const socket = this.connectedClientsByUuid?.get(clientUuid);
-        if (!socket || socket.readyState !== 1) {
-          continue;
-        }
-        socket.send(JSON.stringify(message));
+        await runtime.telegramTransport.handleProjectMemberLeftEvent(
+          message.payload,
+        );
         delivered += 1;
+        continue;
+      }
+        const sockets = listConnectedSocketsForClient(this, clientUuid);
+        if (sockets.length === 0) {
+          continue;
+        }
+        for (const socket of sockets) {
+          socket.send(JSON.stringify(message));
+          delivered += 1;
+        }
       }
 
       return delivered;
@@ -2743,18 +2841,20 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       for (const clientUuid of params.clientUuids) {
         if (await this.isLocalGatewayClientUuid?.(clientUuid)) {
           const runtime = this.getRuntimeOrThrow!();
-          await runtime.telegramTransport.handleProjectDeletedEvent(
-            message.payload,
-          );
-          delivered += 1;
-          continue;
-        }
-        const socket = this.connectedClientsByUuid?.get(clientUuid);
-        if (!socket || socket.readyState !== 1) {
-          continue;
-        }
-        socket.send(JSON.stringify(message));
+        await runtime.telegramTransport.handleProjectDeletedEvent(
+          message.payload,
+        );
         delivered += 1;
+        continue;
+      }
+        const sockets = listConnectedSocketsForClient(this, clientUuid);
+        if (sockets.length === 0) {
+          continue;
+        }
+        for (const socket of sockets) {
+          socket.send(JSON.stringify(message));
+          delivered += 1;
+        }
       }
 
       return delivered;
@@ -2775,18 +2875,20 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         return true;
       }
 
-      const socket = this.connectedClientsByUuid?.get(params.clientUuid);
-      if (!socket || socket.readyState !== 1) {
+      const sockets = listConnectedSocketsForClient(this, params.clientUuid);
+      if (sockets.length === 0) {
         return false;
       }
 
-      socket.send(
-        JSON.stringify({
-          type: "live_event",
-          event: "approval_request",
-          payload: params.payload,
-        } satisfies GatewaySocketLiveEvent),
-      );
+      for (const socket of sockets) {
+        socket.send(
+          JSON.stringify({
+            type: "live_event",
+            event: "approval_request",
+            payload: params.payload,
+          } satisfies GatewaySocketLiveEvent),
+        );
+      }
       return true;
     },
 
@@ -2807,18 +2909,20 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         return true;
       }
 
-      const socket = this.connectedClientsByUuid?.get(params.clientUuid);
-      if (!socket || socket.readyState !== 1) {
+      const sockets = listConnectedSocketsForClient(this, params.clientUuid);
+      if (sockets.length === 0) {
         return false;
       }
 
-      socket.send(
-        JSON.stringify({
-          type: "live_event",
-          event: params.approved ? "approval_granted" : "approval_denied",
-          payload: params.payload,
-        } satisfies GatewaySocketLiveEvent),
-      );
+      for (const socket of sockets) {
+        socket.send(
+          JSON.stringify({
+            type: "live_event",
+            event: params.approved ? "approval_granted" : "approval_denied",
+            payload: params.payload,
+          } satisfies GatewaySocketLiveEvent),
+        );
+      }
       return true;
     },
 
@@ -2833,7 +2937,10 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         return true;
       }
 
-      const socket = this.connectedClientsByUuid?.get(params.clientUuid);
+      const socket = findConnectedSocketForSession(this, {
+        clientUuid: params.clientUuid,
+        localSessionId: params.delivery.target_local_session_id,
+      });
       if (!socket || socket.readyState !== 1) {
         return false;
       }
@@ -2859,17 +2966,19 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         return true;
       }
 
-      const socket = this.connectedClientsByUuid?.get(params.clientUuid);
-      if (!socket || socket.readyState !== 1) {
+      const sockets = listConnectedSocketsForClient(this, params.clientUuid);
+      if (sockets.length === 0) {
         return false;
       }
 
-      socket.send(
-        JSON.stringify({
-          type: "delivery_status_event",
-          payload: params.status,
-        } satisfies GatewaySocketDeliveryStatusEvent),
-      );
+      for (const socket of sockets) {
+        socket.send(
+          JSON.stringify({
+            type: "delivery_status_event",
+            payload: params.status,
+          } satisfies GatewaySocketDeliveryStatusEvent),
+        );
+      }
       return true;
     },
 
@@ -2888,18 +2997,20 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         return true;
       }
 
-      const socket = this.connectedClientsByUuid?.get(params.clientUuid);
-      if (!socket || socket.readyState !== 1) {
+      const sockets = listConnectedSocketsForClient(this, params.clientUuid);
+      if (sockets.length === 0) {
         return false;
       }
 
-      socket.send(
-        JSON.stringify({
-          type: "transport_event",
-          event: "request_reply",
-          payload: params.payload,
-        } satisfies GatewaySocketTransportEvent),
-      );
+      for (const socket of sockets) {
+        socket.send(
+          JSON.stringify({
+            type: "transport_event",
+            event: "request_reply",
+            payload: params.payload,
+          } satisfies GatewaySocketTransportEvent),
+        );
+      }
       return true;
     },
 
@@ -2943,7 +3054,17 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         socket.on("close", () => {
           const hello = this.connectedClients?.get(socket);
           if (hello?.client_uuid) {
-            this.connectedClientsByUuid?.delete(hello.client_uuid);
+            if (this.connectedClientsByUuid?.get(hello.client_uuid) === socket) {
+              const replacement =
+                listConnectedSocketsForClient(this, hello.client_uuid).find(
+                  (candidate) => candidate !== socket,
+                ) ?? null;
+              if (replacement) {
+                this.connectedClientsByUuid?.set(hello.client_uuid, replacement);
+              } else {
+                this.connectedClientsByUuid?.delete(hello.client_uuid);
+              }
+            }
             for (const [streamId, handler] of this.liveStreamHandlers?.entries() ?? []) {
               if (handler.clientUuid === hello.client_uuid) {
                 this.liveStreamHandlers?.delete(streamId);

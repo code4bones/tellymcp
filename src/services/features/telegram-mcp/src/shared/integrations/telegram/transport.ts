@@ -44,9 +44,6 @@ import type {
   TelegramMenuContext,
   WaiterRecord,
 } from "./transportTypes";
-import {
-  extractIncomingText,
-} from "./transportContent";
 import { parsePartnerNoteText } from "./transportFormatting";
 import { TransportLiveActions } from "./transportLiveActions";
 import { TransportLifecycleActions } from "./transportLifecycleActions";
@@ -266,6 +263,8 @@ export class TelegramTransport implements HumanTransport {
       isAdminBotProfile: () => this.isAdminBotProfile(),
       isPrincipalAdminAuthorized: (principal) =>
         this.isPrincipalAdminAuthorized(principal),
+      setPrincipalAdminAuthorized: (principal) =>
+        this.setPrincipalAdminAuthorized(principal),
     });
     this.telegramFetch = composition.telegramFetch;
     this.bot = composition.bot;
@@ -333,7 +332,10 @@ export class TelegramTransport implements HumanTransport {
   }
 
   private isAdminAuthEnabled(): boolean {
-    return false;
+    return (
+      this.isAdminBotProfile() &&
+      Boolean(this.config.distributed.gatewayToken?.trim())
+    );
   }
 
   private isAdminBotProfile(): boolean {
@@ -347,8 +349,20 @@ export class TelegramTransport implements HumanTransport {
   private async isPrincipalAdminAuthorized(
     principal: { telegramChatId: number; telegramUserId: number } | null,
   ): Promise<boolean> {
-    void principal;
-    return false;
+    if (!this.isAdminAuthEnabled()) {
+      return true;
+    }
+    if (!principal) {
+      return false;
+    }
+    return this.adminAuthStore.isAdminAuthorized(principal);
+  }
+
+  private async setPrincipalAdminAuthorized(principal: {
+    telegramChatId: number;
+    telegramUserId: number;
+  }): Promise<void> {
+    await this.adminAuthStore.setAdminAuthorized(principal);
   }
 
   public setCollaborationService(service: CollaborationService): void {

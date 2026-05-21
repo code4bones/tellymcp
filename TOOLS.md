@@ -51,125 +51,31 @@ Utility tools:
 
 - `refresh_tools_markdown`
 
-## `create_session_pair_code`
+## Console model
 
-Purpose:
+Gateway-first runtime model:
 
-- Create a short-lived Telegram pairing code for a session.
-
-Typical use:
-
-- first-time session linking
-- re-linking after `clear_session_pairing`
-- any request like "register me in Telegram", "link this session to Telegram", "pair this agent", or similar
-
-Input:
-
-- `session_id?`
-- `session_label?`
-- `cwd?`
-- `expires_in_seconds?`
-- `tmux_session_name?`
-- `tmux_window_name?`
-- `tmux_window_index?`
-- `tmux_pane_id?`
-- `tmux_pane_index?`
-
-Output:
-
-- `session_id`
-- `code`
-- `expires_at`
-- `status`
-- `status_message`
-- `telegram_link_hint?`
-
-Behavior:
-
-- generated pairing codes are short numeric 3-digit one-time codes
-- if `session_id` is omitted, the server derives it automatically
-- if `cwd` is provided, the server uses it as the agent workspace root for default session identity and for `.mcp-xchange` file downloads
-- `.mcp-xchange` is the active local exchange workspace for files, screenshots, notes, and handoffs
-- one directory now maps to one logical session by default
-- the service stores that logical identity in `.mcpsession.json` inside the workspace
-- tmux attributes are runtime metadata only and no longer change `session_id`
-- if tmux attributes are not provided here, the Telegram session can still pair successfully, but tmux nudges, Mini App controls, and other tmux-driven features will remain unavailable until `set_tmux_target` is called later
+- agents register themselves on the gateway automatically through `GATEWAY_TOKEN`
+- Telegram no longer links sessions with pair codes
+- `/menu` in the gateway bot shows available remote consoles directly
+- one running agent console is one logical session/console target
 
 Required agent practice:
 
-This is mandatory for the agent:
+- when the user asks to contact another agent, inspect consoles through `list_gateway_sessions`
+- when the user asks to work with Telegram-linked human interaction, use the current console `session_id` explicitly
+- do not mention pair codes, `/link`, or session pairing unless the user is explicitly asking about legacy behavior
 
-- when the user asks to register, link, pair, or connect the current agent/session to Telegram, do not call `create_session_pair_code` immediately from memory
-- first determine the correct workspace `cwd`
-- if tmux is available, collect the current tmux attributes too
-- then call `create_session_pair_code` with them
+Preferred order for cross-console work:
 
-Required order:
-
-1. Determine the agent workspace `cwd`.
-2. If running inside tmux, collect tmux attributes:
-
-```bash
-tmux display-message -p '#{session_name} #{window_name} #{window_index} #{pane_id} #{pane_index}'
-```
-
-3. Call `create_session_pair_code` and pass:
-   - `cwd`
-   - tmux attributes when available
-4. Use `set_tmux_target` later only as a repair, refresh, or override path.
-
-Do not skip `cwd`. It is now the anchor for the stable session marker.
-
-After `create_session_pair_code` succeeds:
-
-- treat the returned `session_id` as the canonical session identity for this agent
-- remember it in the current task context
-- pass it explicitly to later session-scoped tools
-- do not rely on implicit session defaults unless you also know that `cwd` is already correct for this exact agent workspace
-
-Why this matters:
-
-- many MCP tools resolve `session_id` from explicit input first
-- if it is omitted, the server may derive it from `cwd`
-- if the agent did not pass the correct `cwd`, or the MCP client does not preserve it, a later tool call can hit the wrong session
-
-Mandatory rule:
-
-- after pairing, prefer:
-  - `session_id: "<returned value>"`
-- for tools like:
-  - `ask_user_telegram`
-  - `notify_telegram`
-  - `get_telegram_inbox_count`
-  - `get_telegram_inbox`
-  - `delete_telegram_inbox_message`
-  - browser/session-context tools
-- do not assume Telegram "active session" in the bot menu affects MCP tool defaults.
-
-If you skip `cwd`:
-
-- the service may create or reuse the wrong `.mcpsession.json`
-- Telegram file exchange into `.mcp-xchange` may not know the correct agent workspace
-
-If you skip tmux attributes:
-
-- pairing may still succeed
-- but tmux nudges and Mini App controls may not work until repaired later
-
-## `clear_session_pairing`
-
-Purpose:
-
-- Remove the Telegram binding for a session.
-
-Input:
-
-- `session_id?`
-
-Output:
-
-- `cleared`
-- `session_id`
+1. Call `list_gateway_sessions`.
+2. Choose the correct target by `session_label`, `node_id`, `client_label`, or `local_session_id`.
+3. Use:
+   - `send_partner_note`
+   - `send_partner_file`
+   - inbox tools
+   - browser tools
+   with explicit `session_id` or explicit target routing fields.
 
 ## `set_session_context`
 

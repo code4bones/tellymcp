@@ -77,6 +77,13 @@ type GatewaySocketHarness = {
   wsClient: {
     send: MockFn;
   } | null;
+  connectedClients: Map<
+    { readyState: number; send: MockFn },
+    {
+      client_uuid?: string;
+      session_tools?: Array<{ local_session_id: string }>;
+    }
+  >;
   connectedClientsByUuid: Map<string, { readyState: number; send: MockFn }>;
   getRuntimeOrThrow: () => {
     logger: {
@@ -170,6 +177,7 @@ function createHarness(): GatewaySocketHarness {
     wsClient: {
       send: vi.fn(),
     },
+    connectedClients: new Map(),
     connectedClientsByUuid: new Map(),
     getRuntimeOrThrow: () => runtime,
     isLocalGatewayClientUuid: vi.fn(async () => false),
@@ -668,10 +676,15 @@ describe("gatewaySocket service", () => {
     const harness = createHarness();
     const remoteSend = vi.fn();
     const delivery = createDelivery();
-    harness.connectedClientsByUuid.set("remote-client", {
+    const socket = {
       readyState: 1,
       send: remoteSend,
+    };
+    harness.connectedClients.set(socket, {
+      client_uuid: "remote-client",
+      session_tools: [{ local_session_id: delivery.target_local_session_id }],
     });
+    harness.connectedClientsByUuid.set("remote-client", socket);
 
     const published = await harness.notifyDeliveryQueued({
       clientUuid: "remote-client",

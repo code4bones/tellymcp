@@ -1,6 +1,7 @@
 import {
   captureTerminalPaneRange,
   captureVisibleTerminal,
+  ensureTerminalTargetForSession,
   getTerminalWindowHeight,
   isTerminalTargetInvalidError,
   isTerminalUnavailableError,
@@ -56,6 +57,46 @@ export interface TransportTerminalHost {
 export class TransportTerminalActions {
   public constructor(private readonly host: TransportTerminalHost) {}
 
+  private async ensurePtyTargetForSession(
+    sessionId: string,
+    session: NonNullable<Awaited<ReturnType<SessionStore["getSession"]>>>,
+  ): Promise<string | null> {
+    if (this.host.config.tmux.transport !== "pty") {
+      return session.tmuxTarget ?? null;
+    }
+
+    const ensuredTarget = ensureTerminalTargetForSession(this.host.config.tmux, {
+      sessionId,
+      ...(typeof session.cwd === "string" ? { cwd: session.cwd } : {}),
+      ...(typeof session.tmuxTarget === "string"
+        ? { target: session.tmuxTarget }
+        : {}),
+    });
+
+    if (!ensuredTarget) {
+      return null;
+    }
+
+    if (ensuredTarget === session.tmuxTarget && ensuredTarget === session.tmuxPaneId) {
+      return ensuredTarget;
+    }
+
+    await this.host.sessionStore.setSession({
+      ...session,
+      tmuxTarget: ensuredTarget,
+      tmuxPaneId: ensuredTarget,
+      updatedAt: new Date().toISOString(),
+    });
+
+    this.host.logger.info("PTY terminal target normalized", {
+      sessionId,
+      previousTerminalTarget: session.tmuxTarget,
+      normalizedTerminalTarget: ensuredTarget,
+    });
+
+    return ensuredTarget;
+  }
+
   public async nudgeForInboxMessage(sessionId: string): Promise<void> {
     await this.nudgeForSession(sessionId, {
       message: this.host.config.tmux.nudgeMessage,
@@ -86,6 +127,21 @@ export class TransportTerminalActions {
       return;
     }
 
+    let normalizedSession = session;
+    if (
+      this.host.config.tmux.transport === "pty" &&
+      !session.tmuxTarget.startsWith("pty:")
+    ) {
+      const normalizedTarget = await this.ensurePtyTargetForSession(sessionId, session);
+      if (normalizedTarget) {
+        normalizedSession = {
+          ...session,
+          tmuxTarget: normalizedTarget,
+          tmuxPaneId: normalizedTarget,
+        };
+      }
+    }
+
     const inboxCount = await this.host.inboxStore.countInboxMessages(sessionId);
     if (input.requireInboxMessage && inboxCount === 0) {
       this.host.logger.debug("terminal nudge skipped because inbox is empty", {
@@ -106,21 +162,32 @@ export class TransportTerminalActions {
       this.host.logger.debug("terminal nudge skipped because of cooldown", {
         sessionId,
         reason: input.reason,
-        terminalTarget: session.tmuxTarget,
+        terminalTarget: normalizedSession.tmuxTarget,
         inboxCount,
-        lastTmuxNudgeAt: session.lastTmuxNudgeAt,
+        lastTmuxNudgeAt: normalizedSession.lastTmuxNudgeAt,
       });
       return;
     }
 
     await this.host.sendTypingForSession(sessionId);
 
-    let terminalTarget = session.tmuxTarget;
+    let terminalTarget = normalizedSession.tmuxTarget ?? null;
+    if (!terminalTarget) {
+      this.host.logger.debug("terminal nudge skipped", {
+        sessionId,
+        nudgeReason: input.reason,
+        skipReason: "normalized_target_missing",
+      });
+      return;
+    }
     try {
       await sendTerminalLiteralLine(this.host.config.tmux, terminalTarget, input.message);
     } catch (error) {
-      if (isTerminalTargetInvalidError(error)) {
-        const recoveredTarget = await this.tryRecoverTarget(sessionId, session);
+      if (isTerminalTargetInvalidError(error) || isTerminalUnavailableError(error)) {
+        const recoveredTarget =
+          this.host.config.tmux.transport === "pty"
+            ? await this.ensurePtyTargetForSession(sessionId, normalizedSession)
+            : await this.tryRecoverTarget(sessionId, normalizedSession);
         if (recoveredTarget) {
           terminalTarget = recoveredTarget;
           await sendTerminalLiteralLine(
@@ -129,7 +196,7 @@ export class TransportTerminalActions {
             input.message,
           );
         } else {
-          await this.notifyTargetInvalid(sessionId, session, error);
+          await this.notifyTargetInvalid(sessionId, normalizedSession, error);
           throw error;
         }
       } else {
@@ -139,12 +206,12 @@ export class TransportTerminalActions {
 
     const lastTmuxNudgeAt = new Date(nowMs).toISOString();
     await this.host.sessionStore.setSession({
-      ...session,
+      ...normalizedSession,
       tmuxTarget: terminalTarget,
       ...(terminalTarget.startsWith("%") || terminalTarget.startsWith("pty:")
         ? { tmuxPaneId: terminalTarget }
-        : session.tmuxPaneId
-          ? { tmuxPaneId: session.tmuxPaneId }
+        : normalizedSession.tmuxPaneId
+          ? { tmuxPaneId: normalizedSession.tmuxPaneId }
           : {}),
       lastTmuxNudgeAt,
     });
@@ -154,7 +221,7 @@ export class TransportTerminalActions {
       sessionId,
       reason: input.reason,
       message: input.message,
-      tmuxSessionName: session.tmuxSessionName,
+      tmuxSessionName: normalizedSession.tmuxSessionName,
       terminalTarget,
       inboxCount,
       lastTmuxNudgeAt,

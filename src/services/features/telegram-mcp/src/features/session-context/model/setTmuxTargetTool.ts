@@ -27,7 +27,7 @@ export class SetTmuxTargetTool implements ToolModule {
       {
         title: "Set tmux Target",
         description:
-          "Use this to repair or complete Telegram session setup after pairing, or when tmux pane/session changed. Store the tmux pane target for a session so the long-running MCP service can nudge the agent to check Telegram inbox when new ordinary Telegram messages arrive.",
+          "Use this to repair or update the terminal target for a session when the pane/backend changed. Store the terminal target so the long-running MCP service can nudge the agent to check Telegram inbox when new ordinary Telegram messages arrive.",
         inputSchema: setTmuxTargetInputSchema,
         outputSchema: setTmuxTargetOutputSchema,
       },

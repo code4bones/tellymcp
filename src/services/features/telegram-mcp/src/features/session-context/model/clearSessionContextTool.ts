@@ -27,7 +27,7 @@ export class ClearSessionContextTool implements ToolModule {
       {
         title: "Clear Session Context",
         description:
-          "Use this for full session cleanup/reset. It removes saved context, pairing, and related per-session state for the session.",
+          "Use this for full console cleanup/reset. It removes saved context and related per-session state for the session.",
         inputSchema: clearSessionContextInputSchema,
         outputSchema: clearSessionContextOutputSchema,
       },

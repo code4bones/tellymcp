@@ -5,8 +5,6 @@ import { DeleteTelegramInboxMessageTool } from "../../../features/inbox/model/de
 import { GetTelegramInboxCountTool } from "../../../features/inbox/model/getTelegramInboxCountTool";
 import { GetTelegramInboxTool } from "../../../features/inbox/model/getTelegramInboxTool";
 import { NotifyTelegramTool } from "../../../features/notify/model/notifyTelegramTool";
-import { ClearSessionPairingTool } from "../../../features/pair-session/model/clearSessionPairingTool";
-import { CreateSessionPairCodeTool } from "../../../features/pair-session/model/createSessionPairCodeTool";
 import { ClearSessionContextTool } from "../../../features/session-context/model/clearSessionContextTool";
 import { GetSessionContextTool } from "../../../features/session-context/model/getSessionContextTool";
 import { GetTmuxTargetTool } from "../../../features/session-context/model/getTmuxTargetTool";
@@ -52,8 +50,6 @@ export type AppToolModules = {
   getTelegramInboxCountTool: GetTelegramInboxCountTool;
   getTelegramInboxTool: GetTelegramInboxTool;
   deleteTelegramInboxMessageTool: DeleteTelegramInboxMessageTool;
-  createSessionPairCodeTool: CreateSessionPairCodeTool;
-  clearSessionPairingTool: ClearSessionPairingTool;
   setSessionContextTool: SetSessionContextTool;
   renameSessionTool: RenameSessionTool;
   setTmuxTargetTool: SetTmuxTargetTool;

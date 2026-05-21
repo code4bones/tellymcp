@@ -38,6 +38,23 @@ export interface TransportConsoleRegistryHost {
 export class TransportConsoleRegistry {
   public constructor(private readonly host: TransportConsoleRegistryHost) {}
 
+  private async clearStaleRelaySessions(input: {
+    existingBound: Set<string>;
+    liveRelaySessionIds: Set<string>;
+  }): Promise<void> {
+    for (const sessionId of input.existingBound) {
+      if (!sessionId.startsWith("relay~")) {
+        continue;
+      }
+      if (input.liveRelaySessionIds.has(sessionId)) {
+        continue;
+      }
+
+      await this.host.bindingStore.clearBinding(sessionId);
+      await this.host.sessionStore.clearSession(sessionId);
+    }
+  }
+
   public async listScopedConsoles(): Promise<GatewayKnownSessionRecord[]> {
     const response = await this.host.callGatewayJson<{
       sessions?: GatewayKnownSessionRecord[];
@@ -58,17 +75,30 @@ export class TransportConsoleRegistry {
     sessionIds: string[];
     activeSessionId: string | null;
   }> {
-    const existingActive =
-      await this.host.bindingStore.getActiveSessionIdForPrincipal(input.principal);
     const existingBound = new Set(
       await this.host.bindingStore.listBoundSessionIdsForPrincipal(input.principal),
     );
     const consoles = await this.listScopedConsoles();
+    const liveRelaySessionIds = new Set(
+      consoles.map((consoleSession) =>
+        buildLiveRelaySessionId(
+          consoleSession.client_uuid,
+          consoleSession.local_session_id,
+        ),
+      ),
+    );
 
-    if (consoles.length === 0) {
+    await this.clearStaleRelaySessions({
+      existingBound,
+      liveRelaySessionIds,
+    });
+
+    if (liveRelaySessionIds.size === 0) {
+      const nextActive =
+        await this.host.bindingStore.getActiveSessionIdForPrincipal(input.principal);
       return {
         sessionIds: [],
-        activeSessionId: existingActive,
+        activeSessionId: nextActive,
       };
     }
 
@@ -85,11 +115,15 @@ export class TransportConsoleRegistry {
         relaySessionId,
         consoleSession,
       });
-      existingBound.add(relaySessionId);
     }
 
+    const existingActive =
+      await this.host.bindingStore.getActiveSessionIdForPrincipal(input.principal);
+    const nextBound = new Set(
+      await this.host.bindingStore.listBoundSessionIdsForPrincipal(input.principal),
+    );
     const nextActive =
-      existingActive && existingBound.has(existingActive)
+      existingActive && nextBound.has(existingActive)
         ? existingActive
         : relaySessionIds[0] ?? existingActive ?? null;
     if (nextActive) {

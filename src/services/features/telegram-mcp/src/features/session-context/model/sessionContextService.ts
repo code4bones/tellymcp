@@ -253,11 +253,11 @@ export class SessionContextService {
 
     const statusMessage = binding
       ? session?.tmuxTarget
-        ? "Telegram pairing is active for this session. A tmux target is configured, so ordinary Telegram messages can wake the agent through tmux nudges."
-        : "Telegram pairing is active for this session. No tmux target is configured, so inbox handling requires passive MCP checks."
+        ? "Gateway console binding is active for this session. A terminal target is configured, so ordinary Telegram messages can wake the agent through terminal nudges."
+        : "Gateway console binding is active for this session. No terminal target is configured, so inbox handling requires passive MCP checks."
       : session
-        ? "Session metadata exists, but Telegram pairing is not active."
-        : "Session metadata and Telegram pairing are both absent.";
+        ? "Session metadata exists, but no gateway console binding is active."
+        : "Session metadata and gateway console binding are both absent.";
 
     return {
       session_id: resolved.sessionId,

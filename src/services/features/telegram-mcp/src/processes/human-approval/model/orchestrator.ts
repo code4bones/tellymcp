@@ -88,7 +88,7 @@ export class HumanApprovalOrchestrator {
     const canUseGatewayProxy = Boolean(this.config.distributed.gatewayPublicUrl);
     if (!binding && !canUseGatewayProxy) {
       throw new Error(
-        "Session is not linked to Telegram. Call create_session_pair_code first.",
+        "Session is not available through the gateway console registry yet. Open /menu in the gateway bot and select the console first.",
       );
     }
 

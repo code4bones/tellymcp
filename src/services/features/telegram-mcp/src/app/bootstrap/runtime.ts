@@ -7,12 +7,14 @@ import {
 import { createLogger, type Logger } from "../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../shared/lib/project-identity/projectIdentity";
 import { RedisStateStore } from "../../shared/integrations/redis/stateStore";
+import { ProcessLocalSessionStore } from "../../shared/integrations/memory/processLocalSessionStore";
 import { TelegramTransport } from "../../shared/integrations/telegram/transport";
 import { MinioExchangeStore } from "../../shared/integrations/object-storage/minioExchangeStore";
 import { GatewayHttpService } from "../../features/distributed-gateway/model/gatewayHttpService";
 import { ensureGatewayClientUuid } from "../../features/distributed-client/model/gatewayClientAccess";
 import {
   ensureTerminalTargetForSession,
+  getConfiguredTerminalShellDisplayName,
 } from "../../shared/integrations/tmux/client";
 import { stopAllPtyTargets } from "../../shared/integrations/terminal/ptyRegistry";
 import type {
@@ -114,6 +116,7 @@ export async function createAppRuntime(input: {
   });
 
   const stateStore = new RedisStateStore(redis);
+  let sessionStore: SessionStore = stateStore;
   const webAppLaunchRegistry = new WebAppLaunchRegistry();
   const objectStore = new MinioExchangeStore(
     input.callBroker,
@@ -126,6 +129,90 @@ export async function createAppRuntime(input: {
     config.distributed.gatewayPublicUrl,
     config.distributed.gatewayAuthToken,
   );
+
+  if (config.distributed.mode === "client" && config.tmux.transport === "pty") {
+    const resolvedSession = projectIdentityResolver.resolveSessionDefaults({
+      cwd: process.cwd(),
+    });
+    const existingSession = await stateStore.getSession(resolvedSession.sessionId);
+    const terminalTarget = ensureTerminalTargetForSession(config.tmux, {
+      sessionId: resolvedSession.sessionId,
+      cwd: resolvedSession.cwd,
+      ...(typeof existingSession?.tmuxTarget === "string"
+        ? { target: existingSession.tmuxTarget }
+        : {}),
+    });
+
+    if (!terminalTarget) {
+      throw new Error("PTY terminal target could not be created during runtime bootstrap");
+    }
+
+    const initialSession = {
+      sessionId: resolvedSession.sessionId,
+      ...(typeof existingSession?.label === "string"
+        ? { label: existingSession.label }
+        : { label: resolvedSession.sessionLabel }),
+      ...(typeof existingSession?.cwd === "string"
+        ? { cwd: existingSession.cwd }
+        : { cwd: resolvedSession.cwd }),
+      ...(typeof existingSession?.linkedSessionId === "string"
+        ? { linkedSessionId: existingSession.linkedSessionId }
+        : {}),
+      ...(typeof existingSession?.activeProjectUuid === "string"
+        ? { activeProjectUuid: existingSession.activeProjectUuid }
+        : {}),
+      ...(typeof existingSession?.activeProjectName === "string"
+        ? { activeProjectName: existingSession.activeProjectName }
+        : {}),
+      ...(typeof existingSession?.task === "string"
+        ? { task: existingSession.task }
+        : {}),
+      ...(typeof existingSession?.summary === "string"
+        ? { summary: existingSession.summary }
+        : {}),
+      ...(Array.isArray(existingSession?.files)
+        ? { files: existingSession.files }
+        : {}),
+      ...(Array.isArray(existingSession?.decisions)
+        ? { decisions: existingSession.decisions }
+        : {}),
+      ...(Array.isArray(existingSession?.risks)
+        ? { risks: existingSession.risks }
+        : {}),
+      tmuxSessionName: "pty",
+      tmuxWindowName: getConfiguredTerminalShellDisplayName(config.tmux),
+      tmuxPaneId: terminalTarget,
+      tmuxTarget: terminalTarget,
+      ...(typeof existingSession?.tmuxWindowIndex === "number"
+        ? { tmuxWindowIndex: existingSession.tmuxWindowIndex }
+        : {}),
+      ...(typeof existingSession?.tmuxPaneIndex === "number"
+        ? { tmuxPaneIndex: existingSession.tmuxPaneIndex }
+        : {}),
+      ...(typeof existingSession?.lastTmuxNudgeAt === "string"
+        ? { lastTmuxNudgeAt: existingSession.lastTmuxNudgeAt }
+        : {}),
+      ...(typeof existingSession?.lastSeenToolsHash === "string"
+        ? { lastSeenToolsHash: existingSession.lastSeenToolsHash }
+        : {}),
+      ...(typeof existingSession?.lastNotifiedToolsHash === "string"
+        ? { lastNotifiedToolsHash: existingSession.lastNotifiedToolsHash }
+        : {}),
+      updatedAt: new Date().toISOString(),
+    };
+
+    sessionStore = new ProcessLocalSessionStore({
+      initialSessions: [initialSession],
+      onClearSession: async (sessionId) => {
+        await stateStore.clearSession(sessionId);
+      },
+    });
+
+    logger.info("Client PTY process-local session store initialized", {
+      sessionId: resolvedSession.sessionId,
+      terminalTarget,
+    });
+  }
   await stateStore.resetRuntimeState();
   logger.info("Runtime pending state reset");
 
@@ -153,7 +240,7 @@ export async function createAppRuntime(input: {
   }
 
   if (config.tmux.transport === "pty") {
-    const sessions = await stateStore.listSessions();
+    const sessions = await sessionStore.listSessions();
     let recoveredCount = 0;
     for (const session of sessions) {
       if (!session.tmuxTarget?.startsWith("pty:")) {
@@ -172,7 +259,7 @@ export async function createAppRuntime(input: {
 
   const telegramTransport = new TelegramTransport(
     config,
-    stateStore,
+    sessionStore,
     stateStore,
     stateStore,
     stateStore,
@@ -199,7 +286,7 @@ export async function createAppRuntime(input: {
     redis,
     stateStore,
     telegramTransport,
-    sessionStore: stateStore,
+    sessionStore,
     bindingStore: stateStore,
     adminAuthStore: stateStore,
     inboxStore: stateStore,

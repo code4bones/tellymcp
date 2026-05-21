@@ -1055,6 +1055,7 @@ export class GatewayHttpService {
           : []) {
           if (
             scopeFilterRequested &&
+            !connectedOnly &&
             !allowedClientUuids.has(client.client_uuid)
           ) {
             continue;

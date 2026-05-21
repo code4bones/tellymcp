@@ -25,10 +25,6 @@ import {
   type TelegramMcpNotifyServiceInstance,
 } from "./notify.service";
 import {
-  TELEGRAM_MCP_PAIR_SERVICE_NAME,
-  type TelegramMcpPairServiceInstance,
-} from "./pair.service";
-import {
   TELEGRAM_MCP_SESSION_CONTEXT_SERVICE_NAME,
   type TelegramMcpSessionContextServiceInstance,
 } from "./session-context.service";
@@ -63,8 +59,6 @@ import { DeleteTelegramInboxMessageTool } from "./src/features/inbox/model/delet
 import { GetTelegramInboxCountTool } from "./src/features/inbox/model/getTelegramInboxCountTool";
 import { GetTelegramInboxTool } from "./src/features/inbox/model/getTelegramInboxTool";
 import { NotifyTelegramTool } from "./src/features/notify/model/notifyTelegramTool";
-import { ClearSessionPairingTool } from "./src/features/pair-session/model/clearSessionPairingTool";
-import { CreateSessionPairCodeTool } from "./src/features/pair-session/model/createSessionPairCodeTool";
 import { ClearSessionContextTool } from "./src/features/session-context/model/clearSessionContextTool";
 import { GetSessionContextTool } from "./src/features/session-context/model/getSessionContextTool";
 import { GetTmuxTargetTool } from "./src/features/session-context/model/getTmuxTargetTool";
@@ -90,7 +84,6 @@ type McpServerCarrier = Service & {
 const TelegramMcpMcpServerService: ServiceSchema = {
   name: TELEGRAM_MCP_MCP_SERVER_SERVICE_NAME,
   dependencies: [
-    TELEGRAM_MCP_PAIR_SERVICE_NAME,
     TELEGRAM_MCP_SESSION_CONTEXT_SERVICE_NAME,
     TELEGRAM_MCP_NOTIFY_SERVICE_NAME,
     TELEGRAM_MCP_INBOX_SERVICE_NAME,
@@ -103,9 +96,6 @@ const TelegramMcpMcpServerService: ServiceSchema = {
 
   methods: {
     createServer(this: McpServerCarrier): McpServer {
-      const pairService = this.broker.getLocalService(
-        TELEGRAM_MCP_PAIR_SERVICE_NAME,
-      ) as TelegramMcpPairServiceInstance | null;
       const sessionContextService = this.broker.getLocalService(
         TELEGRAM_MCP_SESSION_CONTEXT_SERVICE_NAME,
       ) as TelegramMcpSessionContextServiceInstance | null;
@@ -132,7 +122,6 @@ const TelegramMcpMcpServerService: ServiceSchema = {
       ) as TelegramMcpXchangeServiceInstance | null;
 
       if (
-        !pairService ||
         !sessionContextService ||
         !notifyService ||
         !inboxService ||
@@ -146,8 +135,6 @@ const TelegramMcpMcpServerService: ServiceSchema = {
       }
 
       const tools: ToolModule[] = [
-        new CreateSessionPairCodeTool(pairService.getPairSessionService()),
-        new ClearSessionPairingTool(pairService.getPairSessionService()),
         new SetSessionContextTool(
           sessionContextService.getSessionContextService(),
         ),
@@ -205,7 +192,6 @@ const TelegramMcpMcpServerService: ServiceSchema = {
 
   async started(this: McpServerCarrier) {
     await this.broker.waitForServices([
-      TELEGRAM_MCP_PAIR_SERVICE_NAME,
       TELEGRAM_MCP_SESSION_CONTEXT_SERVICE_NAME,
       TELEGRAM_MCP_NOTIFY_SERVICE_NAME,
       TELEGRAM_MCP_INBOX_SERVICE_NAME,

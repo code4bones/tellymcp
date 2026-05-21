@@ -132,6 +132,10 @@ export interface TransportConstructorWiringHost {
   isPrincipalAdminAuthorized(
     principal: { telegramChatId: number; telegramUserId: number } | null,
   ): Promise<boolean>;
+  setPrincipalAdminAuthorized(principal: {
+    telegramChatId: number;
+    telegramUserId: number;
+  }): Promise<void>;
 }
 
 export interface TransportConstructorWiringResult {
@@ -922,22 +926,22 @@ export function buildTransportConstructorWiring(
         ...(host.config.distributed.gatewayPublicUrl !== undefined
           ? { gatewayPublicUrl: host.config.distributed.gatewayPublicUrl }
           : {}),
-      },
-      telegram: {
-        ...(host.config.telegram.adminToken !== undefined
-          ? { adminToken: host.config.telegram.adminToken }
+        ...(host.config.distributed.gatewayToken !== undefined
+          ? { gatewayToken: host.config.distributed.gatewayToken }
           : {}),
       },
     },
     bindingStore: host.bindingStore,
     sessionStore: host.sessionStore,
     inboxStore: host.inboxStore,
-    adminAuthStore: host.adminAuthStore,
+    isAdminAuthEnabled: () => host.isAdminAuthEnabled(),
+    isPrincipalAdminAuthorized: (principal) =>
+      host.isPrincipalAdminAuthorized(principal),
+    setPrincipalAdminAuthorized: (principal) =>
+      host.setPrincipalAdminAuthorized(principal),
     waiters: host.waiters,
     currentAttachmentTargets: host.currentAttachmentTargets,
-    isAdminAuthEnabled: () => host.isAdminAuthEnabled(),
     isAdminBotProfile: () => host.isAdminBotProfile(),
-    isPrincipalAdminAuthorized: (principal) => host.isPrincipalAdminAuthorized(principal),
     getPrincipalFromContext: (ctx) => context.getPrincipalFromContext(ctx),
     extractIncomingText: (message) => extractIncomingText(message),
     collectIncomingAttachments: (message) => collectIncomingAttachments(message),
@@ -953,12 +957,9 @@ export function buildTransportConstructorWiring(
     tForContext: (ctx, key, options) => context.tForContext(ctx, key, options),
     showSessionsMenu: (ctx, introText) => menuFlow.showSessionsMenu(ctx, introText),
     showHelp: (ctx) => menuFlow.showHelp(ctx),
-    showAdminMainMenu: (ctx, introText) => adminActions.showMainMenu(ctx, introText),
-    showAdminClientsMenu: (ctx, introText) => adminActions.showClientsMenu(ctx, introText),
     ensureGatewayScopeConsolesBound: ({ principal, ctx }) =>
       consoleRegistry.ensureScopedConsolesBound({ principal, ctx }),
     getMainMenu: () => mainMenu,
-    bindRelaySessionToPrincipal: (input) => projectState.bindRelaySessionToPrincipal(input),
     clearWaiter: (requestId) => requestFlow.clearWaiter(requestId),
     callGatewayJson: (path, payload) =>
       host.callGatewayJson(path, payload as Record<string, unknown> | undefined),

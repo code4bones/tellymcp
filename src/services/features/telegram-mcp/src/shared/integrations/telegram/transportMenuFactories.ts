@@ -129,10 +129,7 @@ export class TransportMenuFactories {
       .text(
         async (ctx) => this.host.tForContext(ctx, "menu:main.buttons.content"),
         async (ctx) => {
-          await ctx.answerCallbackQuery({
-            text: await this.host.tForContext(ctx, "menu:main.actions.open_content"),
-          });
-          await this.host.showBufferMenu(ctx);
+          await this.host.sendActiveSessionBuffer(ctx, { mode: "visible" });
         },
       )
       .text(

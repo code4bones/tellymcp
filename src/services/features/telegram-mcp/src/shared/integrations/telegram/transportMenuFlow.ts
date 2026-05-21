@@ -23,6 +23,7 @@ import type {
 } from "../../api/storage/contract";
 import type { SupportedLocale } from "../../i18n";
 import type { Logger } from "../../lib/logger/logger";
+import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
 import { buildPrincipalKey, formatTmuxBridgeError } from "./transportUtils";
 import { isTmuxUnavailableError } from "../tmux/client";
 import type { TransportLiveActions } from "./transportLiveActions";
@@ -79,6 +80,16 @@ export interface TransportMenuFlowHost {
     },
     meta: SendMessageMeta,
   ): Promise<void>;
+  captureRelaySessionBuffer(
+    sessionId: string,
+    scope: TmuxCaptureScope,
+  ): Promise<{
+    filename: string;
+    markdown_content: string;
+    capture_mode: TmuxCaptureScope["mode"];
+    scope_description: string;
+    terminal_target: string;
+  }>;
 }
 
 export class TransportMenuFlow {
@@ -387,10 +398,11 @@ export class TransportMenuFlow {
       return;
     }
 
+    const relayTarget = parseLiveRelaySessionId(sessionId);
     const session = await this.host.sessionStore.getSession(sessionId);
-    if (!session?.tmuxTarget) {
+    if (!relayTarget && !session?.tmuxTarget) {
       await ctx.answerCallbackQuery({
-        text: "tmux target is not configured for this session.",
+        text: "terminal target is not configured for this session.",
         show_alert: true,
       });
       return;
@@ -401,12 +413,44 @@ export class TransportMenuFlow {
     });
 
     try {
-      const capture = await this.host.tmuxActions.captureBuffer(session, scope);
+      const capture = relayTarget
+        ? await this.host.captureRelaySessionBuffer(sessionId, scope)
+        : await this.host.tmuxActions.captureBuffer(session!, scope);
+      const relayMarkdownContent =
+        relayTarget && "markdown_content" in capture
+          ? capture.markdown_content
+          : relayTarget &&
+              "markdownContent" in (capture as Record<string, unknown>) &&
+              typeof (capture as Record<string, unknown>).markdownContent === "string"
+            ? ((capture as Record<string, unknown>).markdownContent as string)
+            : null;
+      const relayFilename =
+        relayTarget && "filename" in capture && typeof capture.filename === "string"
+          ? capture.filename
+          : relayTarget &&
+              "fileName" in (capture as Record<string, unknown>) &&
+              typeof (capture as Record<string, unknown>).fileName === "string"
+            ? ((capture as Record<string, unknown>).fileName as string)
+            : null;
+
+      if (relayTarget && typeof relayMarkdownContent !== "string") {
+        throw new Error(
+          `Invalid relay terminal buffer response: ${JSON.stringify(capture)}`,
+        );
+      }
+      const finalRelayMarkdownContent = relayMarkdownContent ?? "";
+      const finalRelayFilename = relayFilename ?? capture.filename;
+
       await this.host.replyDocumentWithRetry(
         ctx,
-        new InputFile(capture.buffer, capture.filename),
+        new InputFile(
+          "buffer" in capture
+            ? capture.buffer
+            : Buffer.from(finalRelayMarkdownContent, "utf8"),
+          finalRelayFilename,
+        ),
         {
-          caption: `📄 Buffer: ${session.label ?? sessionId}`,
+          caption: `📄 Buffer: ${session?.label ?? sessionId}`,
         },
         {
           kind: "menu",
@@ -414,25 +458,33 @@ export class TransportMenuFlow {
         },
       );
 
-      this.host.logger.info("Telegram tmux buffer sent", {
+      this.host.logger.info("Telegram terminal buffer sent", {
         sessionId,
-        tmuxTarget: session.tmuxTarget,
+        terminalTarget:
+          "terminal_target" in capture ? capture.terminal_target : session?.tmuxTarget,
         filename: capture.filename,
-        bytes: capture.buffer.length,
-        captureMode: capture.captureMode,
-        captureScope: capture.scopeDescription,
+        bytes:
+          "buffer" in capture
+            ? capture.buffer.length
+            : Buffer.byteLength(finalRelayMarkdownContent, "utf8"),
+        captureMode:
+          "captureMode" in capture ? capture.captureMode : capture.capture_mode,
+        captureScope:
+          "scopeDescription" in capture
+            ? capture.scopeDescription
+            : capture.scope_description,
       });
     } catch (error) {
       const payload = {
         sessionId,
-        tmuxTarget: session.tmuxTarget,
+        terminalTarget: session?.tmuxTarget,
         error:
           error instanceof Error ? (error.stack ?? error.message) : String(error),
       };
 
       if (isTmuxUnavailableError(error)) {
         this.host.logger.warn(
-          "tmux buffer capture skipped because tmux is unavailable",
+          "terminal buffer capture skipped because terminal is unavailable",
           payload,
         );
         await this.host.replyText(
@@ -440,20 +492,20 @@ export class TransportMenuFlow {
           formatTmuxBridgeError(
             this.host.config,
             error,
-            "Unable to capture tmux buffer right now.",
+            "Unable to capture the terminal buffer right now.",
           ),
           { kind: "menu", sessionId },
         );
         return;
       }
 
-      this.host.logger.error("tmux buffer capture failed", payload);
+      this.host.logger.error("terminal buffer capture failed", payload);
       await this.host.replyText(
         ctx,
         formatTmuxBridgeError(
           this.host.config,
           error,
-          "Failed to capture the tmux buffer for this session.",
+          "Failed to capture the terminal buffer for this session.",
         ),
         { kind: "menu", sessionId },
       );

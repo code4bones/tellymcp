@@ -657,6 +657,11 @@ export function buildTransportConstructorWiring(
       ),
     replyDocumentWithRetry: (ctx, document, options, meta) =>
       documentActions.replyDocumentWithRetry(ctx, document, options, meta),
+    captureRelaySessionBuffer: (sessionId, scope) =>
+      host.callGatewayJson("/live/capture-buffer", {
+        session_id: sessionId,
+        scope,
+      }),
   });
 
   const adminActions: TransportAdminActions = new TransportAdminActions({

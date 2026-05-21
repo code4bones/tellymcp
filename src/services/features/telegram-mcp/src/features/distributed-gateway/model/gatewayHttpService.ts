@@ -12,6 +12,7 @@ import type {
   SendPartnerNoteOutput,
 } from "../../../entities/collaboration/model/types";
 import type { TelegramWebAppInitDataUnsafe } from "../../../app/webapp/auth";
+import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
 import { getTellyMcpPackageRoot } from "../../../shared/lib/version/versionHandshake";
 
 function readHeader(
@@ -62,6 +63,16 @@ type LiveRelayViewResult = {
 
 type LiveRelayActionResult = {
   ok: true;
+};
+
+type LiveRelayCaptureBufferResult = {
+  session_id: string;
+  session_label?: string;
+  terminal_target: string;
+  filename: string;
+  markdown_content: string;
+  capture_mode: "visible" | "full" | "lines";
+  scope_description: string;
 };
 
 function unwrapLiveRelayResult<T>(response: unknown): T | null {
@@ -171,6 +182,15 @@ function buildPartnerNoteOutputFallback(
         ? outputRecord.requires_reply
         : Boolean(input.requires_reply ?? (input.kind === "question" || input.kind === "request")),
   };
+}
+
+function slugifyGatewayFilenamePart(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/gu, "-")
+    .replace(/-+/gu, "-")
+    .replace(/^-|-$/gu, "");
 }
 
 export class GatewayHttpService {
@@ -648,6 +668,111 @@ export class GatewayHttpService {
       } catch (error) {
         writeJson(res, 400, {
           error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/live/capture-buffer") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const sessionId =
+          typeof body.session_id === "string" ? body.session_id.trim() : "";
+        const relayTarget = parseLiveRelaySessionId(sessionId);
+        const scope =
+          body.scope && typeof body.scope === "object"
+            ? (body.scope as Record<string, unknown>)
+            : null;
+
+        if (!relayTarget || !scope) {
+          writeJson(res, 400, {
+            error: "relay session_id and scope are required",
+          });
+          return true;
+        }
+
+        if (scope.mode === "visible") {
+          const rawResponse = await this.callBroker<LiveRelayViewResult>(
+            "telegramMcp.gatewaySocket.requestLiveRelay",
+            {
+              clientUuid: relayTarget.clientUuid,
+              localSessionId: relayTarget.localSessionId,
+              requestType: "view",
+              payload: {},
+            },
+            { meta: { internal_call: true } },
+          );
+          const response = unwrapLiveRelayResult<LiveRelayViewResult>(rawResponse);
+
+          if (
+            !response ||
+            typeof response !== "object" ||
+            typeof (response as { content?: unknown }).content !== "string"
+          ) {
+            throw new Error("Invalid live relay view response");
+          }
+
+          const capturedAt = new Date().toISOString();
+          const titleBase =
+            typeof response.session_label === "string" && response.session_label.trim()
+              ? response.session_label.trim()
+              : relayTarget.localSessionId;
+          const filenameBase =
+            slugifyGatewayFilenamePart(titleBase) || "session-buffer";
+          const timestamp = capturedAt.replace(/[:.]/g, "-");
+          writeJson(res, 200, {
+            session_id: sessionId,
+            ...(typeof response.session_label === "string" &&
+            response.session_label.trim()
+              ? { session_label: response.session_label.trim() }
+              : {}),
+            terminal_target: `relay:${relayTarget.clientUuid}/${relayTarget.localSessionId}`,
+            filename: `${filenameBase}-${timestamp}.md`,
+            markdown_content: [
+              "# Terminal Buffer",
+              "",
+              `- Session: ${titleBase}`,
+              `- Session ID: ${sessionId}`,
+              `- terminal target: relay:${relayTarget.clientUuid}/${relayTarget.localSessionId}`,
+              "- Capture scope: visible pane",
+              `- Captured at: ${capturedAt}`,
+              "",
+              "```text",
+              response.content.replaceAll("\u0000", ""),
+              "```",
+              "",
+            ].join("\n"),
+            capture_mode: "visible",
+            scope_description: "visible pane",
+          } satisfies LiveRelayCaptureBufferResult);
+          return true;
+        }
+
+        const result = await this.callBroker<LiveRelayCaptureBufferResult>(
+          "telegramMcp.gatewaySocket.requestClientAction",
+          {
+            clientUuid: relayTarget.clientUuid,
+            actionName: "telegramMcp.terminalBuffer.captureBufferRemote",
+            params: {
+              session_id: relayTarget.localSessionId,
+              scope,
+            },
+          },
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, result);
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : `Failed to capture remote buffer. Update the client agent if it is not on the latest build. Cause: ${String(error)}`,
         });
         return true;
       }

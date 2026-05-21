@@ -6,7 +6,12 @@ This directory holds the decomposed Telegram transport. `transport.ts` is now th
 
 - `transport.ts`
   Main composition root.
-  Owns shared runtime state, grammy menus, delegate wiring, and the remaining glue that has not yet been split.
+  Owns shared runtime state plus the final runtime shell:
+  start/stop, admin auth gate, top-level gateway HTTP helper, file/document helpers, and TOOLS/version glue.
+
+- `transportConstructorWiring.ts`
+  Constructor-time composition builder.
+  Creates delegate graph, menu graph, menu registration, and the cross-wired closures between Telegram transport modules.
 
 - `transportTypes.ts`
   Transport-only types for menu context, gateway/admin records, pending interaction records, attachment descriptors, waiter records, and related shapes.
@@ -203,11 +208,8 @@ The safe order has been:
 
 ## Next Recommended Extractions
 
-- `transportConstructorWiring.ts`
-  The biggest remaining bulk is constructor-time delegate wiring and menu registration.
-
 - `transportLifecycleShell.ts`
   Start/stop/admin-access middleware and the remaining top-level runtime shell still live in `transport.ts`.
 
 - `transportToolsSyncEvents.ts`
-  TOOLS/version mismatch event glue can be split further once constructor wiring is out.
+  TOOLS/version mismatch event glue can be split further now that constructor wiring is out.

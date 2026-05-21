@@ -52,20 +52,20 @@ export interface TransportMenuStateHost {
     meta: { kind: "menu"; sessionId?: string },
     options?: { reply_markup?: unknown },
   ): Promise<void | { message_id: number }>;
-  mainMenu: unknown;
-  sessionsMenu: unknown;
-  inboxMenu: unknown;
-  storageMenu: unknown;
-  browserMenu: unknown;
-  screenshotsMenu: unknown;
-  linkMenu: unknown;
-  partnerMenu: unknown;
-  localMenu: unknown;
-  settingsMenu: unknown;
-  bufferMenu: unknown;
-  developerMenu: unknown;
-  unpairConfirmMenu: unknown;
-  pruneConfirmMenu: unknown;
+  getMainMenu(): unknown;
+  getSessionsMenu(): unknown;
+  getInboxMenu(): unknown;
+  getStorageMenu(): unknown;
+  getBrowserMenu(): unknown;
+  getScreenshotsMenu(): unknown;
+  getLinkMenu(): unknown;
+  getPartnerMenu(): unknown;
+  getLocalMenu(): unknown;
+  getSettingsMenu(): unknown;
+  getBufferMenu(): unknown;
+  getDeveloperMenu(): unknown;
+  getUnpairConfirmMenu(): unknown;
+  getPruneConfirmMenu(): unknown;
   sessionStore: {
     getSession(sessionId: string): Promise<{
       sessionId: string;
@@ -103,7 +103,7 @@ export class TransportMenuState {
       ctx,
       intro ? `${intro}\n\n${text}` : text,
       { kind: "menu" },
-      this.host.mainMenu,
+      this.host.getMainMenu(),
     );
   }
 
@@ -165,7 +165,7 @@ export class TransportMenuState {
         ctx,
         intro ? `${intro}\n\n${text}` : text,
         { kind: "menu" },
-        this.host.sessionsMenu,
+        this.host.getSessionsMenu(),
       );
     } catch (error) {
       this.host.logger.error("Failed to render Telegram sessions menu", {
@@ -274,7 +274,7 @@ export class TransportMenuState {
       ctx,
       introText ? `${introText}\n\n${text}` : text,
       { kind: "menu" },
-      this.host.inboxMenu,
+      this.host.getInboxMenu(),
     );
   }
 
@@ -317,7 +317,7 @@ export class TransportMenuState {
       ctx,
       introText ? `${introText}\n\n${text}` : text,
       { kind: "menu" },
-      this.host.storageMenu,
+      this.host.getStorageMenu(),
     );
   }
 
@@ -362,7 +362,7 @@ export class TransportMenuState {
       ctx,
       introText ? `${introText}\n\n${text}` : text,
       { kind: "menu" },
-      this.host.browserMenu,
+      this.host.getBrowserMenu(),
     );
   }
 
@@ -407,7 +407,7 @@ export class TransportMenuState {
       ctx,
       introText ? `${introText}\n\n${text}` : text,
       { kind: "menu" },
-      this.host.screenshotsMenu,
+      this.host.getScreenshotsMenu(),
     );
   }
 
@@ -461,7 +461,7 @@ export class TransportMenuState {
       ctx,
       introText ? `${introText}\n\n${text}` : text,
       { kind: "menu" },
-      this.host.linkMenu,
+      this.host.getLinkMenu(),
     );
   }
 
@@ -518,7 +518,7 @@ export class TransportMenuState {
       ctx,
       introText ? `${introText}\n\n${text}` : text,
       { kind: "menu" },
-      this.host.partnerMenu,
+      this.host.getPartnerMenu(),
     );
   }
 
@@ -576,7 +576,7 @@ export class TransportMenuState {
       ctx,
       introText ? `${introText}\n\n${text}` : text,
       { kind: "menu" },
-      this.host.localMenu,
+      this.host.getLocalMenu(),
     );
   }
 
@@ -624,7 +624,7 @@ export class TransportMenuState {
       ctx,
       introText ? `${introText}\n\n${text}` : text,
       { kind: "menu" },
-      this.host.settingsMenu,
+      this.host.getSettingsMenu(),
     );
   }
 
@@ -663,7 +663,7 @@ export class TransportMenuState {
       ctx,
       introText ? `${introText}\n\n${text}` : text,
       { kind: "menu" },
-      this.host.bufferMenu,
+      this.host.getBufferMenu(),
     );
   }
 
@@ -706,7 +706,7 @@ export class TransportMenuState {
       ctx,
       introText ? `${introText}\n\n${text}` : text,
       { kind: "menu" },
-      this.host.developerMenu,
+      this.host.getDeveloperMenu(),
     );
   }
 
@@ -743,7 +743,7 @@ export class TransportMenuState {
       ctx,
       introText ? `${introText}\n\n${text}` : text,
       { kind: "menu" },
-      this.host.unpairConfirmMenu,
+      this.host.getUnpairConfirmMenu(),
     );
   }
 
@@ -785,7 +785,7 @@ export class TransportMenuState {
       ctx,
       introText ? `${introText}\n\n${text}` : text,
       { kind: "menu" },
-      this.host.pruneConfirmMenu,
+      this.host.getPruneConfirmMenu(),
     );
   }
 

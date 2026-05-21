@@ -8,6 +8,7 @@ import { Bot, GrammyError, InputFile } from "grammy";
 import type { AppConfig } from "../../../app/config/env";
 import type { WebAppLaunchRegistry } from "../../../app/webapp/auth";
 import type { CollaborationService } from "../../../features/collaboration/model/collaborationService";
+import type { PartnerNoteKind } from "../../../entities/collaboration/model/types";
 import type {
   SessionStore,
   TelegramAdminAuthStore,
@@ -24,9 +25,10 @@ import type {
   HumanTransportReply,
   HumanTransportRequest,
 } from "../../api/transport/contract";
+import { createInboxMessageId } from "../../lib/ids/ids";
 import type { Logger } from "../../lib/logger/logger";
 import type { MinioExchangeStore } from "../object-storage/minioExchangeStore";
-import { createTelegramFetch } from "./proxyFetch";
+import { isExecutorTargetKind } from "./collabSemantics";
 import type {
   AdminClientViewRecord,
   AdminGatewayRegistrationSessionRecord,
@@ -40,23 +42,12 @@ import type {
   TelegramClientFetch,
   TelegramEditMessageOptions,
   TelegramMenuContext,
-  TelegramSendMessageOptions,
   WaiterRecord,
 } from "./transportTypes";
 import {
-  buildInboxText,
-  formatFilePreviewLabel,
-  formatInboxPreviewLabel,
-  formatSessionMenuLabel,
-  formatStoragePreviewLabel,
-} from "./transportFormatting";
-import {
-  collectIncomingAttachments,
   extractIncomingText,
-  formatInboxDetail,
-  formatScreenshotDetail,
-  formatStorageDetail,
 } from "./transportContent";
+import { parsePartnerNoteText } from "./transportFormatting";
 import { TransportLiveActions } from "./transportLiveActions";
 import { TransportLifecycleActions } from "./transportLifecycleActions";
 import { TransportAdminActions } from "./transportAdminActions";
@@ -91,11 +82,10 @@ import { TransportTmuxActions } from "./transportTmuxActions";
 import { TransportTmuxRuntime } from "./transportTmuxRuntime";
 import { TransportXchangeState } from "./transportXchangeState";
 import { TransportOutputActions } from "./transportOutputActions";
+import { buildTransportConstructorWiring } from "./transportConstructorWiring";
 import {
-  extractCallbackSuffix,
   isGatewayAdminCommand,
   parseAdminAuthCommand,
-  readMenuPayloadKey,
   resolveGatewayControlBaseUrl,
 } from "./transportUtils";
 
@@ -238,902 +228,108 @@ export class TelegramTransport implements HumanTransport {
     private readonly webAppLaunchRegistry: WebAppLaunchRegistry,
     private readonly logger: Logger,
   ) {
-    this.telegramFetch = createTelegramFetch(
-      this.config,
-      this.logger,
-    ) as unknown as TelegramClientFetch;
-    this.liveActions = new TransportLiveActions({
-      config: this.config,
-      webAppLaunchRegistry: this.webAppLaunchRegistry,
-      logger: this.logger,
-      t: (locale, key, vars) => this.context.t(locale, key, vars),
-      ensureGatewayClientUuid: (principal, actor) =>
-        this.gatewayActions.ensureGatewayClientUuid(principal, actor),
-      sendChatMessage: (telegramChatId, text, options, meta) =>
-        this.outputActions.sendChatMessage(telegramChatId, text, options, meta),
-    });
-    this.tmuxActions = new TransportTmuxActions({
+    const composition = buildTransportConstructorWiring({
       config: this.config,
       sessionStore: this.sessionStore,
-      inboxStore: this.inboxStore,
+      adminAuthStore: this.adminAuthStore,
       bindingStore: this.bindingStore,
+      inboxStore: this.inboxStore,
+      menuPayloadStore: this.menuPayloadStore,
+      localeStore: this.localeStore,
+      xchangeFileMetaStore: this.xchangeFileMetaStore,
+      maintenanceStore: this.maintenanceStore,
+      objectStore: this.objectStore,
+      webAppLaunchRegistry: this.webAppLaunchRegistry,
       logger: this.logger,
+      waiters: this.waiters,
+      tmuxNudgeDebounceTimers: this.tmuxNudgeDebounceTimers,
       tmuxNudgeFailureNoticeAt: this.tmuxNudgeFailureNoticeAt,
       tmuxPromptNoticeState: this.tmuxPromptNoticeState,
-      sendTypingForSession: (sessionId) => this.tmuxRuntime.sendTypingForSession(sessionId),
-      resolveLocaleForTelegramUserId: (userId) =>
-        this.context.resolveLocaleForTelegramUserId(userId),
-      sendNotification: (input) => this.sendNotification(input),
-      sendLiveViewLauncherMessage: (input) =>
-        this.liveActions.sendLauncherMessage(input),
-      t: (locale, key, vars) => this.context.t(locale, key, vars),
-    });
-    this.xchangeState = new TransportXchangeState({
-      config: this.config,
-      sessionStore: this.sessionStore,
-      xchangeFileMetaStore: this.xchangeFileMetaStore,
-    });
-    this.context = new TransportContext({
-      config: this.config,
-      localeStore: this.localeStore,
-    });
-    this.payloadState = new TransportPayloadState({
-      menuPayloadStore: this.menuPayloadStore,
-      menuPayloadTtlSeconds: this.config.telegram.menuPayloadTtlSeconds,
-    });
-    this.menuFingerprints = new TransportMenuFingerprints({
-      logger: this.logger,
-      bindingStore: this.bindingStore,
-      inboxStore: this.inboxStore,
-      sessionStore: this.sessionStore,
-      resolveLocaleForContext: (ctx) => this.context.resolveLocaleForContext(ctx),
-      getPrincipalFromContext: (ctx) => this.context.getPrincipalFromContext(ctx),
-      t: (locale, key, vars) => this.context.t(locale, key, vars),
-      listActiveSessionStorageEntries: (sessionId) =>
-        this.xchangeState.listActiveSessionStorageEntries(sessionId),
-      listActiveSessionScreenshots: (sessionId) =>
-        this.xchangeState.listActiveSessionScreenshots(sessionId),
-    });
-    this.adminMenus = new TransportAdminMenus({
-      createMenuOptions: (onMenuOutdated) => this.createMenuOptions(onMenuOutdated),
-      tForContext: (ctx, key, vars) => this.context.tForContext(ctx, key, vars),
-      showAdminMainMenu: (ctx) => this.adminActions.showMainMenu(ctx),
-      showAdminClientsMenu: (ctx) => this.adminActions.showClientsMenu(ctx),
-      showAdminClientSessionsMenu: (ctx) => this.adminActions.showClientSessionsMenu(ctx),
-      showAdminClientSessionList: (ctx, scope) =>
-        this.adminActions.showClientSessionList(ctx, scope),
-      showAdminToolsMenu: (ctx) => this.adminActions.showToolsMenu(ctx),
-      listGatewayAdminClients: () => this.gatewayActions.listGatewayAdminClients(),
-      createAdminClientMenuPayload: (client) =>
-        this.payloadState.createAdminClientMenuPayload(client),
-      handleAdminClientSelectCallback: (ctx) =>
-        this.adminActions.handleClientSelectCallback(ctx, readMenuPayloadKey),
-      adminHandleClientEnvExport: (ctx) =>
-        this.adminActions.handleClientEnvExport(ctx),
-    });
-    this.documentActions = new TransportDocumentActions({
-      logger: this.logger,
-    });
-    this.linkingActions = new TransportLinkingActions({
-      config: this.config,
-      sessionStore: this.sessionStore,
-      bindingStore: this.bindingStore,
-      resolveLocaleForContext: (ctx) => this.context.resolveLocaleForContext(ctx),
-      getPrincipalFromContext: (ctx) => this.context.getPrincipalFromContext(ctx),
-      t: (locale, key, vars) => this.context.t(locale, key, vars),
-      tForContext: (ctx, key, vars) => this.context.tForContext(ctx, key, vars),
-      showMainMenu: (ctx, introText) => this.menuState.showMainMenu(ctx, introText),
-      showLinkMenu: (ctx) => this.menuFlow.showLinkMenu(ctx),
-      showLocalMenu: (ctx) => this.menuFlow.showLocalMenu(ctx),
-      showProjectsMenu: (ctx) => this.menuFlow.showProjectsMenu(ctx),
-    });
-    this.projectMenus = new TransportProjectMenus({
-      createMenuOptions: (onMenuOutdated) => this.createMenuOptions(onMenuOutdated),
-      buildProjectsFingerprint: (ctx) => this.gatewayActions.buildProjectsFingerprint(ctx),
-      loadProjectsContext: (ctx) => this.gatewayActions.loadProjectsContext(ctx),
-      tForContext: (ctx, key, vars) => this.context.tForContext(ctx, key, vars),
-      createProjectMenuPayload: (sessionId, projectUuid, title) =>
-        this.payloadState.createProjectMenuPayload(sessionId, projectUuid, title),
-      createProjectDeleteMenuPayload: (sessionId, projectUuid, title) =>
-        this.payloadState.createProjectDeleteMenuPayload(
-          sessionId,
-          projectUuid,
-          title,
-        ),
-      handleProjectSelect: (ctx) => this.projectEntryActions.handleProjectSelect(ctx),
-      handleProjectDeleteSelect: (ctx) => this.projectEntryActions.handleProjectDeleteSelect(ctx),
-      beginProjectMode: (ctx, mode) => this.projectEntryActions.beginProjectMode(ctx, mode),
-      beginProjectBroadcast: (ctx) => this.broadcastActions.beginProjectBroadcast(ctx),
-      handleCollabHistoryExport: (ctx) => this.menuFlow.handleCollabHistoryExport(ctx),
-      showCollabToolsMenu: (ctx) => this.menuFlow.showCollabToolsMenu(ctx),
-      showCollabDeleteMenu: (ctx) => this.menuFlow.showCollabDeleteMenu(ctx),
-      showProjectsMenu: (ctx) => this.menuFlow.showProjectsMenu(ctx),
-      showMainMenu: (ctx) => this.menuState.showMainMenu(ctx),
-    });
-    this.menuFactories = new TransportMenuFactories({
-      logger: this.logger,
-      bindingStore: this.bindingStore,
-      inboxStore: this.inboxStore,
-      sessionStore: this.sessionStore,
-      createMenuOptions: (onMenuOutdated) => this.createMenuOptions(onMenuOutdated),
-      tForContext: (ctx, key, vars) => this.context.tForContext(ctx, key, vars),
-      getPrincipalFromContext: (ctx) => this.context.getPrincipalFromContext(ctx),
-      buildMainMenuFingerprint: (ctx) =>
-        this.menuFingerprints.buildMainMenuFingerprint(ctx),
-      buildInboxFingerprint: (ctx) =>
-        this.menuFingerprints.buildInboxFingerprint(ctx),
-      buildStorageFingerprint: (ctx) =>
-        this.menuFingerprints.buildStorageFingerprint(ctx),
-      buildScreenshotsFingerprint: (ctx) =>
-        this.menuFingerprints.buildScreenshotsFingerprint(ctx),
-      buildSessionsFingerprint: (ctx) =>
-        this.menuFingerprints.buildSessionsFingerprint(ctx),
-      buildLinkFingerprint: (ctx) =>
-        this.menuFingerprints.buildLinkFingerprint(ctx),
-      buildInboxButtonLabel: (ctx) =>
-        this.menuFingerprints.buildInboxButtonLabel(ctx),
-      buildScreenshotsButtonLabel: (ctx) =>
-        this.menuFingerprints.buildScreenshotsButtonLabel(ctx),
-      buildLinkButtonLabel: (ctx) =>
-        this.menuFingerprints.buildLinkButtonLabel(ctx),
-      showLiveViewLauncher: (ctx) => this.menuFlow.showLiveViewLauncher(ctx),
-      showBufferMenu: (ctx) => this.menuFlow.showBufferMenu(ctx),
-      showBrowserMenu: (ctx) => this.menuFlow.showBrowserMenu(ctx),
-      showMainMenu: (ctx) => this.menuState.showMainMenu(ctx),
-      showLocalEntryPoint: (ctx) => this.linkingActions.showLocalEntryPoint(ctx),
-      showProjectsEntryPoint: (ctx) =>
-        this.linkingActions.showProjectsEntryPoint(ctx),
-      showInboxMenu: (ctx) => this.menuFlow.showInboxMenu(ctx),
-      showStorageMenu: (ctx) => this.menuFlow.showStorageMenu(ctx),
-      showSettingsMenu: (ctx) => this.menuFlow.showSettingsMenu(ctx),
-      showSessionsMenu: (ctx) => this.menuFlow.showSessionsMenu(ctx),
-      showScreenshotsMenu: (ctx) => this.menuFlow.showScreenshotsMenu(ctx),
-      showLocalMenu: (ctx) => this.menuFlow.showLocalMenu(ctx),
-      showLinkMenu: (ctx) => this.menuFlow.showLinkMenu(ctx),
-      showPartnerMenu: (ctx) => this.menuFlow.showPartnerMenu(ctx),
-      showPartnerEntryPoint: (ctx) => this.menuCallbacks.showPartnerEntryPoint(ctx),
-      handleLinkButton: (ctx) => this.linkingActions.handleLinkButton(ctx),
-      handleLinkTargetSelect: (ctx) =>
-        this.menuCallbacks.handleLinkTargetSelect(ctx, readMenuPayloadKey(ctx)),
-      beginPartnerNoteMode: (ctx, kind) =>
-        this.partnerActions.beginPartnerNoteMode(ctx, kind),
-      sendActiveSessionBuffer: (ctx, input) =>
-        this.menuFlow.sendActiveSessionBuffer(ctx, input),
-      showUnpairConfirmMenu: (ctx) => this.menuFlow.showUnpairConfirmMenu(ctx),
-      showDeveloperMenu: (ctx) => this.menuFlow.showDeveloperMenu(ctx),
-      showPruneConfirmMenu: (ctx) => this.menuFlow.showPruneConfirmMenu(ctx),
-      showActiveSessionInfo: (ctx) => this.menuFlow.showActiveSessionInfo(ctx),
-      beginRenameActiveSession: (ctx) =>
-        this.sessionActions.beginRenameActiveSession(ctx),
-      beginBroadcast: (ctx) => this.broadcastActions.beginBroadcast(ctx),
-      pruneAllSessions: (ctx) => this.sessionActions.pruneAllSessions(ctx),
-      unpairActiveSession: (ctx) => this.sessionActions.unpairActiveSession(ctx),
-      handleInboxMessageOpen: (ctx) =>
-        this.menuCallbacks.handleInboxMessageOpen(ctx, readMenuPayloadKey(ctx)),
-      handleInboxMessageDelete: (ctx) =>
-        this.menuCallbacks.handleInboxMessageDelete(ctx, readMenuPayloadKey(ctx)),
-      handleStorageOpen: (ctx) =>
-        this.menuCallbacks.handleStorageOpen(ctx, readMenuPayloadKey(ctx)),
-      handleStorageGet: (ctx) =>
-        this.menuCallbacks.handleStorageGet(ctx, readMenuPayloadKey(ctx)),
-      handleStorageDelete: (ctx) =>
-        this.menuCallbacks.handleStorageDelete(ctx, readMenuPayloadKey(ctx)),
-      handleScreenshotOpen: (ctx) =>
-        this.menuCallbacks.handleScreenshotOpen(ctx, readMenuPayloadKey(ctx)),
-      handleScreenshotGet: (ctx) =>
-        this.menuCallbacks.handleScreenshotGet(ctx, readMenuPayloadKey(ctx)),
-      handleScreenshotDelete: (ctx) =>
-        this.menuCallbacks.handleScreenshotDelete(ctx, readMenuPayloadKey(ctx)),
-      handleSessionSelection: (ctx) =>
-        this.menuCallbacks.handleSessionSelection(ctx, readMenuPayloadKey(ctx)),
-      createInboxMenuPayload: (sessionId, messageId) =>
-        this.payloadState.createInboxMenuPayload(sessionId, messageId),
-      createFileMenuPayload: (sessionId, filePath) =>
-        this.payloadState.createFileMenuPayload(sessionId, filePath),
-      createSessionMenuPayload: (sessionId) =>
-        this.payloadState.createSessionMenuPayload(sessionId),
-      createLinkMenuPayload: (sessionId, targetSessionId) =>
-        this.payloadState.createLinkMenuPayload(sessionId, targetSessionId),
-      formatInboxPreviewLabel: (message) => formatInboxPreviewLabel(message),
-      formatStoragePreviewLabel: (filePath, meta) =>
-        formatStoragePreviewLabel(filePath, meta),
-      formatFilePreviewLabel: (filePath) => formatFilePreviewLabel(filePath),
-      formatSessionMenuLabel: (input) => formatSessionMenuLabel(input),
-      listActiveSessionStorageEntries: (sessionId) =>
-        this.xchangeState.listActiveSessionStorageEntries(sessionId),
-      listActiveSessionScreenshots: (sessionId) =>
-        this.xchangeState.listActiveSessionScreenshots(sessionId),
-    });
-
-    this.bot = new Bot<TelegramMenuContext>(
-      this.config.telegram.botToken ?? "0:disabled",
-      {
-      client: {
-        fetch: this.telegramFetch,
-      },
-    });
-    this.outputActions = new TransportOutputActions({
-      config: this.config,
-      logger: this.logger,
-      bot: this.bot,
-    });
-    this.tmuxRuntime = new TransportTmuxRuntime({
-      config: this.config,
-      logger: this.logger,
-      bot: this.bot,
-      sessionStore: this.sessionStore,
-      bindingStore: this.bindingStore,
-      isTelegramEnabled: () => this.isTelegramEnabled(),
-      tmuxActions: this.tmuxActions,
-      tmuxNudgeDebounceTimers: this.tmuxNudgeDebounceTimers,
-    });
-    this.mainMenu = this.menuFactories.createMainMenu();
-    this.adminMainMenu = this.adminMenus.createAdminMainMenu();
-    this.adminClientsMenu = this.adminMenus.createAdminClientsMenu();
-    this.adminClientSessionsMenu = this.adminMenus.createAdminClientSessionsMenu();
-    this.adminClientSessionDetailMenu =
-      this.adminMenus.createAdminClientSessionDetailMenu();
-    this.adminToolsMenu = this.adminMenus.createAdminToolsMenu();
-    this.inboxMenu = this.menuFactories.createInboxMenu();
-    this.storageMenu = this.menuFactories.createStorageMenu();
-    this.browserMenu = this.menuFactories.createBrowserMenu();
-    this.projectsMenu = this.projectMenus.createProjectsMenu();
-    this.collabToolsMenu = this.projectMenus.createCollabToolsMenu();
-    this.collabDeleteMenu = this.projectMenus.createCollabDeleteMenu();
-    this.localMenu = this.menuFactories.createLocalMenu();
-    this.screenshotsMenu = this.menuFactories.createScreenshotsMenu();
-    this.linkMenu = this.menuFactories.createLinkMenu();
-    this.partnerMenu = this.menuFactories.createPartnerMenu();
-    this.sessionsMenu = this.menuFactories.createSessionsMenu();
-    this.bufferMenu = this.menuFactories.createBufferMenu();
-    this.settingsMenu = this.menuFactories.createSettingsMenu();
-    this.developerMenu = this.menuFactories.createDeveloperMenu();
-    this.unpairConfirmMenu = this.menuFactories.createUnpairConfirmMenu();
-    this.pruneConfirmMenu = this.menuFactories.createPruneConfirmMenu();
-    this.inboxMessageMenu = this.menuFactories.createInboxMessageMenu();
-    this.storageMessageMenu = this.menuFactories.createStorageMessageMenu();
-    this.screenshotMessageMenu = this.menuFactories.createScreenshotMessageMenu();
-    this.adminActions = new TransportAdminActions({
-      config: this.config,
-      adminClientViewByPrincipal: this.adminClientViewByPrincipal,
-      adminMainMenu: this.adminMainMenu,
-      adminClientsMenu: this.adminClientsMenu,
-      adminClientSessionsMenu: this.adminClientSessionsMenu,
-      adminToolsMenu: this.adminToolsMenu,
-      liveActions: this.liveActions,
-      resolveLocaleForContext: (ctx) => this.context.resolveLocaleForContext(ctx),
-      getPrincipalFromContext: (ctx) => this.context.getPrincipalFromContext(ctx),
-      t: (locale, key, vars) => this.context.t(locale, key, vars),
-      tForContext: (ctx, key) => this.context.tForContext(ctx, key),
-      listGatewayAdminClients: () => this.gatewayActions.listGatewayAdminClients(),
-      listGatewayClientSessions: (clientUuid) =>
-        this.gatewayActions.listGatewayClientSessions(clientUuid),
-      listGatewayConnectedClients: () => this.gatewayActions.listGatewayConnectedClients(),
-      createAdminClientSessionMenuPayload: (session) =>
-        this.payloadState.createAdminClientSessionMenuPayload(session),
-      renderMenuHtmlScreen: (ctx, text, meta, menu) =>
-        this.menuFlow.renderMenuHtmlScreen(ctx, text, meta, menu as Menu<TelegramMenuContext>),
-      editText: (ctx, text, meta, options) =>
-        this.outputActions.editText(
-          ctx,
-          text,
-          meta,
-          options as TelegramEditMessageOptions,
-        ),
-      replyText: (ctx, text, meta, options) =>
-        this.outputActions.replyText(
-          ctx,
-          text,
-          meta,
-          options as TelegramSendMessageOptions,
-        ),
-      replyDocumentWithRetry: (ctx, document, options, meta) =>
-        this.documentActions.replyDocumentWithRetry(ctx, document, options, meta),
-      showAdminClientsMenu: (ctx, introText) => this.adminActions.showClientsMenu(ctx, introText),
-      showMainMenu: (ctx, introText) => this.menuState.showMainMenu(ctx, introText),
-      getAdminClientSessionPayloadByKey: (payloadKey) =>
-        this.projectState.getAdminClientSessionPayloadByKey(payloadKey),
-      getMenuPayloadByKey: (payloadKey) =>
-        this.menuPayloadStore.getMenuPayload(payloadKey),
-      extractCallbackSuffix: (ctx, prefix) => extractCallbackSuffix(ctx, prefix),
-      bindRelaySessionToPrincipal: (input) => this.projectState.bindRelaySessionToPrincipal(input),
-      webAppLaunchRegistry: this.webAppLaunchRegistry,
-    });
-    this.broadcastActions = new TransportBroadcastActions({
-      logger: this.logger,
-      pendingBroadcasts: this.pendingBroadcasts,
-      pendingRenames: this.pendingRenames,
-      getPrincipalFromContext: (ctx) => this.context.getPrincipalFromContext(ctx),
-      resolveLocaleForContext: (ctx) => this.context.resolveLocaleForContext(ctx),
-      t: (locale, key, vars) => this.context.t(locale, key, vars),
-      tForContext: (ctx, key, vars) => this.context.tForContext(ctx, key, vars),
-      replyText: (ctx, text, meta, options) =>
-        this.outputActions.replyText(
-          ctx,
-          text,
-          meta,
-          options as TelegramSendMessageOptions,
-        ),
-      deleteMessage: (chatId, messageId) => this.deleteMessage(chatId, messageId),
-      showCollabToolsMenu: (ctx) => this.menuFlow.showCollabToolsMenu(ctx),
-      showDeveloperMenu: (ctx) => this.menuFlow.showDeveloperMenu(ctx),
-      ensureGatewayClientUuid: (principal) => this.gatewayActions.ensureGatewayClientUuid(principal),
-      listGatewayProjects: (principal) => this.gatewayActions.listGatewayProjects(principal),
-      listGatewayProjectSessions: (principal, projectUuid) =>
-        this.gatewayActions.listGatewayProjectSessions(principal, projectUuid),
-      bindingStore: this.bindingStore,
-      sessionStore: this.sessionStore,
-      inboxStore: this.inboxStore,
-      routeTelegramInboxToRelaySession: (input) =>
-        this.messageFlow.routeTelegramInboxToRelaySession(input),
-      scheduleTmuxNudgeForInboxMessage: (sessionId, session) =>
-        this.tmuxRuntime.scheduleTmuxNudgeForInboxMessage(sessionId, session),
-      sendPartnerNote: (input) => this.gatewayActions.sendPartnerNote(input),
-    });
-    this.partnerActions = new TransportPartnerActions({
-      logger: this.logger,
-      pendingPartnerNotes: this.pendingPartnerNotes,
-      getPrincipalFromContext: (ctx) => this.context.getPrincipalFromContext(ctx),
-      resolveLocaleForContext: (ctx) => this.context.resolveLocaleForContext(ctx),
-      t: (locale, key, vars) => this.context.t(locale, key, vars),
-      replyText: (ctx, text, meta, options) =>
-        this.outputActions.replyText(
-          ctx,
-          text,
-          meta,
-          options as TelegramSendMessageOptions,
-        ),
-      deleteMessage: (chatId, messageId) => this.deleteMessage(chatId, messageId),
-      showPartnerMenu: (ctx) => this.menuFlow.showPartnerMenu(ctx),
-      bindingStore: this.bindingStore,
-      sessionStore: this.sessionStore,
-      inboxStore: this.inboxStore,
-      maintenanceStore: this.maintenanceStore,
-      ensureProjectSessionRegistered: (input) => this.gatewayActions.ensureProjectSessionRegistered(input),
-      sendPartnerNote: (input) => this.gatewayActions.sendPartnerNote(input),
-      nudgeSessionInbox: (sessionId) => this.nudgeSessionInbox(sessionId),
-    });
-    this.fileHandoffActions = new TransportFileHandoffActions({
-      logger: this.logger,
-      config: this.config,
-      pendingFileHandoffs: this.pendingFileHandoffs,
-      getPrincipalFromContext: (ctx) => this.context.getPrincipalFromContext(ctx),
-      resolveLocaleForContext: (ctx) => this.context.resolveLocaleForContext(ctx),
-      t: (locale, key, vars) => this.context.t(locale, key, vars),
-      replyText: (ctx, text, meta, options) =>
-        this.outputActions.replyText(
-          ctx,
-          text,
-          meta,
-          options as TelegramSendMessageOptions,
-        ),
-      deleteMessage: (chatId, messageId) => this.deleteMessage(chatId, messageId),
-      showPartnerMenu: (ctx) => this.menuFlow.showPartnerMenu(ctx),
-      showLocalMenu: (ctx) => this.menuFlow.showLocalMenu(ctx),
-      showProjectMemberDetail: (ctx, input) =>
-        this.projectView.showProjectMemberDetail(ctx, {
-          ...input,
-          inviteToken: input.inviteToken ?? "",
-        }),
-      getProjectPayloadByUuid: (sessionId, projectUuid) =>
-        this.projectState.getProjectPayloadByUuid(sessionId, projectUuid),
-      ensureProjectSessionRegistered: (input) => this.gatewayActions.ensureProjectSessionRegistered(input),
-      sendPartnerNote: (input) => this.gatewayActions.sendPartnerNote(input),
-      xchangeFileMetaStore: this.xchangeFileMetaStore,
-      sessionStore: this.sessionStore,
-      inboxStore: this.inboxStore,
-      maintenanceStore: this.maintenanceStore,
-      objectStore: this.objectStore,
-      nudgeSessionInbox: (sessionId) => this.nudgeSessionInbox(sessionId),
-    });
-    this.menuCallbacks = new TransportMenuCallbacks({
-      logger: this.logger,
-      getMenuPayloadByKey: (key) => this.menuPayloadStore.getMenuPayload(key),
-      getPrincipalFromContext: (ctx) => this.context.getPrincipalFromContext(ctx),
-      tForContext: (ctx, key, vars) => this.context.tForContext(ctx, key, vars),
-      replyText: (ctx, text, meta, options) =>
-        this.outputActions.replyText(
-          ctx,
-          text,
-          meta,
-          options as TelegramSendMessageOptions,
-        ),
-      editText: (ctx, text, meta, options) =>
-        this.outputActions.editText(
-          ctx,
-          text,
-          meta,
-          options as TelegramEditMessageOptions,
-        ),
-      showMainMenu: (ctx, introText) => this.menuState.showMainMenu(ctx, introText),
-      showLinkMenu: (ctx) => this.menuFlow.showLinkMenu(ctx),
-      showPartnerMenu: (ctx) => this.menuFlow.showPartnerMenu(ctx),
-      showScreenshotsMenu: (ctx, introText) =>
-        this.menuFlow.showScreenshotsMenu(ctx, introText),
-      showStorageMenu: (ctx, introText) =>
-        this.menuFlow.showStorageMenu(ctx, introText),
-      inboxMessageMenu: this.inboxMessageMenu,
-      storageMessageMenu: this.storageMessageMenu,
-      screenshotMessageMenu: this.screenshotMessageMenu,
-      xchangeFileMetaStore: this.xchangeFileMetaStore,
-      inboxStore: this.inboxStore,
-      sessionStore: this.sessionStore,
-      bindingStore: this.bindingStore,
-      objectStore: this.objectStore,
-      formatInboxDetail: (message) => formatInboxDetail(message),
-      formatScreenshotDetail: (sessionId, filePath, meta) =>
-        formatScreenshotDetail(sessionId, filePath, meta),
-      formatStorageDetail: (sessionId, filePath, meta) =>
-        formatStorageDetail(sessionId, filePath, meta),
-      formatFilePreviewLabel: (filePath, meta) =>
-        formatFilePreviewLabel(filePath, meta),
-      listActiveSessionFiles: (sessionId) =>
-        this.xchangeState.listActiveSessionFiles(sessionId),
-      createPartnerFileTargetPayload: (sessionId, targetSessionId, title, filePath) =>
-        this.payloadState.createPartnerFileTargetPayload(
-          sessionId,
-          targetSessionId,
-          title,
-          filePath,
-        ),
-      ensureStoredXchangeFile: (sessionId, filePath, source) =>
-        this.attachmentStore.ensureStoredXchangeFile(sessionId, filePath, source),
-      sendDocumentToChat: (chatId, filePath, caption) =>
-        this.sendDocumentToChat(chatId, filePath, caption),
-      linkSessions: (sessionId, targetSessionId) =>
-        this.linkingActions.linkSessions(sessionId, targetSessionId),
-      maybeNotifyToolsMismatchForSession: (sessionId) => this.maybeNotifyToolsMismatchForSession(sessionId),
-    });
-    this.menuState = new TransportMenuState({
-      logger: this.logger,
-      t: (locale, key, vars) => this.context.t(locale, key, vars),
-      resolveLocaleForContext: (ctx) => this.context.resolveLocaleForContext(ctx),
-      getPrincipalFromContext: (ctx) => this.context.getPrincipalFromContext(ctx),
-      getTmuxStatusLine: async (locale) =>
-        this.context.t(locale, "menu:main.screen.tmux_mode_direct"),
-      setCurrentAttachmentTargetForContext: (ctx, target) =>
-        this.menuFlow.setCurrentAttachmentTargetForContext(ctx, target),
-      renderMenuHtmlScreen: (ctx, text, meta, menu) =>
-        this.menuFlow.renderMenuHtmlScreen(ctx, text, meta, menu as Menu<TelegramMenuContext>),
-      renderMenuScreen: (ctx, text, meta, menu) =>
-        this.menuFlow.renderMenuScreen(ctx, text, meta, menu as Menu<TelegramMenuContext>),
-      replyText: (ctx, text, meta, options) =>
-        this.outputActions.replyText(
-          ctx,
-          text,
-          meta,
-          options as TelegramSendMessageOptions,
-        ),
-      mainMenu: this.mainMenu,
-      sessionsMenu: this.sessionsMenu,
-      inboxMenu: this.inboxMenu,
-      storageMenu: this.storageMenu,
-      browserMenu: this.browserMenu,
-      screenshotsMenu: this.screenshotsMenu,
-      linkMenu: this.linkMenu,
-      partnerMenu: this.partnerMenu,
-      localMenu: this.localMenu,
-      settingsMenu: this.settingsMenu,
-      bufferMenu: this.bufferMenu,
-      developerMenu: this.developerMenu,
-      unpairConfirmMenu: this.unpairConfirmMenu,
-      pruneConfirmMenu: this.pruneConfirmMenu,
-      sessionStore: this.sessionStore,
-      bindingStore: this.bindingStore,
-      inboxStore: this.inboxStore,
-      listActiveSessionScreenshots: (sessionId) =>
-        this.xchangeState.listActiveSessionScreenshots(sessionId),
-      listActiveSessionStorageEntries: (sessionId) =>
-        this.xchangeState.listActiveSessionStorageEntries(sessionId),
-    });
-    this.projectState = new TransportProjectState({
-      config: this.config,
-      getGatewayActorFromContext: (ctx) => this.context.getGatewayActorFromContext(ctx),
-      getPrincipalFromContext: (ctx) => this.context.getPrincipalFromContext(ctx),
-      callGatewayJson: (path, payload) => this.callGatewayJson(path, payload),
-      sessionStore: this.sessionStore,
-      bindingStore: this.bindingStore,
-      maintenanceStore: this.maintenanceStore,
-      menuPayloadStore: this.menuPayloadStore,
-    });
-    this.projectView = new TransportProjectView({
-      config: this.config,
-      projectsMenu: this.projectsMenu,
-      collabToolsMenu: this.collabToolsMenu,
-      collabDeleteMenu: this.collabDeleteMenu,
-      t: (locale, key, vars) => this.context.t(locale, key, vars),
-      resolveLocaleForContext: (ctx) => this.context.resolveLocaleForContext(ctx),
-      resolveLocaleForTelegramUserId: (telegramUserId, telegramLanguageCode) =>
-        this.context.resolveLocaleForTelegramUserId(telegramUserId, telegramLanguageCode),
-      getPrincipalFromContext: (ctx) => this.context.getPrincipalFromContext(ctx),
-      getGatewayActorFromContext: (ctx) => this.context.getGatewayActorFromContext(ctx),
-      ensureGatewayClientUuid: (principal, actor) =>
-        this.gatewayActions.ensureGatewayClientUuid(principal, actor),
-      loadProjectsContext: (ctx) => this.gatewayActions.loadProjectsContext(ctx),
-      listGatewayProjects: (principal, actor) =>
-        this.gatewayActions.listGatewayProjects(principal, actor),
-      listGatewayProjectSessions: (principal, projectUuid) =>
-        this.gatewayActions.listGatewayProjectSessions(principal, projectUuid),
-      listGatewaySessionHistory: (principal, localSessionId) =>
-        this.gatewayActions.listGatewaySessionHistory(principal, localSessionId),
-      collectCollabBroadcastTargets: (principal, _sessionId) =>
-        this.broadcastActions.listCollabBroadcastTargets(principal),
-      ensureOpenedProjectIsActive: (input) =>
-        this.gatewayActions.ensureOpenedProjectIsActive(input),
-      setCurrentAttachmentTargetForContext: (ctx, target) =>
-        this.menuFlow.setCurrentAttachmentTargetForContext(ctx, target),
-      renderMenuScreen: (ctx, text, meta, menu) =>
-        this.menuFlow.renderMenuScreen(ctx, text, meta, menu as Menu<TelegramMenuContext>),
-      replyText: (ctx, text, meta, options) =>
-        this.outputActions.replyText(
-          ctx,
-          text,
-          meta,
-          options as TelegramSendMessageOptions,
-        ),
-      editText: (ctx, text, meta, options) =>
-        this.outputActions.editText(
-          ctx,
-          text,
-          meta,
-          options as TelegramEditMessageOptions,
-        ),
-      replyDocumentWithRetry: (ctx, document, options, meta) =>
-        this.documentActions.replyDocumentWithRetry(ctx, document, options, meta),
-      sessionStore: this.sessionStore,
-      bindingStore: this.bindingStore,
-      maintenanceStore: this.maintenanceStore,
-      xchangeFileMetaStore: this.xchangeFileMetaStore,
-      webAppLaunchRegistry: this.webAppLaunchRegistry,
-      createProjectMemberMenuPayload: (
-        sessionId,
-        projectUuid,
-        targetSessionId,
-        title,
-        extra,
-      ) =>
-        this.payloadState.createProjectMemberMenuPayload(
-          sessionId,
-          projectUuid,
-          targetSessionId,
-          title,
-          extra,
-        ),
-      listActiveSessionFiles: (sessionId) =>
-        this.xchangeState.listActiveSessionFiles(sessionId),
-      formatFilePreviewLabel: (filePath, meta) =>
-        formatFilePreviewLabel(filePath, meta),
-    });
-    this.attachmentStore = new TransportAttachmentStore({
-      sessionStore: this.sessionStore,
-      xchangeFileMetaStore: this.xchangeFileMetaStore,
-      objectStore: this.objectStore,
-      telegramFetch: (input, init) =>
-        this.telegramFetch(input, init as Parameters<typeof this.telegramFetch>[1]),
-      getRequiredBotToken: (action) => this.getRequiredBotToken(action),
-      getTelegramFile: (fileId) => this.bot.api.getFile(fileId),
-    });
-    this.lifecycleActions = new TransportLifecycleActions({
-      logger: this.logger,
-      config: this.config,
-      sessionStore: this.sessionStore,
-      inboxStore: this.inboxStore,
-      bindingStore: this.bindingStore,
-      isTelegramEnabled: () => this.isTelegramEnabled(),
-      nudgeSessionInbox: (sessionId) => this.nudgeSessionInbox(sessionId),
-      resolveLocaleForTelegramUserId: (telegramUserId, telegramLanguageCode) =>
-        this.context.resolveLocaleForTelegramUserId(telegramUserId, telegramLanguageCode),
-      t: (locale, key, options) => this.context.t(locale, key, options),
-      sendNotification: (input) => this.sendNotification(input),
-    });
-    this.menuFlow = new TransportMenuFlow({
-      config: this.config,
-      logger: this.logger,
-      bindingStore: this.bindingStore,
-      sessionStore: this.sessionStore,
-      inboxStore: this.inboxStore,
-      menuState: this.menuState,
-      projectView: this.projectView,
-      liveActions: this.liveActions,
-      tmuxActions: this.tmuxActions,
       pendingRenames: this.pendingRenames,
       pendingBroadcasts: this.pendingBroadcasts,
       pendingPartnerNotes: this.pendingPartnerNotes,
       pendingFileHandoffs: this.pendingFileHandoffs,
       pendingProjects: this.pendingProjects,
+      adminClientViewByPrincipal: this.adminClientViewByPrincipal,
       currentAttachmentTargets: this.currentAttachmentTargets,
-      resolveLocaleForContext: (ctx) => this.context.resolveLocaleForContext(ctx),
-      getPrincipalFromContext: (ctx) => this.context.getPrincipalFromContext(ctx),
-      getGatewayActorFromContext: (ctx) => this.context.getGatewayActorFromContext(ctx),
-      t: (locale, key, options) => this.context.t(locale, key, options),
-      replyText: (ctx, text, meta, options) =>
-        this.outputActions.replyText(
-          ctx,
-          text,
-          meta,
-          options as TelegramSendMessageOptions,
-        ),
-      editText: (ctx, text, meta, options) =>
-        this.outputActions.editText(
-          ctx,
-          text,
-          meta,
-          options as TelegramEditMessageOptions,
-        ),
-      replyDocumentWithRetry: (ctx, document, options, meta) =>
-        this.documentActions.replyDocumentWithRetry(ctx, document, options, meta),
-    });
-    this.gatewayDirectory = new TransportGatewayDirectory({
-      logger: this.logger,
-      config: this.config,
-      callGatewayJson: (path, payload) => this.callGatewayJson(path, payload),
-    });
-    this.gatewayActions = new TransportGatewayActions({
       getCollaborationService: () => this.collaborationService,
-      projectState: this.projectState,
-      gatewayDirectory: this.gatewayDirectory,
-    });
-    this.messageFlow = new TransportMessageFlow({
-      logger: this.logger,
-      config: this.config,
-      bindingStore: this.bindingStore,
-      sessionStore: this.sessionStore,
-      inboxStore: this.inboxStore,
-      adminAuthStore: this.adminAuthStore,
-      waiters: this.waiters,
-      currentAttachmentTargets: this.currentAttachmentTargets,
+      createMenuOptions: (handler) => this.createMenuOptions(handler),
+      getRequiredBotToken: (action) => this.getRequiredBotToken(action),
+      deleteMessage: (telegramChatId, telegramMessageId) =>
+        this.deleteMessage(telegramChatId, telegramMessageId),
+      sendDocumentToChat: (telegramChatId, filePath, caption) =>
+        this.sendDocumentToChat(telegramChatId, filePath, caption),
+      sendNotification: (input) => this.sendNotification(input),
+      nudgeSessionInbox: (sessionId) => this.nudgeSessionInbox(sessionId),
+      maybeNotifyToolsMismatchForSession: (sessionId) =>
+        this.maybeNotifyToolsMismatchForSession(sessionId),
+      callGatewayJson: (endpointPath, body) => this.callGatewayJson(endpointPath, body),
       isAdminAuthEnabled: () => this.isAdminAuthEnabled(),
       isAdminBotProfile: () => this.isAdminBotProfile(),
       isPrincipalAdminAuthorized: (principal) =>
         this.isPrincipalAdminAuthorized(principal),
-      getPrincipalFromContext: (ctx) => this.context.getPrincipalFromContext(ctx),
-      extractIncomingText: (message) => extractIncomingText(message),
-      collectIncomingAttachments: (message) =>
-        collectIncomingAttachments(message),
-      buildInboxText: (text, attachments) =>
-        buildInboxText(text, attachments),
-      clearPendingInteractionsForContext: (ctx) =>
-        this.menuFlow.clearPendingInteractionsForContext(ctx),
-      handlePendingRename: (ctx, text) =>
-        this.sessionActions.handlePendingRename(ctx, text),
-      handlePendingBroadcast: (ctx, text) =>
-        this.broadcastActions.handlePendingBroadcast(ctx, text),
-      handlePendingPartnerNote: (ctx, text) =>
-        this.partnerActions.handlePendingPartnerNote(ctx, text),
-      handlePendingFileHandoff: (ctx, text) =>
-        this.fileHandoffActions.handlePending(ctx, text),
-      handlePendingProject: (ctx, text) => this.projectActions.handlePendingProject(ctx, text),
-      replyText: (ctx, text, meta, options) =>
-        this.outputActions.replyText(
-          ctx,
-          text,
-          meta,
-          options as TelegramSendMessageOptions,
-        ),
-      tForContext: (ctx, key, options) => this.context.tForContext(ctx, key, options),
-      showSessionsMenu: (ctx, introText) =>
-        this.menuFlow.showSessionsMenu(ctx, introText),
-      showHelp: (ctx) => this.menuFlow.showHelp(ctx),
-      showAdminMainMenu: (ctx, introText) => this.adminActions.showMainMenu(ctx, introText),
-      showAdminClientsMenu: (ctx, introText) =>
-        this.adminActions.showClientsMenu(ctx, introText),
-      mainMenu: this.mainMenu,
-      bindRelaySessionToPrincipal: (input) =>
-        this.projectState.bindRelaySessionToPrincipal(input),
-      clearWaiter: (requestId) => this.requestFlow.clearWaiter(requestId),
-      callGatewayJson: (path, payload) =>
-        this.callGatewayJson(path, payload as Record<string, unknown> | undefined),
-      scheduleTmuxNudgeForInboxMessage: (sessionId, session) =>
-        this.tmuxRuntime.scheduleTmuxNudgeForInboxMessage(sessionId, session),
-      downloadIncomingAttachments: (session, sessionId, sourceTelegramMessageId, attachments) =>
-        this.attachmentStore.downloadIncomingAttachments(
-          session,
-          sessionId,
-          sourceTelegramMessageId,
-          attachments,
-        ),
-      storeTelegramUploadMetas: (input) =>
-        this.attachmentStore.storeTelegramUploadMetas(input),
-      deliverAttachmentToPartner: (input) =>
-        this.fileHandoffActions.deliverToPartnerPublic(input).then(() => {}),
     });
-    this.menuShell = new TransportMenuShell({
-      logger: this.logger,
-      tForContext: (ctx, key) => this.context.tForContext(ctx, key),
-      showPartnerMenu: (ctx) => this.menuFlow.showPartnerMenu(ctx),
-      showProjectsMenu: (ctx) => this.menuFlow.showProjectsMenu(ctx),
-      showAdminClientSessionList: (ctx, scope) =>
-        this.adminActions.showClientSessionList(ctx, scope),
-      showAdminClientSessionsMenu: (ctx) =>
-        this.adminActions.showClientSessionsMenu(ctx),
-      handleMessage: (ctx) => this.messageFlow.handleMessage(ctx),
-      cancelPendingBroadcast: (ctx) => this.broadcastActions.cancelPendingBroadcast(ctx),
-      cancelPendingPartnerNote: (ctx) => this.partnerActions.cancelPendingPartnerNote(ctx),
-      cancelPendingFileHandoff: (ctx) => this.fileHandoffActions.cancelPending(ctx),
-      handleAdminClientSessionLiveCallback: (ctx) =>
-        this.adminActions.handleClientSessionLiveCallback(ctx),
-      handleAdminClientSessionBindCallback: (ctx) =>
-        this.adminActions.handleClientSessionBindCallback(ctx),
-      handleAdminClientSessionOpenCallback: (ctx, readPayloadKey) =>
-        this.adminActions.handleClientSessionOpenCallback(ctx, readPayloadKey),
-      handleProjectSetCallback: (ctx) =>
-        this.projectActions.handleProjectSetCallback(ctx),
-      handleProjectMembersCallback: (ctx) =>
-        this.projectActions.handleProjectMembersCallback(ctx),
-      handleProjectMemberOpenCallback: (ctx) =>
-        this.projectActions.handleProjectMemberOpenCallback(ctx),
-      handleProjectMemberNoteCallback: (ctx) =>
-        this.projectActions.handleProjectMemberNoteCallback(ctx),
-      handleProjectMemberLiveCallback: (ctx) =>
-        this.projectActions.handleProjectMemberLiveCallback(ctx),
-      handleLiveApprovalCallback: (ctx) =>
-        this.projectActions.handleLiveApprovalCallback(ctx),
-      handleProjectDetailCallback: (ctx) =>
-        this.projectActions.handleProjectDetailCallback(ctx),
-      handleProjectDeleteCallback: (ctx) =>
-        this.projectActions.handleProjectDeleteCallback(ctx),
-      handleProjectLeaveCallback: (ctx) =>
-        this.projectActions.handleProjectLeaveCallback(ctx),
-    });
-    this.eventActions = new TransportEventActions({
-      logger: this.logger,
-      config: this.config,
-      sessionStore: this.sessionStore,
-      inboxStore: this.inboxStore,
-      bindingStore: this.bindingStore,
-      webAppLaunchRegistry: this.webAppLaunchRegistry,
-      createLiveApprovalMenuPayload: (input) =>
-        this.payloadState.createLiveApprovalMenuPayload(input),
-      nudgeSessionInbox: (sessionId) => this.nudgeSessionInbox(sessionId),
-      sendNotification: (input) => this.sendNotification(input),
-      resolveLocaleForTelegramUserId: (telegramUserId, telegramLanguageCode) =>
-        this.context.resolveLocaleForTelegramUserId(telegramUserId, telegramLanguageCode),
-      t: (locale, key, options) => this.context.t(locale, key, options),
-      tForTelegramUserId: (telegramUserId, key, options) =>
-        this.context.tForTelegramUserId(telegramUserId, key, options),
-      sendChatMessage: (telegramChatId, text, options, meta) =>
-        this.outputActions.sendChatMessage(telegramChatId, text, options, meta),
-      buildLiveViewUrl: (input) => this.liveActions.buildUrl(input),
-      buildLiveViewKeyboard: (buildUrlForMode, locale) =>
-        this.liveActions.buildKeyboard(buildUrlForMode, locale),
-    });
-    this.projectEvents = new TransportProjectEvents({
-      sessionStore: this.sessionStore,
-      bindingStore: this.bindingStore,
-      resolveLocaleForTelegramUserId: (telegramUserId, telegramLanguageCode) =>
-        this.context.resolveLocaleForTelegramUserId(telegramUserId, telegramLanguageCode),
-      t: (locale, key, options) => this.context.t(locale, key, options),
-      sendNotification: (input) => this.sendNotification(input),
-    });
-    this.requestFlow = new TransportRequestFlow({
-      logger: this.logger,
-      config: this.config,
-      adminAuthStore: this.adminAuthStore,
-      maintenanceStore: this.maintenanceStore,
-      waiters: this.waiters,
-      isTelegramEnabled: () => this.isTelegramEnabled(),
-      isAdminAuthEnabled: () => this.isAdminAuthEnabled(),
-      resolveLocaleForTelegramUserId: (telegramUserId, telegramLanguageCode) =>
-        this.context.resolveLocaleForTelegramUserId(telegramUserId, telegramLanguageCode),
-      t: (locale, key, options) => this.context.t(locale, key, options),
-      sendTextChunks: (chatId, body, meta) =>
-        this.outputActions.sendTextChunks(chatId, body, meta),
-      callGatewayJson: (path, payload) => this.callGatewayJson(path, payload),
-    });
-    this.sessionActions = new TransportSessionActions({
-      logger: this.logger,
-      config: this.config,
-      bindingStore: this.bindingStore,
-      sessionStore: this.sessionStore,
-      maintenanceStore: this.maintenanceStore,
-      pendingRenames: this.pendingRenames,
-      pendingBroadcasts: this.pendingBroadcasts,
-      mainMenu: this.mainMenu,
-      resolveLocaleForContext: (ctx) => this.context.resolveLocaleForContext(ctx),
-      getPrincipalFromContext: (ctx) => this.context.getPrincipalFromContext(ctx),
-      t: (locale, key, options) => this.context.t(locale, key, options),
-      replyText: (ctx, text, meta, options) =>
-        this.outputActions.replyText(
-          ctx,
-          text,
-          meta,
-          options as TelegramSendMessageOptions,
-        ),
-      showSessionsMenu: (ctx, introText) =>
-        this.menuFlow.showSessionsMenu(ctx, introText),
-      clearPendingInteractionsForContext: (ctx) =>
-        this.menuFlow.clearPendingInteractionsForContext(ctx),
-      clearTmuxNudgeDebounceTimers: () => this.tmuxRuntime.clearTmuxNudgeDebounceTimers(),
-      callGatewayJson: (path, payload) => this.callGatewayJson(path, payload),
-    });
-    this.projectActions = new TransportProjectActions({
-      resolveLocaleForContext: (ctx) => this.context.resolveLocaleForContext(ctx),
-      t: (locale, key, vars) => this.context.t(locale, key, vars),
-      getPrincipalFromContext: (ctx) => this.context.getPrincipalFromContext(ctx),
-      extractCallbackSuffix: (ctx, prefix) => extractCallbackSuffix(ctx, prefix),
-      getGatewayActorFromContext: (ctx) => this.context.getGatewayActorFromContext(ctx),
-      bindingStore: this.bindingStore,
-      sessionStore: this.sessionStore,
-      pendingProjects: this.pendingProjects,
-      ensureGatewayClientUuid: (principal, actor) =>
-        this.gatewayActions.ensureGatewayClientUuid(principal, actor),
-      listGatewayProjects: (principal) => this.gatewayActions.listGatewayProjects(principal),
-      callGatewayJson: (path, payload) => this.callGatewayJson(path, payload),
-      activateProjectForSession: (input) =>
-        this.gatewayActions.activateProjectForSession(input),
-      ensureOpenedProjectIsActive: (input) =>
-        this.gatewayActions.ensureOpenedProjectIsActive(input),
-      getProjectPayloadByUuid: (sessionId, projectUuid) =>
-        this.projectState.getProjectPayloadByUuid(sessionId, projectUuid),
-      getProjectMemberPayloadByKey: (payloadKey) =>
-        this.projectState.getProjectMemberPayloadByKey(payloadKey),
-      getPartnerFileTargetPayloadByKey: (payloadKey) =>
-        this.projectState.getPartnerFileTargetPayloadByKey(payloadKey),
-      getLiveApprovalPayloadByKey: (payloadKey) =>
-        this.projectState.getLiveApprovalPayloadByKey(payloadKey),
-      beginFileHandoffModeForTarget: (ctx, input) =>
-        this.fileHandoffActions.beginModeForTarget(ctx, input),
-      beginPartnerNoteMode: (ctx, kind, target) =>
-        this.partnerActions.beginPartnerNoteMode(ctx, kind, target),
-      showProjectMembers: (ctx, input) => this.projectView.showProjectMembers(ctx, input),
-      showProjectMemberDetail: (ctx, input) => this.projectView.showProjectMemberDetail(ctx, input),
-      showProjectMemberFiles: (ctx, input) => this.projectView.showProjectMemberFiles(ctx, input),
-      showProjectsMenu: (ctx, introText) =>
-        this.menuFlow.showProjectsMenu(ctx, introText),
-      showCollabDeleteMenu: (ctx, introText) =>
-        this.menuFlow.showCollabDeleteMenu(ctx, introText),
-      replyText: (ctx, text, meta) => this.outputActions.replyText(ctx, text, meta),
-      editText: (ctx, text, meta) => this.outputActions.editText(ctx, text, meta),
-    });
-    this.projectEntryActions = new TransportProjectEntryActions({
-      bindingStore: this.bindingStore,
-      sessionStore: this.sessionStore,
-      menuPayloadStore: this.menuPayloadStore,
-      pendingProjects: this.pendingProjects,
-      resolveLocaleForContext: (ctx) => this.context.resolveLocaleForContext(ctx),
-      getPrincipalFromContext: (ctx) => this.context.getPrincipalFromContext(ctx),
-      t: (locale, key, options) => this.context.t(locale, key, options),
-      replyText: (ctx, text, meta) => this.outputActions.replyText(ctx, text, meta),
-      showProjectsMenu: (ctx, introText) =>
-        this.menuFlow.showProjectsMenu(ctx, introText),
-      listGatewayProjects: (principal) => this.gatewayActions.listGatewayProjects(principal),
-      getProjectPayloadByUuid: (sessionId, projectUuid) =>
-        this.projectState.getProjectPayloadByUuid(sessionId, projectUuid),
-      ensureOpenedProjectIsActive: (input) =>
-        this.gatewayActions.ensureOpenedProjectIsActive(input),
-      showProjectMembers: (ctx, input) => this.projectView.showProjectMembers(ctx, input),
-      ensureGatewayClientUuid: (principal) =>
-        this.gatewayActions.ensureGatewayClientUuid(principal),
-      callGatewayJson: (path, payload) => this.callGatewayJson(path, payload),
-    });
-    this.mainMenu.register([
-      this.adminMainMenu,
-      this.inboxMenu,
-      this.storageMenu,
-      this.browserMenu,
-      this.projectsMenu,
-      this.collabToolsMenu,
-      this.collabDeleteMenu,
-      this.localMenu,
-      this.screenshotsMenu,
-      this.linkMenu,
-      this.partnerMenu,
-      this.sessionsMenu,
-      this.bufferMenu,
-      this.settingsMenu,
-      this.developerMenu,
-      this.unpairConfirmMenu,
-      this.pruneConfirmMenu,
-      this.inboxMessageMenu,
-      this.storageMessageMenu,
-      this.screenshotMessageMenu,
-    ]);
-    this.adminMainMenu.register([
-      this.adminClientsMenu,
-      this.adminClientSessionsMenu,
-      this.adminClientSessionDetailMenu,
-      this.adminToolsMenu,
-    ]);
+    this.telegramFetch = composition.telegramFetch;
+    this.bot = composition.bot;
+    this.mainMenu = composition.mainMenu;
+    this.adminMainMenu = composition.adminMainMenu;
+    this.adminClientsMenu = composition.adminClientsMenu;
+    this.adminClientSessionsMenu = composition.adminClientSessionsMenu;
+    this.adminClientSessionDetailMenu = composition.adminClientSessionDetailMenu;
+    this.adminToolsMenu = composition.adminToolsMenu;
+    this.inboxMenu = composition.inboxMenu;
+    this.storageMenu = composition.storageMenu;
+    this.browserMenu = composition.browserMenu;
+    this.projectsMenu = composition.projectsMenu;
+    this.collabToolsMenu = composition.collabToolsMenu;
+    this.collabDeleteMenu = composition.collabDeleteMenu;
+    this.localMenu = composition.localMenu;
+    this.screenshotsMenu = composition.screenshotsMenu;
+    this.linkMenu = composition.linkMenu;
+    this.partnerMenu = composition.partnerMenu;
+    this.sessionsMenu = composition.sessionsMenu;
+    this.bufferMenu = composition.bufferMenu;
+    this.settingsMenu = composition.settingsMenu;
+    this.developerMenu = composition.developerMenu;
+    this.unpairConfirmMenu = composition.unpairConfirmMenu;
+    this.pruneConfirmMenu = composition.pruneConfirmMenu;
+    this.inboxMessageMenu = composition.inboxMessageMenu;
+    this.storageMessageMenu = composition.storageMessageMenu;
+    this.screenshotMessageMenu = composition.screenshotMessageMenu;
+    this.tmuxActions = composition.tmuxActions;
+    this.liveActions = composition.liveActions;
+    this.lifecycleActions = composition.lifecycleActions;
+    this.adminActions = composition.adminActions;
+    this.adminMenus = composition.adminMenus;
+    this.attachmentStore = composition.attachmentStore;
+    this.broadcastActions = composition.broadcastActions;
+    this.context = composition.context;
+    this.documentActions = composition.documentActions;
+    this.eventActions = composition.eventActions;
+    this.partnerActions = composition.partnerActions;
+    this.fileHandoffActions = composition.fileHandoffActions;
+    this.linkingActions = composition.linkingActions;
+    this.menuFactories = composition.menuFactories;
+    this.menuFingerprints = composition.menuFingerprints;
+    this.menuFlow = composition.menuFlow;
+    this.menuShell = composition.menuShell;
+    this.gatewayDirectory = composition.gatewayDirectory;
+    this.gatewayActions = composition.gatewayActions;
+    this.messageFlow = composition.messageFlow;
+    this.menuCallbacks = composition.menuCallbacks;
+    this.menuState = composition.menuState;
+    this.payloadState = composition.payloadState;
+    this.projectMenus = composition.projectMenus;
+    this.projectEvents = composition.projectEvents;
+    this.projectState = composition.projectState;
+    this.projectView = composition.projectView;
+    this.projectActions = composition.projectActions;
+    this.projectEntryActions = composition.projectEntryActions;
+    this.requestFlow = composition.requestFlow;
+    this.sessionActions = composition.sessionActions;
+    this.outputActions = composition.outputActions;
+    this.tmuxRuntime = composition.tmuxRuntime;
+    this.xchangeState = composition.xchangeState;
     this.bot.use(async (ctx, next) => {
       await this.handleAdminAccessMiddleware(ctx, next);
     });
@@ -1472,6 +668,271 @@ export class TelegramTransport implements HumanTransport {
     input: HumanTransportNotification,
   ): Promise<{ externalMessageId?: string | number }> {
     return this.requestFlow.sendNotification(input);
+  }
+
+  public async handleProjectMemberNoteCallback(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    if (this.projectActions) {
+      await this.projectActions.handleProjectMemberNoteCallback(ctx);
+      return;
+    }
+
+    const data = ctx.callbackQuery?.data ?? "";
+    const match = data.match(/^project-member-note:(question|share):(.+)$/u);
+    if (!match) {
+      await ctx.answerCallbackQuery({
+        text: "Действие с участником проекта некорректно.",
+        show_alert: true,
+      });
+      return;
+    }
+    const [, kind, payloadKeyRaw] = match;
+    const payloadKey = payloadKeyRaw?.trim();
+    if (!payloadKey) {
+      await ctx.answerCallbackQuery({
+        text: "Данные участника проекта некорректны или устарели.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const payload = await (this as unknown as {
+      getProjectMemberPayloadByKey: (payloadKey: string) => Promise<{
+        targetSessionId?: string;
+        targetSessionLabel?: string;
+        projectUuid?: string;
+      } | null>;
+    }).getProjectMemberPayloadByKey(payloadKey);
+    if (!payload) {
+      await ctx.answerCallbackQuery({
+        text: "Данные участника проекта некорректны или устарели.",
+        show_alert: true,
+      });
+      await ctx.deleteMessage().catch(() => undefined);
+      return;
+    }
+
+    await (this as unknown as {
+      beginPartnerNoteMode: (
+        ctx: TelegramMenuContext,
+        kind: PartnerNoteKind,
+        target?: {
+          targetSessionId?: string;
+          targetSessionLabel?: string;
+          projectUuid?: string;
+        },
+      ) => Promise<void>;
+    }).beginPartnerNoteMode(ctx, kind as PartnerNoteKind, {
+      ...(payload.targetSessionId ? { targetSessionId: payload.targetSessionId } : {}),
+      ...(payload.targetSessionLabel ? { targetSessionLabel: payload.targetSessionLabel } : {}),
+      ...(payload.projectUuid ? { projectUuid: payload.projectUuid } : {}),
+    });
+  }
+
+  public async handlePendingPartnerNote(
+    ctx: TelegramMenuContext,
+    text: string,
+  ): Promise<boolean> {
+    if (this.partnerActions) {
+      return this.partnerActions.handlePendingPartnerNote(ctx, text);
+    }
+
+    const principal = (this as unknown as {
+      getPrincipalFromContext: (
+        ctx: TelegramMenuContext,
+      ) => { telegramChatId: number; telegramUserId: number } | null;
+    }).getPrincipalFromContext(ctx);
+    if (!principal) {
+      return false;
+    }
+
+    const principalKey = `${principal.telegramChatId}:${principal.telegramUserId}`;
+    const pending = this.pendingPartnerNotes.get(principalKey) as
+      | {
+          sessionId: string;
+          kind: PartnerNoteKind;
+          targetSessionId?: string;
+          targetSessionLabel?: string;
+          projectUuid?: string;
+        }
+      | undefined;
+    if (!pending) {
+      return false;
+    }
+
+    if (text.startsWith("/")) {
+      this.pendingPartnerNotes.delete(principalKey);
+      return false;
+    }
+
+    const parsed = parsePartnerNoteText(text);
+    const sourceSession = await this.sessionStore.getSession(pending.sessionId);
+    const sourceLabel = sourceSession?.label ?? pending.sessionId;
+    const targetLabel = pending.targetSessionLabel ?? pending.targetSessionId ?? "partner";
+
+    this.pendingPartnerNotes.delete(principalKey);
+
+    if (isExecutorTargetKind(pending.kind)) {
+      if (pending.projectUuid) {
+        await (this as unknown as {
+          ensureProjectSessionRegistered: (input: {
+            principal: { telegramChatId: number; telegramUserId: number };
+            sessionId: string;
+            projectUuid: string;
+          }) => Promise<void>;
+        }).ensureProjectSessionRegistered({
+          principal,
+          sessionId: pending.sessionId,
+          projectUuid: pending.projectUuid,
+        });
+      }
+
+      const delegatedMessage = [
+        `Пользователь из Telegram просит тебя выполнить задачу для сессии ${sourceLabel}.`,
+        `Маршрут результата: ${targetLabel} -> ${sourceLabel}`,
+        "",
+        "Задача:",
+        parsed.message,
+      ].join("\n");
+      const expectedReply = [
+        `Подготовь результат для сессии ${sourceLabel}.`,
+        "После подготовки обязательно отправь его обратно через send_partner_note.",
+        "Задача не завершена, пока send_partner_note не отработал успешно.",
+      ].join(" ");
+      const output = await (this as unknown as {
+        sendPartnerNote: (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+      }).sendPartnerNote({
+        session_id: pending.sessionId,
+        ...(pending.targetSessionId ? { target_session_id: pending.targetSessionId } : {}),
+        ...(pending.projectUuid ? { project_uuid: pending.projectUuid } : {}),
+        kind: pending.kind,
+        summary: parsed.summary,
+        message: delegatedMessage,
+        expected_reply: expectedReply,
+        requires_reply: true,
+      });
+
+      const sent = await (this as unknown as {
+        replyText: (
+          ctx: TelegramMenuContext,
+          text: string,
+          meta: { kind: "menu"; sessionId?: string },
+        ) => Promise<{ message_id: number } | void>;
+      }).replyText(
+        ctx,
+        [
+          "Задача отправлена.",
+          `Маршрут результата: ${targetLabel} -> ${sourceLabel}`,
+          `Тип: ${pending.kind}`,
+          `Кратко: ${parsed.summary}`,
+          `Share: ${String(output.share_id ?? "")}`,
+        ].join("\n"),
+        { kind: "menu", sessionId: pending.sessionId },
+      );
+
+      if (
+        output.delivery_status === "queued" &&
+        sent &&
+        "message_id" in sent &&
+        ctx.chat
+      ) {
+        await this.maintenanceStore.setOutgoingDeliveryNotice({
+          deliveryUuid: String(output.inbox_message_id),
+          sessionId: pending.sessionId,
+          telegramChatId: ctx.chat.id,
+          telegramMessageId: sent.message_id,
+          shareId: String(output.share_id),
+          kind: String(output.kind),
+          summary: parsed.summary,
+          ...(output.project_name ? { projectName: String(output.project_name) } : {}),
+          ...(output.target_actor_label
+            ? { targetLabel: String(output.target_actor_label) }
+            : { targetLabel }),
+          ...(output.target_session_label
+            ? { targetSessionLabel: String(output.target_session_label) }
+            : { targetSessionLabel: targetLabel }),
+        });
+      }
+      return true;
+    }
+
+    await this.enqueuePartnerNoteInstruction({
+      principal,
+      sessionId: pending.sessionId,
+      sourceTelegramMessageId: ctx.message?.message_id ?? 0,
+      kind: pending.kind,
+      summary: parsed.summary,
+      message: parsed.message,
+      ...(pending.targetSessionId ? { targetSessionId: pending.targetSessionId } : {}),
+      ...(pending.targetSessionLabel ? { targetSessionLabel: pending.targetSessionLabel } : {}),
+      ...(pending.projectUuid ? { projectUuid: pending.projectUuid } : {}),
+    });
+
+    await (this as unknown as {
+      replyText: (
+        ctx: TelegramMenuContext,
+        text: string,
+        meta: { kind: "menu"; sessionId?: string },
+      ) => Promise<{ message_id: number } | void>;
+    }).replyText(
+      ctx,
+      [
+        "Инструкция добавлена во входящие текущей сессии.",
+        `Маршрут отправки: ${sourceLabel} -> ${targetLabel}`,
+        `Тип: ${pending.kind}`,
+        `Кратко: ${parsed.summary}`,
+      ].join("\n"),
+      { kind: "menu", sessionId: pending.sessionId },
+    );
+    return true;
+  }
+
+  public async enqueuePartnerNoteInstruction(input: {
+    principal: { telegramChatId: number; telegramUserId: number };
+    sessionId: string;
+    sourceTelegramMessageId: number;
+    kind: PartnerNoteKind;
+    summary: string;
+    message: string;
+    targetSessionId?: string;
+    targetSessionLabel?: string;
+    projectUuid?: string;
+  }): Promise<void> {
+    const session = await this.sessionStore.getSession(input.sessionId);
+    const sourceLabel = session?.label ?? input.sessionId;
+    const targetLabel = input.targetSessionLabel ?? input.targetSessionId ?? "напарник";
+    await this.inboxStore.createInboxMessage({
+      id: createInboxMessageId(),
+      sessionId: input.sessionId,
+      telegramChatId: input.principal.telegramChatId,
+      telegramUserId: input.principal.telegramUserId,
+      sourceTelegramMessageId: input.sourceTelegramMessageId,
+      text: [
+        "Пользователь просит текущую сессию выполнить работу и отправить результат другой сессии.",
+        `Маршрут отправки: ${sourceLabel} -> ${targetLabel}`,
+        `Тип: ${input.kind}`,
+        `Кратко: ${input.summary}`,
+        ...(input.projectUuid ? [`Проект UUID: ${input.projectUuid}`] : []),
+        ...(input.targetSessionId ? [`Target session ID: ${input.targetSessionId}`] : []),
+        "",
+        "Содержимое для отправки:",
+        input.message,
+        "",
+        "Не пересылай это как новую задачу в target-сессию.",
+        "Сначала выполни работу в текущей сессии сам.",
+        "Через send_partner_note или send_partner_file отправляй только результат, а не исходное поручение.",
+        "Не используй linked partner для отправки. Передай target_session_id явно в send_partner_note.",
+        "После подготовки обязательно используй send_partner_note.",
+        "Задача не завершена, пока send_partner_note не отработал успешно.",
+        "Если запрос касается существующего локального файла, не ограничивайся note.",
+        "Найди файл в локальном workspace и вызови send_partner_file.",
+        "Не заменяй это на plain send_partner_note с упоминанием имени файла.",
+        "Недостаточно просто упомянуть имя файла в тексте note.",
+      ].join("\n"),
+      receivedAt: new Date().toISOString(),
+    });
+    await this.nudgeSessionInbox(input.sessionId);
   }
 
   public async handleProjectMemberJoinedEvent(input: {

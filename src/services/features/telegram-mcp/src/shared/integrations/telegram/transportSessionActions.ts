@@ -14,7 +14,7 @@ export interface TransportSessionActionsHost {
   maintenanceStore: MaintenanceStore;
   pendingRenames: Map<string, PendingRenameRecord>;
   pendingBroadcasts: Map<string, PendingBroadcastRecord>;
-  mainMenu: unknown;
+  getMainMenu(): unknown;
   resolveLocaleForContext(ctx: TelegramMenuContext): Promise<SupportedLocale>;
   getPrincipalFromContext(
     ctx: TelegramMenuContext,
@@ -209,11 +209,11 @@ export class TransportSessionActions {
 
     await this.host.replyText(
       ctx,
-      `Session renamed: ${label}`,
+        `Session renamed: ${label}`,
       { kind: "menu", sessionId: pending.sessionId },
       {
         reply_markup:
-          this.host.mainMenu as NonNullable<TelegramSendMessageOptions["reply_markup"]>,
+          this.host.getMainMenu() as NonNullable<TelegramSendMessageOptions["reply_markup"]>,
       },
     );
     return true;

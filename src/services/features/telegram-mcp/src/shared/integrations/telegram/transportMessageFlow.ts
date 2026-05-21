@@ -89,7 +89,7 @@ export interface TransportMessageFlowHost {
   showHelp(ctx: TelegramMenuContext): Promise<void>;
   showAdminMainMenu(ctx: TelegramMenuContext, introText?: string): Promise<void>;
   showAdminClientsMenu(ctx: TelegramMenuContext, introText?: string): Promise<void>;
-  mainMenu: unknown;
+  getMainMenu(): unknown;
   bindRelaySessionToPrincipal(input: {
     principal: { telegramChatId: number; telegramUserId: number };
     ctx: TelegramMenuContext;
@@ -658,7 +658,7 @@ export class TransportMessageFlow {
         { kind: "transport", sessionId },
         {
           reply_markup:
-            this.host.mainMenu as NonNullable<TelegramSendMessageOptions["reply_markup"]>,
+            this.host.getMainMenu() as NonNullable<TelegramSendMessageOptions["reply_markup"]>,
         },
       );
       return;
@@ -763,7 +763,7 @@ export class TransportMessageFlow {
       { kind: "inbox", sessionId },
       {
         reply_markup:
-          this.host.mainMenu as NonNullable<TelegramSendMessageOptions["reply_markup"]>,
+          this.host.getMainMenu() as NonNullable<TelegramSendMessageOptions["reply_markup"]>,
       },
     );
   }
@@ -836,7 +836,7 @@ export class TransportMessageFlow {
         { kind: "inbox", sessionId },
         {
           reply_markup:
-            this.host.mainMenu as NonNullable<TelegramSendMessageOptions["reply_markup"]>,
+            this.host.getMainMenu() as NonNullable<TelegramSendMessageOptions["reply_markup"]>,
         },
       );
       return;
@@ -882,7 +882,7 @@ export class TransportMessageFlow {
       { kind: "inbox", sessionId },
       {
         reply_markup:
-          this.host.mainMenu as NonNullable<TelegramSendMessageOptions["reply_markup"]>,
+          this.host.getMainMenu() as NonNullable<TelegramSendMessageOptions["reply_markup"]>,
       },
     );
   }

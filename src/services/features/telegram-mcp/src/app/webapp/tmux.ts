@@ -1,7 +1,9 @@
 export {
   captureTmuxPaneRange,
   captureVisibleTmuxPane,
+  captureVisibleTmuxPaneAnsi,
   getTmuxWindowHeight,
+  getTmuxWindowSize,
   isTmuxUnavailableError,
   sendAllowedTmuxAction,
   sendTmuxLiteralText,

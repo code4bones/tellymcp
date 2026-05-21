@@ -17,10 +17,17 @@ import {
 } from "./src/app/webapp/auth";
 import {
   captureVisibleTmuxPane,
+  captureVisibleTmuxPaneAnsi,
+  getTmuxWindowSize,
   isTmuxUnavailableError,
   sendAllowedTmuxAction,
   sendTmuxLiteralText,
 } from "./src/app/webapp/tmux";
+import {
+  isStreamableTerminalTarget,
+  subscribeForegroundTerminal,
+  type TerminalExitInfo,
+} from "./src/shared/integrations/terminal/client";
 import {
   hasLocalTargetSession,
   hasOutgoingDeliveryNotice,
@@ -51,6 +58,8 @@ const CLIENT_RECONNECT_DELAY_MS = 3000;
 const LIVE_REQUEST_TIMEOUT_MS = 20000;
 const TOOLS_SYNC_CHECK_INTERVAL_MS = 15000;
 const WS_HEARTBEAT_INTERVAL_MS = 10000;
+const HTTP_SERVER_WAIT_TIMEOUT_MS = 15000;
+const HTTP_SERVER_WAIT_STEP_MS = 100;
 
 function requireTelegramBotToken(
   runtime: ReturnType<TelegramMcpRuntimeServiceInstance["getRuntime"]>,
@@ -142,7 +151,13 @@ type GatewaySocketHeartbeatPong = {
 type GatewaySocketLiveRequest = {
   type: "live_request";
   request_id: string;
-  request_type: "bootstrap" | "bootstrap_validate" | "view" | "action";
+  request_type:
+    | "bootstrap"
+    | "bootstrap_validate"
+    | "view"
+    | "action"
+    | "stream_subscribe"
+    | "stream_unsubscribe";
   local_session_id: string;
   payload: Record<string, unknown>;
 };
@@ -256,6 +271,13 @@ type GatewaySocketLiveEvent = {
   payload: GatewaySocketLiveApprovalPayload;
 };
 
+type GatewaySocketLiveStreamEvent = {
+  type: "live_stream_event";
+  stream_id: string;
+  event: "snapshot" | "data" | "exit";
+  payload: Record<string, unknown>;
+};
+
 type GatewaySocketTransportReplyPayload = {
   request_id: string;
   answer: string;
@@ -303,6 +325,7 @@ type GatewaySocketMessage =
   | GatewaySocketActionRequest
   | GatewaySocketActionResponse
   | GatewaySocketLiveEvent
+  | GatewaySocketLiveStreamEvent
   | GatewaySocketTransportEvent
   | GatewaySocketToolsEvent
   | GatewaySocketProjectEvent
@@ -323,6 +346,11 @@ type ActionRequestPending = {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
+};
+
+type LiveStreamHandler = {
+  clientUuid: string;
+  onEvent: (event: GatewaySocketLiveStreamEvent) => void;
 };
 
 type StandaloneHttpServiceCarrier = Service & {
@@ -353,8 +381,11 @@ type GatewaySocketCarrier = Service & {
   connectedClientToolsAlerts?: Map<any, Map<string, string>>;
   pendingLiveRequests?: Map<string, LiveRequestPending>;
   pendingActionRequests?: Map<string, ActionRequestPending>;
+  liveStreamHandlers?: Map<string, LiveStreamHandler>;
+  localLiveStreamSubscriptions?: Map<string, () => void>;
   getRuntimeOrThrow?: () => ReturnType<TelegramMcpRuntimeServiceInstance["getRuntime"]>;
   getHttpServerOrThrow?: () => HttpServer;
+  waitForHttpServer?: () => Promise<HttpServer>;
   startGatewayWsServer?: () => Promise<void>;
   startGatewayWsClient?: () => Promise<void>;
   scheduleGatewayWsReconnect?: () => void;
@@ -410,9 +441,23 @@ type GatewaySocketCarrier = Service & {
   requestLiveRelay?: (params: {
     clientUuid: string;
     localSessionId: string;
-    requestType: "bootstrap" | "bootstrap_validate" | "view" | "action";
+    requestType:
+      | "bootstrap"
+      | "bootstrap_validate"
+      | "view"
+      | "action"
+      | "stream_subscribe"
+      | "stream_unsubscribe";
     payload: Record<string, unknown>;
   }) => Promise<unknown>;
+  openLiveRelayStream?: (params: {
+    clientUuid: string;
+    localSessionId: string;
+    onEvent: (event: GatewaySocketLiveStreamEvent) => void;
+  }) => Promise<{
+    streamId: string;
+    close: () => Promise<void>;
+  }>;
   requestClientAction?: (params: {
     clientUuid: string;
     actionName: string;
@@ -476,6 +521,8 @@ type GatewaySocketCarrier = Service & {
     capabilities: TellyMcpCapability[];
   }>;
 };
+
+export type TelegramMcpGatewaySocketServiceInstance = GatewaySocketCarrier;
 
 function normalizeWebSocketUrl(value: string, defaultPath: string): string {
   const url = new URL(value);
@@ -543,7 +590,14 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         localSessionId: "string",
         requestType: {
           type: "enum",
-          values: ["bootstrap", "bootstrap_validate", "view", "action"],
+          values: [
+            "bootstrap",
+            "bootstrap_validate",
+            "view",
+            "action",
+            "stream_subscribe",
+            "stream_unsubscribe",
+          ],
         },
         payload: { type: "object", optional: true },
       },
@@ -553,7 +607,13 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           params: {
             clientUuid: string;
             localSessionId: string;
-            requestType: "bootstrap" | "bootstrap_validate" | "view" | "action";
+            requestType:
+              | "bootstrap"
+              | "bootstrap_validate"
+              | "view"
+              | "action"
+              | "stream_subscribe"
+              | "stream_unsubscribe";
             payload?: Record<string, unknown>;
           };
         },
@@ -784,6 +844,8 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
     this.connectedClientToolsAlerts = new Map();
     this.pendingLiveRequests = new Map();
     this.pendingActionRequests = new Map();
+    this.liveStreamHandlers = new Map();
+    this.localLiveStreamSubscriptions = new Map();
   },
 
   methods: {
@@ -819,6 +881,31 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
       this.standaloneHttpService = standaloneHttpService;
       return standaloneHttpService.httpServer;
+    },
+
+    async waitForHttpServer(this: GatewaySocketCarrier): Promise<HttpServer> {
+      const startedAt = Date.now();
+
+      while (Date.now() - startedAt < HTTP_SERVER_WAIT_TIMEOUT_MS) {
+        const standaloneHttpService =
+          this.standaloneHttpService ??
+          (this.broker.getLocalService(
+            TELEGRAM_MCP_STANDALONE_HTTP_SERVICE_NAME,
+          ) as StandaloneHttpServiceCarrier | null);
+
+        if (standaloneHttpService?.httpServer) {
+          this.standaloneHttpService = standaloneHttpService;
+          return standaloneHttpService.httpServer;
+        }
+
+        await new Promise((resolve) =>
+          setTimeout(resolve, HTTP_SERVER_WAIT_STEP_MS),
+        );
+      }
+
+      throw new Error(
+        `Local Moleculer service '${TELEGRAM_MCP_STANDALONE_HTTP_SERVICE_NAME}' HTTP server is unavailable`,
+      );
     },
 
     async collectSessionTools(this: GatewaySocketCarrier): Promise<{
@@ -1566,7 +1653,17 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             throw new Error("tmux target is not configured for this session");
           }
 
+          const terminalSize = await getTmuxWindowSize(
+            runtime.config.tmux,
+            session.tmuxTarget,
+          );
           const content = await captureVisibleTmuxPane(
+            runtime.config.tmux,
+            session.tmuxTarget,
+            runtime.config.tmux.captureLines,
+            runtime.config.webapp.visibleScreens,
+          );
+          const ansi = await captureVisibleTmuxPaneAnsi(
             runtime.config.tmux,
             session.tmuxTarget,
             runtime.config.tmux.captureLines,
@@ -1581,6 +1678,8 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
               session_label: session.label ?? null,
               captured_at: new Date().toISOString(),
               content,
+              ansi,
+              ...(terminalSize ? terminalSize : {}),
             },
           };
         }
@@ -1634,6 +1733,121 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             ok: true,
             result: {
               ok: true,
+            },
+          };
+        }
+
+        if (request.request_type === "stream_subscribe") {
+          const streamId =
+            typeof request.payload?.stream_id === "string"
+              ? request.payload.stream_id.trim()
+              : "";
+          if (!streamId) {
+            throw new Error("stream_id is required");
+          }
+
+          const sessionId = request.local_session_id.trim();
+          const session = await runtime.sessionStore.getSession(sessionId);
+          if (!session?.tmuxTarget) {
+            throw new Error("tmux target is not configured for this session");
+          }
+          if (!isStreamableTerminalTarget(session.tmuxTarget)) {
+            throw new Error("Live stream is supported only for PTY-backed terminals");
+          }
+
+          this.localLiveStreamSubscriptions?.get(streamId)?.();
+          this.localLiveStreamSubscriptions?.delete(streamId);
+
+          const terminalSize = await getTmuxWindowSize(
+            runtime.config.tmux,
+            session.tmuxTarget,
+          );
+          const content = await captureVisibleTmuxPane(
+            runtime.config.tmux,
+            session.tmuxTarget,
+            runtime.config.tmux.captureLines,
+            runtime.config.webapp.visibleScreens,
+          );
+          const ansi = await captureVisibleTmuxPaneAnsi(
+            runtime.config.tmux,
+            session.tmuxTarget,
+            runtime.config.tmux.captureLines,
+            runtime.config.webapp.visibleScreens,
+          );
+
+          this.wsClient?.send(
+            JSON.stringify({
+              type: "live_stream_event",
+              stream_id: streamId,
+              event: "snapshot",
+              payload: {
+                session_id: session.sessionId,
+                session_label: session.label ?? null,
+                captured_at: new Date().toISOString(),
+                content,
+                ansi,
+                ...(terminalSize ? terminalSize : {}),
+              },
+            } satisfies GatewaySocketLiveStreamEvent),
+          );
+
+          const unsubscribe = subscribeForegroundTerminal(session.tmuxTarget, {
+            onData: (data) => {
+              this.wsClient?.send(
+                JSON.stringify({
+                  type: "live_stream_event",
+                  stream_id: streamId,
+                  event: "data",
+                  payload: { data },
+                } satisfies GatewaySocketLiveStreamEvent),
+              );
+            },
+            onExit: (info: TerminalExitInfo) => {
+              this.wsClient?.send(
+                JSON.stringify({
+                  type: "live_stream_event",
+                  stream_id: streamId,
+                  event: "exit",
+                  payload: {
+                    exitCode:
+                      typeof info.exitCode === "number" ? info.exitCode : null,
+                    signal:
+                      typeof info.signal === "number" ? info.signal : null,
+                  },
+                } satisfies GatewaySocketLiveStreamEvent),
+              );
+            },
+          });
+          this.localLiveStreamSubscriptions?.set(streamId, unsubscribe);
+
+          return {
+            type: "live_response",
+            request_id: request.request_id,
+            ok: true,
+            result: {
+              ok: true,
+              stream_id: streamId,
+            },
+          };
+        }
+
+        if (request.request_type === "stream_unsubscribe") {
+          const streamId =
+            typeof request.payload?.stream_id === "string"
+              ? request.payload.stream_id.trim()
+              : "";
+          if (streamId) {
+            this.localLiveStreamSubscriptions?.get(streamId)?.();
+            this.localLiveStreamSubscriptions?.delete(streamId);
+          }
+
+          return {
+            type: "live_response",
+            request_id: request.request_id,
+            ok: true,
+            result: {
+              ok: true,
+              ...(streamId ? { stream_id: streamId } : {}),
             },
           };
         }
@@ -1911,6 +2125,20 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             ),
           );
         }
+        return;
+      }
+
+      if (parsed.type === "live_stream_event") {
+        const streamId =
+          typeof parsed.stream_id === "string" ? parsed.stream_id.trim() : "";
+        if (!streamId) {
+          return;
+        }
+        const handler = this.liveStreamHandlers?.get(streamId);
+        if (!handler) {
+          return;
+        }
+        handler.onEvent(parsed as GatewaySocketLiveStreamEvent);
         return;
       }
 
@@ -2317,6 +2545,53 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       return response;
     },
 
+    async openLiveRelayStream(
+      this: GatewaySocketCarrier,
+      params: {
+        clientUuid: string;
+        localSessionId: string;
+        onEvent: (event: GatewaySocketLiveStreamEvent) => void;
+      },
+    ): Promise<{
+      streamId: string;
+      close: () => Promise<void>;
+    }> {
+      const streamId = randomUUID();
+      this.liveStreamHandlers?.set(streamId, {
+        clientUuid: params.clientUuid,
+        onEvent: params.onEvent,
+      });
+
+      try {
+        await this.requestLiveRelay?.({
+          clientUuid: params.clientUuid,
+          localSessionId: params.localSessionId,
+          requestType: "stream_subscribe",
+          payload: { stream_id: streamId },
+        });
+      } catch (error) {
+        this.liveStreamHandlers?.delete(streamId);
+        throw error;
+      }
+
+      return {
+        streamId,
+        close: async () => {
+          this.liveStreamHandlers?.delete(streamId);
+          try {
+            await this.requestLiveRelay?.({
+              clientUuid: params.clientUuid,
+              localSessionId: params.localSessionId,
+              requestType: "stream_unsubscribe",
+              payload: { stream_id: streamId },
+            });
+          } catch {
+            // best-effort unsubscribe during stream shutdown
+          }
+        },
+      };
+    },
+
     async requestClientAction(
       this: GatewaySocketCarrier,
       params: {
@@ -2634,7 +2909,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         return;
       }
 
-      const httpServer = this.getHttpServerOrThrow?.();
+      const httpServer = await this.waitForHttpServer?.();
       const wsPath =
         runtime.config.distributed.gatewayWsPath.replace(/\/+$/u, "") || "/";
       const wsServer = new WebSocketServer({ noServer: true });
@@ -2669,6 +2944,11 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           const hello = this.connectedClients?.get(socket);
           if (hello?.client_uuid) {
             this.connectedClientsByUuid?.delete(hello.client_uuid);
+            for (const [streamId, handler] of this.liveStreamHandlers?.entries() ?? []) {
+              if (handler.clientUuid === hello.client_uuid) {
+                this.liveStreamHandlers?.delete(streamId);
+              }
+            }
           }
           this.connectedClientToolsAlerts?.delete(socket);
           this.connectedClients?.delete(socket);
@@ -2957,6 +3237,11 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         pending.reject(new Error("Gateway WS transport is shutting down"));
       }
       this.pendingActionRequests?.clear();
+      for (const unsubscribe of this.localLiveStreamSubscriptions?.values() ?? []) {
+        unsubscribe();
+      }
+      this.localLiveStreamSubscriptions?.clear();
+      this.liveStreamHandlers?.clear();
 
       if (this.wsClient) {
         const socket = this.wsClient;

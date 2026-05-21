@@ -84,8 +84,6 @@ import { TransportXchangeState } from "./transportXchangeState";
 import { TransportOutputActions } from "./transportOutputActions";
 import { buildTransportConstructorWiring } from "./transportConstructorWiring";
 import {
-  isGatewayAdminCommand,
-  parseAdminAuthCommand,
   resolveGatewayControlBaseUrl,
 } from "./transportUtils";
 
@@ -330,19 +328,16 @@ export class TelegramTransport implements HumanTransport {
     this.outputActions = composition.outputActions;
     this.tmuxRuntime = composition.tmuxRuntime;
     this.xchangeState = composition.xchangeState;
-    this.bot.use(async (ctx, next) => {
-      await this.handleAdminAccessMiddleware(ctx, next);
-    });
     this.bot.use(this.getRootMenu());
     this.menuShell.register(this.bot);
   }
 
   private isAdminAuthEnabled(): boolean {
-    return Boolean(this.config.telegram.adminToken?.trim());
+    return false;
   }
 
   private isAdminBotProfile(): boolean {
-    return this.isAdminAuthEnabled();
+    return this.config.distributed.mode === "gateway";
   }
 
   private getRootMenu(): Menu<TelegramMenuContext> {
@@ -352,60 +347,8 @@ export class TelegramTransport implements HumanTransport {
   private async isPrincipalAdminAuthorized(
     principal: { telegramChatId: number; telegramUserId: number } | null,
   ): Promise<boolean> {
-    if (!this.isAdminAuthEnabled()) {
-      return true;
-    }
-
-    if (!principal) {
-      return false;
-    }
-
-    return this.adminAuthStore.isAdminAuthorized(principal);
-  }
-
-  private async handleAdminAccessMiddleware(
-    ctx: TelegramMenuContext,
-    next: () => Promise<void>,
-  ): Promise<void> {
-    if (!this.isAdminAuthEnabled()) {
-      await next();
-      return;
-    }
-
-    const principal = this.context.getPrincipalFromContext(ctx);
-    const authorized = await this.isPrincipalAdminAuthorized(principal);
-    if (authorized) {
-      await next();
-      return;
-    }
-
-    if (ctx.callbackQuery) {
-      await ctx.answerCallbackQuery({
-        text: await this.context.tForContext(ctx, "menu:admin.auth.required_callback"),
-        show_alert: true,
-      });
-      return;
-    }
-
-    const text = extractIncomingText(ctx.message);
-    const token = text ? parseAdminAuthCommand(text) : null;
-    if (principal && token) {
-      await this.messageFlow.handleAdminAuthCommand(ctx, principal, token);
-      return;
-    }
-
-    if (text && isGatewayAdminCommand(text)) {
-      await this.outputActions.replyText(
-        ctx,
-        await this.context.tForContext(ctx, "menu:admin.auth.prompt"),
-        {
-          kind: "transport",
-        },
-      );
-      return;
-    }
-
-    await next();
+    void principal;
+    return false;
   }
 
   public setCollaborationService(service: CollaborationService): void {
@@ -476,25 +419,11 @@ export class TelegramTransport implements HumanTransport {
       botUsername: this.bot.botInfo.username,
     });
     await this.bot.api.setMyCommands([
-      ...(this.isAdminAuthEnabled()
-        ? [{ command: "auth", description: "Authenticate as gateway admin" }]
-        : []),
-      ...(this.isAdminBotProfile()
-        ? [
-            { command: "link", description: "Open gateway clients list" },
-            { command: "admin", description: "Open gateway admin menu" },
-          ]
-        : []),
-      { command: "menu", description: "Open session menu" },
+      { command: "menu", description: "Open console menu" },
       { command: "help", description: "Show help" },
     ]);
     this.logger.info("Telegram bot commands registered", {
-      commands: [
-        ...(this.isAdminAuthEnabled() ? ["/auth"] : []),
-        ...(this.isAdminBotProfile() ? ["/link", "/admin"] : []),
-        "/menu",
-        "/help",
-      ],
+      commands: ["/menu", "/help"],
     });
 
     this.logger.debug("Telegram polling start scheduled");

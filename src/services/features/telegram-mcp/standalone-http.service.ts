@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
+import type { Socket } from "node:net";
 import type { Service, ServiceSchema } from "moleculer";
 
 import {
@@ -14,6 +15,7 @@ export const TELEGRAM_MCP_STANDALONE_HTTP_SERVICE_NAME = "telegramMcp.standalone
 
 type StandaloneHttpCarrier = Service & {
   httpServer?: Server | null;
+  upgradeHandler?: ((req: IncomingMessage, socket: Socket, head: Buffer) => void) | null;
 };
 
 function resolveStandaloneBind(runtime: TelegramMcpRuntimeServiceInstance["getRuntime"] extends () => infer TRuntime ? TRuntime : never): {
@@ -49,6 +51,7 @@ const TelegramMcpStandaloneHttpService: ServiceSchema = {
 
   created(this: StandaloneHttpCarrier) {
     this.httpServer = null;
+    this.upgradeHandler = null;
   },
 
   async started(this: StandaloneHttpCarrier) {
@@ -103,6 +106,16 @@ const TelegramMcpStandaloneHttpService: ServiceSchema = {
         }
       },
     );
+    this.upgradeHandler = (req: IncomingMessage, socket: Socket, head: Buffer) => {
+      const requestUrl = new URL(req.url ?? "/", "http://standalone.local");
+      void httpService.routeUpgrade?.(req, socket, head, requestUrl.pathname).catch((error) => {
+        this.logger.error("Standalone HTTP upgrade failed", {
+          error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+        });
+        socket.destroy();
+      });
+    };
+    this.httpServer.on("upgrade", this.upgradeHandler);
 
     await new Promise<void>((resolve, reject) => {
       const server = this.httpServer;
@@ -139,6 +152,7 @@ const TelegramMcpStandaloneHttpService: ServiceSchema = {
   async stopped(this: StandaloneHttpCarrier) {
     const server = this.httpServer;
     this.httpServer = null;
+    this.upgradeHandler = null;
 
     if (!server) {
       return;

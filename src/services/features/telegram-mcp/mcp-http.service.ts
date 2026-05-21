@@ -1,5 +1,6 @@
 import type { Service, ServiceSchema } from "moleculer";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { Socket } from "node:net";
 
 import {
   TELEGRAM_MCP_MCP_SERVER_SERVICE_NAME,
@@ -9,6 +10,10 @@ import {
   TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
   type TelegramMcpRuntimeServiceInstance,
 } from "./runtime.service";
+import {
+  TELEGRAM_MCP_GATEWAY_SOCKET_SERVICE_NAME,
+  type TelegramMcpGatewaySocketServiceInstance,
+} from "./gateway-socket.service";
 import {
   createMcpHttpHandler,
   type McpHttpHandler,
@@ -23,6 +28,12 @@ type HttpServiceCarrier = Service & {
     res: ServerResponse,
     pathname: string,
   ) => Promise<void>;
+  routeUpgrade?: (
+    req: IncomingMessage,
+    socket: Socket,
+    head: Buffer,
+    pathname: string,
+  ) => Promise<boolean>;
 };
 
 export type TelegramMcpHttpServiceInstance = HttpServiceCarrier;
@@ -55,6 +66,19 @@ const TelegramMcpHttpService: ServiceSchema = {
       });
 
       await this.httpHandler.handleRequest(req, res, pathname);
+    },
+    async routeUpgrade(
+      this: HttpServiceCarrier,
+      req: IncomingMessage,
+      socket: Socket,
+      head: Buffer,
+      pathname: string,
+    ): Promise<boolean> {
+      if (!this.httpHandler) {
+        throw new Error("telegram_mcp HTTP handler is not initialized yet");
+      }
+
+      return await this.httpHandler.handleUpgrade(req, socket, head, pathname);
     },
   },
 
@@ -111,6 +135,10 @@ const TelegramMcpHttpService: ServiceSchema = {
     this.logger.info("Starting telegram_mcp HTTP service");
     this.httpHandler = createMcpHttpHandler(runtime, {
       createMcpServer: () => mcpServerService.createServer(),
+      getGatewaySocketService: () =>
+        this.broker.getLocalService(
+          TELEGRAM_MCP_GATEWAY_SOCKET_SERVICE_NAME,
+        ) as TelegramMcpGatewaySocketServiceInstance | null,
     });
     this.logger.info("telegram_mcp HTTP service is ready", {
       path: runtime.config.mcp.httpPath,

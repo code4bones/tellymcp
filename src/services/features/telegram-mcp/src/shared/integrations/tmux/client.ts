@@ -14,9 +14,12 @@ import {
   buildPtyTarget,
   capturePtyRange,
   captureVisiblePty,
+  renderVisiblePtyHtml,
+  renderVisiblePtyAnsi,
   ensurePtySession,
   getPtyShellDisplayName,
   getPtyWindowHeight,
+  getPtyWindowSize,
   hasPtyTarget,
   isPtyTarget,
   sendPtyAction,
@@ -498,6 +501,17 @@ export async function getTmuxWindowHeight(
   return Number.isFinite(height) && height > 0 ? height : null;
 }
 
+export async function getTmuxWindowSize(
+  config: TmuxRuntimeConfig,
+  target: string,
+): Promise<{ cols: number; rows: number } | null> {
+  if (shouldUsePty(config, target)) {
+    return getPtyWindowSize(target);
+  }
+
+  return null;
+}
+
 export async function captureTmuxPaneRange(
   config: TmuxRuntimeConfig,
   target: string,
@@ -505,7 +519,7 @@ export async function captureTmuxPaneRange(
   includeEscapes: boolean,
 ): Promise<string> {
   if (shouldUsePty(config, target)) {
-    return capturePtyRange(target, start);
+    return await capturePtyRange(target, start);
   }
 
   const args = [
@@ -528,7 +542,7 @@ export async function captureVisibleTmuxPane(
   visibleScreens: number,
 ): Promise<string> {
   if (shouldUsePty(config, target)) {
-    return captureVisiblePty(target, fallbackLines, visibleScreens);
+    return await captureVisiblePty(target, fallbackLines, visibleScreens);
   }
 
   const height = await getTmuxWindowHeight(config, target);
@@ -574,6 +588,32 @@ export async function captureVisibleTmuxPane(
   }
 
   return stdout.replaceAll("\u0000", "");
+}
+
+export async function captureVisibleTmuxPaneHtml(
+  config: TmuxRuntimeConfig,
+  target: string,
+  fallbackLines: number,
+  visibleScreens: number,
+): Promise<string | null> {
+  if (shouldUsePty(config, target)) {
+    return await renderVisiblePtyHtml(target, fallbackLines, visibleScreens);
+  }
+
+  return null;
+}
+
+export async function captureVisibleTmuxPaneAnsi(
+  config: TmuxRuntimeConfig,
+  target: string,
+  fallbackLines: number,
+  visibleScreens: number,
+): Promise<string> {
+  if (shouldUsePty(config, target)) {
+    return await renderVisiblePtyAnsi(target, fallbackLines, visibleScreens);
+  }
+
+  return captureVisibleTmuxPane(config, target, fallbackLines, visibleScreens);
 }
 
 export async function sendAllowedTmuxAction(

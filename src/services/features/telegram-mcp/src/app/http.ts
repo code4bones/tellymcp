@@ -3,10 +3,12 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
+import type { Socket } from "node:net";
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import ws from "ws";
 
 import type { AppRuntime } from "./bootstrap/runtime";
 import {
@@ -21,7 +23,15 @@ import {
   renderWebAppHtml,
 } from "./webapp/assets";
 import {
+  isStreamableTerminalTarget,
+  resizeForegroundTerminal,
+  sendForegroundTerminalInput,
+  subscribeForegroundTerminal,
+} from "../shared/integrations/terminal/client";
+import {
   captureVisibleTmuxPane,
+  captureVisibleTmuxPaneAnsi,
+  getTmuxWindowSize,
   isTmuxUnavailableError,
   sendAllowedTmuxAction,
   sendTmuxLiteralText,
@@ -39,6 +49,12 @@ export type McpHttpHandler = {
     res: ServerResponse,
     pathname: string,
   ) => Promise<void>;
+  handleUpgrade: (
+    req: IncomingMessage,
+    socket: Socket,
+    head: Buffer,
+    pathname: string,
+  ) => Promise<boolean>;
   close: () => Promise<void>;
 };
 
@@ -239,10 +255,29 @@ export function createMcpHttpHandler(
   runtime: AppRuntime,
   input: {
     createMcpServer: () => McpServer;
+    getGatewaySocketService?: () => {
+      openLiveRelayStream?: (params: {
+        clientUuid: string;
+        localSessionId: string;
+        onEvent: (event: {
+          event: "snapshot" | "data" | "exit";
+          payload: Record<string, unknown>;
+        }) => void;
+      }) => Promise<{
+        close: () => Promise<void>;
+      }>;
+      requestLiveRelay?: (params: {
+        clientUuid: string;
+        localSessionId: string;
+        requestType: "action";
+        payload: Record<string, unknown>;
+      }) => Promise<unknown>;
+    } | null;
   },
 ): McpHttpHandler {
   const transports = new Map<string, SessionEntry>();
   const webAppSessions = new WebAppSessionRegistry();
+  const liveWsServer = new WebSocketServer({ noServer: true });
   const webAppBasePath =
     runtime.config.webapp.basePath.replace(/\/+$/u, "") || "/webapp";
   const rootPrefix = normalizeBasePath(process.env.ROOT_PREFIX || "/api");
@@ -250,11 +285,275 @@ export function createMcpHttpHandler(
     rootPrefix === "/"
       ? webAppBasePath
       : `${rootPrefix}${normalizeBasePath(webAppBasePath)}`;
+  const publicLiveWsPath =
+    rootPrefix === "/" ? "/gateway/live/ws" : `${rootPrefix}/gateway/live/ws`;
   const webAppLivePrefix = `${webAppBasePath}/live/`;
 
   const closeSessionEntry = async (entry: SessionEntry): Promise<void> => {
     await entry.close();
   };
+
+  const resolveAuthorizedWebAppSession = async (token: string) => {
+    const webAppSession = token ? webAppSessions.get(token) : null;
+    if (!webAppSession) {
+      return null;
+    }
+
+    const relayTarget = parseLiveRelaySessionId(webAppSession.sessionId);
+    if (relayTarget) {
+      return {
+        webAppSession,
+        relayTarget,
+        session: null,
+      };
+    }
+
+    const binding = await runtime.bindingStore.getBinding(webAppSession.sessionId);
+    if (!binding || binding.telegramUserId !== webAppSession.telegramUserId) {
+      return null;
+    }
+
+    const session = await runtime.sessionStore.getSession(webAppSession.sessionId);
+    if (!session?.tmuxTarget) {
+      return null;
+    }
+
+    return {
+      webAppSession,
+      relayTarget: null,
+      session,
+    };
+  };
+
+  liveWsServer.on("connection", (socket: LiveWebSocket, req: IncomingMessage) => {
+    const requestUrl = new URL(req.url ?? "/", "http://gateway.local");
+    const token = requestUrl.searchParams.get("token")?.trim() ?? "";
+
+    void (async () => {
+      const resolved = await resolveAuthorizedWebAppSession(token);
+      if (!resolved) {
+        socket.close(1008, "Unauthorized");
+        return;
+      }
+
+      let closed = false;
+      let relayStreamClose: (() => Promise<void>) | null = null;
+      let localUnsubscribe: (() => void) | null = null;
+
+      const cleanup = async () => {
+        if (closed) {
+          return;
+        }
+        closed = true;
+        try {
+          localUnsubscribe?.();
+        } catch {
+          // ignore cleanup errors during socket shutdown
+        }
+        localUnsubscribe = null;
+        if (relayStreamClose) {
+          await relayStreamClose().catch(() => undefined);
+          relayStreamClose = null;
+        }
+      };
+
+      const sendJson = (payload: Record<string, unknown>) => {
+        if (socket.readyState === 1) {
+          socket.send(JSON.stringify(payload));
+        }
+      };
+
+      socket.on("close", () => {
+        void cleanup();
+      });
+
+      socket.on("message", (raw: unknown) => {
+        void (async () => {
+          const parsed =
+            raw && typeof raw === "string"
+              ? JSON.parse(raw)
+              : JSON.parse(String(raw)) as Record<string, unknown>;
+          const type =
+            parsed && typeof parsed === "object" && typeof parsed.type === "string"
+              ? parsed.type
+              : "";
+
+          if (type === "input") {
+            const data =
+              typeof parsed.data === "string" ? parsed.data : "";
+            if (!data) {
+              return;
+            }
+
+            if (resolved.relayTarget) {
+              const gatewaySocketService = input.getGatewaySocketService?.();
+              await gatewaySocketService?.requestLiveRelay?.({
+                clientUuid: resolved.relayTarget.clientUuid,
+                localSessionId: resolved.relayTarget.localSessionId,
+                requestType: "action",
+                payload: {
+                  action: "text",
+                  text: data,
+                },
+              });
+              return;
+            }
+
+            if (resolved.session?.tmuxTarget && isStreamableTerminalTarget(resolved.session.tmuxTarget)) {
+              sendForegroundTerminalInput(resolved.session.tmuxTarget, data);
+            }
+            return;
+          }
+
+          if (type === "action") {
+            const action =
+              typeof parsed.action === "string" ? parsed.action : "";
+            if (
+              ![
+                "up",
+                "down",
+                "enter",
+                "slash",
+                "delete",
+                "tab",
+                "escape",
+                "interrupt",
+              ].includes(action)
+            ) {
+              return;
+            }
+
+            if (resolved.relayTarget) {
+              const gatewaySocketService = input.getGatewaySocketService?.();
+              await gatewaySocketService?.requestLiveRelay?.({
+                clientUuid: resolved.relayTarget.clientUuid,
+                localSessionId: resolved.relayTarget.localSessionId,
+                requestType: "action",
+                payload: { action },
+              });
+              return;
+            }
+
+            if (resolved.session?.tmuxTarget) {
+              await sendAllowedTmuxAction(
+                runtime.config.tmux,
+                resolved.session.tmuxTarget,
+                action as
+                  | "up"
+                  | "down"
+                  | "enter"
+                  | "slash"
+                  | "delete"
+                  | "tab"
+                  | "escape"
+                  | "interrupt",
+              );
+            }
+            return;
+          }
+
+          if (type === "resize") {
+            const cols =
+              typeof parsed.cols === "number" ? parsed.cols : NaN;
+            const rows =
+              typeof parsed.rows === "number" ? parsed.rows : NaN;
+            if (!Number.isFinite(cols) || !Number.isFinite(rows)) {
+              return;
+            }
+            if (resolved.session?.tmuxTarget && isStreamableTerminalTarget(resolved.session.tmuxTarget)) {
+              resizeForegroundTerminal(
+                resolved.session.tmuxTarget,
+                Math.max(20, Math.min(400, Math.round(cols))),
+                Math.max(5, Math.min(200, Math.round(rows))),
+              );
+            }
+          }
+        })().catch((error) => {
+          runtime.logger.warn("Telegram WebApp live WS message handling failed", {
+            error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+          });
+        });
+      });
+
+      if (resolved.relayTarget) {
+        const gatewaySocketService = input.getGatewaySocketService?.();
+        if (!gatewaySocketService?.openLiveRelayStream) {
+          socket.close(1011, "Relay live stream is unavailable");
+          return;
+        }
+
+        const relayStream = await gatewaySocketService.openLiveRelayStream({
+          clientUuid: resolved.relayTarget.clientUuid,
+          localSessionId: resolved.relayTarget.localSessionId,
+          onEvent: (event) => {
+            sendJson({
+              type: event.event,
+              ...event.payload,
+            });
+          },
+        });
+        relayStreamClose = relayStream.close;
+        sendJson({ type: "ready", mode: "stream" });
+        return;
+      }
+
+      if (
+        !resolved.session?.tmuxTarget ||
+        !isStreamableTerminalTarget(resolved.session.tmuxTarget)
+      ) {
+        socket.close(1011, "Local live stream is not supported for this terminal");
+        return;
+      }
+
+      const terminalSize = await getTmuxWindowSize(
+        runtime.config.tmux,
+        resolved.session.tmuxTarget,
+      );
+      const content = await captureVisibleTmuxPane(
+        runtime.config.tmux,
+        resolved.session.tmuxTarget,
+        runtime.config.tmux.captureLines,
+        runtime.config.webapp.visibleScreens,
+      );
+      const ansi = await captureVisibleTmuxPaneAnsi(
+        runtime.config.tmux,
+        resolved.session.tmuxTarget,
+        runtime.config.tmux.captureLines,
+        runtime.config.webapp.visibleScreens,
+      );
+      sendJson({
+        type: "snapshot",
+        session_id: resolved.session.sessionId,
+        session_label: resolved.session.label ?? null,
+        captured_at: new Date().toISOString(),
+        content,
+        ansi,
+        ...(terminalSize ? terminalSize : {}),
+      });
+
+      localUnsubscribe = subscribeForegroundTerminal(resolved.session.tmuxTarget, {
+        onData: (data) => {
+          sendJson({
+            type: "data",
+            data,
+          });
+        },
+        onExit: (info) => {
+          sendJson({
+            type: "exit",
+            exitCode: typeof info.exitCode === "number" ? info.exitCode : null,
+            signal: typeof info.signal === "number" ? info.signal : null,
+          });
+        },
+      });
+      sendJson({ type: "ready", mode: "stream" });
+    })().catch((error) => {
+      runtime.logger.warn("Telegram WebApp live WS bootstrap failed", {
+        error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+      });
+      socket.close(1011, "Live stream bootstrap failed");
+    });
+  });
 
   const handleRequest = async (
     req: IncomingMessage,
@@ -308,6 +607,7 @@ export function createMcpHttpHandler(
           200,
           renderWebAppHtml({
             basePath: publicWebAppBasePath,
+            liveWsPath: publicLiveWsPath,
             launchMode,
           }),
         );
@@ -692,7 +992,17 @@ export function createMcpHttpHandler(
         }
 
         try {
+          const terminalSize = await getTmuxWindowSize(
+            runtime.config.tmux,
+            session.tmuxTarget,
+          );
           const content = await captureVisibleTmuxPane(
+            runtime.config.tmux,
+            session.tmuxTarget,
+            runtime.config.tmux.captureLines,
+            runtime.config.webapp.visibleScreens,
+          );
+          const ansi = await captureVisibleTmuxPaneAnsi(
             runtime.config.tmux,
             session.tmuxTarget,
             runtime.config.tmux.captureLines,
@@ -703,6 +1013,8 @@ export function createMcpHttpHandler(
             session_label: session.label ?? null,
             captured_at: new Date().toISOString(),
             content,
+            ansi,
+            ...(terminalSize ? terminalSize : {}),
           });
         } catch (error) {
           runtime.logger.error("Telegram WebApp visible buffer capture failed", {
@@ -1184,6 +1496,26 @@ export function createMcpHttpHandler(
 
   let shuttingDown = false;
 
+  const handleUpgrade = async (
+    req: IncomingMessage,
+    socket: Socket,
+    head: Buffer,
+    pathname: string,
+  ): Promise<boolean> => {
+    const normalizedPathname = normalizePrefixedPathname(pathname);
+    if (
+      normalizedPathname !== `${webAppBasePath}/api/live/ws` &&
+      normalizedPathname !== "/gateway/live/ws"
+    ) {
+      return false;
+    }
+
+    liveWsServer.handleUpgrade(req, socket, head, (clientSocket: LiveWebSocket) => {
+      liveWsServer.emit("connection", clientSocket, req);
+    });
+    return true;
+  };
+
   const shutdown = async (): Promise<void> => {
     if (shuttingDown) {
       return;
@@ -1194,10 +1526,50 @@ export function createMcpHttpHandler(
       Array.from(transports.values()).map((entry) => closeSessionEntry(entry)),
     );
     transports.clear();
+    await new Promise<void>((resolve, reject) => {
+      liveWsServer.close((error: unknown) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
   };
 
   return {
     handleRequest,
+    handleUpgrade,
     close: shutdown,
   };
 }
+type LiveWebSocket = {
+  readyState: number;
+  send: (data: string) => void;
+  close: (code?: number, reason?: string) => void;
+  on: (event: "close" | "message", listener: (payload?: unknown) => void) => void;
+};
+
+type LiveWebSocketServer = {
+  on: (
+    event: "connection",
+    listener: (socket: LiveWebSocket, req: IncomingMessage) => void,
+  ) => void;
+  handleUpgrade: (
+    req: IncomingMessage,
+    socket: Socket,
+    head: Buffer,
+    callback: (clientSocket: LiveWebSocket) => void,
+  ) => void;
+  emit: (
+    event: "connection",
+    socket: LiveWebSocket,
+    req: IncomingMessage,
+  ) => void;
+  close: (callback: (error?: unknown) => void) => void;
+};
+
+const wsLib = ws as unknown as {
+  WebSocketServer: new (options: Record<string, unknown>) => LiveWebSocketServer;
+};
+const WebSocketServer = wsLib.WebSocketServer;

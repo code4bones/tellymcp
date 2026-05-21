@@ -21,6 +21,7 @@ import {
   type TmuxRuntimeConfig,
 } from "../tmux/client";
 import {
+  isPtyTarget,
   resizePtyTarget,
   sendPtyText,
   stopAllPtyTargets,
@@ -54,6 +55,10 @@ export {
 };
 
 export type TerminalExitInfo = PtyExitInfo;
+
+export function isStreamableTerminalTarget(target: string): boolean {
+  return isPtyTarget(target);
+}
 
 export function sendForegroundTerminalInput(
   target: string,

@@ -55,6 +55,9 @@ type LiveRelayViewResult = {
   session_label: string | null;
   captured_at: string;
   content: string;
+  ansi?: string;
+  cols?: number;
+  rows?: number;
 };
 
 type LiveRelayActionResult = {

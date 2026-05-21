@@ -4,7 +4,6 @@ import type { TelegramInboxMessage, TelegramXchangeFileMeta } from "../../../ent
 import type { SessionContext } from "../../../entities/session/model/types";
 import type { Logger } from "../../lib/logger/logger";
 import type { TelegramMenuContext } from "./transportTypes";
-import { buildPrincipalKey } from "./transportUtils";
 
 export interface TransportMenuCallbacksHost {
   logger: Logger;

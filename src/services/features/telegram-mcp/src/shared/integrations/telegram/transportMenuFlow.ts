@@ -2,7 +2,6 @@ import { InlineKeyboard, InputFile } from "grammy";
 import type { Menu } from "@grammyjs/menu";
 
 import type { AppConfig } from "../../../app/config/env";
-import type { TelegramInboxMessage } from "../../../entities/inbox/model/types";
 import type {
   PendingBroadcastRecord,
   PendingFileHandoffRecord,

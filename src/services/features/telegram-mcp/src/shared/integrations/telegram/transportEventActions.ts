@@ -1,7 +1,6 @@
 import { InlineKeyboard } from "grammy";
 
 import type { WebAppLaunchRegistry } from "../../../app/webapp/auth";
-import type { SessionContext } from "../../../entities/session/model/types";
 import type { TelegramInboxMessage } from "../../../entities/inbox/model/types";
 import type { AppConfig } from "../../../app/config/env";
 import type { SessionBindingStore, SessionStore, TelegramInboxStore } from "../../api/storage/contract";

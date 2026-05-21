@@ -404,3 +404,14 @@ export function buildAdminClientButtonLabel(
   const prefix = markers ? `${markers} ` : "";
   return `${prefix}${buildAdminClientTitle(client)}`.slice(0, 56);
 }
+
+export function extractCallbackSuffix(
+  ctx: TelegramMenuContext,
+  prefix: string,
+): string | null {
+  const data = ctx.callbackQuery?.data;
+  if (!data || !data.startsWith(prefix)) {
+    return null;
+  }
+  return data.slice(prefix.length) || null;
+}

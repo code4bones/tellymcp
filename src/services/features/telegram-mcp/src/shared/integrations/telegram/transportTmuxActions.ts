@@ -1,4 +1,12 @@
-import { captureTmuxPaneRange, captureVisibleTmuxPane, getTmuxWindowHeight, resolveTmuxTargetFromHint, sendTmuxLiteralLine } from "../tmux/client";
+import {
+  captureTmuxPaneRange,
+  captureVisibleTmuxPane,
+  getTmuxWindowHeight,
+  isTmuxTargetInvalidError,
+  isTmuxUnavailableError,
+  resolveTmuxTargetFromHint,
+  sendTmuxLiteralLine,
+} from "../tmux/client";
 import type { AppConfig } from "../../../app/config/env";
 import type { SessionBindingStore, SessionStore, TelegramInboxStore } from "../../api/storage/contract";
 import type { HumanTransportNotification } from "../../api/transport/contract";
@@ -6,8 +14,7 @@ import type { Logger } from "../../lib/logger/logger";
 import { detectTmuxInteractivePrompt, type TmuxPromptDetection } from "../../lib/tmuxPromptDetection";
 import { type SupportedLocale } from "../../i18n";
 import { slugifyFilenamePart, shouldNudge } from "./transportUtils";
-import type { GatewayActorProfile, TmuxCaptureScope, WebAppLaunchMode } from "./transportTypes";
-import { isTmuxTargetInvalidError, isTmuxUnavailableError } from "../tmux/client";
+import type { GatewayActorProfile, TmuxCaptureScope } from "./transportTypes";
 
 const TMUX_NUDGE_FAILURE_NOTICE_COOLDOWN_MS = 5 * 60 * 1000;
 const TMUX_PROMPT_SCAN_MATCHED_LINES_LIMIT = 6;

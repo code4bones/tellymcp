@@ -1,306 +1,213 @@
 # Telegram Integration Index
 
-This directory now holds the Telegram transport in smaller pieces. Use this as the entry map.
+This directory holds the decomposed Telegram transport. `transport.ts` is now the main composition root; behavior is split into delegates next to it.
 
-## Files
+## Core
 
 - `transport.ts`
-  Main orchestrator.
-  Wires grammy menus, runtime services, gateway calls, tmux nudges, live relay, inbox routing, and human-transport behavior.
+  Main composition root.
+  Owns shared runtime state, grammy menus, delegate wiring, and the remaining glue that has not yet been split.
 
 - `transportTypes.ts`
-  Local transport-only TypeScript types.
-  Contains menu context types, pending interaction records, gateway admin/client view records, and attachment/helper data shapes.
+  Transport-only types for menu context, gateway/admin records, pending interaction records, attachment descriptors, waiter records, and related shapes.
+
+## Pure Helpers
 
 - `transportUtils.ts`
-  Pure helpers with no transport state.
-  Contains:
-  - Telegram command parsing
-  - URL/base-path helpers
-  - markdown/html escaping
-  - text chunking
-  - admin client title/button builders
-  - local handoff note helpers
+  Stateless helpers:
+  command parsing, URL/path normalization, escaping, text chunking, menu payload parsing, local handoff helpers.
 
 - `transportFormatting.ts`
-  Small presentation/data-shaping helpers used by `transport.ts`.
-  Contains:
-  - admin client session button labels
-  - inbox/file/storage/session labels
-  - inbox text builder
-  - partner note text parser
-
-- `transportAdminView.ts`
-  Admin-specific merge/view helpers.
-  Contains:
-  - merge of registered + connected gateway clients
-  - merge of collab + all sessions for a client
-  - admin clients menu text builder
+  Small formatting helpers:
+  inbox/file/storage/session labels, inbox text assembly, partner-note text parsing.
 
 - `transportContent.ts`
-  Pure inbound/detail helpers.
-  Contains:
-  - inbox/file/storage/screenshot detail renderers
-  - incoming text extraction
-  - incoming attachment extraction
+  Inbound/detail helpers:
+  incoming text/attachment extraction, inbox/file/storage/screenshot detail rendering.
 
 - `transportMenuText.ts`
-  Pure menu screen text builders.
-  Contains:
-  - link/partner/local/projects text assembly
-  - collab tools text assembly
+  Pure screen text builders for menu pages.
 
 - `transportLive.ts`
-  Pure Live/WebApp helpers.
-  Contains:
-  - live availability checks
-  - live target URL construction
-  - launch keyboard builder
-  - launcher text builder
+  Pure Live/WebApp helpers:
+  live availability checks, live URL construction, launcher keyboard/text builders.
 
-- `transportTmuxActions.ts`
-  Tmux action delegate.
-  Contains:
-  - tmux nudge flow
-  - target recovery and user notices
-  - prompt scan detection/notification
-  - tmux buffer capture helpers
-
-- `transportLiveActions.ts`
-  Live action delegate.
-  Contains:
-  - live launcher delivery
-  - relay/local live URL orchestration
-  - live launch keyboard construction
-
-- `transportAdminActions.ts`
-  Gateway admin action delegate.
-  Contains:
-  - admin client/session menus
-  - admin client session detail/live/bind callbacks
-  - client `.env` export generation
-
-- `transportBroadcastActions.ts`
-  Broadcast action delegate.
-  Contains:
-  - linked broadcast flow
-  - collab broadcast flow
-  - gateway/local target fanout
-  - pending broadcast cancel/cleanup
-
-- `transportPartnerActions.ts`
-  Partner note action delegate.
-  Contains:
-  - partner note prompt flow
-  - executor/request routing
-  - pending partner note cancel/resolve
-  - current-session instruction enqueue
-
-- `transportFileHandoffActions.ts`
-  File handoff action delegate.
-  Contains:
-  - handoff prompt flow
-  - pending handoff cancel/resolve
-  - partner file delivery
-  - local-agent file handoff materialization
-
-- `transportMenuCallbacks.ts`
-  Generic callback delegate.
-  Contains:
-  - inbox/storage/screenshots open/get/delete callbacks
-  - session selection callback
-  - partner entry and partner files callbacks
-  - link-target callback
-
-- `transportProjectActions.ts`
-  Project/collab action delegate.
-  Contains:
-  - project/member/live approval callbacks
-  - project create/join/delete/leave pending flow
-  - project member note/file/live entry actions
-
-- `transportProjectState.ts`
-  Project/gateway state delegate.
-  Contains:
-  - gateway client registration for project scope
-  - project/session/history fetches
-  - active project activation/sync
-  - project/member/admin payload resolution
-  - relay session binding construction
-
-- `transportProjectView.ts`
-  Project/collab screen delegate.
-  Contains:
-  - projects/collab menu text assembly
-  - collab history export
-  - project members/session detail/file screens
-
-- `transportMenuState.ts`
-  Session menu state delegate.
-  Contains:
-  - main/sessions/inbox/storage/browser/screenshots/link/partner/local screens
-  - settings/buffer/developer/unpair/prune screens
-  - associated menu text assembly
-
-- `transportProjectMenus.ts`
-  Project-specific grammy menu factory.
-  Contains:
-  - projects dynamic menu
-  - collab tools menu
-  - collab delete dynamic menu
-
-- `transportPayloadState.ts`
-  Menu payload persistence delegate.
-  Contains:
-  - menu payload creation for inbox/file/session/link/admin/project/live approval targets
-  - shared TTL/expiry wiring for payload records
-
-- `transportAdminMenus.ts`
-  Admin-specific grammy menu factory.
-  Contains:
-  - admin root menu
-  - admin clients dynamic menu
-  - admin session list/detail tools menus
-
-- `transportXchangeState.ts`
-  Session xchange/storage state delegate.
-  Contains:
-  - filesystem xchange listing
-  - screenshot/storage/upload file filtering
-  - reconciliation of stored file metadata against real files
+- `transportAdminView.ts`
+  Admin merge/view helpers:
+  registered + connected gateway clients, collab + all session views, admin client list text.
 
 - `transportMenuFingerprints.ts`
-  Menu fingerprint and button-label delegate.
-  Contains:
-  - main/inbox/storage/screenshots/sessions/link fingerprints
-  - dynamic inbox/screenshots/link button labels
+  Dynamic menu fingerprint and label helpers.
 
-- `transportMenuFactories.ts`
-  Remaining non-project grammy menu factory.
-  Contains:
-  - main/browser/local/link/partner/buffer/settings/developer menus
-  - inbox/storage/screenshots/sessions dynamic menus
-  - inbox/storage/screenshot detail action menus
+## Menu/Render State
+
+- `transportMenuState.ts`
+  Session menu-state screens and stateful page rendering inputs.
 
 - `transportMenuFlow.ts`
-  Menu/render/live/buffer flow delegate.
-  Contains:
-  - menu screen rendering
-  - help/live launcher flow
-  - active-session info flow
-  - tmux buffer send flow
-  - menu-state screen routing wrappers
-  - pending-interaction cleanup for menu contexts
+  Menu/render flow:
+  render helpers, help/live launcher flow, active-session info, tmux buffer send, pending-interaction cleanup.
 
-- `transportMessageFlow.ts`
-  Inbound Telegram message delegate.
-  Contains:
-  - top-level message routing
-  - `/menu`, `/help`, `/link`, `/admin`, `/auth` command handling
-  - reply/waiter resolution
-  - relay inbox routing
-  - attachment upload and inbox capture flow
+- `transportPayloadState.ts`
+  Menu payload persistence and lookup helpers.
 
-- `transportGatewayDirectory.ts`
-  Gateway admin directory delegate.
-  Contains:
-  - gateway client listing
-  - connected client listing
-  - merged admin client view
-  - gateway client session listing
+- `transportMenuFactories.ts`
+  Non-project grammy menu factories.
 
-- `transportRequestFlow.ts`
-  Human request/notification delegate.
-  Contains:
-  - outbound Telegram requests
-  - outbound Telegram notifications
-  - gateway request proxying for headless clients
-  - waiter lifecycle and reply resolution
-  - admin registration notices
+- `transportAdminMenus.ts`
+  Admin grammy menu factories.
+
+- `transportProjectMenus.ts`
+  Project/collab grammy menu factories.
+
+- `transportMenuCallbacks.ts`
+  Generic callback handlers for inbox/storage/screenshots/session/link/partner flows.
+
+- `transportMenuShell.ts`
+  Top-level grammy shell registration:
+  polling error handler, callbackQuery routing, and the top-level `message` hook.
+
+## Runtime/Delivery Actions
+
+- `transportTmuxActions.ts`
+  Tmux flow:
+  nudges, prompt scan, cooldown/fingerprint logic, tmux buffer capture helpers.
+
+- `transportLiveActions.ts`
+  Live/WebApp action flow:
+  launcher delivery, relay/local live URL orchestration, keyboard delivery.
+
+- `transportBroadcastActions.ts`
+  Broadcast flow:
+  linked and collab fanout, gateway/local routing, pending broadcast resolution/cancel.
+
+- `transportPartnerActions.ts`
+  Partner-note flow:
+  prompt start, request/share routing, pending note resolution/cancel, current-session enqueue.
+
+- `transportFileHandoffActions.ts`
+  File handoff flow:
+  prompt start, pending handoff resolution/cancel, partner file delivery, local materialization.
+
+- `transportLinkingActions.ts`
+  Local link/session-pair flow:
+  link/unlink persistence, link button behavior, local/projects entry-point routing.
+
+- `transportSessionActions.ts`
+  Session-management flow:
+  unpair, rename prompt/commit, prune-all.
+
+- `transportProjectEntryActions.ts`
+  Project entry/navigation flow:
+  create/join prompts, project open, delete selection, leave current project.
+
+- `transportProjectActions.ts`
+  Project/collab callbacks and pending project actions:
+  member open/note/live, live approval, project delete/leave/detail, create/join completion.
+
+- `transportAdminActions.ts`
+  Gateway-admin flow:
+  client/session admin menus, client session detail/live/bind callbacks, `.env-client` export.
 
 - `transportEventActions.ts`
-  Gateway/runtime event delegate.
-  Contains:
-  - tools mismatch notices
-  - gateway/client version mismatch notices
-  - live approval request delivery
-  - live approval resolution delivery
+  Runtime/gateway event delivery:
+  tools mismatch notices, version mismatch notices, live approval request/resolution notices.
 
 - `transportLifecycleActions.ts`
-  Startup/lifecycle delegate.
-  Contains:
-  - startup inbox nudge recovery
-  - startup Telegram notices
-  - package update notice injection
+  Startup/lifecycle flow:
+  startup inbox recovery, startup notices, package update notices.
+
+- `transportRequestFlow.ts`
+  Human request/notification flow:
+  outbound Telegram requests/notifications, gateway request proxying for headless clients, waiter lifecycle, admin registration notices.
+
+- `transportMessageFlow.ts`
+  Inbound Telegram message flow:
+  top-level message routing, `/menu`/`/help`/`/link`/`/admin`/`/auth`, waiter replies, relay inbox routing, attachment upload/capture.
+
+## Gateway/Project State
+
+- `transportGatewayDirectory.ts`
+  Gateway admin directory queries:
+  gateway client listing, connected client listing, merged admin client view, client session listing.
+
+- `transportProjectState.ts`
+  Gateway/project/session state helpers:
+  client registration, project/session/history fetches, active project sync, payload resolution, relay session binding context.
+
+- `transportProjectView.ts`
+  Project/collab screen rendering:
+  projects/collab page text, collab history export, project members/session detail/file screens.
+
+- `transportProjectEvents.ts`
+  Project membership/project deletion notices routed back to bound Telegram principals.
+
+- `transportGatewayActions.ts`
+  Gateway/project wrapper actions:
+  partner-note dispatch, gateway directory/project access, active-project synchronization.
+
+- `transportProjectEntryActions.ts`
+  Project entry/navigation flow:
+  create/join prompts, project open, delete selection, leave current project.
+
+## Persistence / Xchange
+
+- `transportAttachmentStore.ts`
+  Attachment persistence:
+  upload metadata persistence, object-store materialization, Telegram file download flow, attachment batch orchestration.
+
+- `transportDocumentActions.ts`
+  Document send/retry helpers:
+  Telegram document retry with backoff for menu/admin/project flows.
+
+- `transportXchangeState.ts`
+  Session xchange/storage state:
+  xchange listing, screenshot/storage/upload file filtering, file metadata reconciliation.
+
+- `transportContext.ts`
+  Telegram identity/locale/i18n context:
+  principal extraction, locale resolution, localized text lookup, gateway actor profile.
+
+- `transportOutputActions.ts`
+  Outbound Telegram output path:
+  chunked send, message retry, reply/edit helpers.
+
+- `transportTmuxRuntime.ts`
+  Tmux scheduler/runtime loop:
+  prompt-scan interval, debounce timers, inbox nudge scheduling, typing action.
+
+## External Helpers
 
 - `messageFormat.ts`
   Formatting for outbound request/notification messages.
 
 - `collabUi.ts`
-  Collaboration-specific text builders for project/member detail views.
+  Collaboration-specific text builders.
 
 - `collabSemantics.ts`
-  Collaboration semantic helpers such as target-kind checks.
+  Collaboration semantic helpers.
 
 - `proxyFetch.ts`
-  Telegram HTTP fetch setup, including proxy-aware fetch creation.
+  Telegram HTTP fetch creation, including proxy-aware transport setup.
 
 ## Current Split Strategy
 
-The decomposition is being done in low-risk layers:
+The safe order has been:
 
-1. Types
-2. Pure helpers
-3. Presentation/formatting helpers
-4. Detail/content helpers
-5. Menu text builders
-6. Live helper extraction
-7. Tmux action delegation
-8. Live action delegation
-9. Admin action delegation
-10. Broadcast action delegation
-11. Message routing delegation
-12. Gateway directory delegation
-13. Request/waiter delegation
-14. Event delegation
-15. Lifecycle delegation
+1. Types and pure helpers
+2. Text/render helpers
+3. Menu state and menu factories
+4. Runtime action delegates
+5. Message/request/event/lifecycle delegates
+6. Callback shell and remaining orchestration
 
 ## Next Recommended Extractions
 
-- `transportSessionActions.ts`
-  Remaining rename/unpair/prune/session-management actions.
+- `transportConstructorWiring.ts`
+  The biggest remaining bulk is constructor-time delegate wiring and menu registration.
 
-- `transportProjectCallbacks.ts`
-  Remaining project open/select/detail callback orchestration still left in `transport.ts`.
+- `transportLifecycleShell.ts`
+  Start/stop/admin-access middleware and the remaining top-level runtime shell still live in `transport.ts`.
 
-- `transportAttachmentStore.ts`
-  File download, xchange file persistence, and upload metadata storage.
-11. Partner action delegation
-12. File handoff delegation
-13. Generic callback delegation
-14. Project action delegation
-15. Project state delegation
-16. Project view delegation
-17. Session menu-state delegation
-18. Project menu-factory delegation
-19. Payload-state delegation
-20. Admin menu-factory delegation
-21. Xchange-state delegation
-22. Menu fingerprint delegation
-23. Remaining menu-factory delegation
-24. Menu/live/render flow delegation
-25. Remaining flow extraction
-
-## Next Recommended Extractions
-
-- `transportMessageFlow.ts`
-  Telegram inbound message orchestration:
-  - top-level message routing
-  - admin auth command handling
-  - pairing command handling
-  - waiter reply resolution
-  - inbox capture / relay delivery
-  - attachment download/materialization
-
-- `transportGatewayInboxFlow.ts`
-  Gateway relay inbox routing and attachment-heavy local/remote inbox delivery.
+- `transportToolsSyncEvents.ts`
+  TOOLS/version mismatch event glue can be split further once constructor wiring is out.

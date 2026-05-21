@@ -1,5 +1,4 @@
 import type { Logger } from "../../lib/logger/logger";
-import type { SessionContext } from "../../../entities/session/model/types";
 import type {
   SessionBindingStore,
   SessionStore,

@@ -21,6 +21,7 @@ import {
   mergeGatewayAdminClientSessions,
 } from "./transportAdminView";
 import {
+  buildAdminMainMenuText,
   buildAdminClientSessionDetailText,
   buildAdminClientSessionListText,
   buildAdminClientSessionsMenuText,
@@ -31,6 +32,7 @@ import { buildAdminClientTitle, buildPrincipalKey, escapeHtml } from "./transpor
 export interface TransportAdminHost {
   config: AppConfig;
   adminClientViewByPrincipal: Map<string, AdminClientViewRecord>;
+  adminMainMenu: unknown;
   adminClientsMenu: unknown;
   adminClientSessionsMenu: unknown;
   adminToolsMenu: unknown;
@@ -125,6 +127,66 @@ export interface TransportAdminHost {
 
 export class TransportAdminActions {
   public constructor(private readonly host: TransportAdminHost) {}
+
+  public async showMainMenu(
+    ctx: TelegramMenuContext,
+    introText?: string,
+  ): Promise<void> {
+    const text = await this.buildMainMenuText(ctx);
+    const intro = introText ? escapeHtml(introText) : null;
+    await this.host.renderMenuHtmlScreen(
+      ctx,
+      intro ? `${intro}\n\n${text}` : text,
+      { kind: "menu" },
+      this.host.adminMainMenu,
+    );
+  }
+
+  public async buildMainMenuText(ctx: TelegramMenuContext): Promise<string> {
+    const locale = await this.host.resolveLocaleForContext(ctx);
+    let clients: AdminClientViewRecord[] | null = null;
+    try {
+      clients = await this.host.listGatewayAdminClients();
+    } catch {
+      clients = null;
+    }
+    return buildAdminMainMenuText({
+      title: this.host.t(locale, "menu:admin.screen.title"),
+      gatewayClientsLine: clients
+        ? this.host.t(locale, "menu:admin.screen.gateway_clients", {
+            count: clients.length,
+          })
+        : null,
+      connectedClientsLine: clients
+        ? this.host.t(locale, "menu:admin.screen.gateway_clients_connected", {
+            count: clients.filter((client) => client.is_connected).length,
+          })
+        : null,
+      registeredClientsLine: clients
+        ? this.host.t(locale, "menu:admin.screen.gateway_clients_registered", {
+            count: clients.filter((client) => client.is_registered).length,
+          })
+        : null,
+      unavailableLine: clients
+        ? null
+        : this.host.t(locale, "menu:admin.screen.gateway_clients_unavailable"),
+      hintLine: this.host.t(locale, "menu:admin.screen.hint"),
+    });
+  }
+
+  public async showClientsMenu(
+    ctx: TelegramMenuContext,
+    introText?: string,
+  ): Promise<void> {
+    const text = await this.buildClientsMenuText(ctx);
+    const intro = introText ? escapeHtml(introText) : null;
+    await this.host.renderMenuHtmlScreen(
+      ctx,
+      intro ? `${intro}\n\n${text}` : text,
+      { kind: "menu" },
+      this.host.adminClientsMenu,
+    );
+  }
 
   public async showClientSessionsMenu(
     ctx: TelegramMenuContext,
@@ -222,7 +284,7 @@ export class TransportAdminActions {
     let clients: AdminClientViewRecord[];
     try {
       clients = await this.host.listGatewayAdminClients();
-    } catch (error) {
+    } catch {
       return [
         this.host.t(locale, "menu:admin.clients.title"),
         "",
@@ -749,7 +811,7 @@ export class TransportAdminActions {
       return;
     }
 
-    const session = await this.host.bindRelaySessionToPrincipal({
+    await this.host.bindRelaySessionToPrincipal({
       principal,
       ctx,
       payload,

@@ -16,18 +16,35 @@ import {
   markXchangeRecordRead,
 } from "../../../shared/integrations/xchange/sqliteRecordStore";
 
+type RemoteConsoleInvoker = {
+  invokeForRelaySession<T>(
+    sessionId: string,
+    actionName: string,
+    params: Record<string, unknown>,
+  ): Promise<T | null>;
+};
+
 export class XchangeService {
   public constructor(
     private readonly config: AppConfig,
     private readonly sessionStore: SessionStore,
     private readonly logger: Logger,
     private readonly projectIdentityResolver: ProjectIdentityResolver,
+    private readonly remoteConsoleInvoker?: RemoteConsoleInvoker,
   ) {}
 
   public async listRecords(
     input: ListXchangeRecordsInput,
   ): Promise<ListXchangeRecordsOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<ListXchangeRecordsOutput>(
+      resolved.sessionId,
+      "telegramMcp.xchange.listRecordsRemote",
+      input as Record<string, unknown>,
+    );
+    if (remote) {
+      return remote;
+    }
     const workspaceDir = await this.resolveWorkspaceDir(resolved.sessionId);
     const records = await listXchangeRecords(
       this.config.tmux,
@@ -63,6 +80,14 @@ export class XchangeService {
     input: GetXchangeRecordInput,
   ): Promise<GetXchangeRecordOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<GetXchangeRecordOutput>(
+      resolved.sessionId,
+      "telegramMcp.xchange.getRecordRemote",
+      input as Record<string, unknown>,
+    );
+    if (remote) {
+      return remote;
+    }
     const workspaceDir = await this.resolveWorkspaceDir(resolved.sessionId);
     const record = await getXchangeRecord(
       this.config.tmux,
@@ -89,6 +114,14 @@ export class XchangeService {
     input: MarkXchangeRecordReadInput,
   ): Promise<MarkXchangeRecordReadOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<MarkXchangeRecordReadOutput>(
+      resolved.sessionId,
+      "telegramMcp.xchange.markReadRemote",
+      input as Record<string, unknown>,
+    );
+    if (remote) {
+      return remote;
+    }
     const workspaceDir = await this.resolveWorkspaceDir(resolved.sessionId);
     const updated = await markXchangeRecordRead(
       this.config.tmux,

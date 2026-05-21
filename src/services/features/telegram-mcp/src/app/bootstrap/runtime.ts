@@ -10,6 +10,11 @@ import { RedisStateStore } from "../../shared/integrations/redis/stateStore";
 import { TelegramTransport } from "../../shared/integrations/telegram/transport";
 import { MinioExchangeStore } from "../../shared/integrations/object-storage/minioExchangeStore";
 import { GatewayHttpService } from "../../features/distributed-gateway/model/gatewayHttpService";
+import { ensureGatewayClientUuid } from "../../features/distributed-client/model/gatewayClientAccess";
+import {
+  ensureTerminalTargetForSession,
+} from "../../shared/integrations/tmux/client";
+import { stopAllPtyTargets } from "../../shared/integrations/terminal/ptyRegistry";
 import type {
   MaintenanceStore,
   SessionStore,
@@ -93,6 +98,7 @@ export async function createAppRuntime(input: {
       actionCooldownMs: config.webapp.actionCooldownMs,
     },
     tmux: {
+      transport: config.tmux.transport,
       nudgeEnabled: config.tmux.nudgeEnabled,
       nudgeDebounceSeconds: config.tmux.nudgeDebounceSeconds,
       nudgeCooldownSeconds: config.tmux.nudgeCooldownSeconds,
@@ -122,6 +128,47 @@ export async function createAppRuntime(input: {
   );
   await stateStore.resetRuntimeState();
   logger.info("Runtime pending state reset");
+
+  if (config.distributed.mode === "client" && config.distributed.gatewayPublicUrl) {
+    const clientUuid = await ensureGatewayClientUuid({
+      maintenanceStore: stateStore,
+      gatewayPublicUrl: config.distributed.gatewayPublicUrl,
+      ...(config.distributed.gatewayAuthToken
+        ? { gatewayAuthToken: config.distributed.gatewayAuthToken }
+        : {}),
+      ...(config.project.name ? { projectName: config.project.name } : {}),
+      ...(config.telegram.botUsername ? { botUsername: config.telegram.botUsername } : {}),
+      ...(config.distributed.gatewayToken
+        ? { gatewayToken: config.distributed.gatewayToken }
+        : {}),
+      ...(process.env.NAMESPACE?.trim()
+        ? { namespace: process.env.NAMESPACE.trim() }
+        : {}),
+      ...(process.env.NODE_ID?.trim() ? { nodeId: process.env.NODE_ID.trim() } : {}),
+    });
+    logger.info("Gateway client identity ensured", {
+      clientUuid,
+      gatewayPublicUrl: config.distributed.gatewayPublicUrl,
+    });
+  }
+
+  if (config.tmux.transport === "pty") {
+    const sessions = await stateStore.listSessions();
+    let recoveredCount = 0;
+    for (const session of sessions) {
+      if (!session.tmuxTarget?.startsWith("pty:")) {
+        continue;
+      }
+
+      ensureTerminalTargetForSession(config.tmux, {
+        sessionId: session.sessionId,
+        ...(session.cwd ? { cwd: session.cwd } : {}),
+        target: session.tmuxTarget,
+      });
+      recoveredCount += 1;
+    }
+    logger.info("PTY terminal sessions recovered", { recoveredCount });
+  }
 
   const telegramTransport = new TelegramTransport(
     config,
@@ -166,6 +213,7 @@ export async function createAppRuntime(input: {
     shutdown: async () => {
       logger.info("Shutdown started");
       await telegramTransport.stop();
+      stopAllPtyTargets();
       redis.disconnect();
       logger.info("Shutdown completed");
     },

@@ -155,6 +155,21 @@ type GatewaySocketLiveResponse = {
   error?: string;
 };
 
+type GatewaySocketActionRequest = {
+  type: "action_request";
+  request_id: string;
+  action_name: string;
+  payload: Record<string, unknown>;
+};
+
+type GatewaySocketActionResponse = {
+  type: "action_response";
+  request_id: string;
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+};
+
 type GatewaySocketProjectEvent = {
   type: "project_event";
   event: "member_joined" | "member_left" | "project_deleted";
@@ -285,6 +300,8 @@ type GatewaySocketMessage =
   | GatewaySocketHeartbeatPong
   | GatewaySocketLiveRequest
   | GatewaySocketLiveResponse
+  | GatewaySocketActionRequest
+  | GatewaySocketActionResponse
   | GatewaySocketLiveEvent
   | GatewaySocketTransportEvent
   | GatewaySocketToolsEvent
@@ -295,6 +312,13 @@ type GatewaySocketMessage =
   | GatewaySocketDeliveryFail;
 
 type LiveRequestPending = {
+  clientUuid: string;
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  timeout: NodeJS.Timeout;
+};
+
+type ActionRequestPending = {
   clientUuid: string;
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
@@ -328,6 +352,7 @@ type GatewaySocketCarrier = Service & {
   connectedClientsByUuid?: Map<string, any>;
   connectedClientToolsAlerts?: Map<any, Map<string, string>>;
   pendingLiveRequests?: Map<string, LiveRequestPending>;
+  pendingActionRequests?: Map<string, ActionRequestPending>;
   getRuntimeOrThrow?: () => ReturnType<TelegramMcpRuntimeServiceInstance["getRuntime"]>;
   getHttpServerOrThrow?: () => HttpServer;
   startGatewayWsServer?: () => Promise<void>;
@@ -386,6 +411,11 @@ type GatewaySocketCarrier = Service & {
     clientUuid: string;
     localSessionId: string;
     requestType: "bootstrap" | "bootstrap_validate" | "view" | "action";
+    payload: Record<string, unknown>;
+  }) => Promise<unknown>;
+  requestClientAction?: (params: {
+    clientUuid: string;
+    actionName: string;
     payload: Record<string, unknown>;
   }) => Promise<unknown>;
   notifyProjectMemberJoined?: (params: {
@@ -497,6 +527,16 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
   ],
 
   actions: {
+    refreshClientHello: {
+      async handler(this: GatewaySocketCarrier) {
+        if (!this.wsClient || this.wsClient.readyState !== 1) {
+          return { sent: false };
+        }
+
+        await this.sendClientHello?.(this.wsClient);
+        return { sent: true };
+      },
+    },
     requestLiveRelay: {
       params: {
         clientUuid: "string",
@@ -523,6 +563,23 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           localSessionId: ctx.params.localSessionId,
           requestType: ctx.params.requestType,
           payload: ctx.params.payload ?? {},
+        });
+      },
+    },
+    requestClientAction: {
+      params: {
+        clientUuid: "string",
+        actionName: "string",
+        params: { type: "object", optional: true },
+      },
+      async handler(this: GatewaySocketCarrier, ctx) {
+        return await this.requestClientAction?.({
+          clientUuid: String(ctx.params.clientUuid),
+          actionName: String(ctx.params.actionName),
+          payload:
+            ctx.params.params && typeof ctx.params.params === "object"
+              ? (ctx.params.params as Record<string, unknown>)
+              : {},
         });
       },
     },
@@ -726,6 +783,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
     this.connectedClientsByUuid = new Map();
     this.connectedClientToolsAlerts = new Map();
     this.pendingLiveRequests = new Map();
+    this.pendingActionRequests = new Map();
   },
 
   methods: {
@@ -769,16 +827,21 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
     }> {
       const runtime = this.getRuntimeOrThrow!();
       const sessions = await runtime.sessionStore.listSessions();
-      const boundSessions = (
-        await Promise.all(
-          sessions.map(async (session) =>
-            (await runtime.bindingStore.getBinding(session.sessionId))
-              ? session
-              : null,
-          ),
-        )
-      ).filter((session): session is (typeof sessions)[number] => Boolean(session));
-      const sessionTools = boundSessions
+      const sessionsForHello =
+        runtime.config.distributed.mode === "client"
+          ? sessions
+          : (
+              await Promise.all(
+                sessions.map(async (session) =>
+                  (await runtime.bindingStore.getBinding(session.sessionId))
+                    ? session
+                    : null,
+                ),
+              )
+            ).filter(
+              (session): session is (typeof sessions)[number] => Boolean(session),
+            );
+      const sessionTools = sessionsForHello
         .map((session) => {
           const toolsHash = session.cwd
             ? computeToolsHashForDir(session.cwd)
@@ -1851,6 +1914,33 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         return;
       }
 
+      if (parsed.type === "action_response") {
+        const requestId =
+          typeof parsed.request_id === "string" ? parsed.request_id.trim() : "";
+        if (!requestId) {
+          return;
+        }
+        const pending = this.pendingActionRequests?.get(requestId);
+        if (!pending) {
+          return;
+        }
+
+        clearTimeout(pending.timeout);
+        this.pendingActionRequests?.delete(requestId);
+        if (parsed.ok === true) {
+          pending.resolve(parsed.result);
+        } else {
+          pending.reject(
+            new Error(
+              typeof parsed.error === "string" && parsed.error.trim()
+                ? parsed.error
+                : "Remote action request failed",
+            ),
+          );
+        }
+        return;
+      }
+
       if (parsed.type === "delivery_ack" || parsed.type === "delivery_fail") {
         const hello = this.connectedClients?.get(socket);
         const clientUuid = hello?.client_uuid?.trim();
@@ -2007,6 +2097,43 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         await runtime.telegramTransport.handleToolsUpdatedEvent(
           parsed.payload as GatewaySocketToolsEventPayload,
         );
+        return;
+      }
+
+      if (parsed.type === "action_request") {
+        const requestId =
+          typeof parsed.request_id === "string" ? parsed.request_id.trim() : "";
+        const actionName =
+          typeof parsed.action_name === "string" ? parsed.action_name.trim() : "";
+        if (!requestId || !actionName) {
+          return;
+        }
+
+        try {
+          const result = await this.broker.call(
+            actionName,
+            parsed.payload ?? {},
+            { meta: { internal_call: true } },
+          );
+          this.wsClient?.send(
+            JSON.stringify({
+              type: "action_response",
+              request_id: requestId,
+              ok: true,
+              result,
+            } satisfies GatewaySocketActionResponse),
+          );
+        } catch (error) {
+          this.wsClient?.send(
+            JSON.stringify({
+              type: "action_response",
+              request_id: requestId,
+              ok: false,
+              error:
+                error instanceof Error ? (error.stack ?? error.message) : String(error),
+            } satisfies GatewaySocketActionResponse),
+          );
+        }
         return;
       }
 
@@ -2188,6 +2315,46 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         requestType: params.requestType,
       });
       return response;
+    },
+
+    async requestClientAction(
+      this: GatewaySocketCarrier,
+      params: {
+        clientUuid: string;
+        actionName: string;
+        payload: Record<string, unknown>;
+      },
+    ): Promise<unknown> {
+      const socket = this.connectedClientsByUuid?.get(params.clientUuid);
+      if (!socket || socket.readyState !== 1) {
+        throw new Error(
+          `Gateway WS client '${params.clientUuid}' is not connected`,
+        );
+      }
+
+      const requestId = randomUUID();
+      return await new Promise<unknown>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          this.pendingActionRequests?.delete(requestId);
+          reject(new Error("Remote action WS request timed out"));
+        }, LIVE_REQUEST_TIMEOUT_MS);
+
+        this.pendingActionRequests?.set(requestId, {
+          clientUuid: params.clientUuid,
+          resolve,
+          reject,
+          timeout,
+        });
+
+        socket.send(
+          JSON.stringify({
+            type: "action_request",
+            request_id: requestId,
+            action_name: params.actionName,
+            payload: params.payload ?? {},
+          } satisfies GatewaySocketActionRequest),
+        );
+      });
     },
 
     async notifyProjectMemberJoined(
@@ -2785,6 +2952,11 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         pending.reject(new Error("Gateway WS transport is shutting down"));
       }
       this.pendingLiveRequests?.clear();
+      for (const pending of this.pendingActionRequests?.values() ?? []) {
+        clearTimeout(pending.timeout);
+        pending.reject(new Error("Gateway WS transport is shutting down"));
+      }
+      this.pendingActionRequests?.clear();
 
       if (this.wsClient) {
         const socket = this.wsClient;

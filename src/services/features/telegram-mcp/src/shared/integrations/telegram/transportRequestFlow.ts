@@ -194,15 +194,7 @@ export class TransportRequestFlow {
     input: HumanTransportNotification,
   ): Promise<{ externalMessageId?: string | number }> {
     if (!this.host.isTelegramEnabled()) {
-      this.host.logger.debug(
-        "Telegram notification skipped because transport is disabled",
-        {
-          sessionId: input.sessionId,
-          telegramChatId: input.recipient.telegramChatId,
-          telegramUserId: input.recipient.telegramUserId,
-        },
-      );
-      return {};
+      return this.sendNotificationViaGateway(input);
     }
 
     const text = formatTelegramNotification(input, {
@@ -359,5 +351,45 @@ export class TransportRequestFlow {
       this.clearWaiter(input.requestId);
       throw error;
     }
+  }
+
+  private async sendNotificationViaGateway(
+    input: HumanTransportNotification,
+  ): Promise<{ externalMessageId?: string | number }> {
+    if (!this.host.config.distributed.gatewayPublicUrl) {
+      throw new Error("Gateway is not configured for Telegram notification proxying.");
+    }
+
+    const clientUuid = await this.host.maintenanceStore.getGatewayClientUuid();
+    if (!clientUuid) {
+      throw new Error("Gateway client UUID is unavailable for Telegram notification proxying.");
+    }
+
+    const response = await this.host.callGatewayJson<{
+      message_id?: number | string;
+    }>("/transport/notify", {
+      client_uuid: clientUuid,
+      local_session_id: input.sessionId,
+      ...(input.sessionLabel ? { session_label: input.sessionLabel } : {}),
+      telegram_chat_id: input.recipient.telegramChatId,
+      telegram_user_id: input.recipient.telegramUserId,
+      message: input.message,
+      ...(input.task ? { task: input.task } : {}),
+      ...(input.context ? { context: input.context } : {}),
+      ...(input.riskLevel ? { risk_level: input.riskLevel } : {}),
+    });
+
+    this.host.logger.info("Gateway transport notification delivered", {
+      sessionId: input.sessionId,
+      telegramChatId: input.recipient.telegramChatId,
+      telegramUserId: input.recipient.telegramUserId,
+      ...(typeof response.message_id !== "undefined"
+        ? { messageId: response.message_id }
+        : {}),
+    });
+
+    return typeof response.message_id === "undefined"
+      ? {}
+      : { externalMessageId: response.message_id };
   }
 }

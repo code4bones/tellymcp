@@ -130,6 +130,10 @@ This directory holds the decomposed Telegram transport. `transport.ts` is now th
   Inbound Telegram message flow:
   top-level message routing, `/menu`/`/help`/`/link`/`/admin`/`/auth`, waiter replies, relay inbox routing, attachment upload/capture.
 
+- `transportConsoleRegistry.ts`
+  Gateway console registry flow:
+  scope-based remote console discovery, synthetic relay session materialization, and auto-binding of gateway consoles to a Telegram principal without pair codes.
+
 ## Gateway/Project State
 
 - `transportGatewayDirectory.ts`
@@ -180,6 +184,14 @@ This directory holds the decomposed Telegram transport. `transport.ts` is now th
 - `transportTmuxRuntime.ts`
   Tmux scheduler/runtime loop:
   prompt-scan interval, debounce timers, inbox nudge scheduling, typing action.
+
+- `transportTerminalActions.ts`
+  Terminal-oriented interaction flow:
+  nudge, prompt scan, target recovery, and buffer capture via the generic terminal facade shared by `tmux` and built-in `pty`.
+
+- `transportTerminalRuntime.ts`
+  Terminal scheduler/runtime loop:
+  prompt-scan interval, debounce timers, inbox nudge scheduling, typing action, with compatibility shims for legacy `tmux` naming.
 
 ## External Helpers
 

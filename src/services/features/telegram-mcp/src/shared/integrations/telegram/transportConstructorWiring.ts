@@ -51,6 +51,7 @@ import { TransportAdminMenus } from "./transportAdminMenus";
 import { TransportAttachmentStore } from "./transportAttachmentStore";
 import { TransportBroadcastActions } from "./transportBroadcastActions";
 import { TransportContext } from "./transportContext";
+import { TransportConsoleRegistry } from "./transportConsoleRegistry";
 import { TransportDocumentActions } from "./transportDocumentActions";
 import { TransportEventActions } from "./transportEventActions";
 import { TransportFileHandoffActions } from "./transportFileHandoffActions";
@@ -178,6 +179,7 @@ export interface TransportConstructorWiringResult {
   menuFingerprints: TransportMenuFingerprints;
   menuFlow: TransportMenuFlow;
   menuShell: TransportMenuShell;
+  consoleRegistry: TransportConsoleRegistry;
   gatewayDirectory: TransportGatewayDirectory;
   gatewayActions: TransportGatewayActions;
   messageFlow: TransportMessageFlow;
@@ -227,6 +229,13 @@ export function buildTransportConstructorWiring(
     config: host.config,
     logger: host.logger,
     bot,
+  });
+  const consoleRegistry = new TransportConsoleRegistry({
+    config: host.config,
+    logger: host.logger,
+    sessionStore: host.sessionStore,
+    bindingStore: host.bindingStore,
+    callGatewayJson: (path, payload) => host.callGatewayJson(path, payload),
   });
 
   const liveActions = new TransportLiveActions({
@@ -946,6 +955,8 @@ export function buildTransportConstructorWiring(
     showHelp: (ctx) => menuFlow.showHelp(ctx),
     showAdminMainMenu: (ctx, introText) => adminActions.showMainMenu(ctx, introText),
     showAdminClientsMenu: (ctx, introText) => adminActions.showClientsMenu(ctx, introText),
+    ensureGatewayScopeConsolesBound: ({ principal, ctx }) =>
+      consoleRegistry.ensureScopedConsolesBound({ principal, ctx }),
     getMainMenu: () => mainMenu,
     bindRelaySessionToPrincipal: (input) => projectState.bindRelaySessionToPrincipal(input),
     clearWaiter: (requestId) => requestFlow.clearWaiter(requestId),
@@ -1101,6 +1112,7 @@ export function buildTransportConstructorWiring(
     menuFingerprints,
     menuFlow,
     menuShell,
+    consoleRegistry,
     gatewayDirectory,
     gatewayActions,
     messageFlow,

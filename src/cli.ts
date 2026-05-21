@@ -9,12 +9,18 @@ import Redis from "ioredis";
 import pc from "picocolors";
 import WebSocket from "ws";
 import { getTellyMcpPackageVersion } from "./services/features/telegram-mcp/src/shared/lib/version/versionHandshake";
+import {
+  isForegroundPtyClientMode,
+  runForegroundPtyRuntime,
+} from "./services/features/telegram-mcp/src/features/foreground-terminal/model/foregroundTerminalRuntime";
+import { runStdioMcpServer } from "./services/features/telegram-mcp/src/features/stdio-server/model/runStdioMcpServer";
 
 type InitMode = "client" | "gateway" | "both";
 type CliCommand =
   | "help"
   | "init"
   | "run"
+  | "serve-stdio"
   | "mcp"
   | "doctor"
   | "browser"
@@ -120,6 +126,8 @@ function printHelp(): void {
     "  tellymcp init <client|gateway|both> [directory]",
     "  tellymcp run [--env <file>]",
     "  tellymcp run --env=<file>",
+    "  tellymcp run --env .env-client -s backendDev",
+    "  tellymcp serve-stdio --env .env-client -s backendDev",
     "  tellymcp doctor [--env <file>]",
     "  tellymcp system-prune [--env <file>] --yes",
     "  tellymcp browser install",
@@ -131,6 +139,8 @@ function printHelp(): void {
     "  tellymcp init gateway ./gateway-node",
     "  tellymcp run",
     "  tellymcp run --env .env.client",
+    "  tellymcp run --env .env-client -s backendDev",
+    "  tellymcp serve-stdio --env .env-client -s backendDev",
     "  tellymcp doctor --env .env.client",
     "  tellymcp system-prune --env .env.gateway --yes",
     "  tellymcp browser install",
@@ -139,12 +149,12 @@ function printHelp(): void {
   if (tmux.found) {
     printSection("tmux", [
       `${pc.green("  OK")} ${tmux.version}`,
-      "  Live view and session nudges are available.",
+      "  Live view and session nudges are available for tmux transport.",
     ]);
   } else {
     printSection("tmux", [
       `${pc.yellow("  WARN")} tmux was not found on this system.`,
-      "  TellyMCP will still run, but Live view and nudges will be limited.",
+      "  TellyMCP will still run. Use tmux transport or switch TERMINAL_TRANSPORT=pty.",
       "  Install examples:",
       ...getTmuxInstallHints().map((line) => `    ${line}`),
     ]);
@@ -158,6 +168,8 @@ type LoadedCliEnv = {
 
 function loadCliEnv(args: string[]): LoadedCliEnv {
   const envPath = resolveRunEnvPath(args);
+  const sessionOverride =
+    readFlagValue(args, "-s") ?? readFlagValue(args, "--session");
   if (!existsSync(envPath)) {
     fail(`Missing env file: ${envPath}`);
   }
@@ -173,6 +185,12 @@ function loadCliEnv(args: string[]): LoadedCliEnv {
     parsed: {
       ...fileEnv,
       ...runtimeEnvOverrides,
+      ...(sessionOverride
+        ? {
+            TELLYMCP_SESSION_ID: sessionOverride,
+            TELLYMCP_SESSION_LABEL: sessionOverride,
+          }
+        : {}),
     },
   };
 }
@@ -191,10 +209,21 @@ function printMcpHelp(): void {
     "  Copy the printed JSON into your agent's MCP config.",
   ]);
   printSection("What you need", [
-    "  1. tmux must be installed on the machine where tellymcp runs.",
+    "  1. For terminal transport, either tmux must be installed or TERMINAL_TRANSPORT=pty must be enabled.",
     "  2. Your MCP endpoint depends on mode:",
     "     - client/local: http://127.0.0.1:8787/mcp",
     "     - gateway/both behind nginx: https://your-host.example/api/mcp",
+    "  3. For local agent-only mode, prefer stdio: tellymcp serve-stdio --env .env-client -s <session>.",
+  ]);
+  printSection("Local stdio example", [
+    "{",
+    '  "mcpServers": {',
+    '    "telegramHuman": {',
+    '      "command": "tellymcp",',
+    '      "args": ["serve-stdio", "--env", ".env-client", "-s", "backendDev"]',
+    "    }",
+    "  }",
+    "}",
   ]);
   printSection("Claude / modern streamable-http example", [
     "{",
@@ -549,11 +578,18 @@ async function checkWebSocketUrl(
 
 async function runDoctor(args: string[]): Promise<void> {
   const { envPath, parsed } = loadCliEnv(args);
+  const terminalTransport = (parsed.TERMINAL_TRANSPORT || "tmux").trim();
   const tmux = getTmuxStatus();
 
   printBanner("doctor", "Local installation diagnostics");
 
-  if (tmux.found) {
+  if (terminalTransport === "pty") {
+    printSection("terminal", [
+      `${pc.green("  OK")} built-in PTY transport`,
+      `  shell: ${parsed.TERMINAL_SHELL?.trim() || process.env.SHELL || "bash"}`,
+      `  size:  ${parsed.TERMINAL_COLS?.trim() || "120"}x${parsed.TERMINAL_ROWS?.trim() || "40"}`,
+    ]);
+  } else if (tmux.found) {
     printSection("tmux", [
       `${pc.green("  OK")} ${tmux.version}`,
       "  Live view and session nudges should work.",
@@ -604,6 +640,10 @@ async function runDoctor(args: string[]): Promise<void> {
   printSection("env", [
     `${pc.green("  OK")} ${envPath}`,
     `  mode: ${mode}`,
+    `  terminal transport: ${terminalTransport}`,
+    ...(parsed.TELLYMCP_SESSION_ID
+      ? [`  session override: ${parsed.TELLYMCP_SESSION_ID}`]
+      : []),
     `  bind: http://${httpHost}:${httpPort}`,
     `  mcp:  http://${httpHost}:${httpPort}${mcpUrlPath}`,
     `  web:  http://${httpHost}:${httpPort}${webappUrlPath}`,
@@ -957,10 +997,22 @@ function runBrowserCommand(args: string[]): void {
   });
 }
 
-function runRuntime(args: string[]): void {
-  const envPath = resolveRunEnvPath(args);
-  if (!existsSync(envPath)) {
-    fail(`Missing ${envPath}. Run 'tellymcp init <client|gateway|both>' first or pass --env <file>.`);
+async function runRuntime(args: string[]): Promise<void> {
+  const { envPath, parsed } = loadCliEnv(args);
+  if (parsed.TELLYMCP_SESSION_ID) {
+    process.env.TELLYMCP_SESSION_ID = parsed.TELLYMCP_SESSION_ID;
+  }
+  if (parsed.TELLYMCP_SESSION_LABEL) {
+    process.env.TELLYMCP_SESSION_LABEL = parsed.TELLYMCP_SESSION_LABEL;
+  }
+
+  if (isForegroundPtyClientMode(parsed)) {
+    await runForegroundPtyRuntime({
+      envPath,
+      packageRoot,
+      printBanner,
+    });
+    return;
   }
 
   const runnerPath = path.join(
@@ -1009,6 +1061,12 @@ function runRuntime(args: string[]): void {
         ...process.env,
         ENV_FILE: envPath,
         TELLYMCP_STANDALONE_HTTP: "true",
+        ...(parsed.TELLYMCP_SESSION_ID
+          ? { TELLYMCP_SESSION_ID: parsed.TELLYMCP_SESSION_ID }
+          : {}),
+        ...(parsed.TELLYMCP_SESSION_LABEL
+          ? { TELLYMCP_SESSION_LABEL: parsed.TELLYMCP_SESSION_LABEL }
+          : {}),
       },
     },
   );
@@ -1022,9 +1080,24 @@ function runRuntime(args: string[]): void {
   });
 }
 
+async function runServeStdio(args: string[]): Promise<void> {
+  const { envPath, parsed } = loadCliEnv(args);
+  if (parsed.TELLYMCP_SESSION_ID) {
+    process.env.TELLYMCP_SESSION_ID = parsed.TELLYMCP_SESSION_ID;
+  }
+  if (parsed.TELLYMCP_SESSION_LABEL) {
+    process.env.TELLYMCP_SESSION_LABEL = parsed.TELLYMCP_SESSION_LABEL;
+  }
+
+  await runStdioMcpServer({
+    envPath,
+    packageRoot,
+  });
+}
+
 async function main(argv: string[]): Promise<void> {
   const [rawCommand, firstArg, secondArg] = argv;
-  const command: CliCommand = rawCommand === "init" || rawCommand === "run" || rawCommand === "help" || rawCommand === "mcp" || rawCommand === "doctor" || rawCommand === "browser" || rawCommand === "system-prune"
+  const command: CliCommand = rawCommand === "init" || rawCommand === "run" || rawCommand === "serve-stdio" || rawCommand === "help" || rawCommand === "mcp" || rawCommand === "doctor" || rawCommand === "browser" || rawCommand === "system-prune"
     ? rawCommand
     : "help";
 
@@ -1058,7 +1131,12 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
 
-  runRuntime(argv.slice(1));
+  if (command === "serve-stdio") {
+    await runServeStdio(argv.slice(1));
+    return;
+  }
+
+  await runRuntime(argv.slice(1));
 }
 
 void main(process.argv.slice(2));

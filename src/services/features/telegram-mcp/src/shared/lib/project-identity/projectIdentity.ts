@@ -143,15 +143,20 @@ export class ProjectIdentityResolver {
     const inputCwd = resolveInputCwd(input.cwd);
     const resolvedCwd = inputCwd || this.identity.cwd;
     const titleBase = basename(resolvedCwd) || this.identity.resolvedTitle || "Project";
-    const sessionMarker = this.readSessionMarker(resolvedCwd);
+    const explicitSessionId =
+      input.session_id?.trim() || this.config.project.sessionId?.trim();
+    const explicitSessionLabel =
+      input.session_label?.trim() || this.config.project.sessionLabel?.trim();
+    const sessionMarker =
+      explicitSessionId || explicitSessionLabel
+        ? null
+        : this.readSessionMarker(resolvedCwd);
     const derivedSessionId =
       sessionMarker?.localSessionId ||
       `${slugify(titleBase) || "session"}-${shortHash(resolvedCwd)}`;
     const derivedSessionLabel = sessionMarker?.sessionLabel || titleBase;
-    const explicitSessionId = input.session_id?.trim();
-    const explicitSessionLabel = input.session_label?.trim();
 
-    if (!sessionMarker) {
+    if (!sessionMarker && !explicitSessionId && !explicitSessionLabel) {
       this.writeSessionMarker(resolvedCwd, {
         localSessionId: explicitSessionId || derivedSessionId,
         sessionLabel: explicitSessionLabel || derivedSessionLabel,

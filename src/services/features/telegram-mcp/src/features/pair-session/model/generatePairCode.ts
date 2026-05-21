@@ -15,6 +15,10 @@ import { createPairCode } from "../../../shared/lib/ids/ids";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
 import {
+  ensureTerminalTargetForSession,
+  getConfiguredTerminalShellDisplayName,
+} from "../../../shared/integrations/tmux/client";
+import {
   callGatewayJson,
   ensureGatewayClientUuid,
 } from "../../distributed-client/model/gatewayClientAccess";
@@ -160,6 +164,19 @@ export class PairSessionService {
     const existingSession = await this.sessionStore.getSession(
       resolved.sessionId,
     );
+    const ensuredTerminalTarget = ensureTerminalTargetForSession(
+      this.config.tmux,
+      {
+        sessionId: resolved.sessionId,
+        cwd: resolved.cwd,
+        ...(existingSession?.tmuxTarget
+          ? { target: existingSession.tmuxTarget }
+          : {}),
+      },
+    );
+    const terminalShellName = getConfiguredTerminalShellDisplayName(
+      this.config.tmux,
+    );
     await this.sessionStore.setSession({
       sessionId: resolved.sessionId,
       ...(input.session_label
@@ -193,11 +210,15 @@ export class PairSessionService {
       ...(existingSession?.risks ? { risks: existingSession.risks } : {}),
       ...(input.tmux_session_name
         ? { tmuxSessionName: input.tmux_session_name }
+        : ensuredTerminalTarget
+          ? { tmuxSessionName: "pty" }
         : existingSession?.tmuxSessionName
           ? { tmuxSessionName: existingSession.tmuxSessionName }
           : {}),
       ...(input.tmux_window_name
         ? { tmuxWindowName: input.tmux_window_name }
+        : ensuredTerminalTarget
+          ? { tmuxWindowName: terminalShellName }
         : existingSession?.tmuxWindowName
           ? { tmuxWindowName: existingSession.tmuxWindowName }
           : {}),
@@ -208,6 +229,8 @@ export class PairSessionService {
           : {}),
       ...(input.tmux_pane_id
         ? { tmuxPaneId: input.tmux_pane_id, tmuxTarget: input.tmux_pane_id }
+        : ensuredTerminalTarget
+          ? { tmuxPaneId: ensuredTerminalTarget, tmuxTarget: ensuredTerminalTarget }
         : existingSession?.tmuxPaneId
           ? {
               tmuxPaneId: existingSession.tmuxPaneId,

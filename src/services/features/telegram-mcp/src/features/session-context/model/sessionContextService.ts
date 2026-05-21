@@ -2,6 +2,10 @@ import type {
   SessionBindingStore,
   SessionStore,
 } from "../../../shared/api/storage/contract";
+import {
+  isPtyTarget,
+  stopPtyTarget,
+} from "../../../shared/integrations/terminal/ptyRegistry";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
 import { redactSecrets } from "../../../shared/lib/redact-secrets/redactSecrets";
@@ -20,18 +24,35 @@ import type {
   SetTmuxTargetOutput,
 } from "../../../entities/session/model/types";
 
+type RemoteConsoleInvoker = {
+  invokeForRelaySession<T>(
+    sessionId: string,
+    actionName: string,
+    params: Record<string, unknown>,
+  ): Promise<T | null>;
+};
+
 export class SessionContextService {
   public constructor(
     private readonly sessionStore: SessionStore,
     private readonly bindingStore: SessionBindingStore,
     private readonly logger: Logger,
     private readonly projectIdentityResolver: ProjectIdentityResolver,
+    private readonly remoteConsoleInvoker?: RemoteConsoleInvoker,
   ) {}
 
   public async setContext(
     input: SetSessionContextInput,
   ): Promise<SetSessionContextOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<SetSessionContextOutput>(
+      resolved.sessionId,
+      "telegramMcp.sessionContext.setContextRemote",
+      input as Record<string, unknown>,
+    );
+    if (remote) {
+      return remote;
+    }
     const updatedAt = new Date().toISOString();
     const existing = await this.sessionStore.getSession(resolved.sessionId);
     const binding = await this.bindingStore.getBinding(resolved.sessionId);
@@ -130,6 +151,14 @@ export class SessionContextService {
     input: RenameSessionInput,
   ): Promise<RenameSessionOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<RenameSessionOutput>(
+      resolved.sessionId,
+      "telegramMcp.sessionContext.renameSessionRemote",
+      input as Record<string, unknown>,
+    );
+    if (remote) {
+      return remote;
+    }
     const existing = await this.sessionStore.getSession(resolved.sessionId);
     const updatedAt = new Date().toISOString();
     const label = redactSecrets(input.title);
@@ -201,6 +230,14 @@ export class SessionContextService {
     input: GetSessionContextInput,
   ): Promise<GetSessionContextOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<GetSessionContextOutput>(
+      resolved.sessionId,
+      "telegramMcp.sessionContext.getContextRemote",
+      input as Record<string, unknown>,
+    );
+    if (remote) {
+      return remote;
+    }
     const session = await this.sessionStore.getSession(resolved.sessionId);
     const binding = await this.bindingStore.getBinding(resolved.sessionId);
     const linkedSession = session?.linkedSessionId
@@ -300,7 +337,19 @@ export class SessionContextService {
     input: ClearSessionContextInput,
   ): Promise<ClearSessionContextOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<ClearSessionContextOutput>(
+      resolved.sessionId,
+      "telegramMcp.sessionContext.clearContextRemote",
+      input as Record<string, unknown>,
+    );
+    if (remote) {
+      return remote;
+    }
     const existing = await this.sessionStore.getSession(resolved.sessionId);
+    const existingTarget = existing?.tmuxTarget;
+    if (existingTarget && isPtyTarget(existingTarget)) {
+      stopPtyTarget(existingTarget);
+    }
     await this.sessionStore.clearSession(resolved.sessionId);
     await this.bindingStore.clearBinding(resolved.sessionId);
     this.projectIdentityResolver.removeSessionMarker(existing?.cwd || resolved.cwd);
@@ -322,6 +371,14 @@ export class SessionContextService {
     input: SetTmuxTargetInput,
   ): Promise<SetTmuxTargetOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<SetTmuxTargetOutput>(
+      resolved.sessionId,
+      "telegramMcp.sessionContext.setTmuxTargetRemote",
+      input as Record<string, unknown>,
+    );
+    if (remote) {
+      return remote;
+    }
     const existing = await this.sessionStore.getSession(resolved.sessionId);
     const updatedAt = new Date().toISOString();
     const sanitizedTarget = redactSecrets(input.tmux_target);
@@ -420,6 +477,14 @@ export class SessionContextService {
     input: GetTmuxTargetInput,
   ): Promise<GetTmuxTargetOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<GetTmuxTargetOutput>(
+      resolved.sessionId,
+      "telegramMcp.sessionContext.getTmuxTargetRemote",
+      input as Record<string, unknown>,
+    );
+    if (remote) {
+      return remote;
+    }
     const session = await this.sessionStore.getSession(resolved.sessionId);
     const configured = Boolean(session?.tmuxTarget);
 

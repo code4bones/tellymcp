@@ -4,7 +4,16 @@ import {
   TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
   type TelegramMcpRuntimeServiceInstance,
 } from "./runtime.service";
+import { RemoteConsoleActionClient } from "./src/features/distributed-gateway/model/remoteConsoleActionClient";
 import { SessionContextService } from "./src/features/session-context/model/sessionContextService";
+import type {
+  ClearSessionContextInput,
+  GetSessionContextInput,
+  GetTmuxTargetInput,
+  RenameSessionInput,
+  SetSessionContextInput,
+  SetTmuxTargetInput,
+} from "./src/entities/session/model/types";
 
 export const TELEGRAM_MCP_SESSION_CONTEXT_SERVICE_NAME =
   "telegramMcp.sessionContext";
@@ -22,6 +31,63 @@ type SessionContextServiceCarrier = Service & {
 const TelegramMcpSessionContextService: ServiceSchema = {
   name: TELEGRAM_MCP_SESSION_CONTEXT_SERVICE_NAME,
   dependencies: [TELEGRAM_MCP_RUNTIME_SERVICE_NAME],
+
+  actions: {
+    getContextRemote: {
+      params: { type: "object" },
+      async handler(
+        this: SessionContextServiceCarrier,
+        ctx: { params: GetSessionContextInput },
+      ) {
+        return this.getSessionContextService!().getContext(ctx.params);
+      },
+    },
+    setContextRemote: {
+      params: { type: "object" },
+      async handler(
+        this: SessionContextServiceCarrier,
+        ctx: { params: SetSessionContextInput },
+      ) {
+        return this.getSessionContextService!().setContext(ctx.params);
+      },
+    },
+    renameSessionRemote: {
+      params: { type: "object" },
+      async handler(
+        this: SessionContextServiceCarrier,
+        ctx: { params: RenameSessionInput },
+      ) {
+        return this.getSessionContextService!().renameSession(ctx.params);
+      },
+    },
+    clearContextRemote: {
+      params: { type: "object" },
+      async handler(
+        this: SessionContextServiceCarrier,
+        ctx: { params: ClearSessionContextInput },
+      ) {
+        return this.getSessionContextService!().clearContext(ctx.params);
+      },
+    },
+    getTmuxTargetRemote: {
+      params: { type: "object" },
+      async handler(
+        this: SessionContextServiceCarrier,
+        ctx: { params: GetTmuxTargetInput },
+      ) {
+        return this.getSessionContextService!().getTmuxTarget(ctx.params);
+      },
+    },
+    setTmuxTargetRemote: {
+      params: { type: "object" },
+      async handler(
+        this: SessionContextServiceCarrier,
+        ctx: { params: SetTmuxTargetInput },
+      ) {
+        return this.getSessionContextService!().setTmuxTarget(ctx.params);
+      },
+    },
+  },
 
   created(this: SessionContextServiceCarrier) {
     this.sessionContextService = null;
@@ -62,6 +128,9 @@ const TelegramMcpSessionContextService: ServiceSchema = {
       runtime.stateStore,
       runtime.logger,
       runtime.projectIdentityResolver,
+      new RemoteConsoleActionClient((actionName, params) =>
+        this.broker.call(actionName, params, { meta: { internal_call: true } }),
+      ),
     );
     this.logger.info("telegram_mcp session-context service is ready");
   },

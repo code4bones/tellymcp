@@ -10,8 +10,26 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
+import {
+  buildPtyTarget,
+  capturePtyRange,
+  captureVisiblePty,
+  ensurePtySession,
+  getPtyShellDisplayName,
+  getPtyWindowHeight,
+  hasPtyTarget,
+  isPtyTarget,
+  sendPtyAction,
+  sendPtyText,
+} from "../terminal/ptyRegistry";
+
 export type TmuxRuntimeConfig = {
+  transport?: "tmux" | "pty";
   socketPath?: string;
+  shell?: string;
+  cols?: number;
+  rows?: number;
+  scrollbackLines?: number;
 };
 
 export type AllowedTmuxAction =
@@ -35,6 +53,22 @@ export type TmuxTargetHint = {
 
 const ENTER_AFTER_PASTE_DELAY_MS = 75;
 const SUBMIT_LINE_KEY = "C-m";
+
+function shouldUsePty(
+  config: TmuxRuntimeConfig,
+  target?: string,
+): boolean {
+  return config.transport === "pty" || isPtyTarget(target);
+}
+
+function toPtyConfig(config: TmuxRuntimeConfig) {
+  return {
+    shell: config.shell?.trim() || process.env.SHELL || "bash",
+    cols: config.cols ?? 120,
+    rows: config.rows ?? 40,
+    scrollbackLines: config.scrollbackLines ?? 4000,
+  };
+}
 
 function sanitizeFileName(fileName: string): string {
   const baseName = path.basename(fileName).trim();
@@ -290,6 +324,7 @@ export function isTmuxUnavailableError(error: unknown): boolean {
   const message =
     error instanceof Error ? (error.stack ?? error.message) : String(error);
   return (
+    message.includes("pty target is unavailable") ||
     message.includes("error connecting to /tmp/tmux-") ||
     message.includes("No such file or directory") ||
     message.includes("ENOENT") ||
@@ -301,10 +336,42 @@ export function isTmuxTargetInvalidError(error: unknown): boolean {
   const message =
     error instanceof Error ? (error.stack ?? error.message) : String(error);
   return (
+    message.includes("unknown pty target") ||
     message.includes("can't find pane") ||
     message.includes("can't find window") ||
     message.includes("can't find session")
   );
+}
+
+export function getConfiguredTerminalShell(
+  config: TmuxRuntimeConfig,
+): string {
+  return toPtyConfig(config).shell;
+}
+
+export function getConfiguredTerminalShellDisplayName(
+  config: TmuxRuntimeConfig,
+): string {
+  return getPtyShellDisplayName(toPtyConfig(config));
+}
+
+export function ensureTerminalTargetForSession(
+  config: TmuxRuntimeConfig,
+  input: {
+    sessionId: string;
+    cwd?: string | undefined;
+    target?: string | undefined;
+  },
+): string | null {
+  if (!shouldUsePty(config, input.target)) {
+    return null;
+  }
+
+  return ensurePtySession(toPtyConfig(config), {
+    sessionId: input.sessionId,
+    ...(input.cwd ? { cwd: input.cwd } : {}),
+    ...(isPtyTarget(input.target) ? { target: input.target } : {}),
+  });
 }
 
 async function listTmuxPanes(
@@ -348,6 +415,14 @@ export async function resolveTmuxTargetFromHint(
   config: TmuxRuntimeConfig,
   hint: TmuxTargetHint,
 ): Promise<string | null> {
+  if (shouldUsePty(config, hint.tmuxTarget ?? hint.tmuxPaneId)) {
+    const target =
+      hint.tmuxTarget?.trim() ||
+      hint.tmuxPaneId?.trim() ||
+      buildPtyTarget(hint.tmuxSessionName?.trim() || "default");
+    return hasPtyTarget(target) ? target : hint.tmuxTarget?.trim() ?? null;
+  }
+
   const panes = await listTmuxPanes(config);
 
   const byPaneId = hint.tmuxPaneId
@@ -411,6 +486,10 @@ export async function getTmuxWindowHeight(
   config: TmuxRuntimeConfig,
   target: string,
 ): Promise<number | null> {
+  if (shouldUsePty(config, target)) {
+    return getPtyWindowHeight(target);
+  }
+
   const { stdout: heightRaw } = await execFileOutputAsync(
     "tmux",
     buildTmuxArgs(config, ["display-message", "-p", "-t", target, "#{window_height}"]),
@@ -425,6 +504,10 @@ export async function captureTmuxPaneRange(
   start: string,
   includeEscapes: boolean,
 ): Promise<string> {
+  if (shouldUsePty(config, target)) {
+    return capturePtyRange(target, start);
+  }
+
   const args = [
     "capture-pane",
     "-p",
@@ -444,6 +527,10 @@ export async function captureVisibleTmuxPane(
   fallbackLines: number,
   visibleScreens: number,
 ): Promise<string> {
+  if (shouldUsePty(config, target)) {
+    return captureVisiblePty(target, fallbackLines, visibleScreens);
+  }
+
   const height = await getTmuxWindowHeight(config, target);
   const baseLines =
     typeof height === "number" && height > 0 ? height : Math.max(1, fallbackLines);
@@ -494,6 +581,11 @@ export async function sendAllowedTmuxAction(
   target: string,
   action: AllowedTmuxAction,
 ): Promise<void> {
+  if (shouldUsePty(config, target)) {
+    sendPtyAction(target, action);
+    return;
+  }
+
   const key =
     action === "up"
       ? "Up"
@@ -519,6 +611,13 @@ export async function sendTmuxLiteralText(
   text: string,
 ): Promise<void> {
   const normalized = text.replace(/\r?\n/g, " ");
+
+  if (shouldUsePty(config, target)) {
+    if (normalized.length > 0) {
+      sendPtyText(target, normalized);
+    }
+    return;
+  }
 
   const bufferName = `telegram-mcp-${Date.now().toString(36)}`;
   if (normalized.length > 0) {
@@ -552,6 +651,12 @@ export async function sendTmuxLiteralLine(
   target: string,
   text: string,
 ): Promise<void> {
+  if (shouldUsePty(config, target)) {
+    await sendTmuxLiteralText(config, target, text);
+    sendPtyText(target, "\r");
+    return;
+  }
+
   await sendTmuxLiteralText(config, target, text);
   if (text.length > 0) {
     await delay(ENTER_AFTER_PASTE_DELAY_MS);

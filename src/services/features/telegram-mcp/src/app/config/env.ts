@@ -59,6 +59,8 @@ const envSchema = z.object({
   MODE: z.enum(["queue", "reject"]).default("queue"),
   PAIR_CODE_TTL_SECONDS: z.coerce.number().int().positive().default(600),
   PROJECT_NAME: optionalNonEmptyString,
+  TELLYMCP_SESSION_ID: optionalNonEmptyString,
+  TELLYMCP_SESSION_LABEL: optionalNonEmptyString,
   MCP_HTTP_HOST: z.string().min(1).default("127.0.0.1"),
   MCP_HTTP_PORT: z.coerce.number().int().positive().default(8787),
   MCP_HTTP_PATH: z.string().min(1).default("/mcp"),
@@ -117,6 +119,11 @@ const envSchema = z.object({
   WEBAPP_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
   WEBAPP_ACTION_COOLDOWN_MS: z.coerce.number().int().nonnegative().default(150),
   MCP_XCHANGE_DIR: z.string().min(1).default(".mcp-xchange"),
+  TERMINAL_TRANSPORT: z.enum(["tmux", "pty"]).default("tmux"),
+  TERMINAL_SHELL: z.string().min(1).default(process.env.SHELL || "bash"),
+  TERMINAL_COLS: z.coerce.number().int().positive().default(120),
+  TERMINAL_ROWS: z.coerce.number().int().positive().default(40),
+  TERMINAL_SCROLLBACK_LINES: z.coerce.number().int().positive().default(4000),
   TMUX_NUDGE_ENABLED: z
     .string()
     .optional()
@@ -263,6 +270,11 @@ export type AppConfig = {
     dir: string;
   };
   tmux: {
+    transport: "tmux" | "pty";
+    shell: string;
+    cols: number;
+    rows: number;
+    scrollbackLines: number;
     nudgeEnabled: boolean;
     socketPath?: string;
     nudgeDebounceSeconds: number;
@@ -291,6 +303,8 @@ export type AppConfig = {
   };
   project: {
     name?: string | undefined;
+    sessionId?: string | undefined;
+    sessionLabel?: string | undefined;
   };
   logging: {
     level: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
@@ -448,6 +462,11 @@ export function loadConfig(): AppConfig {
       dir: parsed.MCP_XCHANGE_DIR,
     },
     tmux: {
+      transport: parsed.TERMINAL_TRANSPORT,
+      shell: parsed.TERMINAL_SHELL,
+      cols: parsed.TERMINAL_COLS,
+      rows: parsed.TERMINAL_ROWS,
+      scrollbackLines: parsed.TERMINAL_SCROLLBACK_LINES,
       nudgeEnabled: parsed.TMUX_NUDGE_ENABLED,
       ...(parsed.TMUX_SOCKET_PATH ? { socketPath: parsed.TMUX_SOCKET_PATH } : {}),
       nudgeDebounceSeconds: parsed.TMUX_NUDGE_DEBOUNCE_SECONDS,
@@ -478,6 +497,12 @@ export function loadConfig(): AppConfig {
     },
     project: {
       ...(parsed.PROJECT_NAME ? { name: parsed.PROJECT_NAME } : {}),
+      ...(parsed.TELLYMCP_SESSION_ID
+        ? { sessionId: parsed.TELLYMCP_SESSION_ID }
+        : {}),
+      ...(parsed.TELLYMCP_SESSION_LABEL
+        ? { sessionLabel: parsed.TELLYMCP_SESSION_LABEL }
+        : {}),
     },
     logging: {
       level: parsed.LOG_LEVEL,

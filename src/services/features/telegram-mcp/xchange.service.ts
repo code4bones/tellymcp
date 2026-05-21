@@ -4,7 +4,13 @@ import {
   TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
   type TelegramMcpRuntimeServiceInstance,
 } from "./runtime.service";
+import { RemoteConsoleActionClient } from "./src/features/distributed-gateway/model/remoteConsoleActionClient";
 import { XchangeService } from "./src/features/xchange/model/xchangeService";
+import type {
+  GetXchangeRecordInput,
+  ListXchangeRecordsInput,
+  MarkXchangeRecordReadInput,
+} from "./src/entities/xchange/model/types";
 
 export const TELEGRAM_MCP_XCHANGE_SERVICE_NAME = "telegramMcp.xchange";
 
@@ -21,6 +27,36 @@ type XchangeServiceCarrier = Service & {
 const TelegramMcpXchangeService: ServiceSchema = {
   name: TELEGRAM_MCP_XCHANGE_SERVICE_NAME,
   dependencies: [TELEGRAM_MCP_RUNTIME_SERVICE_NAME],
+
+  actions: {
+    listRecordsRemote: {
+      params: { type: "object" },
+      async handler(
+        this: XchangeServiceCarrier,
+        ctx: { params: ListXchangeRecordsInput },
+      ) {
+        return this.getXchangeService!().listRecords(ctx.params);
+      },
+    },
+    getRecordRemote: {
+      params: { type: "object" },
+      async handler(
+        this: XchangeServiceCarrier,
+        ctx: { params: GetXchangeRecordInput },
+      ) {
+        return this.getXchangeService!().getRecord(ctx.params);
+      },
+    },
+    markReadRemote: {
+      params: { type: "object" },
+      async handler(
+        this: XchangeServiceCarrier,
+        ctx: { params: MarkXchangeRecordReadInput },
+      ) {
+        return this.getXchangeService!().markRead(ctx.params);
+      },
+    },
+  },
 
   created(this: XchangeServiceCarrier) {
     this.xchangeService = null;
@@ -56,6 +92,9 @@ const TelegramMcpXchangeService: ServiceSchema = {
       runtime.stateStore,
       runtime.logger,
       runtime.projectIdentityResolver,
+      new RemoteConsoleActionClient((actionName, params) =>
+        this.broker.call(actionName, params, { meta: { internal_call: true } }),
+      ),
     );
     this.logger.info("telegram_mcp xchange service is ready");
   },

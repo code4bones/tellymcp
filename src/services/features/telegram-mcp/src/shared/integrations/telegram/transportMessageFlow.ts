@@ -89,6 +89,10 @@ export interface TransportMessageFlowHost {
   showHelp(ctx: TelegramMenuContext): Promise<void>;
   showAdminMainMenu(ctx: TelegramMenuContext, introText?: string): Promise<void>;
   showAdminClientsMenu(ctx: TelegramMenuContext, introText?: string): Promise<void>;
+  ensureGatewayScopeConsolesBound(input: {
+    principal: { telegramChatId: number; telegramUserId: number };
+    ctx: TelegramMenuContext;
+  }): Promise<{ sessionIds: string[]; activeSessionId: string | null }>;
   getMainMenu(): unknown;
   bindRelaySessionToPrincipal(input: {
     principal: { telegramChatId: number; telegramUserId: number };
@@ -218,6 +222,9 @@ export class TransportMessageFlow {
 
     if (text && isMenuEntryCommand(text)) {
       const isAdminAuthorized = await this.host.isPrincipalAdminAuthorized(principal);
+      if (principal && isAdminAuthorized) {
+        await this.host.ensureGatewayScopeConsolesBound({ principal, ctx });
+      }
       const activeSessionId = principal
         ? await this.host.bindingStore.getActiveSessionIdForPrincipal(principal)
         : null;

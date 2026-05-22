@@ -13,6 +13,18 @@ import { buildPrincipalKey } from "./transportUtils";
 
 type Principal = { telegramChatId: number; telegramUserId: number };
 
+function looksLikeBrowserScreenshotTask(input: {
+  summary: string;
+  message: string;
+}): boolean {
+  const haystack = [input.summary, input.message].join("\n").toLowerCase();
+  return (
+    /\b(browser_open|browser_screenshot|playwright)\b/u.test(haystack) ||
+    /\b(скриншот|screenshot|скрин)\b/u.test(haystack) ||
+    /\bhttps?:\/\/[^\s]+/u.test(haystack)
+  );
+}
+
 export interface TransportPartnerHost {
   config: AppConfig;
   logger: Logger;
@@ -228,18 +240,36 @@ export class TransportPartnerActions {
           projectUuid: pending.projectUuid,
         });
       }
+      const prefersBrowserScreenshot = looksLikeBrowserScreenshotTask({
+        summary: parsed.summary,
+        message: parsed.message,
+      });
       const delegatedMessage = [
         `Пользователь из Telegram просит тебя выполнить задачу для сессии ${sourceLabel}.`,
         `Маршрут результата: ${targetLabel} -> ${sourceLabel}`,
         "",
         "Задача:",
         parsed.message,
+        "",
+        "Не отправляй результат напрямую в Telegram из этой сессии.",
+        `Верни результат только обратно в сессию ${sourceLabel}.`,
+        `Исходная сессия ${sourceLabel} сама доставит его человеку в Telegram.`,
       ].join("\n");
-      const expectedReply = [
-        `Подготовь результат для сессии ${sourceLabel}.`,
-        "После подготовки обязательно отправь его обратно через send_partner_note.",
-        "Задача не завершена, пока send_partner_note не отработал успешно.",
-      ].join(" ");
+      const expectedReply = prefersBrowserScreenshot
+        ? [
+            `Подготовь скриншот для сессии ${sourceLabel}.`,
+            "Для веб-страницы сначала используй browser_open и browser_screenshot в этой консоли.",
+            "Если нужен реальный файл-артефакт, верни его обратно в исходную сессию через send_partner_file.",
+            "Не отправляй результат напрямую в Telegram из этой сессии.",
+            "Задача не завершена, пока send_partner_file не отработал успешно.",
+          ].join(" ")
+        : [
+            `Подготовь результат для сессии ${sourceLabel}.`,
+            "Если результатом является реальный файл или артефакт, отправь его обратно через send_partner_file.",
+            "Во всех остальных случаях отправь результат обратно через send_partner_note.",
+            "Не отправляй результат напрямую в Telegram из этой сессии.",
+            "Задача не завершена, пока send_partner_note или send_partner_file не отработал успешно.",
+          ].join(" ");
       const output = await this.host.sendPartnerNote({
         session_id: pending.sessionId,
         ...(pending.targetSessionId ? { target_session_id: pending.targetSessionId } : {}),
@@ -373,15 +403,17 @@ export class TransportPartnerActions {
         "Не пересылай это как новую задачу в target-консоль.",
         "Сначала выполни работу в текущей консоли сам.",
         "Через send_partner_note или send_partner_file отправляй только результат, а не исходное поручение.",
+        "Не останавливайся на проверке xchange records, чтении note, listing файлов или текстовом отчёте.",
         "Передай target_session_id явно в send_partner_note.",
         "После подготовки обязательно используй send_partner_note.",
         "Задача не завершена, пока send_partner_note не отработал успешно.",
+        "Только после успешной отправки результата можно делать mark_xchange_record_read.",
         "Если запрос касается существующего локального файла, вызови send_partner_file.",
       ].join("\n"),
       createdAt: new Date().toISOString(),
       actionDesc:
-        "Read body_text and complete the work in this console, then send the final result to the target console with send_partner_note or send_partner_file. The task is not complete until the outbound tool succeeds.",
-      tools: ["get_xchange_record", "mark_xchange_record_read", "send_partner_note", "send_partner_file"],
+        "Start with get_xchange_record, complete the work in this console, then send the final result to the target console with send_partner_note or send_partner_file. Do not stop at analysis or a summary. The task is not complete until the outbound tool succeeds, and only then may you call mark_xchange_record_read.",
+      tools: ["get_xchange_record", "send_partner_note", "send_partner_file", "mark_xchange_record_read"],
       tags: ["telegram", "human", "local", "partner-routing"],
     });
     await this.host.nudgeSessionInbox(input.sessionId);

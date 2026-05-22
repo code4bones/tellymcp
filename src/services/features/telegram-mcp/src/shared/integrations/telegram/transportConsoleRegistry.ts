@@ -14,6 +14,7 @@ type GatewayKnownSessionRecord = {
   session_id: string;
   client_uuid: string;
   local_session_id: string;
+  cwd?: string | null;
   session_label?: string | null;
   client_label?: string | null;
   system_username?: string | null;
@@ -172,13 +173,20 @@ export class TransportConsoleRegistry {
       label,
       activeProjectUuid: input.consoleSession.project_uuids[0] ?? undefined,
       activeProjectName: projectName ?? undefined,
+      ...(input.consoleSession.cwd?.trim()
+        ? { cwd: input.consoleSession.cwd.trim() }
+        : {}),
       updatedAt: new Date().toISOString(),
     };
 
     await this.host.sessionStore.setSession({
       ...(existingSession ?? nextSession),
       ...nextSession,
-      ...(existingSession?.cwd ? { cwd: existingSession.cwd } : {}),
+      ...(nextSession.cwd
+        ? { cwd: nextSession.cwd }
+        : existingSession?.cwd
+          ? { cwd: existingSession.cwd }
+          : {}),
       ...(existingSession?.task ? { task: existingSession.task } : {}),
       ...(existingSession?.summary ? { summary: existingSession.summary } : {}),
       ...(existingSession?.files ? { files: existingSession.files } : {}),

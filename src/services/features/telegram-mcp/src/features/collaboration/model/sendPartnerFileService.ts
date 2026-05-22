@@ -16,6 +16,14 @@ import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/pr
 import { readWorkspaceFile } from "../../../shared/integrations/tmux/client";
 import { CollaborationService } from "./collaborationService";
 
+type RemoteConsoleInvoker = {
+  invokeForRelaySession<T>(
+    sessionId: string,
+    actionName: string,
+    params: Record<string, unknown>,
+  ): Promise<T>;
+};
+
 function resolveWorkspaceDir(input: {
   inputCwd?: string | undefined;
   sessionCwd?: string | undefined;
@@ -66,6 +74,7 @@ export class SendPartnerFileService {
     private readonly logger: Logger,
     private readonly projectIdentityResolver: ProjectIdentityResolver,
     private readonly collaborationService: CollaborationService,
+    private readonly remoteConsoleInvoker?: RemoteConsoleInvoker,
   ) {}
 
   public async send(
@@ -73,6 +82,20 @@ export class SendPartnerFileService {
   ): Promise<SendPartnerNoteOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
     const sessionId = await this.normalizeSessionIdForWorkspace(resolved.sessionId);
+    const remote =
+      this.config.distributed.mode !== "client"
+        ? await this.remoteConsoleInvoker?.invokeForRelaySession<SendPartnerNoteOutput>(
+            sessionId,
+            "telegramMcp.collaboration.sendPartnerFileRemote",
+            {
+              ...input,
+              session_id: sessionId,
+            } as Record<string, unknown>,
+          )
+        : null;
+    if (remote) {
+      return remote;
+    }
     const session = await this.sessionStore.getSession(sessionId);
     const workspaceDir = resolveWorkspaceDir({
       inputCwd: input.cwd,

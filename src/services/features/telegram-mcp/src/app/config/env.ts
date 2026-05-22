@@ -129,12 +129,20 @@ const envSchema = z.object({
   TMUX_NUDGE_MESSAGE: z
     .string()
     .min(1)
-    .default("проверь xchange records: telegram_message"),
+    .default(
+      "получи newest telegram_message через list_xchange_records/get_xchange_record, выполни запрос и ответь человеку через notify_telegram; не останавливайся на анализе",
+    ),
   TMUX_PARTNER_NUDGE_MESSAGE: z
     .string()
     .min(1)
     .default(
-      "проверь xchange records: telegram_message для человека, partner_note для агента",
+      "не inbox: получи newest partner_note через list_xchange_records/get_xchange_record, выполни задачу в текущей консоли и обязательно отправь результат через send_partner_note или send_partner_file; только потом mark_xchange_record_read",
+    ),
+  TMUX_PARTNER_REPLY_NUDGE_MESSAGE: z
+    .string()
+    .min(1)
+    .default(
+      "не inbox: получи newest partner_note через list_xchange_records/get_xchange_record; если newest note имеет kind=reply или не требует ответа, просто обработай результат и не отправляй новый send_partner_note/send_partner_file без явного нового запроса; только потом mark_xchange_record_read",
     ),
   TMUX_CAPTURE_MODE: z.enum(["visible", "lines"]).default("visible"),
   TMUX_CAPTURE_LINES: z.coerce.number().int().positive().default(300),
@@ -290,6 +298,7 @@ export type AppConfig = {
     nudgeCooldownSeconds: number;
     nudgeMessage: string;
     partnerNudgeMessage: string;
+    partnerReplyNudgeMessage: string;
     captureMode: "visible" | "lines";
     captureLines: number;
     promptScanEnabled: boolean;
@@ -486,6 +495,7 @@ export function loadConfig(): AppConfig {
       nudgeCooldownSeconds: parsed.TMUX_NUDGE_COOLDOWN_SECONDS,
       nudgeMessage: parsed.TMUX_NUDGE_MESSAGE,
       partnerNudgeMessage: parsed.TMUX_PARTNER_NUDGE_MESSAGE,
+      partnerReplyNudgeMessage: parsed.TMUX_PARTNER_REPLY_NUDGE_MESSAGE,
       captureMode: parsed.TMUX_CAPTURE_MODE,
       captureLines: parsed.TMUX_CAPTURE_LINES,
       promptScanEnabled: parsed.TMUX_PROMPT_SCAN_ENABLED,

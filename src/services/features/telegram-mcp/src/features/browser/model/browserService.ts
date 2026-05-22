@@ -46,6 +46,7 @@ import type {
 } from "../../../entities/browser/model/types";
 import type { SessionContext } from "../../../entities/session/model/types";
 import type {
+  MaintenanceStore,
   SessionBindingStore,
   SessionStore,
   TelegramXchangeFileMetaStore,
@@ -54,6 +55,10 @@ import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
 import { MinioExchangeStore } from "../../../shared/integrations/object-storage/minioExchangeStore";
 import { TelegramTransport } from "../../../shared/integrations/telegram/transport";
+import {
+  callGatewayJson,
+  ensureGatewayClientUuid,
+} from "../../distributed-client/model/gatewayClientAccess";
 
 type WaitUntilState = "load" | "domcontentloaded" | "networkidle" | "commit";
 
@@ -182,6 +187,7 @@ export class BrowserService {
   public constructor(
     private readonly config: AppConfig,
     private readonly sessionStore: SessionStore,
+    private readonly maintenanceStore: MaintenanceStore,
     private readonly bindingStore: SessionBindingStore,
     private readonly xchangeFileMetaStore: TelegramXchangeFileMetaStore,
     private readonly objectStore: MinioExchangeStore,
@@ -193,25 +199,31 @@ export class BrowserService {
 
   public async open(input: BrowserOpenInput): Promise<BrowserOpenOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.invokeRemote<BrowserOpenOutput>(
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
       resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserOpenOutput>(
+      normalizedSessionId,
       "telegramMcp.browser.openRemote",
-      input,
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
     );
     if (remote) {
       return remote;
     }
     this.ensureEnabled();
-    const existingState = this.sessionStates.get(resolved.sessionId);
+    const existingState = this.sessionStates.get(normalizedSessionId);
     const shouldReset = input.reset_context === true;
     const targetUrl = this.resolveBrowserUrl(input.url);
 
     if (shouldReset && existingState) {
-      await this.closeState(resolved.sessionId, existingState);
+      await this.closeState(normalizedSessionId, existingState);
     }
 
     const { state, createdContext } = await this.ensureSessionState(
-      resolved.sessionId,
+      normalizedSessionId,
       shouldReset,
     );
     const waitUntil = (input.wait_until ??
@@ -228,6 +240,7 @@ export class BrowserService {
 
     this.logger.info("Browser page opened", {
       sessionId: resolved.sessionId,
+      normalizedSessionId,
       url: state.currentUrl,
       title: state.title,
       createdContext,
@@ -236,7 +249,7 @@ export class BrowserService {
     });
 
     return {
-      session_id: resolved.sessionId,
+      session_id: normalizedSessionId,
       opened: true,
       created_context: createdContext,
       url: state.currentUrl,
@@ -248,10 +261,16 @@ export class BrowserService {
     input: BrowserConsoleInput,
   ): Promise<BrowserConsoleOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.invokeRemote<BrowserConsoleOutput>(
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
       resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserConsoleOutput>(
+      normalizedSessionId,
       "telegramMcp.browser.getConsoleRemote",
-      input,
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
     );
     if (remote) {
       return remote;
@@ -275,10 +294,16 @@ export class BrowserService {
 
   public async click(input: BrowserClickInput): Promise<BrowserClickOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.invokeRemote<BrowserClickOutput>(
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
       resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserClickOutput>(
+      normalizedSessionId,
       "telegramMcp.browser.clickRemote",
-      input,
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
     );
     if (remote) {
       return remote;
@@ -307,10 +332,16 @@ export class BrowserService {
 
   public async fill(input: BrowserFillInput): Promise<BrowserFillOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.invokeRemote<BrowserFillOutput>(
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
       resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserFillOutput>(
+      normalizedSessionId,
       "telegramMcp.browser.fillRemote",
-      input,
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
     );
     if (remote) {
       return remote;
@@ -340,10 +371,16 @@ export class BrowserService {
 
   public async press(input: BrowserPressInput): Promise<BrowserPressOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.invokeRemote<BrowserPressOutput>(
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
       resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserPressOutput>(
+      normalizedSessionId,
       "telegramMcp.browser.pressRemote",
-      input,
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
     );
     if (remote) {
       return remote;
@@ -380,10 +417,16 @@ export class BrowserService {
     input: BrowserReloadInput,
   ): Promise<BrowserReloadOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.invokeRemote<BrowserReloadOutput>(
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
       resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserReloadOutput>(
+      normalizedSessionId,
       "telegramMcp.browser.reloadRemote",
-      input,
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
     );
     if (remote) {
       return remote;
@@ -421,10 +464,16 @@ export class BrowserService {
     input: BrowserWaitForInput,
   ): Promise<BrowserWaitForOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.invokeRemote<BrowserWaitForOutput>(
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
       resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserWaitForOutput>(
+      normalizedSessionId,
       "telegramMcp.browser.waitForRemote",
-      input,
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
     );
     if (remote) {
       return remote;
@@ -459,10 +508,16 @@ export class BrowserService {
     input: BrowserWaitForUrlInput,
   ): Promise<BrowserWaitForUrlOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.invokeRemote<BrowserWaitForUrlOutput>(
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
       resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserWaitForUrlOutput>(
+      normalizedSessionId,
       "telegramMcp.browser.waitForUrlRemote",
-      input,
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
     );
     if (remote) {
       return remote;
@@ -508,10 +563,16 @@ export class BrowserService {
     input: BrowserErrorsInput,
   ): Promise<BrowserErrorsOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.invokeRemote<BrowserErrorsOutput>(
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
       resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserErrorsOutput>(
+      normalizedSessionId,
       "telegramMcp.browser.getErrorsRemote",
-      input,
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
     );
     if (remote) {
       return remote;
@@ -536,10 +597,16 @@ export class BrowserService {
     input: BrowserNetworkFailuresInput,
   ): Promise<BrowserNetworkFailuresOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.invokeRemote<BrowserNetworkFailuresOutput>(
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
       resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserNetworkFailuresOutput>(
+      normalizedSessionId,
       "telegramMcp.browser.getNetworkFailuresRemote",
-      input,
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
     );
     if (remote) {
       return remote;
@@ -569,10 +636,16 @@ export class BrowserService {
     input: BrowserClearLogsInput,
   ): Promise<BrowserClearLogsOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.invokeRemote<BrowserClearLogsOutput>(
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
       resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserClearLogsOutput>(
+      normalizedSessionId,
       "telegramMcp.browser.clearLogsRemote",
-      input,
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
     );
     if (remote) {
       return remote;
@@ -599,10 +672,16 @@ export class BrowserService {
 
   public async getDom(input: BrowserDomInput): Promise<BrowserDomOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.invokeRemote<BrowserDomOutput>(
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
       resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserDomOutput>(
+      normalizedSessionId,
       "telegramMcp.browser.getDomRemote",
-      input,
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
     );
     if (remote) {
       return remote;
@@ -675,10 +754,16 @@ export class BrowserService {
     input: BrowserComputedStyleInput,
   ): Promise<BrowserComputedStyleOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.invokeRemote<BrowserComputedStyleOutput>(
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
       resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserComputedStyleOutput>(
+      normalizedSessionId,
       "telegramMcp.browser.getComputedStyleRemote",
-      input,
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
     );
     if (remote) {
       return remote;
@@ -753,10 +838,16 @@ export class BrowserService {
     input: BrowserScreenshotInput,
   ): Promise<BrowserScreenshotOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.invokeRemote<BrowserScreenshotOutput>(
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
       resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserScreenshotOutput>(
+      normalizedSessionId,
       "telegramMcp.browser.screenshotRemote",
-      input,
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
     );
     if (remote) {
       return remote;
@@ -807,6 +898,12 @@ export class BrowserService {
       relativePath: storedFile.relativePath,
       source: "browser-screenshot",
       uploadedAt: new Date().toISOString(),
+      storageRef: storedFile.storageRef,
+      bucketName: storedFile.bucketName,
+      objectName: storedFile.objectName,
+      vfsNodeId: storedFile.vfsNodeId,
+      vfsPublicUrl: storedFile.vfsPublicUrl,
+      vfsParentId: storedFile.vfsParentId,
       mimeType: "image/png",
       sizeBytes: storedFile.sizeBytes,
       ...(input.caption ? { caption: input.caption } : {}),
@@ -815,24 +912,27 @@ export class BrowserService {
     let telegramMessageId: number | undefined;
     if (input.send_to_telegram === true) {
       if (this.config.distributed.mode === "client") {
-        throw new Error(
-          "send_to_telegram is not available on headless client nodes. Open the file from the gateway bot or send it through a gateway-mediated flow instead.",
-        );
-      }
+        telegramMessageId = await this.sendScreenshotToGatewayTelegramRoute({
+          sessionId,
+          fileName,
+          pngBuffer,
+          ...(input.caption ? { caption: input.caption } : {}),
+        });
+      } else {
+        const binding = await this.bindingStore.getBinding(sessionId);
+        if (!binding) {
+          throw new Error(
+            "Session is not linked to Telegram, so screenshot cannot be sent there.",
+          );
+        }
 
-      const binding = await this.bindingStore.getBinding(sessionId);
-      if (!binding) {
-        throw new Error(
-          "Session is not linked to Telegram, so screenshot cannot be sent there.",
+        const sent = await this.telegramTransport.sendDocumentToChat(
+          binding.telegramChatId,
+          filePath,
+          input.caption,
         );
+        telegramMessageId = sent.messageId;
       }
-
-      const sent = await this.telegramTransport.sendDocumentToChat(
-        binding.telegramChatId,
-        filePath,
-        input.caption,
-      );
-      telegramMessageId = sent.messageId;
     }
 
     return {
@@ -850,23 +950,29 @@ export class BrowserService {
 
   public async close(input: BrowserCloseInput): Promise<BrowserCloseOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.invokeRemote<BrowserCloseOutput>(
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
       resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserCloseOutput>(
+      normalizedSessionId,
       "telegramMcp.browser.closeRemote",
-      input,
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
     );
     if (remote) {
       return remote;
     }
     this.ensureEnabled();
-    const state = this.sessionStates.get(resolved.sessionId);
+    const state = this.sessionStates.get(normalizedSessionId);
 
     if (state) {
-      await this.closeState(resolved.sessionId, state);
+      await this.closeState(normalizedSessionId, state);
     }
 
     return {
-      session_id: resolved.sessionId,
+      session_id: normalizedSessionId,
       closed: Boolean(state),
     };
   }
@@ -1038,16 +1144,17 @@ export class BrowserService {
     state: BrowserSessionState;
   }> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const state = this.sessionStates.get(resolved.sessionId);
+    const sessionId = await this.normalizeSessionIdForAccess(resolved.sessionId);
+    const state = this.sessionStates.get(sessionId);
     if (!state) {
       throw new Error(
         "Browser session is not open. Call browser_open first for this session.",
       );
     }
 
-    const session = await this.sessionStore.getSession(resolved.sessionId);
+    const session = await this.sessionStore.getSession(sessionId);
     return {
-      sessionId: resolved.sessionId,
+      sessionId,
       session,
       state,
     };
@@ -1066,11 +1173,100 @@ export class BrowserService {
     actionName: string,
     input: Record<string, unknown>,
   ): Promise<T | undefined> {
+    if (this.config.distributed.mode === "client") {
+      return undefined;
+    }
     return await this.remoteConsoleInvoker?.invokeForRelaySession<T>(
       sessionId,
       actionName,
       input,
     );
+  }
+
+  private async normalizeSessionIdForAccess(sessionId: string): Promise<string> {
+    const trimmed = sessionId.trim();
+    if (!trimmed) {
+      return trimmed;
+    }
+
+    const direct = await this.sessionStore.getSession(trimmed);
+    if (direct) {
+      return trimmed;
+    }
+
+    const separatorIndex = trimmed.indexOf(":");
+    if (separatorIndex <= 0) {
+      return trimmed;
+    }
+
+    const localClientUuid = await this.maintenanceStore.getGatewayClientUuid();
+    const clientUuid = trimmed.slice(0, separatorIndex).trim();
+    const localSessionId = trimmed.slice(separatorIndex + 1).trim();
+    if (!localClientUuid || clientUuid !== localClientUuid || !localSessionId) {
+      return trimmed;
+    }
+
+    const localSession = await this.sessionStore.getSession(localSessionId);
+    return localSession ? localSessionId : trimmed;
+  }
+
+  private async sendScreenshotToGatewayTelegramRoute(input: {
+    sessionId: string;
+    fileName: string;
+    pngBuffer: Buffer;
+    caption?: string;
+  }): Promise<number | undefined> {
+    if (!this.config.distributed.gatewayPublicUrl) {
+      throw new Error(
+        "send_to_telegram on client nodes requires GATEWAY_PUBLIC_URL.",
+      );
+    }
+
+    const clientUuid = await ensureGatewayClientUuid({
+      maintenanceStore: this.maintenanceStore,
+      gatewayPublicUrl: this.config.distributed.gatewayPublicUrl,
+      ...(this.config.distributed.gatewayAuthToken
+        ? { gatewayAuthToken: this.config.distributed.gatewayAuthToken }
+        : {}),
+      ...(this.config.distributed.gatewayToken
+        ? { gatewayToken: this.config.distributed.gatewayToken }
+        : {}),
+      ...(this.config.project.name
+        ? { projectName: this.config.project.name }
+        : {}),
+      ...(this.config.telegram.botUsername
+        ? { botUsername: this.config.telegram.botUsername }
+        : {}),
+      ...(this.config.distributed.gatewayUserUuid
+        ? { gatewayUserUuid: this.config.distributed.gatewayUserUuid }
+        : {}),
+    });
+
+    const output = await callGatewayJson<{
+      sent?: boolean;
+      message_id?: number;
+    }>({
+      gatewayPublicUrl: this.config.distributed.gatewayPublicUrl,
+      ...(this.config.distributed.gatewayAuthToken
+        ? { gatewayAuthToken: this.config.distributed.gatewayAuthToken }
+        : {}),
+      endpointPath: "/transport/document",
+      body: {
+        client_uuid: clientUuid,
+        local_session_id: input.sessionId,
+        file_name: input.fileName,
+        content_base64: input.pngBuffer.toString("base64"),
+        ...(input.caption?.trim() ? { caption: input.caption.trim() } : {}),
+      },
+    });
+
+    if (!output.sent) {
+      throw new Error(
+        "Gateway did not confirm Telegram document delivery for the screenshot.",
+      );
+    }
+
+    return typeof output.message_id === "number" ? output.message_id : undefined;
   }
 
   private ensureEnabled(): void {

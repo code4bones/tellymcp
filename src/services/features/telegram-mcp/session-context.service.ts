@@ -32,7 +32,7 @@ const TelegramMcpSessionContextService: ServiceSchema = {
 
   actions: {
     getContextRemote: {
-      params: { type: "object" },
+      params: { $$strict: false },
       async handler(
         this: SessionContextServiceCarrier,
         ctx: { params: GetSessionContextInput },
@@ -41,7 +41,7 @@ const TelegramMcpSessionContextService: ServiceSchema = {
       },
     },
     setContextRemote: {
-      params: { type: "object" },
+      params: { $$strict: false },
       async handler(
         this: SessionContextServiceCarrier,
         ctx: { params: SetSessionContextInput },
@@ -50,7 +50,7 @@ const TelegramMcpSessionContextService: ServiceSchema = {
       },
     },
     renameSessionRemote: {
-      params: { type: "object" },
+      params: { $$strict: false },
       async handler(
         this: SessionContextServiceCarrier,
         ctx: { params: RenameSessionInput },
@@ -59,7 +59,7 @@ const TelegramMcpSessionContextService: ServiceSchema = {
       },
     },
     clearContextRemote: {
-      params: { type: "object" },
+      params: { $$strict: false },
       async handler(
         this: SessionContextServiceCarrier,
         ctx: { params: ClearSessionContextInput },

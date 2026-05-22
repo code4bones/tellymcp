@@ -303,6 +303,48 @@ export class NotifyService {
     };
   }
 
+  public async sendDocumentForGatewayBoundSession(input: {
+    clientUuid: string;
+    localSessionId: string;
+    fileName: string;
+    contentBase64: string;
+    caption?: string;
+  }): Promise<NotifyTelegramOutput> {
+    const relaySessionId = buildLiveRelaySessionId(
+      input.clientUuid,
+      input.localSessionId,
+    );
+    const binding = await this.bindingStore.getBinding(relaySessionId);
+    if (!binding) {
+      throw new Error("Gateway relay session has no active Telegram route yet.");
+    }
+
+    const sendResult = await (this.transport as HumanTransport & {
+      sendDocumentBufferToChat?: (
+        telegramChatId: number,
+        fileName: string,
+        content: Uint8Array,
+        caption?: string,
+      ) => Promise<{ messageId: number }>;
+    }).sendDocumentBufferToChat?.(
+      binding.telegramChatId,
+      input.fileName,
+      Buffer.from(input.contentBase64, "base64"),
+      input.caption,
+    );
+
+    if (!sendResult) {
+      throw new Error("Gateway transport document proxy is unavailable.");
+    }
+
+    return {
+      sent: true,
+      ...(typeof sendResult.messageId === "number"
+        ? { message_id: sendResult.messageId }
+        : {}),
+    };
+  }
+
   private async sendViaGatewayBoundSession(input: {
     sessionId: string;
     sessionLabel?: string;

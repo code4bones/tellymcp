@@ -7,6 +7,7 @@ import {
   type TelegramMcpRuntimeServiceInstance,
 } from "./runtime.service";
 import {
+  detectIncomingTelegramBrowserScreenshotRequest,
   buildIncomingPartnerActionDesc,
   buildIncomingTelegramMessageActionDesc,
   buildIncomingPartnerTools,
@@ -106,6 +107,31 @@ function looksLikeFileDeliveryRequest(input: {
   );
 }
 
+function looksLikeBrowserScreenshotRequest(input: {
+  kind: string;
+  summary: string;
+  message: string;
+  expectedReply?: string;
+}): boolean {
+  if (input.kind !== "request" && input.kind !== "question") {
+    return false;
+  }
+
+  const haystack = [
+    input.summary,
+    input.message,
+    input.expectedReply ?? "",
+  ]
+    .join("\n")
+    .toLowerCase();
+
+  return (
+    /\b(browser_open|browser_screenshot|playwright)\b/u.test(haystack) ||
+    /\b(скриншот|screenshot|скрин)\b/u.test(haystack) ||
+    /\bhttps?:\/\/[^\s]+/u.test(haystack)
+  );
+}
+
 function buildNoteContent(input: {
   delivery: GatewayDelivery;
   copiedArtifacts: string[];
@@ -113,6 +139,14 @@ function buildNoteContent(input: {
   const isDirectRoute = input.delivery.route_mode === "direct";
   const isTelegramHumanSource = input.delivery.source_client_uuid === "gateway-telegram";
   const prefersFileDelivery = looksLikeFileDeliveryRequest({
+    kind: input.delivery.kind,
+    summary: input.delivery.summary,
+    message: input.delivery.message,
+    ...(input.delivery.expected_reply
+      ? { expectedReply: input.delivery.expected_reply }
+      : {}),
+  });
+  const prefersBrowserScreenshot = looksLikeBrowserScreenshotRequest({
     kind: input.delivery.kind,
     summary: input.delivery.summary,
     message: input.delivery.message,
@@ -174,16 +208,25 @@ function buildNoteContent(input: {
       ...(prefersFileDelivery
         ? [
             "You must send the requested file via send_partner_file.",
+            ...(prefersBrowserScreenshot
+              ? [
+                  "For a webpage screenshot request, first use browser_open and browser_screenshot in this console.",
+                  "Do not replace the browser workflow with a shell Playwright command unless the browser tools actually fail.",
+                ]
+              : []),
             "Do not paste file contents into send_partner_note.",
+            "Do not stop after reading, listing files, or explaining what you found.",
             "Your task is not complete until send_partner_file succeeds.",
             "Do not mark_xchange_record_read before send_partner_file succeeds.",
           ]
         : [
             "You must send a reply via send_partner_note.",
+            "Do not stop after reading, listing files, or explaining what you found.",
             "Your task is not complete until send_partner_note succeeds.",
             "Do not mark_xchange_record_read before send_partner_note succeeds.",
           ]),
-      "Do not stop after local analysis or a chat explanation.",
+      "Do not stop after local analysis, inspection, or a chat explanation.",
+      "If the request asks you to produce an artifact, actually produce and send the artifact.",
       ...(isDirectRoute
         ? [
             "Do not rely on implicit partner selection or project-scoped target_session_id.",
@@ -198,6 +241,19 @@ function buildNoteContent(input: {
       "",
       ...(prefersFileDelivery
         ? [
+            ...(prefersBrowserScreenshot
+              ? [
+                  "# Preferred Browser Workflow Example",
+                  "browser_open(",
+                  "  url=\"https://github.com\",",
+                  "  wait_until=\"networkidle\"",
+                  ")",
+                  "browser_screenshot(",
+                  "  file_name=\"github.com.png\"",
+                  ")",
+                  "",
+                ]
+              : []),
             "# Preferred Reply Tool Call Example",
             "send_partner_file(",
             `  session_id=${JSON.stringify(input.delivery.target_local_session_id)},`,
@@ -216,7 +272,9 @@ function buildNoteContent(input: {
             ...(!isDirectRoute && input.delivery.project_uuid
               ? [`  project_uuid=${JSON.stringify(input.delivery.project_uuid)},`]
               : []),
-            "  file_path=\"index.html\",",
+            `  file_path=${JSON.stringify(
+              prefersBrowserScreenshot ? "github.com.png" : "index.html",
+            )},`,
             `  in_reply_to=${JSON.stringify(input.delivery.message_uuid)},`,
             "  summary=\"Передаю запрошенный файл\",",
             "  message=\"Передаю реальный файл как артефакт\"",
@@ -487,14 +545,32 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
           ? { expectedReply: delivery.expected_reply }
           : {}),
       });
+      const prefersBrowserScreenshot = looksLikeBrowserScreenshotRequest({
+        kind: delivery.kind,
+        summary: delivery.summary,
+        message: delivery.message,
+        ...(delivery.expected_reply
+          ? { expectedReply: delivery.expected_reply }
+          : {}),
+      });
       const actionDesc = isTelegramHumanSource
         ? buildIncomingTelegramMessageActionDesc(
             delivery.kind as Parameters<typeof buildIncomingTelegramMessageActionDesc>[0],
+            detectIncomingTelegramBrowserScreenshotRequest({
+              kind: delivery.kind as Parameters<
+                typeof buildIncomingTelegramMessageActionDesc
+              >[0],
+              text: delivery.message,
+              ...(delivery.summary.trim()
+                ? { summary: delivery.summary.trim() }
+                : {}),
+            }),
           )
         : buildIncomingPartnerActionDesc(
             delivery.kind as Parameters<typeof buildIncomingPartnerActionDesc>[0],
             delivery.requires_reply,
             prefersFileDelivery,
+            prefersBrowserScreenshot,
           );
       await upsertXchangeRecord(
         runtime.config.tmux,
@@ -513,11 +589,21 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
           tools: isTelegramHumanSource
             ? buildIncomingTelegramMessageTools(
                 delivery.kind as Parameters<typeof buildIncomingTelegramMessageTools>[0],
+                detectIncomingTelegramBrowserScreenshotRequest({
+                  kind: delivery.kind as Parameters<
+                    typeof buildIncomingTelegramMessageTools
+                  >[0],
+                  text: delivery.message,
+                  ...(delivery.summary.trim()
+                    ? { summary: delivery.summary.trim() }
+                    : {}),
+                }),
               )
             : buildIncomingPartnerTools(
                 delivery.kind as Parameters<typeof buildIncomingPartnerTools>[0],
                 delivery.requires_reply,
                 prefersFileDelivery,
+                prefersBrowserScreenshot,
               ),
           note_path: notePath,
           note_relative_path: delivery.note_relative_path,
@@ -602,6 +688,10 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
       try {
         await runtime.telegramTransport.nudgeSessionPartnerNote(
           targetSession.sessionId,
+          {
+            kind: delivery.kind,
+            requiresReply: delivery.requires_reply,
+          },
         );
       } catch (error) {
         runtime.logger.warn("Failed to nudge tmux after gateway delivery", {

@@ -502,6 +502,28 @@ export class TelegramTransport implements HumanTransport {
     };
   }
 
+  public async sendDocumentBufferToChat(
+    telegramChatId: number,
+    fileName: string,
+    content: Uint8Array,
+    caption?: string,
+  ): Promise<{ messageId: number }> {
+    this.ensureTelegramEnabledFor("send Telegram documents");
+    const response = await this.bot.api.sendDocument(
+      telegramChatId,
+      new InputFile(Buffer.from(content), basename(fileName)),
+      caption?.trim()
+        ? {
+            caption: caption.trim(),
+          }
+        : {},
+    );
+
+    return {
+      messageId: response.message_id,
+    };
+  }
+
   public async editChatMessage(
     telegramChatId: number,
     telegramMessageId: number,
@@ -842,15 +864,17 @@ export class TelegramTransport implements HumanTransport {
         "Не пересылай это как новую задачу в target-консоль.",
         "Сначала выполни работу в текущей консоли сам.",
         "Через send_partner_note или send_partner_file отправляй только результат, а не исходное поручение.",
+        "Не останавливайся на проверке xchange records, чтении note, listing файлов или текстовом отчёте.",
         "Передай target_session_id явно в send_partner_note.",
         "После подготовки обязательно используй send_partner_note.",
         "Задача не завершена, пока send_partner_note не отработал успешно.",
+        "Только после успешной отправки результата можно делать mark_xchange_record_read.",
         "Если запрос касается существующего локального файла, вызови send_partner_file.",
       ].join("\n"),
       createdAt: new Date().toISOString(),
       actionDesc:
-        "Read body_text and complete the work in this console, then send the final result to the target console with send_partner_note or send_partner_file. The task is not complete until the outbound tool succeeds.",
-      tools: ["get_xchange_record", "mark_xchange_record_read", "send_partner_note", "send_partner_file"],
+        "Start with get_xchange_record, complete the work in this console, then send the final result to the target console with send_partner_note or send_partner_file. Do not stop at analysis or a summary. The task is not complete until the outbound tool succeeds, and only then may you call mark_xchange_record_read.",
+      tools: ["get_xchange_record", "send_partner_note", "send_partner_file", "mark_xchange_record_read"],
       tags: ["telegram", "human", "local", "partner-routing"],
     });
     await this.nudgeSessionInbox(input.sessionId);
@@ -958,9 +982,22 @@ export class TelegramTransport implements HumanTransport {
     await this.tmuxActions.nudgeForInboxMessage(sessionId);
   }
 
-  public async nudgeSessionPartnerNote(sessionId: string): Promise<void> {
+  public async nudgeSessionPartnerNote(
+    sessionId: string,
+    input?: {
+      kind?: string;
+      requiresReply?: boolean;
+    },
+  ): Promise<void> {
+    const kind = input?.kind?.trim().toLowerCase();
+    const requiresReply = input?.requiresReply === true;
+    const useReplyNudge =
+      !requiresReply &&
+      (kind === "reply" || kind === "handoff");
     await this.tmuxActions.nudgeForSession(sessionId, {
-      message: this.config.tmux.partnerNudgeMessage,
+      message: useReplyNudge
+        ? this.config.tmux.partnerReplyNudgeMessage
+        : this.config.tmux.partnerNudgeMessage,
       reason: "partner_note",
     });
   }

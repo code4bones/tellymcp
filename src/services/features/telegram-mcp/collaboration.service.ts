@@ -8,7 +8,9 @@ import { CollaborationService } from "./src/features/collaboration/model/collabo
 import { SendPartnerFileService } from "./src/features/collaboration/model/sendPartnerFileService";
 import { GatewaySessionsService } from "./src/features/collaboration/model/gatewaySessionsService";
 import { GatewayCollaborationBackend } from "./src/features/distributed-client/model/gatewayCollaborationBackend";
+import { RemoteConsoleActionClient } from "./src/features/distributed-gateway/model/remoteConsoleActionClient";
 import { LocalCollaborationBackend } from "./src/features/collaboration/model/localCollaborationBackend";
+import type { SendPartnerFileInput } from "./src/entities/collaboration/model/types";
 
 export const TELEGRAM_MCP_COLLABORATION_SERVICE_NAME =
   "telegramMcp.collaboration";
@@ -34,6 +36,37 @@ type CollaborationServiceCarrier = Service & {
 const TelegramMcpCollaborationService: ServiceSchema = {
   name: TELEGRAM_MCP_COLLABORATION_SERVICE_NAME,
   dependencies: [TELEGRAM_MCP_RUNTIME_SERVICE_NAME],
+
+  actions: {
+    sendPartnerFileRemote: {
+      params: {
+        $$strict: false,
+        session_id: { type: "string", optional: true, trim: true, min: 1 },
+        target_session_id: { type: "string", optional: true, trim: true, min: 1 },
+        target_client_uuid: { type: "string", optional: true, trim: true, min: 1 },
+        target_local_session_id: { type: "string", optional: true, trim: true, min: 1 },
+        project_uuid: { type: "string", optional: true, trim: true, min: 1 },
+        cwd: { type: "string", optional: true, trim: true, min: 1 },
+        file_path: { type: "string", trim: true, min: 1 },
+        kind: {
+          type: "enum",
+          optional: true,
+          values: ["share", "question", "reply", "request", "handoff"],
+        },
+        summary: { type: "string", optional: true, trim: true, min: 1 },
+        message: { type: "string", optional: true, trim: true, min: 1 },
+        expected_reply: { type: "string", optional: true, trim: true, min: 1 },
+        requires_reply: { type: "boolean", optional: true },
+        in_reply_to: { type: "string", optional: true, trim: true, min: 1 },
+      },
+      async handler(
+        this: CollaborationServiceCarrier,
+        ctx: { params: SendPartnerFileInput },
+      ) {
+        return this.getSendPartnerFileService!().send(ctx.params);
+      },
+    },
+  },
 
   created(this: CollaborationServiceCarrier) {
     this.collaborationService = null;
@@ -133,6 +166,9 @@ const TelegramMcpCollaborationService: ServiceSchema = {
       runtime.logger,
       runtime.projectIdentityResolver,
       this.collaborationService,
+      new RemoteConsoleActionClient((actionName, params) =>
+        this.broker.call(actionName, params, { meta: { internal_call: true } }),
+      ),
     );
     this.gatewaySessionsService = new GatewaySessionsService(
       runtime.logger,

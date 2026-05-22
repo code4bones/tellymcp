@@ -2,6 +2,7 @@ import type { AppConfig } from "../../app/config/env";
 import type { SessionContext } from "../../entities/session/model/types";
 import type { XchangeRecordAttachment } from "../../entities/xchange/model/types";
 import {
+  detectIncomingTelegramBrowserScreenshotRequest,
   buildIncomingTelegramMessageActionDesc,
   buildIncomingTelegramMessageTools,
 } from "./xchangeRecordHints";
@@ -45,6 +46,12 @@ export async function writeTelegramMessageXchangeRecord(input: {
   const recordId = createInboxMessageId(new Date(input.createdAt));
   const workspaceDir = resolveWorkspaceDir(input.session, input.sessionId);
   const kind = input.kind ?? "request";
+  const prefersBrowserScreenshot =
+    detectIncomingTelegramBrowserScreenshotRequest({
+      kind,
+      text: input.text,
+      ...(input.summary?.trim() ? { summary: input.summary.trim() } : {}),
+    });
 
   await upsertXchangeRecord(
     input.config.tmux,
@@ -61,8 +68,11 @@ export async function writeTelegramMessageXchangeRecord(input: {
         input.summary?.trim() ||
         deriveXchangeSummary(input.text, "Telegram message"),
       body_text: input.text,
-      action_desc: buildIncomingTelegramMessageActionDesc(kind),
-      tools: buildIncomingTelegramMessageTools(kind),
+      action_desc: buildIncomingTelegramMessageActionDesc(
+        kind,
+        prefersBrowserScreenshot,
+      ),
+      tools: buildIncomingTelegramMessageTools(kind, prefersBrowserScreenshot),
       attachments: input.attachments ?? [],
       tags: input.tags ?? ["telegram", "human"],
       created_at: input.createdAt,

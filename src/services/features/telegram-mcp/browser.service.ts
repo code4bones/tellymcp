@@ -42,7 +42,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
 
   actions: {
     openRemote: {
-      params: { type: "object" },
+      params: { $$strict: false },
       async handler(
         this: BrowserServiceCarrier,
         ctx: { params: BrowserOpenInput },
@@ -51,7 +51,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
       },
     },
     getConsoleRemote: {
-      params: { type: "object" },
+      params: { $$strict: false },
       async handler(
         this: BrowserServiceCarrier,
         ctx: { params: BrowserConsoleInput },
@@ -60,7 +60,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
       },
     },
     clickRemote: {
-      params: { type: "object" },
+      params: { $$strict: false },
       async handler(
         this: BrowserServiceCarrier,
         ctx: { params: BrowserClickInput },
@@ -69,7 +69,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
       },
     },
     fillRemote: {
-      params: { type: "object" },
+      params: { $$strict: false },
       async handler(
         this: BrowserServiceCarrier,
         ctx: { params: BrowserFillInput },
@@ -78,7 +78,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
       },
     },
     pressRemote: {
-      params: { type: "object" },
+      params: { $$strict: false },
       async handler(
         this: BrowserServiceCarrier,
         ctx: { params: BrowserPressInput },
@@ -87,7 +87,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
       },
     },
     reloadRemote: {
-      params: { type: "object" },
+      params: { $$strict: false },
       async handler(
         this: BrowserServiceCarrier,
         ctx: { params: BrowserReloadInput },
@@ -96,7 +96,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
       },
     },
     waitForRemote: {
-      params: { type: "object" },
+      params: { $$strict: false },
       async handler(
         this: BrowserServiceCarrier,
         ctx: { params: BrowserWaitForInput },
@@ -105,7 +105,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
       },
     },
     waitForUrlRemote: {
-      params: { type: "object" },
+      params: { $$strict: false },
       async handler(
         this: BrowserServiceCarrier,
         ctx: { params: BrowserWaitForUrlInput },
@@ -114,7 +114,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
       },
     },
     getErrorsRemote: {
-      params: { type: "object" },
+      params: { $$strict: false },
       async handler(
         this: BrowserServiceCarrier,
         ctx: { params: BrowserErrorsInput },
@@ -123,7 +123,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
       },
     },
     getNetworkFailuresRemote: {
-      params: { type: "object" },
+      params: { $$strict: false },
       async handler(
         this: BrowserServiceCarrier,
         ctx: { params: BrowserNetworkFailuresInput },
@@ -132,7 +132,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
       },
     },
     clearLogsRemote: {
-      params: { type: "object" },
+      params: { $$strict: false },
       async handler(
         this: BrowserServiceCarrier,
         ctx: { params: BrowserClearLogsInput },
@@ -141,7 +141,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
       },
     },
     getDomRemote: {
-      params: { type: "object" },
+      params: { $$strict: false },
       async handler(
         this: BrowserServiceCarrier,
         ctx: { params: BrowserDomInput },
@@ -150,7 +150,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
       },
     },
     getComputedStyleRemote: {
-      params: { type: "object" },
+      params: { $$strict: false },
       async handler(
         this: BrowserServiceCarrier,
         ctx: { params: BrowserComputedStyleInput },
@@ -159,7 +159,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
       },
     },
     screenshotRemote: {
-      params: { type: "object" },
+      params: { $$strict: false },
       async handler(
         this: BrowserServiceCarrier,
         ctx: { params: BrowserScreenshotInput },
@@ -168,7 +168,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
       },
     },
     closeRemote: {
-      params: { type: "object" },
+      params: { $$strict: false },
       async handler(
         this: BrowserServiceCarrier,
         ctx: { params: BrowserCloseInput },
@@ -211,6 +211,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
     this.browserService = new BrowserService(
       runtime.config,
       runtime.sessionStore,
+      runtime.maintenanceStore,
       runtime.stateStore,
       runtime.stateStore,
       runtime.objectStore,

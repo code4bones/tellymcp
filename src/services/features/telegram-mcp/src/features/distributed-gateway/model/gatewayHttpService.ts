@@ -618,7 +618,7 @@ export class GatewayHttpService {
         writeJson(res, 200, parsedOutput.data);
         return true;
       } catch (error) {
-        console.error("Gateway project create request failed", {
+        console.error("Gateway partner-note request failed", {
           error: error instanceof Error ? (error.stack ?? error.message) : String(error),
         });
         writeJson(res, 400, {
@@ -658,7 +658,7 @@ export class GatewayHttpService {
         writeJson(res, 200, { delivered: Boolean(result?.delivered) });
         return true;
       } catch (error) {
-        console.error("Gateway project join request failed", {
+        console.error("Gateway live approval request failed", {
           error: error instanceof Error ? (error.stack ?? error.message) : String(error),
         });
         writeJson(res, 400, {
@@ -700,7 +700,7 @@ export class GatewayHttpService {
         writeJson(res, 200, { delivered: Boolean(result?.delivered) });
         return true;
       } catch (error) {
-        console.error("Gateway project session register request failed", {
+        console.error("Gateway live approval resolution failed", {
           error: error instanceof Error ? (error.stack ?? error.message) : String(error),
         });
         writeJson(res, 400, {
@@ -999,6 +999,30 @@ export class GatewayHttpService {
       return true;
     }
 
+    if (pathname === "/gateway/transport/document") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = await this.readJsonBody(req);
+        const output = await this.callBroker(
+          "telegramMcp.notify.sendDocumentForGatewaySession",
+          body,
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, output);
+      } catch (error) {
+        writeText(
+          res,
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      return true;
+    }
+
     if (pathname === "/gateway/transport/request") {
       if (req.method !== "POST") {
         writeText(res, 405, "Method not allowed");
@@ -1128,6 +1152,7 @@ export class GatewayHttpService {
               session_id: string;
               client_uuid: string;
               local_session_id: string;
+              cwd?: string | null;
               session_label?: string | null;
               client_label?: string | null;
               system_username?: string | null;

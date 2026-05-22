@@ -105,6 +105,27 @@ const TelegramMcpNotifyService: ServiceSchema = {
         });
       },
     },
+    sendDocumentForGatewaySession: {
+      params: {
+        client_uuid: "string",
+        local_session_id: "string",
+        file_name: "string",
+        content_base64: "string",
+        caption: { type: "string", optional: true },
+      },
+      async handler(this: NotifyServiceCarrier, ctx) {
+        const service = this.getNotifyService!();
+        return service.sendDocumentForGatewayBoundSession({
+          clientUuid: String(ctx.params.client_uuid),
+          localSessionId: String(ctx.params.local_session_id),
+          fileName: String(ctx.params.file_name),
+          contentBase64: String(ctx.params.content_base64),
+          ...(typeof ctx.params.caption === "string"
+            ? { caption: ctx.params.caption }
+            : {}),
+        });
+      },
+    },
   },
 
   created(this: NotifyServiceCarrier) {

@@ -158,8 +158,10 @@ function buildNoteContent(input: {
       "",
       "# Action Required",
       "You must send a reply via send_partner_note.",
+      "Do not stop after reading, listing files, or explaining what you found.",
       "Your task is not complete until send_partner_note succeeds.",
       "Do not stop after local analysis or a chat explanation.",
+      "Only after send_partner_note succeeds may you mark the record as read or say the work is done.",
       "Use the current partner route for the reply.",
       "Only after the tool succeeds may you say that the reply was sent.",
       "",
@@ -411,6 +413,10 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     try {
       await this.telegramTransport.nudgeSessionPartnerNote(
         targetSession.sessionId,
+        {
+          kind: input.kind,
+          requiresReply,
+        },
       );
     } catch (error) {
       this.logger.warn("tmux nudge failed after local partner delivery", {

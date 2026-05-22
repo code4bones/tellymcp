@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
 import type { TelegramXchangeFileMeta } from "../../../entities/inbox/model/types";
 import type { SessionContext } from "../../../entities/session/model/types";
 import type { Logger } from "../../lib/logger/logger";
@@ -280,9 +281,34 @@ export class TransportMenuCallbacks {
       });
       return null;
     }
+
+    const sessionId = String(payload.sessionId ?? "").trim();
+    const filePath = String(payload.filePath).trim();
+    if (!sessionId) {
+      await ctx.answerCallbackQuery({
+        text: `${kindLabel} session is missing in payload.`,
+        show_alert: true,
+      });
+      return null;
+    }
+
+    const relay = parseLiveRelaySessionId(sessionId);
+    if (!relay?.localSessionId) {
+      return { sessionId, filePath };
+    }
+
+    const localSession = await this.host.sessionStore.getSession(relay.localSessionId);
+    if (!localSession) {
+      await ctx.answerCallbackQuery({
+        text: `Workspace session '${relay.localSessionId}' is not registered for relay console '${sessionId}'.`,
+        show_alert: true,
+      });
+      return null;
+    }
+
     return {
-      sessionId: String(payload.sessionId),
-      filePath: String(payload.filePath),
+      sessionId: relay.localSessionId,
+      filePath,
     };
   }
 }

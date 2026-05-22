@@ -816,6 +816,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .select(
           "lc.client_uuid",
           "lc.local_session_id",
+          "lc.cwd",
           "lc.session_label",
           "lc.client_label",
           "lc.system_username",
@@ -839,6 +840,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
           session_id: string;
           client_uuid: string;
           local_session_id: string;
+          cwd?: string | null;
           session_label?: string | null;
           client_label?: string | null;
           system_username?: string | null;
@@ -870,6 +872,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
           session_id: key,
           client_uuid: String(row.client_uuid),
           local_session_id: String(row.local_session_id),
+          cwd: current?.cwd ?? (row.cwd ? String(row.cwd) : null),
           session_label:
             current?.session_label ??
             (row.session_label ? String(row.session_label) : null),
@@ -1989,7 +1992,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
 
       await this.db.withSchema(MCP_SCHEMA).table("gateway_messages").insert({
         message_uuid: messageUuid,
-        project_uuid: sourceSession.project_uuid,
+        project_uuid: String(targetSession.project_uuid),
         from_session_uuid: sourceSession.session_uuid,
         to_session_uuid: targetSession.session_uuid,
         kind,
@@ -2086,6 +2089,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
         ...(targetSession.project_name
           ? { project_name: targetSession.project_name }
           : {}),
+        project_uuid: String(targetSession.project_uuid),
         ...(targetSession.target_actor_label
           ? { target_actor_label: targetSession.target_actor_label }
           : {}),
@@ -2114,6 +2118,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
           ...(targetSession.project_name
             ? { project_name: targetSession.project_name }
             : {}),
+          project_uuid: String(targetSession.project_uuid),
           source_actor_label:
             sourceSession.label ?? sourceSession.local_session_id,
           kind,

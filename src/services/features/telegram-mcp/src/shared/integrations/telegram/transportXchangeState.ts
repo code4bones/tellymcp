@@ -1,5 +1,6 @@
 import type { AppConfig } from "../../../app/config/env";
 import type { TelegramXchangeFileMeta } from "../../../entities/inbox/model/types";
+import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
 import type {
   SessionStore,
   TelegramXchangeFileMetaStore,
@@ -15,9 +16,30 @@ export interface TransportXchangeStateHost {
 export class TransportXchangeState {
   public constructor(private readonly host: TransportXchangeStateHost) {}
 
+  private async normalizeSessionIdForFilesystem(sessionId: string): Promise<string> {
+    const trimmed = sessionId.trim();
+    if (!trimmed) {
+      return trimmed;
+    }
+
+    const direct = await this.host.sessionStore.getSession(trimmed);
+    if (direct?.cwd?.trim()) {
+      return trimmed;
+    }
+
+    const relay = parseLiveRelaySessionId(trimmed);
+    if (!relay?.localSessionId) {
+      return trimmed;
+    }
+
+    const localSession = await this.host.sessionStore.getSession(relay.localSessionId);
+    return localSession?.cwd?.trim() ? relay.localSessionId : trimmed;
+  }
+
   public async listActiveSessionFiles(sessionId: string): Promise<string[]> {
-    const files = await this.listSessionFilesystemXchangeFiles(sessionId);
-    const metas = await this.listReconciledSessionXchangeMetas(sessionId, files);
+    const storageSessionId = await this.normalizeSessionIdForFilesystem(sessionId);
+    const files = await this.listSessionFilesystemXchangeFiles(storageSessionId);
+    const metas = await this.listReconciledSessionXchangeMetas(storageSessionId, files);
     const uploadFiles = metas
       .filter((meta) => meta.source === "telegram-upload")
       .map((meta) => meta.filePath)
@@ -32,8 +54,9 @@ export class TransportXchangeState {
       meta: TelegramXchangeFileMeta | null;
     }>
   > {
-    const filePaths = await this.listSessionFilesystemXchangeFiles(sessionId);
-    const metas = await this.listReconciledSessionXchangeMetas(sessionId, filePaths);
+    const storageSessionId = await this.normalizeSessionIdForFilesystem(sessionId);
+    const filePaths = await this.listSessionFilesystemXchangeFiles(storageSessionId);
+    const metas = await this.listReconciledSessionXchangeMetas(storageSessionId, filePaths);
     const metaByPath = new Map(metas.map((meta) => [meta.filePath, meta] as const));
     return filePaths.map((filePath) => ({
       filePath,
@@ -42,8 +65,9 @@ export class TransportXchangeState {
   }
 
   public async listActiveSessionScreenshots(sessionId: string): Promise<string[]> {
-    const files = await this.listSessionFilesystemXchangeFiles(sessionId);
-    const metas = await this.listReconciledSessionXchangeMetas(sessionId, files);
+    const storageSessionId = await this.normalizeSessionIdForFilesystem(sessionId);
+    const files = await this.listSessionFilesystemXchangeFiles(storageSessionId);
+    const metas = await this.listReconciledSessionXchangeMetas(storageSessionId, files);
     const screenshots = metas
       .filter((meta) => meta.source === "browser-screenshot")
       .map((meta) => meta.filePath)

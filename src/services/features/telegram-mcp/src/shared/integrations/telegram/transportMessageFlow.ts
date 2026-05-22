@@ -302,7 +302,6 @@ export class TransportMessageFlow {
     const output = await this.host.callGatewayJson<{
       ok: true;
       session_id: string;
-      terminal_target: string;
       submitted_text: string;
     }>("/relay/console-message", {
       source_actor_label: sourceActorLabel,
@@ -320,7 +319,7 @@ export class TransportMessageFlow {
       sessionId: input.sourceSessionId,
       targetClientUuid: input.relayTarget.clientUuid,
       targetLocalSessionId: input.relayTarget.localSessionId,
-      terminalTarget: output.terminal_target,
+      submittedTextLength: output.submitted_text.length,
       chatId: input.principal.telegramChatId,
       userId: input.principal.telegramUserId,
     });

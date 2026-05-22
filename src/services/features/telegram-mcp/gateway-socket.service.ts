@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import type { IncomingMessage, Server as HttpServer } from "node:http";
 import type { Socket } from "node:net";
 import { basename, extname, join, resolve } from "node:path";
+import { inspect } from "node:util";
 
 import type { Service, ServiceSchema } from "moleculer";
 
@@ -119,6 +120,8 @@ type GatewaySocketHello = {
   connection_id: string;
   role: "client" | "gateway";
   client_uuid?: string;
+  client_label?: string;
+  system_username?: string;
   project_name?: string;
   namespace?: string;
   node_id?: string;
@@ -578,6 +581,72 @@ function computePackageToolsHash(currentDir: string): string | null {
   }
 
   return computeToolsHashForDir(packageRoot);
+}
+
+function isBackendErrorLike(
+  value: unknown,
+): value is { message?: string; statusCode: number; code: string; name?: string } {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as { statusCode?: unknown }).statusCode === "number" &&
+      typeof (value as { code?: unknown }).code === "string" &&
+      (typeof (value as { name?: unknown }).name === "string" ||
+        typeof (value as { message?: unknown }).message === "string"),
+  );
+}
+
+function formatRemoteActionError(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return inspect(error, { depth: 6, breakLength: 140 });
+  }
+
+  const details: string[] = [];
+  const named = error as Error & {
+    code?: unknown;
+    type?: unknown;
+    data?: unknown;
+    fields?: unknown;
+  };
+  const ownProps = Object.fromEntries(
+    Object.getOwnPropertyNames(error).map((key) => [
+      key,
+      (error as unknown as Record<string, unknown>)[key],
+    ]),
+  );
+
+  if (typeof named.code === "string" && named.code.trim()) {
+    details.push(`code=${named.code.trim()}`);
+  }
+  if (typeof named.type === "string" && named.type.trim()) {
+    details.push(`type=${named.type.trim()}`);
+  }
+  if (named.data !== undefined) {
+    try {
+      details.push(`data=${JSON.stringify(named.data)}`);
+    } catch {
+      details.push(`data=${String(named.data)}`);
+    }
+  }
+  if (named.fields !== undefined) {
+    try {
+      details.push(`fields=${JSON.stringify(named.fields)}`);
+    } catch {
+      details.push(`fields=${String(named.fields)}`);
+    }
+  }
+  if (Object.keys(ownProps).length > 0) {
+    try {
+      details.push(`props=${JSON.stringify(ownProps)}`);
+    } catch {
+      details.push(`props=${inspect(ownProps, { depth: 6, breakLength: 140 })}`);
+    }
+  }
+
+  const baseMessage = error.stack ?? error.message;
+  return details.length > 0
+    ? `${baseMessage}\n${details.join("\n")}`
+    : baseMessage;
 }
 
 function normalizeGatewayBaseUrl(value: string): URL {
@@ -1067,6 +1136,8 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
     listConnectedClients(this: GatewaySocketCarrier) {
       const result: Array<{
         client_uuid: string;
+        client_label?: string;
+        system_username?: string;
         namespace?: string;
         node_id?: string;
         package_version?: string;
@@ -1082,6 +1153,10 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
         result.push({
           client_uuid: hello.client_uuid,
+          ...(hello.client_label ? { client_label: hello.client_label } : {}),
+          ...(hello.system_username
+            ? { system_username: hello.system_username }
+            : {}),
           ...(hello.namespace ? { namespace: hello.namespace } : {}),
           ...(hello.node_id ? { node_id: hello.node_id } : {}),
           ...(hello.package_version
@@ -1152,6 +1227,42 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         return null;
       }
 
+      const compositeSeparatorIndex = sessionId.indexOf(":");
+      const compositeClientUuid =
+        compositeSeparatorIndex > 0 ? sessionId.slice(0, compositeSeparatorIndex).trim() : "";
+      const compositeLocalSessionId =
+        compositeSeparatorIndex > 0
+          ? sessionId.slice(compositeSeparatorIndex + 1).trim()
+          : "";
+
+      if (compositeClientUuid && compositeLocalSessionId) {
+        for (const hello of this.connectedClients?.values() ?? []) {
+          if (
+            hello?.client_uuid !== compositeClientUuid ||
+            !Array.isArray(hello.session_tools)
+          ) {
+            continue;
+          }
+
+          const sessionTool = hello.session_tools.find(
+            (item) => item.local_session_id === compositeLocalSessionId,
+          );
+          if (!sessionTool) {
+            continue;
+          }
+
+          return {
+            client_uuid: compositeClientUuid,
+            local_session_id: compositeLocalSessionId,
+            ...(sessionTool.session_label
+              ? { session_label: sessionTool.session_label }
+              : {}),
+          };
+        }
+
+        return null;
+      }
+
       const matches = new Map<
         string,
         {
@@ -1190,9 +1301,9 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       }
 
       if (matches.size > 1) {
-        throw new Error(
-          `Console session_id '${sessionId}' is ambiguous across connected clients`,
-        );
+      throw new Error(
+        `Console session_id '${sessionId}' is ambiguous across connected clients. Use the canonical gateway session_id format client_uuid:local_session_id.`,
+      );
       }
 
       return [...matches.values()][0] ?? null;
@@ -1521,6 +1632,14 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         connection_id: this.wsConnectionId || randomUUID(),
         role: "client",
         ...(clientUuid ? { client_uuid: clientUuid } : {}),
+        ...(runtime.config.project.name
+          ? { client_label: runtime.config.project.name }
+          : {}),
+        ...(process.env.USER?.trim()
+          ? { system_username: process.env.USER.trim() }
+          : process.env.LOGNAME?.trim()
+            ? { system_username: process.env.LOGNAME.trim() }
+            : {}),
         ...(runtime.config.project.name
           ? { project_name: runtime.config.project.name }
           : {}),
@@ -2047,6 +2166,13 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           ...(typeof parsed.client_uuid === "string" && parsed.client_uuid.trim()
             ? { client_uuid: parsed.client_uuid.trim() }
             : {}),
+          ...(typeof parsed.client_label === "string" && parsed.client_label.trim()
+            ? { client_label: parsed.client_label.trim() }
+            : {}),
+          ...(typeof parsed.system_username === "string" &&
+          parsed.system_username.trim()
+            ? { system_username: parsed.system_username.trim() }
+            : {}),
           ...(typeof parsed.project_name === "string" && parsed.project_name.trim()
             ? { project_name: parsed.project_name.trim() }
             : {}),
@@ -2330,6 +2456,19 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
         clearTimeout(pending.timeout);
         this.pendingActionRequests?.delete(requestId);
+        runtime.logger.info("Gateway WS action response received", {
+          requestId,
+          clientUuid: pending.clientUuid,
+          ok: parsed.ok === true,
+          ...(parsed.ok === true
+            ? {}
+            : {
+                error:
+                  typeof parsed.error === "string" && parsed.error.trim()
+                    ? parsed.error
+                    : "Remote action request failed",
+              }),
+        });
         if (parsed.ok === true) {
           pending.resolve(parsed.result);
         } else {
@@ -2512,12 +2651,39 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           return;
         }
 
+        runtime.logger.info("Gateway WS action request received on client", {
+          requestId,
+          actionName,
+          sessionId:
+            typeof parsed.payload?.session_id === "string"
+              ? parsed.payload.session_id
+              : null,
+        });
+
         try {
           const result = await this.broker.call(
             actionName,
             parsed.payload ?? {},
             { meta: { internal_call: true } },
           );
+          if (isBackendErrorLike(result)) {
+            this.wsClient?.send(
+              JSON.stringify({
+                type: "action_response",
+                request_id: requestId,
+                ok: false,
+                error:
+                  typeof result.message === "string" && result.message.trim()
+                    ? result.message
+                    : `${result.name ?? "BackendError"} (${result.code})`,
+              } satisfies GatewaySocketActionResponse),
+            );
+            return;
+          }
+          runtime.logger.info("Gateway WS action request completed on client", {
+            requestId,
+            actionName,
+          });
           this.wsClient?.send(
             JSON.stringify({
               type: "action_response",
@@ -2527,13 +2693,19 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             } satisfies GatewaySocketActionResponse),
           );
         } catch (error) {
+          const formattedError = formatRemoteActionError(error);
+          runtime.logger.error("Gateway WS action request failed on client", {
+            requestId,
+            actionName,
+            error: formattedError,
+            payload: parsed.payload ?? {},
+          });
           this.wsClient?.send(
             JSON.stringify({
               type: "action_response",
               request_id: requestId,
               ok: false,
-              error:
-                error instanceof Error ? (error.stack ?? error.message) : String(error),
+              error: formattedError,
             } satisfies GatewaySocketActionResponse),
           );
         }
@@ -2808,6 +2980,13 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           resolve,
           reject,
           timeout,
+        });
+
+        this.getRuntimeOrThrow!().logger.info("Gateway WS action request sent", {
+          requestId,
+          clientUuid: params.clientUuid,
+          actionName: params.actionName,
+          localSessionId,
         });
 
         socket.send(

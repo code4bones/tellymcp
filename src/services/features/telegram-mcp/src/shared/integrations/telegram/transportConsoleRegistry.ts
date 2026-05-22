@@ -16,6 +16,7 @@ type GatewayKnownSessionRecord = {
   local_session_id: string;
   session_label?: string | null;
   client_label?: string | null;
+  system_username?: string | null;
   telegram_username?: string | null;
   telegram_display_name?: string | null;
   bot_username?: string | null;
@@ -205,10 +206,10 @@ export class TransportConsoleRegistry {
     const owner =
       session.telegram_display_name?.trim() ||
       session.telegram_username?.trim() ||
+      session.system_username?.trim() ||
       session.client_label?.trim() ||
-      [session.node_id?.trim(), session.client_uuid.slice(0, 8)]
-        .filter(Boolean)
-        .join("/");
+      session.node_id?.trim() ||
+      session.client_uuid.slice(0, 8);
     return owner ? `${base} · ${owner}` : base;
   }
 }

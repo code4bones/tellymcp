@@ -76,6 +76,7 @@ export type GatewayKnownSessionRecord = {
   local_session_id: string;
   session_label?: string | null | undefined;
   client_label?: string | null | undefined;
+  system_username?: string | null | undefined;
   telegram_username?: string | null | undefined;
   telegram_display_name?: string | null | undefined;
   bot_username?: string | null | undefined;

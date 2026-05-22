@@ -194,10 +194,19 @@ const envSchema = z.object({
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
+  LOG_STDERR_LEVEL: z
+    .preprocess(
+      emptyStringToUndefined,
+      z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).optional(),
+    ),
   LOG_FILE_ENABLED: z
     .string()
     .optional()
     .transform((value) => value === "true"),
+  LOG_FILE_LEVEL: z.preprocess(
+    emptyStringToUndefined,
+    z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).optional(),
+  ),
   LOG_FILE_PATH: z.string().min(1).default(".tellymcp/log.jsonl"),
 });
 
@@ -313,7 +322,9 @@ export type AppConfig = {
   };
   logging: {
     level: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
+    stderrLevel?: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
     fileEnabled: boolean;
+    fileLevel?: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
     filePath: string;
   };
 };
@@ -511,7 +522,9 @@ export function loadConfig(): AppConfig {
     },
     logging: {
       level: parsed.LOG_LEVEL,
+      ...(parsed.LOG_STDERR_LEVEL ? { stderrLevel: parsed.LOG_STDERR_LEVEL } : {}),
       fileEnabled: parsed.LOG_FILE_ENABLED,
+      ...(parsed.LOG_FILE_LEVEL ? { fileLevel: parsed.LOG_FILE_LEVEL } : {}),
       filePath: parsed.LOG_FILE_PATH,
     },
   };

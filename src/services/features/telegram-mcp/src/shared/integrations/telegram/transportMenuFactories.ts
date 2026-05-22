@@ -16,6 +16,29 @@ import type {
   TmuxCaptureScope,
 } from "./transportTypes";
 
+function splitSessionDisplayLabel(input: {
+  sessionId: string;
+  sessionLabel?: string;
+}): {
+  shortLabel: string;
+  ownerLabel: string | null;
+} {
+  const label = (input.sessionLabel?.trim() || input.sessionId.trim() || "session").trim();
+  const separator = " · ";
+  const separatorIndex = label.indexOf(separator);
+  if (separatorIndex <= 0) {
+    return {
+      shortLabel: label,
+      ownerLabel: null,
+    };
+  }
+
+  return {
+    shortLabel: label.slice(0, separatorIndex).trim() || label,
+    ownerLabel: label.slice(separatorIndex + separator.length).trim() || null,
+  };
+}
+
 export interface TransportMenuFactoriesHost {
   logger: Logger;
   bindingStore: SessionBindingStore;
@@ -83,9 +106,15 @@ export interface TransportMenuFactoriesHost {
   handleScreenshotGet(ctx: TelegramMenuContext): Promise<void>;
   handleScreenshotDelete(ctx: TelegramMenuContext): Promise<void>;
   handleSessionSelection(ctx: TelegramMenuContext): Promise<void>;
+  handleSessionGroupSelection(ctx: TelegramMenuContext): Promise<void>;
+  getMenuPayloadByKey(key: string): Promise<Record<string, unknown> | null>;
   createInboxMenuPayload(sessionId: string, messageId: string): Promise<string>;
   createFileMenuPayload(sessionId: string, filePath: string): Promise<string>;
-  createSessionMenuPayload(sessionId: string): Promise<string>;
+  createSessionMenuPayload(
+    sessionId: string,
+    ownerLabel?: string,
+  ): Promise<string>;
+  createSessionGroupMenuPayload(ownerLabel: string): Promise<string>;
   createLinkMenuPayload(
     sessionId: string,
     targetSessionId: string,
@@ -895,6 +924,18 @@ export class TransportMenuFactories {
             return range;
           }
 
+          const groupedSessions = new Map<
+            string,
+            Array<{
+              sessionId: string;
+              sessionLabel?: string;
+              linkedSessionLabel?: string;
+              active: boolean;
+              inboxCount: number;
+              sortKey: string;
+            }>
+          >();
+
           for (const sessionId of sessionIds) {
             const session = await this.host.sessionStore.getSession(sessionId);
             const linkedSession = session?.linkedSessionId
@@ -902,28 +943,96 @@ export class TransportMenuFactories {
               : null;
             const inboxCount =
               await this.host.inboxStore.countInboxMessages(sessionId);
+            const display = splitSessionDisplayLabel({
+              sessionId,
+              ...(session?.label ? { sessionLabel: session.label } : {}),
+            });
+            const groupKey = display.ownerLabel ?? "";
+            const items = groupedSessions.get(groupKey) ?? [];
+            items.push({
+              sessionId,
+              ...(display.shortLabel ? { sessionLabel: display.shortLabel } : {}),
+              ...(linkedSession?.label
+                ? { linkedSessionLabel: linkedSession.label }
+                : session?.linkedSessionId
+                  ? { linkedSessionLabel: session.linkedSessionId }
+                  : {}),
+              active: sessionId === activeSessionId,
+              inboxCount,
+              sortKey: `${display.shortLabel}\u0000${sessionId}`,
+            });
+            groupedSessions.set(groupKey, items);
+          }
 
-            range.text(
-              {
-                text: this.host.formatSessionMenuLabel({
-                  sessionId,
-                  active: sessionId === activeSessionId,
-                  inboxCount,
-                  ...(session?.label ? { sessionLabel: session.label } : {}),
-                  ...(linkedSession?.label
-                    ? { linkedSessionLabel: linkedSession.label }
-                    : session?.linkedSessionId
-                      ? { linkedSessionLabel: session.linkedSessionId }
+          const currentPayloadKey = readMenuPayloadKey(ctx);
+          let selectedOwnerLabel: string | null = null;
+          if (currentPayloadKey) {
+            const payload = await this.host.getMenuPayloadByKey(currentPayloadKey);
+            if (
+              payload &&
+              (payload.kind === "session-group" ||
+                payload.kind === "active-session") &&
+              typeof payload.ownerLabel === "string"
+            ) {
+              selectedOwnerLabel = payload.ownerLabel;
+            }
+          }
+
+          const sortedGroups = [...groupedSessions.entries()].sort((left, right) => {
+            const leftKey = left[0] || "\uffff";
+            const rightKey = right[0] || "\uffff";
+            return leftKey.localeCompare(rightKey);
+          });
+
+          if (!selectedOwnerLabel) {
+            for (const [groupKey, items] of sortedGroups) {
+              const title =
+                groupKey || (items.length === 1 ? items[0]?.sessionLabel : null) || "Sessions";
+              range.text(
+                {
+                  text: `👤 ${title}`.slice(0, 56),
+                  payload: async () =>
+                    this.host.createSessionGroupMenuPayload(groupKey),
+                },
+                async (innerCtx) => {
+                  await this.host.handleSessionGroupSelection(innerCtx);
+                },
+              );
+              range.row();
+            }
+            return range;
+          }
+
+          for (const [groupKey, items] of sortedGroups) {
+            if (groupKey !== selectedOwnerLabel) {
+              continue;
+            }
+            items.sort((left, right) => left.sortKey.localeCompare(right.sortKey));
+            for (const item of items) {
+              range.text(
+                {
+                  text: this.host.formatSessionMenuLabel({
+                    sessionId: item.sessionId,
+                    active: item.active,
+                    inboxCount: item.inboxCount,
+                    ...(item.sessionLabel ? { sessionLabel: item.sessionLabel } : {}),
+                    ...(item.linkedSessionLabel
+                      ? { linkedSessionLabel: item.linkedSessionLabel }
                       : {}),
-                }),
-                payload: async () => this.host.createSessionMenuPayload(sessionId),
-              },
-              async (innerCtx) => {
-                await this.host.handleSessionSelection(innerCtx);
-              },
-            );
-
-            range.row();
+                  }),
+                  payload: async () =>
+                    this.host.createSessionMenuPayload(
+                      item.sessionId,
+                      selectedOwnerLabel ?? groupKey,
+                    ),
+                },
+                async (innerCtx) => {
+                  await this.host.handleSessionSelection(innerCtx);
+                },
+              );
+              range.row();
+            }
+            break;
           }
 
           return range;
@@ -950,7 +1059,24 @@ export class TransportMenuFactories {
         }
       })
       .text(
-        async (ctx) => this.host.tForContext(ctx, "common:menu.refresh"),
+        {
+          text: async (ctx) => this.host.tForContext(ctx, "common:menu.refresh"),
+          payload: async (ctx) => {
+            const currentPayloadKey = readMenuPayloadKey(ctx);
+            if (!currentPayloadKey) {
+              return "refresh";
+            }
+            const payload = await this.host.getMenuPayloadByKey(currentPayloadKey);
+            if (
+              payload &&
+              payload.kind === "session-group" &&
+              typeof payload.ownerLabel === "string"
+            ) {
+              return currentPayloadKey;
+            }
+            return "refresh";
+          },
+        },
         async (ctx) => {
           await ctx.answerCallbackQuery({
             text: await this.host.tForContext(ctx, "menu:sessions.actions.refreshed"),
@@ -959,7 +1085,24 @@ export class TransportMenuFactories {
         },
       )
       .text(
-        async (ctx) => this.host.tForContext(ctx, "menu:sessions.labels.tools"),
+        {
+          text: async (ctx) => this.host.tForContext(ctx, "menu:sessions.labels.tools"),
+          payload: async (ctx) => {
+            const currentPayloadKey = readMenuPayloadKey(ctx);
+            if (!currentPayloadKey) {
+              return "tools";
+            }
+            const payload = await this.host.getMenuPayloadByKey(currentPayloadKey);
+            if (
+              payload &&
+              payload.kind === "session-group" &&
+              typeof payload.ownerLabel === "string"
+            ) {
+              return currentPayloadKey;
+            }
+            return "tools";
+          },
+        },
         async (ctx) => {
           await ctx.answerCallbackQuery({
             text: await this.host.tForContext(

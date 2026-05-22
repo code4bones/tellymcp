@@ -35,10 +35,21 @@ export class TransportPayloadState {
     });
   }
 
-  public async createSessionMenuPayload(sessionId: string): Promise<string> {
+  public async createSessionMenuPayload(
+    sessionId: string,
+    ownerLabel?: string,
+  ): Promise<string> {
     return this.createPayload({
       kind: "active-session",
       sessionId,
+      ...(ownerLabel ? { ownerLabel } : {}),
+    });
+  }
+
+  public async createSessionGroupMenuPayload(ownerLabel: string): Promise<string> {
+    return this.createPayload({
+      kind: "session-group",
+      ownerLabel,
     });
   }
 

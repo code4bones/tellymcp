@@ -26,7 +26,12 @@ const TelegramMcpToolsSyncService: ServiceSchema = {
 
   actions: {
     refreshToolsMarkdownRemote: {
-      params: { type: "object" },
+      params: {
+        $$strict: false,
+        session_id: { type: "string", optional: true, empty: false },
+        cwd: { type: "string", optional: true, empty: false },
+        save_locally: { type: "boolean", optional: true },
+      },
       async handler(
         this: ToolsSyncServiceCarrier,
         ctx: { params: RefreshToolsMarkdownInput },

@@ -16,7 +16,34 @@ import {
   buildSettingsMenuText,
   buildStorageMenuText,
 } from "./transportMenuText";
-import { escapeHtml, formatMenuTimestamp } from "./transportUtils";
+import {
+  escapeHtml,
+  formatMenuTimestamp,
+  readMenuPayloadKey,
+} from "./transportUtils";
+
+function splitSessionDisplayLabel(input: {
+  sessionId: string;
+  sessionLabel?: string;
+}): {
+  shortLabel: string;
+  ownerLabel: string | null;
+} {
+  const label = (input.sessionLabel?.trim() || input.sessionId.trim() || "session").trim();
+  const separator = " · ";
+  const separatorIndex = label.indexOf(separator);
+  if (separatorIndex <= 0) {
+    return {
+      shortLabel: label,
+      ownerLabel: null,
+    };
+  }
+
+  return {
+    shortLabel: label.slice(0, separatorIndex).trim() || label,
+    ownerLabel: label.slice(separatorIndex + separator.length).trim() || null,
+  };
+}
 
 type Principal = { telegramChatId: number; telegramUserId: number };
 
@@ -52,6 +79,7 @@ export interface TransportMenuStateHost {
     meta: { kind: "menu"; sessionId?: string },
     options?: { reply_markup?: unknown },
   ): Promise<void | { message_id: number }>;
+  getMenuPayloadByKey(key: string): Promise<Record<string, unknown> | null>;
   getMainMenu(): unknown;
   getSessionsMenu(): unknown;
   getInboxMenu(): unknown;
@@ -257,6 +285,68 @@ export class TransportMenuState {
           sessionName: escapeHtml(activeSession?.label ?? activeSessionId),
         }),
       );
+      lines.push("");
+    }
+
+    const currentPayloadKey = readMenuPayloadKey(ctx);
+    let selectedOwnerLabel: string | null = null;
+    if (currentPayloadKey) {
+      const payload = await this.host.getMenuPayloadByKey(currentPayloadKey);
+      if (
+        payload &&
+        (payload.kind === "session-group" || payload.kind === "active-session") &&
+        typeof payload.ownerLabel === "string"
+      ) {
+        selectedOwnerLabel = payload.ownerLabel;
+      }
+    }
+
+    const groupedSessions = new Map<string, string[]>();
+    for (const sessionId of sessionIds) {
+      const session = await this.host.sessionStore.getSession(sessionId);
+      const display = splitSessionDisplayLabel({
+        sessionId,
+        ...(session?.label ? { sessionLabel: session.label } : {}),
+      });
+      const groupKey = display.ownerLabel ?? "";
+      const labels = groupedSessions.get(groupKey) ?? [];
+      labels.push(display.shortLabel);
+      groupedSessions.set(groupKey, labels);
+    }
+
+    if (groupedSessions.size > 0) {
+      lines.push(this.host.t(locale, "menu:sessions.screen.choose_session"));
+      for (const [groupKey, labels] of [...groupedSessions.entries()].sort(
+        (left, right) => {
+          const leftKey = left[0] || "\uffff";
+          const rightKey = right[0] || "\uffff";
+          return leftKey.localeCompare(rightKey);
+        },
+      )) {
+        if (selectedOwnerLabel !== null && groupKey !== selectedOwnerLabel) {
+          continue;
+        }
+        const renderedLabels = labels.sort((left, right) =>
+          left.localeCompare(right),
+        );
+        if (selectedOwnerLabel !== null) {
+          if (groupKey) {
+            lines.push(`• ${escapeHtml(groupKey)}`);
+            lines.push("");
+          }
+          for (const label of renderedLabels) {
+            lines.push(`• ${escapeHtml(label)}`);
+          }
+          break;
+        }
+        if (groupKey) {
+          lines.push(
+            `• ${escapeHtml(groupKey)}: ${escapeHtml(renderedLabels.join(", "))}`,
+          );
+        } else {
+          lines.push(`• ${escapeHtml(renderedLabels.join(", "))}`);
+        }
+      }
       lines.push("");
     }
 

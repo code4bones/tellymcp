@@ -78,8 +78,8 @@ type LiveRelayCaptureBufferResult = {
 type RelayConsoleMessageResult = {
   ok: true;
   session_id: string;
-  terminal_target: string;
   submitted_text: string;
+  source_label?: string;
 };
 
 function unwrapLiveRelayResult<T>(response: unknown): T | null {
@@ -930,21 +930,29 @@ export class GatewayHttpService {
           return true;
         }
 
-        const result = await this.callBroker<RelayConsoleMessageResult>(
-          "telegramMcp.gatewaySocket.requestClientAction",
-          {
-            clientUuid: targetClientUuid,
-            actionName: "telegramMcp.terminalInput.submitHumanMessageRemote",
-            params: {
-              session_id: targetLocalSessionId,
-              text,
-              ...(attachments.length > 0 ? { attachments } : {}),
-              ...(sourceLabel ? { source_label: sourceLabel } : {}),
-            },
-          },
-          { meta: { internal_call: true } },
-        );
-        writeJson(res, 200, result);
+        const submittedText =
+          attachments.length > 0
+            ? `${text} [attachments saved: ${attachments.join(", ")}]`.trim()
+            : text;
+
+        await this.requestLiveRelayAction({
+          clientUuid: targetClientUuid,
+          localSessionId: targetLocalSessionId,
+          action: "text",
+          text: submittedText,
+        });
+        await this.requestLiveRelayAction({
+          clientUuid: targetClientUuid,
+          localSessionId: targetLocalSessionId,
+          action: "enter",
+        });
+
+        writeJson(res, 200, {
+          ok: true,
+          session_id: targetLocalSessionId,
+          submitted_text: submittedText,
+          ...(sourceLabel ? { source_label: sourceLabel } : {}),
+        } satisfies RelayConsoleMessageResult);
         return true;
       } catch (error) {
         writeJson(res, 400, {
@@ -1106,9 +1114,6 @@ export class GatewayHttpService {
           typeof body.client_uuid === "string" && body.client_uuid.trim()
             ? body.client_uuid.trim()
             : null;
-        const scopeFilterRequested =
-          (typeof body.gateway_token === "string" && body.gateway_token.trim().length > 0) ||
-          (typeof body.scope_key === "string" && body.scope_key.trim().length > 0);
         const connectedOnly = typeof body.connected_only === "boolean"
           ? body.connected_only
           : false;
@@ -1125,6 +1130,7 @@ export class GatewayHttpService {
               label: string | null;
               status: string;
               client_label: string | null;
+              system_username: string | null;
               telegram_username: string | null;
               telegram_display_name: string | null;
               bot_username: string | null;
@@ -1139,6 +1145,8 @@ export class GatewayHttpService {
           ) as Promise<{
             clients?: Array<{
               client_uuid: string;
+              client_label?: string;
+              system_username?: string;
               node_id?: string;
               package_version?: string;
               session_tools?: Array<{
@@ -1157,13 +1165,7 @@ export class GatewayHttpService {
             }>;
           }>,
         ]);
-        const allowedClientUuids = new Set(
-          Array.isArray(scopedClientsResult.clients)
-            ? scopedClientsResult.clients
-                .map((client) => client.client_uuid)
-                .filter((clientUuid): clientUuid is string => typeof clientUuid === "string")
-            : [],
-        );
+        void scopedClientsResult;
 
         const merged = new Map<
           string,
@@ -1173,6 +1175,7 @@ export class GatewayHttpService {
             local_session_id: string;
             session_label?: string | null;
             client_label?: string | null;
+            system_username?: string | null;
             telegram_username?: string | null;
             telegram_display_name?: string | null;
             bot_username?: string | null;
@@ -1199,11 +1202,13 @@ export class GatewayHttpService {
             projectNames.add(session.project_name);
           }
           merged.set(key, {
-            session_id: current?.session_id ?? session.session_uuid,
+            session_id: key,
             client_uuid: session.client_uuid,
             local_session_id: session.local_session_id,
             session_label: current?.session_label ?? session.label,
             client_label: current?.client_label ?? session.client_label,
+            system_username:
+              current?.system_username ?? session.system_username,
             telegram_username:
               current?.telegram_username ?? session.telegram_username,
             telegram_display_name:
@@ -1223,28 +1228,26 @@ export class GatewayHttpService {
         for (const client of Array.isArray(connectedResult.clients)
           ? connectedResult.clients
           : []) {
-          if (
-            scopeFilterRequested &&
-            !connectedOnly &&
-            !allowedClientUuids.has(client.client_uuid)
-          ) {
-            continue;
-          }
           for (const sessionTool of Array.isArray(client.session_tools)
             ? client.session_tools
             : []) {
             const key = `${client.client_uuid}:${sessionTool.local_session_id}`;
             const current = merged.get(key);
             merged.set(key, {
-              session_id:
-                current?.session_id ??
-                `${client.client_uuid}:${sessionTool.local_session_id}`,
+              session_id: key,
               client_uuid: client.client_uuid,
               local_session_id: sessionTool.local_session_id,
               session_label:
                 current?.session_label ?? sessionTool.session_label ?? null,
               ...(current?.client_label
                 ? { client_label: current.client_label }
+                : client.client_label
+                  ? { client_label: client.client_label }
+                : {}),
+              ...(current?.system_username
+                ? { system_username: current.system_username }
+                : client.system_username
+                  ? { system_username: client.system_username }
                 : {}),
               ...(current?.telegram_username
                 ? { telegram_username: current.telegram_username }

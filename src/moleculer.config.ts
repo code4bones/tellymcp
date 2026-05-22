@@ -45,8 +45,10 @@ const configuredTransport = process.env.TRANSPORT?.trim();
 const pinoTransport = pino.transport({
 	targets: createPinoTargets({
 		level: process.env.LOG_LEVEL || "info",
+		stderrLevel: process.env.LOG_STDERR_LEVEL || process.env.LOG_LEVEL || "info",
 		fileEnabled: process.env.LOG_FILE_ENABLED === "true",
 		filePath: process.env.LOG_FILE_PATH || ".tellymcp/log.jsonl",
+		fileLevel: process.env.LOG_FILE_LEVEL || process.env.LOG_LEVEL || "info",
 	}),
 });
 

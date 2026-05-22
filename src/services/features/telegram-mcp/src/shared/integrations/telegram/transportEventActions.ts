@@ -87,30 +87,13 @@ export class TransportEventActions {
       return;
     }
 
-    const inboxMessage: TelegramInboxMessage = {
-      id: createInboxMessageId(),
+    this.host.logger.info("TOOLS.md update event received for console", {
       sessionId: session.sessionId,
-      telegramChatId: 0,
-      telegramUserId: 0,
-      sourceTelegramMessageId: 0,
-      text: [
-        "Gateway TOOLS.md has changed or is missing locally.",
-        `Session: ${session.label ?? input.session_label ?? session.sessionId}`,
-        `Reason: ${input.reason === "missing" ? "local TOOLS.md hash is missing" : "local TOOLS.md is outdated"}`,
-        `Gateway tools hash: ${input.gateway_tools_hash}`,
-        ...(input.client_tools_hash ? [`Local tools hash: ${input.client_tools_hash}`] : []),
-        "",
-        "# Action Required",
-        "1. Call refresh_tools_markdown for this session.",
-        "2. Re-read the local TOOLS.md.",
-        "3. Apply the updated instructions before continuing any work.",
-        "The task is not complete until the updated TOOLS.md has been read and applied.",
-      ].join("\n"),
-      receivedAt: new Date().toISOString(),
-    };
-
-    await this.host.inboxStore.createInboxMessage(inboxMessage);
-    await this.host.nudgeSessionInbox(session.sessionId);
+      sessionLabel: session.label ?? input.session_label ?? session.sessionId,
+      reason: input.reason,
+      gatewayToolsHash: input.gateway_tools_hash,
+      clientToolsHash: input.client_tools_hash,
+    });
 
     const binding = await this.host.bindingStore.getBinding(session.sessionId);
     if (!binding) {

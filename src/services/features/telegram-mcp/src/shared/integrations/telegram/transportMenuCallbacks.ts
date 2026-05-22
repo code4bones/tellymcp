@@ -29,6 +29,7 @@ export interface TransportMenuCallbacksHost {
     options?: { reply_markup?: unknown },
   ): Promise<void>;
   showMainMenu(ctx: TelegramMenuContext, introText?: string): Promise<void>;
+  showSessionsMenu(ctx: TelegramMenuContext, introText?: string): Promise<void>;
   showLinkMenu(ctx: TelegramMenuContext): Promise<void>;
   showPartnerMenu(ctx: TelegramMenuContext): Promise<void>;
   showScreenshotsMenu(ctx: TelegramMenuContext, introText?: string): Promise<void>;
@@ -427,6 +428,34 @@ export class TransportMenuCallbacks {
       text: session?.label ? `Active session: ${session.label}` : `Active session: ${String(payload.sessionId)}`,
     });
     await this.host.showMainMenu(ctx);
+  }
+
+  public async handleSessionGroupSelection(
+    ctx: TelegramMenuContext,
+    payloadKey: string | null,
+  ): Promise<void> {
+    if (!payloadKey) {
+      await ctx.answerCallbackQuery({ text: "Session group payload is missing.", show_alert: true });
+      return;
+    }
+    const payload = await this.host.getMenuPayloadByKey(payloadKey);
+    this.host.logger.info("Telegram session group payload lookup", {
+      payloadKey,
+      payload,
+      chatId: ctx.chat?.id,
+      userId: ctx.from?.id,
+    });
+    if (!payload || payload.kind !== "session-group") {
+      await ctx.answerCallbackQuery({ text: "Session group payload is invalid or expired.", show_alert: true });
+      return;
+    }
+    await ctx.answerCallbackQuery({
+      text:
+        typeof payload.ownerLabel === "string" && payload.ownerLabel.trim()
+          ? payload.ownerLabel
+          : "Sessions",
+    });
+    await this.host.showSessionsMenu(ctx);
   }
 
   private async requireFileEntryPayload(

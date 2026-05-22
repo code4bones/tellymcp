@@ -9,12 +9,14 @@ import type {
 } from "./transportTypes";
 import type { SupportedLocale } from "../../i18n";
 import type { TelegramXchangeFileMeta } from "../../../entities/inbox/model/types";
+import { readMenuPayloadKey } from "./transportUtils";
 
 export interface TransportMenuFingerprintsHost {
   logger: Logger;
   bindingStore: SessionBindingStore;
   inboxStore: TelegramInboxStore;
   sessionStore: SessionStore;
+  getMenuPayloadByKey(key: string): Promise<Record<string, unknown> | null>;
   resolveLocaleForContext(ctx: TelegramMenuContext): Promise<SupportedLocale>;
   getPrincipalFromContext(
     ctx: TelegramMenuContext,
@@ -128,8 +130,20 @@ export class TransportMenuFingerprints {
       const sessionIds = (
         await this.host.bindingStore.listBoundSessionIdsForPrincipal(principal)
       ).sort();
+      const currentPayloadKey = readMenuPayloadKey(ctx);
+      let selectedOwnerLabel = "";
+      if (currentPayloadKey) {
+        const payload = await this.host.getMenuPayloadByKey(currentPayloadKey);
+        if (
+          payload &&
+          (payload.kind === "session-group" || payload.kind === "active-session") &&
+          typeof payload.ownerLabel === "string"
+        ) {
+          selectedOwnerLabel = payload.ownerLabel;
+        }
+      }
 
-      return `${locale}:${activeSessionId ?? "none"}:${sessionIds.join(",")}`;
+      return `${locale}:${activeSessionId ?? "none"}:${selectedOwnerLabel}:${sessionIds.join(",")}`;
     } catch (error) {
       this.host.logger.warn("Failed to build Telegram sessions menu fingerprint", {
         chatId: ctx.chat?.id,

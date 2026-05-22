@@ -284,6 +284,7 @@ export function buildTransportConstructorWiring(
     bindingStore: host.bindingStore,
     inboxStore: host.inboxStore,
     sessionStore: host.sessionStore,
+    getMenuPayloadByKey: (key) => host.menuPayloadStore.getMenuPayload(key),
     resolveLocaleForContext: (ctx) => context.resolveLocaleForContext(ctx),
     getPrincipalFromContext: (ctx) => context.getPrincipalFromContext(ctx),
     t: (locale, key, vars) => context.t(locale, key, vars),
@@ -406,12 +407,17 @@ export function buildTransportConstructorWiring(
       menuCallbacks.handleScreenshotDelete(ctx, readMenuPayloadKey(ctx)),
     handleSessionSelection: (ctx) =>
       menuCallbacks.handleSessionSelection(ctx, readMenuPayloadKey(ctx)),
+    handleSessionGroupSelection: (ctx) =>
+      menuCallbacks.handleSessionGroupSelection(ctx, readMenuPayloadKey(ctx)),
+    getMenuPayloadByKey: (key) => host.menuPayloadStore.getMenuPayload(key),
     createInboxMenuPayload: (sessionId, messageId) =>
       payloadState.createInboxMenuPayload(sessionId, messageId),
     createFileMenuPayload: (sessionId, filePath) =>
       payloadState.createFileMenuPayload(sessionId, filePath),
-    createSessionMenuPayload: (sessionId) =>
-      payloadState.createSessionMenuPayload(sessionId),
+    createSessionMenuPayload: (sessionId, ownerLabel) =>
+      payloadState.createSessionMenuPayload(sessionId, ownerLabel),
+    createSessionGroupMenuPayload: (ownerLabel) =>
+      payloadState.createSessionGroupMenuPayload(ownerLabel),
     createLinkMenuPayload: (sessionId, targetSessionId) =>
       payloadState.createLinkMenuPayload(sessionId, targetSessionId),
     formatInboxPreviewLabel: (message) => formatInboxPreviewLabel(message),
@@ -466,6 +472,7 @@ export function buildTransportConstructorWiring(
         meta,
         options as TelegramSendMessageOptions,
       ),
+    getMenuPayloadByKey: (key) => host.menuPayloadStore.getMenuPayload(key),
     getMainMenu: () => mainMenu,
     getSessionsMenu: () => sessionsMenu,
     getInboxMenu: () => inboxMenu,
@@ -609,6 +616,8 @@ export function buildTransportConstructorWiring(
     currentAttachmentTargets: host.currentAttachmentTargets,
     resolveLocaleForContext: (ctx) => context.resolveLocaleForContext(ctx),
     getPrincipalFromContext: (ctx) => context.getPrincipalFromContext(ctx),
+    ensureGatewayScopeConsolesBound: ({ principal, ctx }) =>
+      consoleRegistry.ensureScopedConsolesBound({ principal, ctx }),
     getGatewayActorFromContext: (ctx) => context.getGatewayActorFromContext(ctx),
     t: (locale, key, options) => context.t(locale, key, options),
     replyText: (ctx, text, meta, options) =>
@@ -719,6 +728,7 @@ export function buildTransportConstructorWiring(
     editText: (ctx, text, meta, options) =>
       outputActions.editText(ctx, text, meta, options as TelegramEditMessageOptions),
     showMainMenu: (ctx, introText) => menuState.showMainMenu(ctx, introText),
+    showSessionsMenu: (ctx, introText) => menuFlow.showSessionsMenu(ctx, introText),
     showLinkMenu: (ctx) => menuFlow.showLinkMenu(ctx),
     showPartnerMenu: (ctx) => menuFlow.showPartnerMenu(ctx),
     showScreenshotsMenu: (ctx, introText) => menuFlow.showScreenshotsMenu(ctx, introText),

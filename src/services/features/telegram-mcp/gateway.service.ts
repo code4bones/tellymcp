@@ -660,6 +660,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
           "c.client_label",
           this.db.raw("nullif(c.meta->>'namespace', '')"),
           this.db.raw("nullif(c.meta->>'node_id', '')"),
+          this.db.raw("nullif(c.meta->>'system_username', '')"),
           this.db.raw("nullif(c.meta->>'telegram_username', '')"),
           this.db.raw("nullif(c.meta->>'telegram_display_name', '')"),
           "c.bot_username",
@@ -671,6 +672,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
           "c.client_label",
           this.db.raw("nullif(c.meta->>'namespace', '') as namespace"),
           this.db.raw("nullif(c.meta->>'node_id', '') as node_id"),
+          this.db.raw("nullif(c.meta->>'system_username', '') as system_username"),
           this.db.raw("nullif(c.meta->>'telegram_username', '') as telegram_username"),
           this.db.raw("nullif(c.meta->>'telegram_display_name', '') as telegram_display_name"),
           "c.bot_username",
@@ -697,6 +699,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
           client_label: row.client_label ? String(row.client_label) : null,
           namespace: row.namespace ? String(row.namespace) : null,
           node_id: row.node_id ? String(row.node_id) : null,
+          system_username: row.system_username ? String(row.system_username) : null,
           telegram_username: row.telegram_username ? String(row.telegram_username) : null,
           telegram_display_name: row.telegram_display_name ? String(row.telegram_display_name) : null,
           bot_username: row.bot_username ? String(row.bot_username) : null,
@@ -788,6 +791,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
           "p.name as project_name",
           "c.client_label",
           "c.bot_username",
+          this.db.raw("nullif(c.meta->>'system_username', '') as system_username"),
           this.db.raw("nullif(c.meta->>'telegram_username', '') as telegram_username"),
           this.db.raw(
             "nullif(c.meta->>'telegram_display_name', '') as telegram_display_name",
@@ -810,6 +814,9 @@ const TelegramMcpGatewayService: ServiceSchema = {
           label: row.label ? String(row.label) : null,
           status: String(row.status),
           client_label: row.client_label ? String(row.client_label) : null,
+          system_username: row.system_username
+            ? String(row.system_username)
+            : null,
           telegram_username: row.telegram_username
             ? String(row.telegram_username)
             : null,

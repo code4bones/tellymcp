@@ -27,7 +27,7 @@ export class ListGatewaySessionsTool implements ToolModule {
       {
         title: "List Gateway Sessions",
         description:
-          "List all known consoles from the configured gateway. Use this before direct cross-console communication outside a single collab project. The result includes live connected consoles and project-registered consoles known to the gateway. For direct routing, use target_client_uuid and target_local_session_id from this list.",
+          "List all known consoles from the configured gateway. Use this before direct cross-console communication outside a single collab project, or when you need to discover a console id once. The result includes live connected consoles and project-registered consoles known to the gateway. The canonical gateway-facing session_id is the composite value client_uuid:local_session_id from this list. Reuse that exact session_id in later gateway-routed tools instead of reconstructing it, stripping it, or re-listing sessions when the current console id is already known. target_client_uuid and target_local_session_id are also returned for direct routing APIs that need them.",
         inputSchema: listGatewaySessionsInputSchema,
         outputSchema: listGatewaySessionsOutputSchema,
       },

@@ -64,6 +64,11 @@ Required agent practice:
 
 - when the user asks to contact another agent, inspect consoles through `list_gateway_sessions`
 - when the user asks to work with Telegram-linked human interaction, use the current console `session_id` explicitly
+- in gateway mode, `session_id` means the live console id from `-s`
+- do not use workspace-derived ids like `project-abc12345` for gateway routing
+- do not use `cwd` to route to a console through the gateway
+- if you need a `session_id` and do not know it yet, call `list_gateway_sessions` and use `local_session_id` from the matching live console
+- do not ask the user for the live console id when it can be resolved from `list_gateway_sessions`
 - assume gateway is the only user-facing control plane
 - do not mention pair codes, `/link`, admin menus, or session pairing unless the user is explicitly asking about legacy behavior
 
@@ -163,6 +168,7 @@ Purpose:
 
 Input:
 
+- `session_id`
 - `save_locally?`
 
 Output:
@@ -177,6 +183,9 @@ Behavior:
 - if `GATEWAY_PUBLIC_URL` is configured, the tool fetches `GET /api/gateway/tools-md`
 - if no gateway is configured, the tool falls back to the installed package copy
 - the canonical source is the installed gateway package copy, not an arbitrary current working directory
+- in gateway mode, routing to the target console is done only by explicit `session_id = -s`
+- `cwd` is workspace metadata for the target console after routing succeeds; it is not a routing key
+- if the live console id is not already known, call `list_gateway_sessions` first and use `local_session_id`
 - after successful refresh, treat the target workspace `TOOLS.md` as updated state for this console and re-read it before continuing
 
 ## `clear_session_context`
@@ -207,6 +216,7 @@ Purpose:
   - connected consoles from gateway WS presence
   - registered project consoles from the gateway database
 - Use this before direct cross-console communication outside one collab project.
+- Use this to resolve the authoritative live console id for other gateway-routed tools.
 
 Input:
 
@@ -218,6 +228,7 @@ Output:
 - `total`
 - `sessions[]`
   - `session_id`
+  - `local_session_id`
   - `client_uuid`
   - `local_session_id`
   - `session_label?`

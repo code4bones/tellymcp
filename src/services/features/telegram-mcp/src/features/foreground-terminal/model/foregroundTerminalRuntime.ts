@@ -36,6 +36,15 @@ async function createForegroundBroker(
   envPath: string,
   packageRoot: string,
 ): Promise<ForegroundRuntimeHandle> {
+  if (!process.env.LOG_STDERR_LEVEL?.trim()) {
+    process.env.LOG_STDERR_LEVEL = "error";
+  }
+  if (!process.env.LOG_FILE_ENABLED?.trim()) {
+    process.env.LOG_FILE_ENABLED = "true";
+  }
+  if (!process.env.LOG_FILE_LEVEL?.trim()) {
+    process.env.LOG_FILE_LEVEL = process.env.LOG_LEVEL?.trim() || "info";
+  }
   return createEmbeddedRuntimeBroker({
     envPath,
     packageRoot,

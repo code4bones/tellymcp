@@ -7,6 +7,7 @@ import type {
   RefreshToolsMarkdownInput,
   RefreshToolsMarkdownOutput,
 } from "../../../entities/request/model/types";
+import { refreshToolsMarkdownOutputSchema } from "../../../entities/request/model/schema";
 import type { SessionStore } from "../../../shared/api/storage/contract";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
@@ -35,6 +36,20 @@ function computeContentHash(content: string): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
+function normalizeRemoteRefreshOutput(
+  value: unknown,
+): RefreshToolsMarkdownOutput | null {
+  const candidate =
+    value && typeof value === "object" && "structuredContent" in value
+      ? (value as { structuredContent?: unknown }).structuredContent
+      : value && typeof value === "object" && "result" in value
+        ? (value as { result?: unknown }).result
+        : value;
+
+  const parsed = refreshToolsMarkdownOutputSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
 export class RefreshToolsMarkdownService {
   public constructor(
     private readonly config: AppConfig,
@@ -48,20 +63,54 @@ export class RefreshToolsMarkdownService {
     input: RefreshToolsMarkdownInput = {},
   ): Promise<RefreshToolsMarkdownOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<RefreshToolsMarkdownOutput>(
-      resolved.sessionId,
-      "telegramMcp.toolsSync.refreshToolsMarkdownRemote",
-      input as Record<string, unknown>,
-    );
+    const explicitCwd = input.cwd?.trim() ? resolve(input.cwd.trim()) : null;
+    const requestedSessionId = input.session_id?.trim() ?? "";
+    const remoteLookupRequested =
+      Boolean(this.remoteConsoleInvoker) &&
+      this.config.distributed.mode !== "client";
+    const remote = remoteLookupRequested && requestedSessionId
+      ? await this.remoteConsoleInvoker?.invokeForRelaySession<RefreshToolsMarkdownOutput>(
+          requestedSessionId,
+          "telegramMcp.toolsSync.refreshToolsMarkdownRemote",
+          input as Record<string, unknown>,
+        )
+      : null;
     if (remote) {
-      return remote;
+      const normalizedRemote = normalizeRemoteRefreshOutput(remote);
+      if (normalizedRemote) {
+        return normalizedRemote;
+      }
+      this.logger.error(
+        "refresh_tools_markdown received invalid remote console output",
+        {
+          sessionId: requestedSessionId,
+          remote,
+        },
+      );
+      throw new Error(
+        `Invalid remote refresh_tools_markdown output: ${JSON.stringify(remote)}`,
+      );
+    }
+    if (remoteLookupRequested) {
+      this.logger.error(
+        "refresh_tools_markdown could not resolve remote console target",
+        {
+          sessionId: resolved.sessionId,
+          requestedSessionId,
+          explicitCwd,
+        },
+      );
+      throw new Error(
+        requestedSessionId
+          ? "Could not resolve remote console target for refresh_tools_markdown. Use the canonical gateway session_id in the format client_uuid:local_session_id."
+          : "refresh_tools_markdown requires explicit session_id in gateway mode. Use the canonical gateway session_id in the format client_uuid:local_session_id.",
+      );
     }
     const session = await this.sessionStore.getSession(resolved.sessionId);
-    const workspaceDir = input.cwd?.trim()
-      ? resolve(input.cwd.trim())
-      : session?.cwd?.trim()
-        ? resolve(session.cwd.trim())
-        : resolved.cwd;
+    const sessionCwd = session?.cwd?.trim() ? resolve(session.cwd.trim()) : null;
+    const workspaceDir = requestedSessionId
+      ? sessionCwd ?? explicitCwd ?? resolved.cwd
+      : explicitCwd ?? sessionCwd ?? resolved.cwd;
     const saveLocally = input.save_locally !== false;
     const gatewayToolsPath = join(
       getTellyMcpPackageRoot(__dirname) ?? process.cwd(),
@@ -106,6 +155,16 @@ export class RefreshToolsMarkdownService {
     const toolsPath = join(workspaceDir, "TOOLS.md");
 
     if (saveLocally) {
+      if (sessionCwd && explicitCwd && sessionCwd !== explicitCwd) {
+        this.logger.warn(
+          "refresh_tools_markdown ignored explicit cwd in favor of console workspace",
+          {
+            sessionId: resolved.sessionId,
+            explicitCwd,
+            sessionCwd,
+          },
+        );
+      }
       mkdirSync(dirname(toolsPath), { recursive: true });
       writeFileSync(toolsPath, content, "utf8");
       const appliedHash = computeContentHash(content);

@@ -51,6 +51,10 @@ export interface TransportMenuFlowHost {
   getPrincipalFromContext(
     ctx: TelegramMenuContext,
   ): { telegramChatId: number; telegramUserId: number } | null;
+  ensureGatewayScopeConsolesBound?(input: {
+    principal: { telegramChatId: number; telegramUserId: number };
+    ctx: TelegramMenuContext;
+  }): Promise<{ sessionIds: string[]; activeSessionId: string | null }>;
   getGatewayActorFromContext(
     ctx: TelegramMenuContext,
   ): GatewayActorProfile | undefined;
@@ -99,6 +103,10 @@ export class TransportMenuFlow {
     ctx: TelegramMenuContext,
     introText?: string,
   ): Promise<void> {
+    const principal = this.host.getPrincipalFromContext(ctx);
+    if (principal && this.host.ensureGatewayScopeConsolesBound) {
+      await this.host.ensureGatewayScopeConsolesBound({ principal, ctx });
+    }
     await this.host.menuState.showSessionsMenu(ctx, introText);
   }
 

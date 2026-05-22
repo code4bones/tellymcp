@@ -74,6 +74,7 @@ export type TelegramMenuPayloadRecord = {
   kind:
     | "inbox-message"
     | "active-session"
+    | "session-group"
     | "file-entry"
     | "link-target"
     | "project-entry"
@@ -82,7 +83,8 @@ export type TelegramMenuPayloadRecord = {
     | "live-approval"
     | "project-file-target"
     | "partner-file-target";
-  sessionId: string;
+  sessionId?: string | undefined;
+  ownerLabel?: string | undefined;
   messageId?: string | undefined;
   filePath?: string | undefined;
   targetSessionId?: string | undefined;

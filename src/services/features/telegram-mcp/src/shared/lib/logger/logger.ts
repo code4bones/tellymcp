@@ -33,7 +33,13 @@ export function createLogger(config: AppConfig): Logger {
     targets: createPinoTargets({
       level: config.logging.level,
       fileEnabled: config.logging.fileEnabled,
+      ...(config.logging.stderrLevel
+        ? { stderrLevel: config.logging.stderrLevel }
+        : {}),
       filePath: config.logging.filePath,
+      ...(config.logging.fileLevel
+        ? { fileLevel: config.logging.fileLevel }
+        : {}),
     }),
   });
 

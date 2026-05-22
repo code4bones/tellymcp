@@ -67,7 +67,7 @@ Required agent practice:
 - in gateway mode, `session_id` means the live console id from `-s`
 - do not use workspace-derived ids like `project-abc12345` for gateway routing
 - do not use `cwd` to route to a console through the gateway
-- if you need a `session_id` and do not know it yet, call `list_gateway_sessions` and use `local_session_id` from the matching live console
+- if you need a `session_id` and do not know it yet, call `list_gateway_sessions` and use canonical `session_id` from the matching live console
 - do not ask the user for the live console id when it can be resolved from `list_gateway_sessions`
 - assume gateway is the only user-facing control plane
 - do not mention pair codes, `/link`, admin menus, or session pairing unless the user is explicitly asking about legacy behavior
@@ -75,7 +75,7 @@ Required agent practice:
 Preferred order for cross-console work:
 
 1. Call `list_gateway_sessions`.
-2. Choose the correct target by `session_label`, `node_id`, `client_label`, or `local_session_id`.
+2. Choose the correct target by `session_label`, `node_id`, `client_label`, or canonical `session_id`.
 3. Use:
    - `send_partner_note`
    - `send_partner_file`
@@ -185,7 +185,7 @@ Behavior:
 - if `GATEWAY_PUBLIC_URL` is configured, the tool fetches `GET /api/gateway/tools-md`
 - if no gateway is configured, the tool falls back to the installed package copy
 - the canonical source is the installed gateway package copy, not an arbitrary current working directory
-- in gateway mode, routing to the target console is done only by explicit `session_id = -s`
+- in gateway mode, routing to the target console is done only by explicit canonical `session_id = client_uuid:local_session_id`
 - `cwd` is workspace metadata for the target console after routing succeeds; it is not a routing key
 - if the live console id is not already known, call `list_gateway_sessions` first and use `session_id`
 - prefer hash-based refresh:
@@ -1076,16 +1076,15 @@ Telegram UI summary:
 - root menu reflects terminal bridge status for available consoles
 - console menu uses:
   - `Live | Content | Browser`
-  - `Local | Collab`
-  - `Inbox | Storage | Settings`
+  - `Collab`
+  - `Storage | Settings`
   - `Back`
 - default logical console identity comes from `.mcpsession.json` in the workspace or explicit `-s`
 - terminal runtime metadata does not change `session_id`
 - `Browser -> Screenshots` lists screenshots created by `browser_screenshot`
 - `Storage` browses `.mcp-xchange` for the active console and can send stored notes/files back into Telegram
 - `Settings` contains `Info`, `Rename`, `Unpair`, `Back`
-- `Link` creates a mutual partner relationship between two consoles visible to the same Telegram identity
-- `Local` is the Telegram UI wrapper over same-bot partner collaboration
+- project/collab work is the only supported user-facing collaboration path in Telegram UI
 - `Collab` is the project-based multi-machine collaboration flow
 - inside `Collab -> Project -> Member`, action semantics differ:
   - first row is `Ask | Share`

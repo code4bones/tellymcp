@@ -4,10 +4,9 @@ import {
   detectAvailablePackageUpdate,
   getTellyMcpPackageVersion,
 } from "../../lib/version/versionHandshake";
-import { isTmuxUnavailableError } from "../tmux/client";
 import { joinHttpPath, normalizeBasePath } from "./transportUtils";
 import type { AppConfig } from "../../../app/config/env";
-import type { SessionBindingStore, SessionStore, TelegramInboxStore } from "../../api/storage/contract";
+import type { SessionBindingStore, SessionStore } from "../../api/storage/contract";
 import type { Logger } from "../../lib/logger/logger";
 import type { SupportedLocale } from "../../i18n";
 
@@ -15,10 +14,8 @@ export interface TransportLifecycleActionsHost {
   logger: Logger;
   config: AppConfig;
   sessionStore: SessionStore;
-  inboxStore: TelegramInboxStore;
   bindingStore: SessionBindingStore;
   isTelegramEnabled(): boolean;
-  nudgeSessionInbox(sessionId: string): Promise<void>;
   resolveLocaleForTelegramUserId(
     telegramUserId: number,
     telegramLanguageCode?: string | null,
@@ -34,67 +31,6 @@ export interface TransportLifecycleActionsHost {
 
 export class TransportLifecycleActions {
   public constructor(private readonly host: TransportLifecycleActionsHost) {}
-
-  public async recoverPendingInboxNudges(): Promise<void> {
-    if (!this.host.isTelegramEnabled()) {
-      this.host.logger.debug(
-        "Startup inbox nudge recovery skipped because Telegram transport is disabled",
-      );
-      return;
-    }
-
-    if (!this.host.config.tmux.nudgeEnabled) {
-      this.host.logger.debug(
-        "Startup inbox nudge recovery skipped because tmux nudging is disabled",
-      );
-      return;
-    }
-
-    const sessions = await this.host.sessionStore.listSessions();
-    let recoveredCount = 0;
-
-    for (const session of sessions) {
-      if (!session.tmuxTarget) {
-        continue;
-      }
-
-      const inboxCount = await this.host.inboxStore.countInboxMessages(
-        session.sessionId,
-      );
-      if (inboxCount === 0) {
-        continue;
-      }
-
-      recoveredCount += 1;
-      try {
-        await this.host.nudgeSessionInbox(session.sessionId);
-      } catch (error) {
-        const payload = {
-          sessionId: session.sessionId,
-          tmuxTarget: session.tmuxTarget,
-          error:
-            error instanceof Error
-              ? (error.stack ?? error.message)
-              : String(error),
-        };
-
-        if (isTmuxUnavailableError(error)) {
-          this.host.logger.warn(
-            "Startup inbox nudge recovery skipped because tmux is unavailable",
-            payload,
-          );
-          continue;
-        }
-
-        this.host.logger.error("Startup inbox nudge recovery failed", payload);
-      }
-    }
-
-    this.host.logger.info("Startup inbox nudge recovery finished", {
-      scannedSessions: sessions.length,
-      recoveredSessions: recoveredCount,
-    });
-  }
 
   public async sendStartupNotifications(runtimeDirname: string): Promise<void> {
     if (!this.host.isTelegramEnabled()) {

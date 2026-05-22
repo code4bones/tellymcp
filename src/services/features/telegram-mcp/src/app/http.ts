@@ -1219,15 +1219,11 @@ export function createMcpHttpHandler(
             const binding = await runtime.bindingStore.getBinding(
               session.sessionId,
             );
-            const inboxCount = await runtime.inboxStore.countInboxMessages(
-              session.sessionId,
-            );
 
             return {
               session_id: session.sessionId,
               session_label: session.label ?? null,
               updated_at: session.updatedAt,
-              inbox_count: inboxCount,
               binding: binding
                 ? {
                     telegram_chat_id: binding.telegramChatId,

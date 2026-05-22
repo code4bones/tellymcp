@@ -2,12 +2,11 @@ import { InlineKeyboard } from "grammy";
 
 import type { WebAppLaunchRegistry } from "../../../app/webapp/auth";
 import { buildLiveRelaySessionId } from "../../../app/webapp/relay";
-import type { TelegramInboxMessage } from "../../../entities/inbox/model/types";
 import type { AppConfig } from "../../../app/config/env";
-import type { SessionBindingStore, SessionStore, TelegramInboxStore } from "../../api/storage/contract";
-import { createInboxMessageId } from "../../lib/ids/ids";
+import type { SessionBindingStore, SessionStore } from "../../api/storage/contract";
 import type { Logger } from "../../lib/logger/logger";
 import { writeTellySessionRuntimeState } from "../../lib/project-identity/projectIdentity";
+import { writeLocalTaskXchangeRecord } from "../../lib/telegramXchangeRecords";
 import type { SupportedLocale } from "../../i18n";
 import type { LiveApprovalEventPayload, SendMessageMeta, TelegramSendMessageOptions } from "./transportTypes";
 
@@ -15,7 +14,6 @@ export interface TransportEventActionsHost {
   logger: Logger;
   config: AppConfig;
   sessionStore: SessionStore;
-  inboxStore: TelegramInboxStore;
   bindingStore: SessionBindingStore;
   webAppLaunchRegistry: WebAppLaunchRegistry;
   createLiveApprovalMenuPayload(input: {
@@ -173,12 +171,12 @@ export class TransportEventActions {
       input.compatibility === "reject"
         ? "Gateway/client protocol mismatch blocks transport."
         : "Gateway/client version mismatch detected.";
-    const inboxMessage: TelegramInboxMessage = {
-      id: createInboxMessageId(),
+    await writeLocalTaskXchangeRecord({
+      config: this.host.config,
+      session,
       sessionId: session.sessionId,
-      telegramChatId: 0,
-      telegramUserId: 0,
-      sourceTelegramMessageId: 0,
+      summary: title,
+      kind: input.compatibility,
       text: [
         title,
         `Session: ${session.label ?? input.session_label ?? session.sessionId}`,
@@ -200,13 +198,15 @@ export class TransportEventActions {
               "Do not continue collaboration, delivery, or live relay work until this client is upgraded.",
             ]
           : [
-              "Upgrade the older side soon and verify the updated TOOLS.md before continuing sensitive work.",
+              "Upgrade the older side soon and verify the updated tools content before continuing sensitive work.",
             ]),
       ].join("\n"),
-      receivedAt: new Date().toISOString(),
-    };
-
-    await this.host.inboxStore.createInboxMessage(inboxMessage);
+      createdAt: new Date().toISOString(),
+      actionDesc:
+        "Read the compatibility details, stop sensitive work on this console if required, then upgrade the incompatible side before continuing.",
+      tools: ["get_xchange_record", "mark_xchange_record_read", "refresh_tools_markdown"],
+      tags: ["system", "version", input.compatibility],
+    });
     await this.host.nudgeSessionInbox(session.sessionId);
 
     const binding = await this.host.bindingStore.getBinding(session.sessionId);

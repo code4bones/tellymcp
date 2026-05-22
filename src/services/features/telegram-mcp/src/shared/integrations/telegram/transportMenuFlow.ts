@@ -19,7 +19,6 @@ import type {
 import type {
   SessionBindingStore,
   SessionStore,
-  TelegramInboxStore,
 } from "../../api/storage/contract";
 import type { SupportedLocale } from "../../i18n";
 import type { Logger } from "../../lib/logger/logger";
@@ -36,7 +35,6 @@ export interface TransportMenuFlowHost {
   logger: Logger;
   bindingStore: SessionBindingStore;
   sessionStore: SessionStore;
-  inboxStore: TelegramInboxStore;
   menuState: TransportMenuState;
   projectView: TransportProjectView;
   liveActions: TransportLiveActions;
@@ -110,13 +108,6 @@ export class TransportMenuFlow {
     await this.host.menuState.showSessionsMenu(ctx, introText);
   }
 
-  public async showInboxMenu(
-    ctx: TelegramMenuContext,
-    introText?: string,
-  ): Promise<void> {
-    await this.host.menuState.showInboxMenu(ctx, introText);
-  }
-
   public async showStorageMenu(
     ctx: TelegramMenuContext,
     introText?: string,
@@ -142,21 +133,45 @@ export class TransportMenuFlow {
     ctx: TelegramMenuContext,
     introText?: string,
   ): Promise<void> {
-    await this.host.menuState.showLinkMenu(ctx, introText);
+    const locale = await this.host.resolveLocaleForContext(ctx);
+    await this.host.projectView.showProjectsMenu(
+      ctx,
+      introText ??
+        this.host.t(
+          locale,
+          "menu:projects.screen.title",
+        ),
+    );
   }
 
   public async showPartnerMenu(
     ctx: TelegramMenuContext,
     introText?: string,
   ): Promise<void> {
-    await this.host.menuState.showPartnerMenu(ctx, introText);
+    const locale = await this.host.resolveLocaleForContext(ctx);
+    await this.host.projectView.showProjectsMenu(
+      ctx,
+      introText ??
+        this.host.t(
+          locale,
+          "menu:projects.screen.title",
+        ),
+    );
   }
 
   public async showLocalMenu(
     ctx: TelegramMenuContext,
     introText?: string,
   ): Promise<void> {
-    await this.host.menuState.showLocalMenu(ctx, introText);
+    const locale = await this.host.resolveLocaleForContext(ctx);
+    await this.host.projectView.showProjectsMenu(
+      ctx,
+      introText ??
+        this.host.t(
+          locale,
+          "menu:projects.screen.title",
+        ),
+    );
   }
 
   public async showProjectsMenu(
@@ -298,7 +313,6 @@ export class TransportMenuFlow {
         "",
         this.host.t(locale, "menu:help.how_it_works"),
         this.host.t(locale, "menu:help.step_choose"),
-        this.host.t(locale, "menu:help.step_inbox"),
         this.host.t(locale, "menu:help.step_nudge"),
         this.host.t(locale, "menu:help.step_tools"),
       ].join("\n"),
@@ -533,10 +547,6 @@ export class TransportMenuFlow {
     return this.host.menuState.buildSessionsMenuText(ctx);
   }
 
-  public async buildInboxMenuText(ctx: TelegramMenuContext): Promise<string> {
-    return this.host.menuState.buildInboxMenuText(ctx);
-  }
-
   public async buildBufferMenuText(ctx: TelegramMenuContext): Promise<string> {
     return this.host.menuState.buildBufferMenuText(ctx);
   }
@@ -630,7 +640,6 @@ export class TransportMenuFlow {
 
     const session = await this.host.sessionStore.getSession(sessionId);
     const binding = await this.host.bindingStore.getBinding(sessionId);
-    const inboxCount = await this.host.inboxStore.countInboxMessages(sessionId);
     const linkedSession = session?.linkedSessionId
       ? await this.host.sessionStore.getSession(session.linkedSessionId)
       : null;
@@ -648,9 +657,6 @@ export class TransportMenuFlow {
         }),
         this.host.t(locale, "menu:session_info.session_id", {
           value: sessionId,
-        }),
-        this.host.t(locale, "menu:session_info.inbox_count", {
-          count: inboxCount,
         }),
         this.host.t(locale, "menu:session_info.route", {
           value: binding

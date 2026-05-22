@@ -16,7 +16,6 @@ import type {
 import {
   buildBrowserMenuText,
   buildBufferMenuText,
-  buildInboxMenuText,
   buildLinkMenuText,
   buildLocalMenuText,
   buildMainMenuText,
@@ -98,7 +97,6 @@ export interface TransportMenuStateHost {
   getMenuPayloadByKey(key: string): Promise<Record<string, unknown> | null>;
   getMainMenu(): unknown;
   getSessionsMenu(): unknown;
-  getInboxMenu(): unknown;
   getStorageMenu(): unknown;
   getBrowserMenu(): unknown;
   getScreenshotsMenu(): unknown;
@@ -123,9 +121,6 @@ export interface TransportMenuStateHost {
   bindingStore: {
     getActiveSessionIdForPrincipal(principal: Principal): Promise<string | null>;
     listBoundSessionIdsForPrincipal(principal: Principal): Promise<string[]>;
-  };
-  inboxStore: {
-    countInboxMessages(sessionId: string): Promise<number>;
   };
   listActiveSessionScreenshots(sessionId: string): Promise<string[]>;
   listActiveSessionStorageEntries(
@@ -273,16 +268,12 @@ export class TransportMenuState {
     }
 
     const session = await this.host.sessionStore.getSession(activeSessionId);
-    const inboxCount = await this.host.inboxStore.countInboxMessages(activeSessionId);
     const sessionName = escapeHtml(session?.label ?? activeSessionId);
     const projectName = session?.activeProjectName
       ? escapeHtml(session.activeProjectName)
       : null;
     return buildMainMenuText({
       title: this.host.t(locale, "menu:main.screen.title", { sessionName }),
-      inboxMessagesLine: this.host.t(locale, "menu:main.screen.inbox_messages", {
-        count: inboxCount,
-      }),
       projectLine: projectName
         ? this.host.t(locale, "menu:main.screen.project", { projectName })
         : null,
@@ -470,49 +461,6 @@ export class TransportMenuState {
     lines.push(`<i>${escapeHtml(await this.host.getTmuxStatusLine(locale))}</i>`);
     lines.push("");
     return lines.join("\n");
-  }
-
-  public async showInboxMenu(
-    ctx: TelegramMenuContext,
-    introText?: string,
-  ): Promise<void> {
-    const text = await this.buildInboxMenuText(ctx);
-    await this.host.renderMenuScreen(
-      ctx,
-      introText ? `${introText}\n\n${text}` : text,
-      { kind: "menu" },
-      this.host.getInboxMenu(),
-    );
-  }
-
-  public async buildInboxMenuText(ctx: TelegramMenuContext): Promise<string> {
-    const locale = await this.host.resolveLocaleForContext(ctx);
-    const principal = this.host.getPrincipalFromContext(ctx);
-    if (!principal) {
-      return this.host.t(locale, "common:errors.no_telegram_identity");
-    }
-
-    const activeSessionId =
-      await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
-    if (!activeSessionId) {
-      return this.host.t(locale, "common:errors.no_active_session");
-    }
-
-    const session = await this.host.sessionStore.getSession(activeSessionId);
-    const total = await this.host.inboxStore.countInboxMessages(activeSessionId);
-
-    return buildInboxMenuText({
-      title: this.host.t(locale, "menu:inbox.screen.title"),
-      activeSessionLine: this.host.t(locale, "menu:inbox.screen.active_session", {
-        sessionName: session?.label ?? activeSessionId,
-      }),
-      storedMessagesLine: this.host.t(locale, "menu:inbox.screen.stored_messages", {
-        count: total,
-      }),
-      chooseMessageLine: this.host.t(locale, "menu:inbox.screen.choose_message"),
-      emptyLine: this.host.t(locale, "menu:inbox.screen.empty"),
-      total,
-    });
   }
 
   public async showStorageMenu(

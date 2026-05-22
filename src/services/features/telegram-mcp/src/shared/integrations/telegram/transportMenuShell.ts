@@ -9,7 +9,6 @@ type TransportMenuShellHost = {
     ctx: TelegramMenuContext,
     key: string,
   ) => Promise<string>;
-  showPartnerMenu: (ctx: TelegramMenuContext) => Promise<void>;
   showProjectsMenu: (ctx: TelegramMenuContext) => Promise<void>;
   handleMessage: (ctx: TelegramMenuContext) => Promise<void>;
   cancelPendingBroadcast: (ctx: TelegramMenuContext) => Promise<void>;
@@ -57,7 +56,7 @@ export class TransportMenuShell {
           "menu:partner.actions.back_to_partner",
         ),
       });
-      await this.host.showPartnerMenu(ctx);
+      await this.host.showProjectsMenu(ctx);
     });
     bot.callbackQuery("file-handoff-cancel", async (ctx) => {
       await this.host.cancelPendingFileHandoff(ctx);

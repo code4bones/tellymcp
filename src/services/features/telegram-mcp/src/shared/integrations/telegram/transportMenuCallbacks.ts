@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import type { TelegramInboxMessage, TelegramXchangeFileMeta } from "../../../entities/inbox/model/types";
+import type { TelegramXchangeFileMeta } from "../../../entities/inbox/model/types";
 import type { SessionContext } from "../../../entities/session/model/types";
 import type { Logger } from "../../lib/logger/logger";
 import type { TelegramMenuContext } from "./transportTypes";
@@ -34,7 +34,6 @@ export interface TransportMenuCallbacksHost {
   showPartnerMenu(ctx: TelegramMenuContext): Promise<void>;
   showScreenshotsMenu(ctx: TelegramMenuContext, introText?: string): Promise<void>;
   showStorageMenu(ctx: TelegramMenuContext, introText?: string): Promise<void>;
-  inboxMessageMenu: unknown;
   storageMessageMenu: unknown;
   screenshotMessageMenu: unknown;
   xchangeFileMetaStore: {
@@ -43,10 +42,6 @@ export interface TransportMenuCallbacksHost {
       filePath: string,
     ): Promise<TelegramXchangeFileMeta | null>;
     deleteXchangeFileMeta(sessionId: string, filePath: string): Promise<boolean>;
-  };
-  inboxStore: {
-    getInboxMessage(sessionId: string, messageId: string): Promise<TelegramInboxMessage | null>;
-    deleteInboxMessage(sessionId: string, messageId: string): Promise<boolean>;
   };
   sessionStore: {
     getSession(sessionId: string): Promise<SessionContext | null>;
@@ -66,7 +61,6 @@ export interface TransportMenuCallbacksHost {
   objectStore: {
     deleteStoredFile(input: { storageRef?: string; vfsNodeId?: number }): Promise<void>;
   };
-  formatInboxDetail(message: TelegramInboxMessage): string;
   formatScreenshotDetail(
     sessionId: string,
     filePath: string,
@@ -97,46 +91,6 @@ export interface TransportMenuCallbacksHost {
 
 export class TransportMenuCallbacks {
   public constructor(private readonly host: TransportMenuCallbacksHost) {}
-
-  public async handleInboxMessageOpen(
-    ctx: TelegramMenuContext,
-    payloadKey: string | null,
-  ): Promise<void> {
-    if (!payloadKey) {
-      await ctx.answerCallbackQuery({ text: "Inbox payload is missing.", show_alert: true });
-      return;
-    }
-    const payload = await this.host.getMenuPayloadByKey(payloadKey);
-    if (!payload || payload.kind !== "inbox-message" || !payload.messageId) {
-      await ctx.answerCallbackQuery({
-        text: "Inbox payload is invalid or expired.",
-        show_alert: true,
-      });
-      return;
-    }
-    const message = await this.host.inboxStore.getInboxMessage(
-      String(payload.sessionId),
-      String(payload.messageId),
-    );
-    if (!message) {
-      await ctx.answerCallbackQuery({ text: "Inbox message no longer exists.", show_alert: true });
-      return;
-    }
-
-    this.host.logger.info("Telegram inbox message opened from menu", {
-      sessionId: payload.sessionId,
-      messageId: payload.messageId,
-      chatId: ctx.chat?.id,
-      userId: ctx.from?.id,
-    });
-    await ctx.answerCallbackQuery({ text: "Inbox message opened." });
-    await this.host.replyText(
-      ctx,
-      this.host.formatInboxDetail(message),
-      { kind: "inbox", sessionId: String(payload.sessionId) },
-      { reply_markup: this.host.inboxMessageMenu },
-    );
-  }
 
   public async showPartnerEntryPoint(ctx: TelegramMenuContext): Promise<void> {
     const principal = this.host.getPrincipalFromContext(ctx);
@@ -362,35 +316,6 @@ export class TransportMenuCallbacks {
       text: "Storage metadata deleted.",
     });
     await this.host.showStorageMenu(ctx, "Stale storage metadata deleted.");
-  }
-
-  public async handleInboxMessageDelete(ctx: TelegramMenuContext, payloadKey: string | null): Promise<void> {
-    if (!payloadKey) {
-      await ctx.answerCallbackQuery({ text: "Inbox payload is missing.", show_alert: true });
-      return;
-    }
-    const payload = await this.host.getMenuPayloadByKey(payloadKey);
-    if (!payload || payload.kind !== "inbox-message" || !payload.messageId) {
-      await ctx.answerCallbackQuery({ text: "Inbox payload is invalid or expired.", show_alert: true });
-      return;
-    }
-    const deleted = await this.host.inboxStore.deleteInboxMessage(
-      String(payload.sessionId),
-      String(payload.messageId),
-    );
-    this.host.logger.info("Telegram inbox message deleted from menu", {
-      sessionId: payload.sessionId,
-      messageId: payload.messageId,
-      chatId: ctx.chat?.id,
-      userId: ctx.from?.id,
-      deleted,
-    });
-    await ctx.answerCallbackQuery({
-      text: deleted ? "Inbox message deleted." : "Inbox message already absent.",
-    });
-    await ctx.deleteMessage().catch(async () => {
-      await ctx.editMessageText(deleted ? "Inbox message deleted." : "Inbox message was already removed.");
-    });
   }
 
   public async handleSessionSelection(ctx: TelegramMenuContext, payloadKey: string | null): Promise<void> {

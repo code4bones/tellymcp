@@ -6,15 +6,12 @@ import type {
   SendPartnerNoteInput,
   SendPartnerNoteOutput,
 } from "../../../entities/collaboration/model/types";
-import type { TelegramInboxMessage } from "../../../entities/inbox/model/types";
 import type { SessionContext } from "../../../entities/session/model/types";
 import type {
   SessionBindingStore,
   SessionStore,
-  TelegramInboxStore,
   TelegramXchangeFileMetaStore,
 } from "../../../shared/api/storage/contract";
-import { createInboxMessageId } from "../../../shared/lib/ids/ids";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import type { ResolvedSessionDefaults } from "../../../shared/lib/project-identity/projectIdentity";
 import {
@@ -119,49 +116,6 @@ function renderYamlArray(values: string[]): string {
   return `\n${values.map((value) => `  - ${JSON.stringify(value)}`).join("\n")}`;
 }
 
-function buildPartnerInboxText(input: {
-  recordId: string;
-  kind: PartnerNoteKind;
-  fromLabel: string;
-  summary: string;
-  notePath: string;
-  actionDesc: string;
-  requiresReply: boolean;
-  copiedArtifacts: string[];
-}): string {
-  const kindTitle =
-    input.kind === "question"
-      ? "Partner question received."
-      : input.kind === "reply"
-        ? "Partner reply received."
-        : input.kind === "request"
-          ? "Partner request received."
-          : input.kind === "handoff"
-            ? "Partner handoff received."
-            : "Partner update received.";
-
-  return [
-    kindTitle,
-    `From: ${input.fromLabel}`,
-    `Summary: ${input.summary}`,
-    `Xchange record: ${input.recordId}`,
-    "",
-    "Immediate action: call get_xchange_record for this record and follow its action_desc.",
-    `Action: ${input.actionDesc}`,
-    `Note: ${input.notePath}`,
-    ...(input.copiedArtifacts.length > 0
-      ? ["", "Artifacts:", ...input.copiedArtifacts.map((item) => `- ${item}`)]
-      : []),
-    ...(input.requiresReply
-      ? [
-          "",
-          "Reply through send_partner_note after you finish the requested work.",
-          "The task is not complete until send_partner_note succeeds.",
-        ]
-      : []),
-  ].join("\n");
-}
-
 function buildNoteContent(input: {
   shareId: string;
   kind: PartnerNoteKind;
@@ -237,7 +191,6 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     private readonly config: AppConfig,
     private readonly sessionStore: SessionStore,
     private readonly bindingStore: SessionBindingStore,
-    private readonly inboxStore: TelegramInboxStore,
     private readonly xchangeFileMetaStore: TelegramXchangeFileMetaStore,
     private readonly objectStore: MinioExchangeStore,
     private readonly telegramTransport: TelegramTransport,
@@ -429,27 +382,6 @@ export class LocalCollaborationBackend implements CollaborationBackend {
       },
     );
 
-    const inboxMessage: TelegramInboxMessage = {
-      id: createInboxMessageId(now),
-      sessionId: targetSession.sessionId,
-      telegramChatId: targetBinding.telegramChatId,
-      telegramUserId: targetBinding.telegramUserId,
-      sourceTelegramMessageId: now.getTime(),
-      text: buildPartnerInboxText({
-        recordId: shareId,
-        kind: input.kind,
-        fromLabel: sourceLabel,
-        summary: input.summary.trim(),
-        notePath,
-        actionDesc: targetActionDesc,
-        requiresReply,
-        copiedArtifacts,
-      }),
-      attachments: [notePath, ...copiedArtifacts],
-      receivedAt: createdAt,
-    };
-
-    await this.inboxStore.createInboxMessage(inboxMessage);
     await this.telegramTransport.sendNotification({
       sessionId: targetSession.sessionId,
       sessionLabel: sourceLabel,
@@ -517,7 +449,7 @@ export class LocalCollaborationBackend implements CollaborationBackend {
       note_path: notePath,
       xchange_record_id: shareId,
       copied_artifacts: copiedArtifacts,
-      inbox_message_id: inboxMessage.id,
+      inbox_message_id: shareId,
       requires_reply: requiresReply,
     };
   }

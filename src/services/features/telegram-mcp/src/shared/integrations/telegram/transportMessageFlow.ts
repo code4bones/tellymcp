@@ -1,14 +1,12 @@
 import path from "node:path";
 
-import { createInboxMessageId } from "../../lib/ids/ids";
 import type { Logger } from "../../lib/logger/logger";
 import { redactSecrets } from "../../lib/redact-secrets/redactSecrets";
-import type { PartnerNoteKind } from "../../../entities/collaboration/model/types";
-import type { TelegramInboxMessage } from "../../../entities/inbox/model/types";
+import type { AppConfig } from "../../../app/config/env";
+import { writeTelegramMessageXchangeRecord } from "../../lib/telegramXchangeRecords";
 import type {
   SessionBindingStore,
   SessionStore,
-  TelegramInboxStore,
 } from "../../api/storage/contract";
 import type { HumanTransportReply } from "../../api/transport/contract";
 import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
@@ -29,15 +27,9 @@ import type {
 
 export interface TransportMessageFlowHost {
   logger: Logger;
-  config: {
-    distributed: {
-      gatewayPublicUrl?: string | null;
-      gatewayToken?: string | null;
-    };
-  };
+  config: AppConfig;
   bindingStore: SessionBindingStore;
   sessionStore: SessionStore;
-  inboxStore: TelegramInboxStore;
   isAdminAuthEnabled(): boolean;
   isPrincipalAdminAuthorized(
     principal: { telegramChatId: number; telegramUserId: number } | null,
@@ -291,19 +283,6 @@ export class TransportMessageFlow {
     return `Telegram user ${ctx.from?.id ?? "unknown"}`;
   }
 
-  public inferGatewayInboxKind(text: string): PartnerNoteKind {
-    return /\?\s*$/u.test(text.trim()) ? "question" : "request";
-  }
-
-  public buildGatewayInboxSummary(text: string): string {
-    const summary =
-      text
-        .split(/\r?\n/u)
-        .map((line) => line.trim())
-        .find(Boolean) ?? "Telegram message";
-    return summary.length > 140 ? `${summary.slice(0, 137).trimEnd()}...` : summary;
-  }
-
   public async routeTelegramInboxToRelaySession(input: {
     ctx: TelegramMenuContext;
     principal: { telegramChatId: number; telegramUserId: number };
@@ -555,27 +534,28 @@ export class TransportMessageFlow {
       descriptors: attachmentDescriptors,
     });
 
-    const inboxMessage: TelegramInboxMessage = {
-      id: createInboxMessageId(),
+    const recordId = await writeTelegramMessageXchangeRecord({
+      config: this.host.config,
+      session,
       sessionId,
-      telegramChatId: chatId,
-      telegramUserId: fromUserId,
-      sourceTelegramMessageId: message.message_id,
       text: normalizedText,
-      ...(attachments.length > 0
-        ? { attachments: attachments.map((attachment) => attachment.filePath) }
-        : {}),
-      receivedAt: new Date(message.date * 1000).toISOString(),
-    };
-
-    await this.host.inboxStore.createInboxMessage(inboxMessage);
-    this.host.logger.info("Telegram message stored in inbox", {
+      createdAt: new Date(message.date * 1000).toISOString(),
+      attachments: attachments.map((attachment) => ({
+        file_path: attachment.filePath,
+      })),
+      tags: [
+        "telegram",
+        "human",
+        ...(attachments.length > 0 ? ["attachments"] : []),
+      ],
+    });
+    this.host.logger.info("Telegram message stored in xchange", {
       sessionId,
       chatId,
       userId: fromUserId,
       messageId: message.message_id,
-      inboxMessageId: inboxMessage.id,
-      text: redactSecrets(inboxMessage.text),
+      recordId,
+      text: redactSecrets(normalizedText),
       attachmentCount: attachments.length,
       attachments: attachments.map((attachment) => attachment.filePath),
     });
@@ -583,7 +563,7 @@ export class TransportMessageFlow {
     try {
       this.host.scheduleTmuxNudgeForInboxMessage(sessionId, session);
     } catch (error) {
-      this.host.logger.error("tmux nudge failed after inbox capture", {
+      this.host.logger.error("tmux nudge failed after xchange capture", {
         sessionId,
         error:
           error instanceof Error ? (error.stack ?? error.message) : String(error),
@@ -594,12 +574,12 @@ export class TransportMessageFlow {
       ctx,
       session?.label
         ? attachments.length > 0
-          ? `Saved to inbox for session: ${session.label}. Files downloaded: ${attachments.length}`
-          : `Saved to inbox for session: ${session.label}`
+          ? `Saved to xchange for session: ${session.label}. Files downloaded: ${attachments.length}`
+          : `Saved to xchange for session: ${session.label}`
         : attachments.length > 0
-          ? `Saved to inbox for session: ${sessionId}. Files downloaded: ${attachments.length}`
-          : `Saved to inbox for session: ${sessionId}`,
-      { kind: "inbox", sessionId },
+          ? `Saved to xchange for session: ${sessionId}. Files downloaded: ${attachments.length}`
+          : `Saved to xchange for session: ${sessionId}`,
+      { kind: "transport", sessionId },
       {
         reply_markup:
           this.host.getMainMenu() as NonNullable<TelegramSendMessageOptions["reply_markup"]>,

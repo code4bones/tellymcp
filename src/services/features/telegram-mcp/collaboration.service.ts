@@ -98,7 +98,6 @@ const TelegramMcpCollaborationService: ServiceSchema = {
       runtime.sessionStore,
       runtime.stateStore,
       runtime.stateStore,
-      runtime.stateStore,
       runtime.objectStore,
       runtime.telegramTransport,
       runtime.logger,

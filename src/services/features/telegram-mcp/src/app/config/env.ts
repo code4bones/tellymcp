@@ -36,12 +36,6 @@ const envSchema = z.object({
   TELEGRAM_MAX_CONTEXT_CHARS: z.coerce.number().int().positive().default(3000),
   TELEGRAM_MAX_QUESTION_CHARS: z.coerce.number().int().positive().default(1000),
   TELEGRAM_MAX_MESSAGE_CHARS: z.coerce.number().int().positive().default(3900),
-  TELEGRAM_INBOX_BATCH_SIZE: z.coerce
-    .number()
-    .int()
-    .positive()
-    .max(100)
-    .default(20),
   TELEGRAM_MENU_PAYLOAD_TTL_SECONDS: z.coerce
     .number()
     .int()
@@ -222,7 +216,6 @@ export type AppConfig = {
     maxContextChars: number;
     maxQuestionChars: number;
     maxMessageChars: number;
-    inboxBatchSize: number;
     menuPayloadTtlSeconds: number;
     proxy?: {
       type: "http" | "socks5";
@@ -394,7 +387,6 @@ export function loadConfig(): AppConfig {
       maxContextChars: parsed.TELEGRAM_MAX_CONTEXT_CHARS,
       maxQuestionChars: parsed.TELEGRAM_MAX_QUESTION_CHARS,
       maxMessageChars: parsed.TELEGRAM_MAX_MESSAGE_CHARS,
-      inboxBatchSize: parsed.TELEGRAM_INBOX_BATCH_SIZE,
       menuPayloadTtlSeconds: parsed.TELEGRAM_MENU_PAYLOAD_TTL_SECONDS,
       ...(telegramProxy ? { proxy: telegramProxy } : {}),
     },

@@ -1,12 +1,4 @@
 import type { RiskLevel } from "../../../shared/types/common";
-import type {
-  DeleteTelegramInboxMessageInput,
-  DeleteTelegramInboxMessageOutput,
-  GetTelegramInboxCountInput,
-  GetTelegramInboxCountOutput,
-  GetTelegramInboxInput,
-  GetTelegramInboxOutput,
-} from "../../inbox/model/types";
 
 export type AskUserTelegramInput = {
   question: string;
@@ -71,13 +63,6 @@ export type SendPartnerFileInput = {
   expected_reply?: string | undefined;
   requires_reply?: boolean | undefined;
   in_reply_to?: string | undefined;
-};
-
-export type { GetTelegramInboxInput, GetTelegramInboxOutput };
-export type { GetTelegramInboxCountInput, GetTelegramInboxCountOutput };
-export type {
-  DeleteTelegramInboxMessageInput,
-  DeleteTelegramInboxMessageOutput,
 };
 
 export type PendingRequestStatus =

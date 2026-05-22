@@ -4,7 +4,6 @@ import type {
   TelegramPrincipal,
 } from "../../../entities/auth/model/types";
 import type {
-  TelegramInboxMessage,
   TelegramMenuPayloadRecord,
   TelegramXchangeFileMeta,
 } from "../../../entities/inbox/model/types";
@@ -74,20 +73,6 @@ export interface PendingRequestStore {
   ): Promise<void>;
   enqueue(request: PendingRequestRecord): Promise<void>;
   dequeueNext(): Promise<PendingRequestRecord | null>;
-}
-
-export interface TelegramInboxStore {
-  createInboxMessage(message: TelegramInboxMessage): Promise<void>;
-  listInboxMessages(
-    sessionId: string,
-    limit: number,
-  ): Promise<TelegramInboxMessage[]>;
-  countInboxMessages(sessionId: string): Promise<number>;
-  getInboxMessage(
-    sessionId: string,
-    messageId: string,
-  ): Promise<TelegramInboxMessage | null>;
-  deleteInboxMessage(sessionId: string, messageId: string): Promise<boolean>;
 }
 
 export interface TelegramMenuPayloadStore {

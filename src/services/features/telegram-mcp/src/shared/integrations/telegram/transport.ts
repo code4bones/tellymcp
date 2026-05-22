@@ -12,7 +12,6 @@ import type {
   SessionStore,
   TelegramAdminAuthStore,
   SessionBindingStore,
-  TelegramInboxStore,
   TelegramMenuPayloadStore,
   TelegramUserLocaleStore,
   TelegramXchangeFileMetaStore,
@@ -24,8 +23,8 @@ import type {
   HumanTransportReply,
   HumanTransportRequest,
 } from "../../api/transport/contract";
-import { createInboxMessageId } from "../../lib/ids/ids";
 import type { Logger } from "../../lib/logger/logger";
+import { writeLocalTaskXchangeRecord } from "../../lib/telegramXchangeRecords";
 import type { MinioExchangeStore } from "../object-storage/minioExchangeStore";
 import { isExecutorTargetKind } from "./collabSemantics";
 import type {
@@ -51,7 +50,6 @@ import { TransportDocumentActions } from "./transportDocumentActions";
 import { TransportContext } from "./transportContext";
 import { TransportEventActions } from "./transportEventActions";
 import { TransportFileHandoffActions } from "./transportFileHandoffActions";
-import { TransportLinkingActions } from "./transportLinkingActions";
 import { TransportMenuFactories } from "./transportMenuFactories";
 import { TransportMenuFingerprints } from "./transportMenuFingerprints";
 import { TransportMenuFlow } from "./transportMenuFlow";
@@ -83,23 +81,18 @@ export class TelegramTransport implements HumanTransport {
   private readonly telegramFetch: TelegramClientFetch;
   private readonly bot: Bot<TelegramMenuContext>;
   private readonly mainMenu: Menu<TelegramMenuContext>;
-  private readonly inboxMenu: Menu<TelegramMenuContext>;
   private readonly storageMenu: Menu<TelegramMenuContext>;
   private readonly browserMenu: Menu<TelegramMenuContext>;
   private readonly projectsMenu: Menu<TelegramMenuContext>;
   private readonly collabToolsMenu: Menu<TelegramMenuContext>;
   private readonly collabDeleteMenu: Menu<TelegramMenuContext>;
-  private readonly localMenu: Menu<TelegramMenuContext>;
   private readonly screenshotsMenu: Menu<TelegramMenuContext>;
-  private readonly linkMenu: Menu<TelegramMenuContext>;
-  private readonly partnerMenu: Menu<TelegramMenuContext>;
   private readonly sessionsMenu: Menu<TelegramMenuContext>;
   private readonly bufferMenu: Menu<TelegramMenuContext>;
   private readonly settingsMenu: Menu<TelegramMenuContext>;
   private readonly developerMenu: Menu<TelegramMenuContext>;
   private readonly unpairConfirmMenu: Menu<TelegramMenuContext>;
   private readonly pruneConfirmMenu: Menu<TelegramMenuContext>;
-  private readonly inboxMessageMenu: Menu<TelegramMenuContext>;
   private readonly storageMessageMenu: Menu<TelegramMenuContext>;
   private readonly screenshotMessageMenu: Menu<TelegramMenuContext>;
   private readonly tmuxActions: TransportTmuxActions;
@@ -112,7 +105,6 @@ export class TelegramTransport implements HumanTransport {
   private readonly eventActions: TransportEventActions;
   private readonly partnerActions: TransportPartnerActions;
   private readonly fileHandoffActions: TransportFileHandoffActions;
-  private readonly linkingActions: TransportLinkingActions;
   private readonly menuFactories: TransportMenuFactories;
   private readonly menuFingerprints: TransportMenuFingerprints;
   private readonly menuFlow: TransportMenuFlow;
@@ -200,7 +192,6 @@ export class TelegramTransport implements HumanTransport {
     private readonly sessionStore: SessionStore,
     private readonly adminAuthStore: TelegramAdminAuthStore,
     private readonly bindingStore: SessionBindingStore,
-    private readonly inboxStore: TelegramInboxStore,
     private readonly menuPayloadStore: TelegramMenuPayloadStore,
     private readonly localeStore: TelegramUserLocaleStore,
     private readonly xchangeFileMetaStore: TelegramXchangeFileMetaStore,
@@ -214,7 +205,6 @@ export class TelegramTransport implements HumanTransport {
       sessionStore: this.sessionStore,
       adminAuthStore: this.adminAuthStore,
       bindingStore: this.bindingStore,
-      inboxStore: this.inboxStore,
       menuPayloadStore: this.menuPayloadStore,
       localeStore: this.localeStore,
       xchangeFileMetaStore: this.xchangeFileMetaStore,
@@ -256,23 +246,18 @@ export class TelegramTransport implements HumanTransport {
     this.telegramFetch = composition.telegramFetch;
     this.bot = composition.bot;
     this.mainMenu = composition.mainMenu;
-    this.inboxMenu = composition.inboxMenu;
     this.storageMenu = composition.storageMenu;
     this.browserMenu = composition.browserMenu;
     this.projectsMenu = composition.projectsMenu;
     this.collabToolsMenu = composition.collabToolsMenu;
     this.collabDeleteMenu = composition.collabDeleteMenu;
-    this.localMenu = composition.localMenu;
     this.screenshotsMenu = composition.screenshotsMenu;
-    this.linkMenu = composition.linkMenu;
-    this.partnerMenu = composition.partnerMenu;
     this.sessionsMenu = composition.sessionsMenu;
     this.bufferMenu = composition.bufferMenu;
     this.settingsMenu = composition.settingsMenu;
     this.developerMenu = composition.developerMenu;
     this.unpairConfirmMenu = composition.unpairConfirmMenu;
     this.pruneConfirmMenu = composition.pruneConfirmMenu;
-    this.inboxMessageMenu = composition.inboxMessageMenu;
     this.storageMessageMenu = composition.storageMessageMenu;
     this.screenshotMessageMenu = composition.screenshotMessageMenu;
     this.tmuxActions = composition.tmuxActions;
@@ -285,7 +270,6 @@ export class TelegramTransport implements HumanTransport {
     this.eventActions = composition.eventActions;
     this.partnerActions = composition.partnerActions;
     this.fileHandoffActions = composition.fileHandoffActions;
-    this.linkingActions = composition.linkingActions;
     this.menuFactories = composition.menuFactories;
     this.menuFingerprints = composition.menuFingerprints;
     this.menuFlow = composition.menuFlow;
@@ -572,10 +556,6 @@ export class TelegramTransport implements HumanTransport {
     }
   }
 
-  public async recoverPendingInboxNudges(): Promise<void> {
-    await this.lifecycleActions.recoverPendingInboxNudges();
-  }
-
   public async sendStartupNotifications(): Promise<void> {
     await this.lifecycleActions.sendStartupNotifications(__dirname);
   }
@@ -842,14 +822,14 @@ export class TelegramTransport implements HumanTransport {
     const session = await this.sessionStore.getSession(input.sessionId);
     const sourceLabel = session?.label ?? input.sessionId;
     const targetLabel = input.targetSessionLabel ?? input.targetSessionId ?? "напарник";
-    await this.inboxStore.createInboxMessage({
-      id: createInboxMessageId(),
+    await writeLocalTaskXchangeRecord({
+      config: this.config,
+      session,
       sessionId: input.sessionId,
-      telegramChatId: input.principal.telegramChatId,
-      telegramUserId: input.principal.telegramUserId,
-      sourceTelegramMessageId: input.sourceTelegramMessageId,
+      summary: input.summary,
+      kind: input.kind,
       text: [
-        "Пользователь просит текущую сессию выполнить работу и отправить результат другой сессии.",
+        "Пользователь просит текущую консоль выполнить работу и отправить результат другой консоли.",
         `Маршрут отправки: ${sourceLabel} -> ${targetLabel}`,
         `Тип: ${input.kind}`,
         `Кратко: ${input.summary}`,
@@ -859,18 +839,19 @@ export class TelegramTransport implements HumanTransport {
         "Содержимое для отправки:",
         input.message,
         "",
-        "Не пересылай это как новую задачу в target-сессию.",
-        "Сначала выполни работу в текущей сессии сам.",
+        "Не пересылай это как новую задачу в target-консоль.",
+        "Сначала выполни работу в текущей консоли сам.",
         "Через send_partner_note или send_partner_file отправляй только результат, а не исходное поручение.",
-        "Не используй linked partner для отправки. Передай target_session_id явно в send_partner_note.",
+        "Передай target_session_id явно в send_partner_note.",
         "После подготовки обязательно используй send_partner_note.",
         "Задача не завершена, пока send_partner_note не отработал успешно.",
-        "Если запрос касается существующего локального файла, не ограничивайся note.",
-        "Найди файл в локальном workspace и вызови send_partner_file.",
-        "Не заменяй это на plain send_partner_note с упоминанием имени файла.",
-        "Недостаточно просто упомянуть имя файла в тексте note.",
+        "Если запрос касается существующего локального файла, вызови send_partner_file.",
       ].join("\n"),
-      receivedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      actionDesc:
+        "Read body_text and complete the work in this console, then send the final result to the target console with send_partner_note or send_partner_file. The task is not complete until the outbound tool succeeds.",
+      tools: ["get_xchange_record", "mark_xchange_record_read", "send_partner_note", "send_partner_file"],
+      tags: ["telegram", "human", "local", "partner-routing"],
     });
     await this.nudgeSessionInbox(input.sessionId);
   }

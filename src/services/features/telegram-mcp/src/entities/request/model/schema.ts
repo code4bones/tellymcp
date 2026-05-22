@@ -86,49 +86,6 @@ export const refreshToolsMarkdownOutputSchema = z.object({
   bytes: z.number().int().nonnegative(),
 });
 
-export const getTelegramInboxInputSchema = z.object({
-  session_id: z.string().trim().min(1).optional(),
-});
-
-export const getTelegramInboxOutputSchema = z.object({
-  session_id: z.string(),
-  total: z.number().int().nonnegative(),
-  has_more: z.boolean(),
-  messages: z.array(
-    z.object({
-      message_id: z.string(),
-      source: z.literal("telegram"),
-      message_kind: z.enum(["human", "system"]),
-      telegram_chat_id: z.number(),
-      telegram_user_id: z.number(),
-      telegram_message_id: z.number().int().nonnegative(),
-      text: z.string(),
-      attachments: z.array(z.string()).optional(),
-      received_at: z.string(),
-    }),
-  ),
-});
-
-export const getTelegramInboxCountInputSchema = z.object({
-  session_id: z.string().trim().min(1).optional(),
-});
-
-export const getTelegramInboxCountOutputSchema = z.object({
-  session_id: z.string(),
-  total: z.number().int().nonnegative(),
-});
-
-export const deleteTelegramInboxMessageInputSchema = z.object({
-  session_id: z.string().trim().min(1).optional(),
-  message_id: z.string().trim().min(1),
-});
-
-export const deleteTelegramInboxMessageOutputSchema = z.object({
-  deleted: z.boolean(),
-  session_id: z.string(),
-  message_id: z.string(),
-});
-
 export const setSessionContextInputSchema = z.object({
   session_id: z.string().trim().min(1).optional(),
   session_label: z.string().trim().min(1).optional(),

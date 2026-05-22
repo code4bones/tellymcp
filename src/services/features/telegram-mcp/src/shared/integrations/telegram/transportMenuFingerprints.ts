@@ -2,7 +2,6 @@ import type { Logger } from "../../lib/logger/logger";
 import type {
   SessionBindingStore,
   SessionStore,
-  TelegramInboxStore,
 } from "../../api/storage/contract";
 import type {
   TelegramMenuContext,
@@ -14,7 +13,6 @@ import { readMenuPayloadKey } from "./transportUtils";
 export interface TransportMenuFingerprintsHost {
   logger: Logger;
   bindingStore: SessionBindingStore;
-  inboxStore: TelegramInboxStore;
   sessionStore: SessionStore;
   getMenuPayloadByKey(key: string): Promise<Record<string, unknown> | null>;
   resolveLocaleForContext(ctx: TelegramMenuContext): Promise<SupportedLocale>;
@@ -53,27 +51,7 @@ export class TransportMenuFingerprints {
       return `${locale}:no-active-session`;
     }
 
-    const count = await this.host.inboxStore.countInboxMessages(sessionId);
-    return `${locale}:${sessionId}:${count}`;
-  }
-
-  public async buildInboxFingerprint(
-    ctx: TelegramMenuContext,
-  ): Promise<string> {
-    const locale = await this.host.resolveLocaleForContext(ctx);
-    const principal = this.host.getPrincipalFromContext(ctx);
-    if (!principal) {
-      return `${locale}:no-principal`;
-    }
-
-    const sessionId =
-      await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
-    if (!sessionId) {
-      return `${locale}:no-active-session`;
-    }
-
-    const messages = await this.host.inboxStore.listInboxMessages(sessionId, 10);
-    return `${locale}:${sessionId}:${messages.map((message) => message.id).join(",")}`;
+    return `${locale}:${sessionId}`;
   }
 
   public async buildStorageFingerprint(
@@ -176,27 +154,6 @@ export class TransportMenuFingerprints {
       .sort();
 
     return `${locale}:${activeSessionId}:${session?.linkedSessionId ?? "none"}:${sessionIds.join(",")}`;
-  }
-
-  public async buildInboxButtonLabel(
-    ctx: TelegramMenuContext,
-  ): Promise<string> {
-    const locale = await this.host.resolveLocaleForContext(ctx);
-    const principal = this.host.getPrincipalFromContext(ctx);
-    if (!principal) {
-      return this.host.t(locale, "menu:inbox.button");
-    }
-
-    const sessionId =
-      await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
-    if (!sessionId) {
-      return this.host.t(locale, "menu:inbox.button");
-    }
-
-    const count = await this.host.inboxStore.countInboxMessages(sessionId);
-    return count > 0
-      ? this.host.t(locale, "menu:inbox.button_count", { count })
-      : this.host.t(locale, "menu:inbox.button");
   }
 
   public async buildScreenshotsButtonLabel(

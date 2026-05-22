@@ -9,7 +9,6 @@ import type {
   SessionBindingStore,
   SessionStore,
   TelegramAdminAuthStore,
-  TelegramInboxStore,
   TelegramMenuPayloadStore,
   TelegramUserLocaleStore,
   TelegramXchangeFileMetaStore,
@@ -37,14 +36,12 @@ import type {
 import {
   buildInboxText,
   formatFilePreviewLabel,
-  formatInboxPreviewLabel,
   formatSessionMenuLabel,
   formatStoragePreviewLabel,
 } from "./transportFormatting";
 import {
   collectIncomingAttachments,
   extractIncomingText,
-  formatInboxDetail,
   formatScreenshotDetail,
   formatStorageDetail,
 } from "./transportContent";
@@ -87,7 +84,6 @@ export interface TransportConstructorWiringHost {
   sessionStore: SessionStore;
   adminAuthStore: TelegramAdminAuthStore;
   bindingStore: SessionBindingStore;
-  inboxStore: TelegramInboxStore;
   menuPayloadStore: TelegramMenuPayloadStore;
   localeStore: TelegramUserLocaleStore;
   xchangeFileMetaStore: TelegramXchangeFileMetaStore;
@@ -144,7 +140,6 @@ export interface TransportConstructorWiringResult {
   telegramFetch: TelegramClientFetch;
   bot: Bot<TelegramMenuContext>;
   mainMenu: Menu<TelegramMenuContext>;
-  inboxMenu: Menu<TelegramMenuContext>;
   storageMenu: Menu<TelegramMenuContext>;
   browserMenu: Menu<TelegramMenuContext>;
   projectsMenu: Menu<TelegramMenuContext>;
@@ -160,7 +155,6 @@ export interface TransportConstructorWiringResult {
   developerMenu: Menu<TelegramMenuContext>;
   unpairConfirmMenu: Menu<TelegramMenuContext>;
   pruneConfirmMenu: Menu<TelegramMenuContext>;
-  inboxMessageMenu: Menu<TelegramMenuContext>;
   storageMessageMenu: Menu<TelegramMenuContext>;
   screenshotMessageMenu: Menu<TelegramMenuContext>;
   tmuxActions: TransportTmuxActions;
@@ -259,7 +253,6 @@ export function buildTransportConstructorWiring(
   const tmuxActions: TransportTmuxActions = new TransportTmuxActions({
     config: host.config,
     sessionStore: host.sessionStore,
-    inboxStore: host.inboxStore,
     bindingStore: host.bindingStore,
     logger: host.logger,
     tmuxNudgeFailureNoticeAt: host.tmuxNudgeFailureNoticeAt,
@@ -286,7 +279,6 @@ export function buildTransportConstructorWiring(
   const menuFingerprints = new TransportMenuFingerprints({
     logger: host.logger,
     bindingStore: host.bindingStore,
-    inboxStore: host.inboxStore,
     sessionStore: host.sessionStore,
     getMenuPayloadByKey: (key) => host.menuPayloadStore.getMenuPayload(key),
     resolveLocaleForContext: (ctx) => context.resolveLocaleForContext(ctx),
@@ -339,15 +331,12 @@ export function buildTransportConstructorWiring(
   const menuFactories: TransportMenuFactories = new TransportMenuFactories({
     logger: host.logger,
     bindingStore: host.bindingStore,
-    inboxStore: host.inboxStore,
     sessionStore: host.sessionStore,
     createMenuOptions: (onMenuOutdated) => host.createMenuOptions(onMenuOutdated),
     tForContext: (ctx, key, vars) => context.tForContext(ctx, key, vars),
     getPrincipalFromContext: (ctx) => context.getPrincipalFromContext(ctx),
     buildMainMenuFingerprint: (ctx) =>
       menuFingerprints.buildMainMenuFingerprint(ctx),
-    buildInboxFingerprint: (ctx) =>
-      menuFingerprints.buildInboxFingerprint(ctx),
     buildStorageFingerprint: (ctx) =>
       menuFingerprints.buildStorageFingerprint(ctx),
     buildScreenshotsFingerprint: (ctx) =>
@@ -356,8 +345,6 @@ export function buildTransportConstructorWiring(
       menuFingerprints.buildSessionsFingerprint(ctx),
     buildLinkFingerprint: (ctx) =>
       menuFingerprints.buildLinkFingerprint(ctx),
-    buildInboxButtonLabel: (ctx) =>
-      menuFingerprints.buildInboxButtonLabel(ctx),
     buildScreenshotsButtonLabel: (ctx) =>
       menuFingerprints.buildScreenshotsButtonLabel(ctx),
     buildLinkButtonLabel: (ctx) =>
@@ -368,7 +355,6 @@ export function buildTransportConstructorWiring(
     showMainMenu: (ctx) => menuState.showMainMenu(ctx),
     showLocalEntryPoint: (ctx) => linkingActions.showLocalEntryPoint(ctx),
     showProjectsEntryPoint: (ctx) => linkingActions.showProjectsEntryPoint(ctx),
-    showInboxMenu: (ctx) => menuFlow.showInboxMenu(ctx),
     showStorageMenu: (ctx) => menuFlow.showStorageMenu(ctx),
     showSettingsMenu: (ctx) => menuFlow.showSettingsMenu(ctx),
     showSessionsMenu: (ctx) => menuFlow.showSessionsMenu(ctx),
@@ -394,10 +380,6 @@ export function buildTransportConstructorWiring(
     beginBroadcast: (ctx) => broadcastActions.beginBroadcast(ctx),
     pruneAllSessions: (ctx) => sessionActions.pruneAllSessions(ctx),
     unpairActiveSession: (ctx) => sessionActions.unpairActiveSession(ctx),
-    handleInboxMessageOpen: (ctx) =>
-      menuCallbacks.handleInboxMessageOpen(ctx, readMenuPayloadKey(ctx)),
-    handleInboxMessageDelete: (ctx) =>
-      menuCallbacks.handleInboxMessageDelete(ctx, readMenuPayloadKey(ctx)),
     handleStorageOpen: (ctx) =>
       menuCallbacks.handleStorageOpen(ctx, readMenuPayloadKey(ctx)),
     handleStorageGet: (ctx) =>
@@ -415,8 +397,6 @@ export function buildTransportConstructorWiring(
     handleSessionGroupSelection: (ctx) =>
       menuCallbacks.handleSessionGroupSelection(ctx, readMenuPayloadKey(ctx)),
     getMenuPayloadByKey: (key) => host.menuPayloadStore.getMenuPayload(key),
-    createInboxMenuPayload: (sessionId, messageId) =>
-      payloadState.createInboxMenuPayload(sessionId, messageId),
     createFileMenuPayload: (sessionId, filePath) =>
       payloadState.createFileMenuPayload(sessionId, filePath),
     createSessionMenuPayload: (sessionId, ownerLabel, ownerKey) =>
@@ -425,7 +405,6 @@ export function buildTransportConstructorWiring(
       payloadState.createSessionGroupMenuPayload(ownerLabel, ownerKey),
     createLinkMenuPayload: (sessionId, targetSessionId) =>
       payloadState.createLinkMenuPayload(sessionId, targetSessionId),
-    formatInboxPreviewLabel: (message) => formatInboxPreviewLabel(message),
     formatStoragePreviewLabel: (filePath, meta) =>
       formatStoragePreviewLabel(filePath, meta),
     formatFilePreviewLabel: (filePath) => formatFilePreviewLabel(filePath),
@@ -437,7 +416,6 @@ export function buildTransportConstructorWiring(
   });
 
   const mainMenu: Menu<TelegramMenuContext> = menuFactories.createMainMenu();
-  const inboxMenu: Menu<TelegramMenuContext> = menuFactories.createInboxMenu();
   const storageMenu: Menu<TelegramMenuContext> = menuFactories.createStorageMenu();
   const browserMenu: Menu<TelegramMenuContext> = menuFactories.createBrowserMenu();
   const localMenu: Menu<TelegramMenuContext> = menuFactories.createLocalMenu();
@@ -450,7 +428,6 @@ export function buildTransportConstructorWiring(
   const developerMenu: Menu<TelegramMenuContext> = menuFactories.createDeveloperMenu();
   const unpairConfirmMenu: Menu<TelegramMenuContext> = menuFactories.createUnpairConfirmMenu();
   const pruneConfirmMenu: Menu<TelegramMenuContext> = menuFactories.createPruneConfirmMenu();
-  const inboxMessageMenu: Menu<TelegramMenuContext> = menuFactories.createInboxMessageMenu();
   const storageMessageMenu: Menu<TelegramMenuContext> = menuFactories.createStorageMessageMenu();
   const screenshotMessageMenu: Menu<TelegramMenuContext> = menuFactories.createScreenshotMessageMenu();
   const projectsMenu: Menu<TelegramMenuContext> = projectMenus.createProjectsMenu();
@@ -482,7 +459,6 @@ export function buildTransportConstructorWiring(
     getMenuPayloadByKey: (key) => host.menuPayloadStore.getMenuPayload(key),
     getMainMenu: () => mainMenu,
     getSessionsMenu: () => sessionsMenu,
-    getInboxMenu: () => inboxMenu,
     getStorageMenu: () => storageMenu,
     getBrowserMenu: () => browserMenu,
     getScreenshotsMenu: () => screenshotsMenu,
@@ -496,7 +472,6 @@ export function buildTransportConstructorWiring(
     getPruneConfirmMenu: () => pruneConfirmMenu,
     sessionStore: host.sessionStore,
     bindingStore: host.bindingStore,
-    inboxStore: host.inboxStore,
     listActiveSessionScreenshots: (sessionId) =>
       xchangeState.listActiveSessionScreenshots(sessionId),
     listActiveSessionStorageEntries: (sessionId) =>
@@ -533,12 +508,10 @@ export function buildTransportConstructorWiring(
     logger: host.logger,
     config: host.config,
     sessionStore: host.sessionStore,
-    inboxStore: host.inboxStore,
     bindingStore: host.bindingStore,
     isTelegramEnabled: () =>
       host.config.distributed.mode !== "client" &&
       Boolean(host.config.telegram.botToken?.trim()),
-    nudgeSessionInbox: (sessionId) => host.nudgeSessionInbox(sessionId),
     resolveLocaleForTelegramUserId: (telegramUserId, telegramLanguageCode) =>
       context.resolveLocaleForTelegramUserId(telegramUserId, telegramLanguageCode),
     t: (locale, key, options) => context.t(locale, key, options),
@@ -611,7 +584,6 @@ export function buildTransportConstructorWiring(
     logger: host.logger,
     bindingStore: host.bindingStore,
     sessionStore: host.sessionStore,
-    inboxStore: host.inboxStore,
     menuState,
     projectView,
     liveActions,
@@ -652,6 +624,7 @@ export function buildTransportConstructorWiring(
   });
 
   const broadcastActions: TransportBroadcastActions = new TransportBroadcastActions({
+    config: host.config,
     logger: host.logger,
     pendingBroadcasts: host.pendingBroadcasts,
     pendingRenames: host.pendingRenames,
@@ -670,7 +643,6 @@ export function buildTransportConstructorWiring(
       gatewayActions.listGatewayProjectSessions(principal, projectUuid),
     bindingStore: host.bindingStore,
     sessionStore: host.sessionStore,
-    inboxStore: host.inboxStore,
     routeTelegramInboxToRelaySession: (input) =>
       messageFlow.routeTelegramInboxToRelaySession(input),
     scheduleTmuxNudgeForInboxMessage: (sessionId, session) =>
@@ -679,6 +651,7 @@ export function buildTransportConstructorWiring(
   });
 
   const partnerActions: TransportPartnerActions = new TransportPartnerActions({
+    config: host.config,
     logger: host.logger,
     pendingPartnerNotes: host.pendingPartnerNotes,
     getPrincipalFromContext: (ctx) => context.getPrincipalFromContext(ctx),
@@ -691,7 +664,6 @@ export function buildTransportConstructorWiring(
     showMainMenu: (ctx, introText) => menuState.showMainMenu(ctx, introText),
     bindingStore: host.bindingStore,
     sessionStore: host.sessionStore,
-    inboxStore: host.inboxStore,
     maintenanceStore: host.maintenanceStore,
     ensureProjectSessionRegistered: (input) => gatewayActions.ensureProjectSessionRegistered(input),
     sendPartnerNote: (input) => gatewayActions.sendPartnerNote(input),
@@ -721,7 +693,6 @@ export function buildTransportConstructorWiring(
     sendPartnerNote: (input) => gatewayActions.sendPartnerNote(input),
     xchangeFileMetaStore: host.xchangeFileMetaStore,
     sessionStore: host.sessionStore,
-    inboxStore: host.inboxStore,
     maintenanceStore: host.maintenanceStore,
     objectStore: host.objectStore,
     nudgeSessionInbox: (sessionId) => host.nudgeSessionInbox(sessionId),
@@ -742,15 +713,12 @@ export function buildTransportConstructorWiring(
     showPartnerMenu: (ctx) => menuFlow.showPartnerMenu(ctx),
     showScreenshotsMenu: (ctx, introText) => menuFlow.showScreenshotsMenu(ctx, introText),
     showStorageMenu: (ctx, introText) => menuFlow.showStorageMenu(ctx, introText),
-    inboxMessageMenu,
     storageMessageMenu,
     screenshotMessageMenu,
     xchangeFileMetaStore: host.xchangeFileMetaStore,
-    inboxStore: host.inboxStore,
     sessionStore: host.sessionStore,
     bindingStore: host.bindingStore,
     objectStore: host.objectStore,
-    formatInboxDetail: (message) => formatInboxDetail(message),
     formatScreenshotDetail: (sessionId, filePath, meta) =>
       formatScreenshotDetail(sessionId, filePath, meta),
     formatStorageDetail: (sessionId, filePath, meta) =>
@@ -881,19 +849,9 @@ export function buildTransportConstructorWiring(
 
   const messageFlow: TransportMessageFlow = new TransportMessageFlow({
     logger: host.logger,
-    config: {
-      distributed: {
-        ...(host.config.distributed.gatewayPublicUrl !== undefined
-          ? { gatewayPublicUrl: host.config.distributed.gatewayPublicUrl }
-          : {}),
-        ...(host.config.distributed.gatewayToken !== undefined
-          ? { gatewayToken: host.config.distributed.gatewayToken }
-          : {}),
-      },
-    },
+    config: host.config,
     bindingStore: host.bindingStore,
     sessionStore: host.sessionStore,
-    inboxStore: host.inboxStore,
     isAdminAuthEnabled: () => host.isAdminAuthEnabled(),
     isPrincipalAdminAuthorized: (principal) =>
       host.isPrincipalAdminAuthorized(principal),
@@ -943,7 +901,6 @@ export function buildTransportConstructorWiring(
     logger: host.logger,
     config: host.config,
     sessionStore: host.sessionStore,
-    inboxStore: host.inboxStore,
     bindingStore: host.bindingStore,
     webAppLaunchRegistry: host.webAppLaunchRegistry,
     createLiveApprovalMenuPayload: (input) =>
@@ -965,7 +922,6 @@ export function buildTransportConstructorWiring(
   const menuShell = new TransportMenuShell({
     logger: host.logger,
     tForContext: (ctx, key) => context.tForContext(ctx, key),
-    showPartnerMenu: (ctx) => menuFlow.showPartnerMenu(ctx),
     showProjectsMenu: (ctx) => menuFlow.showProjectsMenu(ctx),
     handleMessage: (ctx) => messageFlow.handleMessage(ctx),
     cancelPendingBroadcast: (ctx) => broadcastActions.cancelPendingBroadcast(ctx),
@@ -992,7 +948,6 @@ export function buildTransportConstructorWiring(
   });
 
   mainMenu.register([
-    inboxMenu,
     storageMenu,
     browserMenu,
     projectsMenu,
@@ -1008,7 +963,6 @@ export function buildTransportConstructorWiring(
     developerMenu,
     unpairConfirmMenu,
     pruneConfirmMenu,
-    inboxMessageMenu,
     storageMessageMenu,
     screenshotMessageMenu,
   ]);
@@ -1017,7 +971,6 @@ export function buildTransportConstructorWiring(
     telegramFetch,
     bot,
     mainMenu,
-    inboxMenu,
     storageMenu,
     browserMenu,
     projectsMenu,
@@ -1033,7 +986,6 @@ export function buildTransportConstructorWiring(
     developerMenu,
     unpairConfirmMenu,
     pruneConfirmMenu,
-    inboxMessageMenu,
     storageMessageMenu,
     screenshotMessageMenu,
     tmuxActions,

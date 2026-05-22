@@ -14,33 +14,12 @@ export function buildLinkMenuText(input: {
   ].join("\n");
 }
 
-export function buildInboxMenuText(input: {
-  title: string;
-  activeSessionLine: string;
-  storedMessagesLine: string;
-  chooseMessageLine: string;
-  emptyLine: string;
-  total: number;
-}): string {
-  return [
-    input.title,
-    "",
-    input.activeSessionLine,
-    input.storedMessagesLine,
-    "",
-    input.total > 0 ? input.chooseMessageLine : input.emptyLine,
-  ].join("\n");
-}
-
 export function buildMainMenuText(input: {
   title: string;
-  inboxMessagesLine: string;
   projectLine?: string | null;
 }): string {
   return [
     input.title,
-    "",
-    input.inboxMessagesLine,
     ...(input.projectLine ? [input.projectLine] : []),
   ]
     .filter((line): line is string => Boolean(line))

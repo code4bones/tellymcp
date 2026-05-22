@@ -4,12 +4,10 @@ import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
 import type {
   SessionBindingStore,
   SessionStore,
-  TelegramInboxStore,
 } from "../../api/storage/contract";
 import type { Logger } from "../../lib/logger/logger";
 import { readMenuPayloadKey } from "./transportUtils";
 import type {
-  TelegramInboxMessage,
   TelegramXchangeFileMeta,
 } from "../../../entities/inbox/model/types";
 import type {
@@ -43,7 +41,6 @@ function splitSessionDisplayLabel(input: {
 export interface TransportMenuFactoriesHost {
   logger: Logger;
   bindingStore: SessionBindingStore;
-  inboxStore: TelegramInboxStore;
   sessionStore: SessionStore;
   createMenuOptions(
     onMenuOutdated: (ctx: TelegramMenuContext) => Promise<void>,
@@ -57,12 +54,10 @@ export interface TransportMenuFactoriesHost {
     ctx: TelegramMenuContext,
   ): { telegramChatId: number; telegramUserId: number } | null;
   buildMainMenuFingerprint(ctx: TelegramMenuContext): Promise<string>;
-  buildInboxFingerprint(ctx: TelegramMenuContext): Promise<string>;
   buildStorageFingerprint(ctx: TelegramMenuContext): Promise<string>;
   buildScreenshotsFingerprint(ctx: TelegramMenuContext): Promise<string>;
   buildSessionsFingerprint(ctx: TelegramMenuContext): Promise<string>;
   buildLinkFingerprint(ctx: TelegramMenuContext): Promise<string>;
-  buildInboxButtonLabel(ctx: TelegramMenuContext): Promise<string>;
   buildScreenshotsButtonLabel(ctx: TelegramMenuContext): Promise<string>;
   buildLinkButtonLabel(ctx: TelegramMenuContext): Promise<string>;
   showLiveViewLauncher(ctx: TelegramMenuContext): Promise<void>;
@@ -71,7 +66,6 @@ export interface TransportMenuFactoriesHost {
   showMainMenu(ctx: TelegramMenuContext): Promise<void>;
   showLocalEntryPoint(ctx: TelegramMenuContext): Promise<void>;
   showProjectsEntryPoint(ctx: TelegramMenuContext): Promise<void>;
-  showInboxMenu(ctx: TelegramMenuContext): Promise<void>;
   showStorageMenu(ctx: TelegramMenuContext): Promise<void>;
   showSettingsMenu(ctx: TelegramMenuContext): Promise<void>;
   showSessionsMenu(ctx: TelegramMenuContext): Promise<void>;
@@ -99,8 +93,6 @@ export interface TransportMenuFactoriesHost {
   beginBroadcast(ctx: TelegramMenuContext): Promise<void>;
   pruneAllSessions(ctx: TelegramMenuContext): Promise<void>;
   unpairActiveSession(ctx: TelegramMenuContext): Promise<void>;
-  handleInboxMessageOpen(ctx: TelegramMenuContext): Promise<void>;
-  handleInboxMessageDelete(ctx: TelegramMenuContext): Promise<void>;
   handleStorageOpen(ctx: TelegramMenuContext): Promise<void>;
   handleStorageGet(ctx: TelegramMenuContext): Promise<void>;
   handleStorageDelete(ctx: TelegramMenuContext): Promise<void>;
@@ -110,7 +102,6 @@ export interface TransportMenuFactoriesHost {
   handleSessionSelection(ctx: TelegramMenuContext): Promise<void>;
   handleSessionGroupSelection(ctx: TelegramMenuContext): Promise<void>;
   getMenuPayloadByKey(key: string): Promise<Record<string, unknown> | null>;
-  createInboxMenuPayload(sessionId: string, messageId: string): Promise<string>;
   createFileMenuPayload(sessionId: string, filePath: string): Promise<string>;
   createSessionMenuPayload(
     sessionId: string,
@@ -122,7 +113,6 @@ export interface TransportMenuFactoriesHost {
     sessionId: string,
     targetSessionId: string,
   ): Promise<string>;
-  formatInboxPreviewLabel(message: TelegramInboxMessage): string;
   formatStoragePreviewLabel(
     filePath: string,
     meta?: TelegramXchangeFileMeta | null,
@@ -132,7 +122,6 @@ export interface TransportMenuFactoriesHost {
     sessionId: string;
     sessionLabel?: string;
     active: boolean;
-    inboxCount: number;
   }): string;
   listActiveSessionStorageEntries(sessionId: string): Promise<
     Array<{
@@ -179,17 +168,6 @@ export class TransportMenuFactories {
           await this.host.showProjectsEntryPoint(ctx);
         },
       )
-      .row()
-      .text(async (ctx) => this.host.buildInboxButtonLabel(ctx), async (ctx) => {
-        this.host.logger.debug("Telegram main menu inbox navigation requested", {
-          chatId: ctx.chat?.id,
-          userId: ctx.from?.id,
-        });
-        await ctx.answerCallbackQuery({
-          text: await this.host.tForContext(ctx, "menu:main.actions.open_inbox"),
-        });
-        await this.host.showInboxMenu(ctx);
-      })
       .text(
         async (ctx) => this.host.tForContext(ctx, "menu:main.buttons.storage"),
         async (ctx) => {
@@ -578,106 +556,6 @@ export class TransportMenuFactories {
       });
   }
 
-  public createInboxMenu(): Menu<TelegramMenuContext> {
-    return new Menu<TelegramMenuContext>("telegram-inbox-menu", {
-      fingerprint: async (ctx) => this.host.buildInboxFingerprint(ctx),
-      ...this.host.createMenuOptions((ctx) => this.host.showInboxMenu(ctx)),
-    })
-      .dynamic(async (ctx) => {
-        const range = new MenuRange<TelegramMenuContext>();
-        const principal = this.host.getPrincipalFromContext(ctx);
-        if (!principal) {
-          range.text(
-            await this.host.tForContext(ctx, "common:menu.no_telegram_identity_label"),
-            async (innerCtx) => {
-              await innerCtx.answerCallbackQuery({
-                text: await this.host.tForContext(
-                  innerCtx,
-                  "common:errors.missing_telegram_context",
-                ),
-                show_alert: true,
-              });
-            },
-          );
-          return range;
-        }
-
-        const sessionId =
-          await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
-        if (!sessionId) {
-          range.text(
-            await this.host.tForContext(ctx, "common:menu.no_active_session_label"),
-            async (innerCtx) => {
-              await innerCtx.answerCallbackQuery({
-                text: await this.host.tForContext(
-                  innerCtx,
-                  "common:errors.no_active_session",
-                ),
-                show_alert: true,
-              });
-            },
-          );
-          return range;
-        }
-
-        const inboxMessages = await this.host.inboxStore.listInboxMessages(
-          sessionId,
-          10,
-        );
-
-        if (inboxMessages.length === 0) {
-          range.text(
-            await this.host.tForContext(ctx, "menu:inbox.labels.empty"),
-            async (innerCtx) => {
-              await innerCtx.answerCallbackQuery({
-                text: await this.host.tForContext(innerCtx, "menu:inbox.actions.empty"),
-                show_alert: false,
-              });
-            },
-          );
-          return range;
-        }
-
-        for (const message of inboxMessages) {
-          range
-            .text(
-              {
-                text: this.host.formatInboxPreviewLabel(message),
-                payload: async () =>
-                  this.host.createInboxMenuPayload(message.sessionId, message.id),
-              },
-              async (innerCtx) => {
-                await this.host.handleInboxMessageOpen(innerCtx);
-              },
-            )
-            .row();
-        }
-
-        return range;
-      })
-      .text(
-        async (ctx) => this.host.tForContext(ctx, "common:menu.refresh"),
-        async (ctx) => {
-          await ctx.answerCallbackQuery({
-            text: await this.host.tForContext(ctx, "menu:inbox.actions.refreshed"),
-          });
-          await this.host.showInboxMenu(ctx);
-        },
-      )
-      .text(
-        async (ctx) => this.host.tForContext(ctx, "common:menu.back"),
-        async (ctx) => {
-          await ctx.answerCallbackQuery({
-            text: await this.host.tForContext(
-              ctx,
-              "menu:local.actions.back_to_session_menu",
-            ),
-          });
-          await this.host.showMainMenu(ctx);
-        },
-      );
-  }
-
   public createStorageMenu(): Menu<TelegramMenuContext> {
     return new Menu<TelegramMenuContext>("telegram-storage-menu", {
       fingerprint: async (ctx) => this.host.buildStorageFingerprint(ctx),
@@ -931,15 +809,12 @@ export class TransportMenuFactories {
               sessionLabel?: string;
               ownerLabel?: string;
               active: boolean;
-              inboxCount: number;
               sortKey: string;
             }>
           >();
 
           for (const sessionId of sessionIds) {
             const session = await this.host.sessionStore.getSession(sessionId);
-            const inboxCount =
-              await this.host.inboxStore.countInboxMessages(sessionId);
             const display = splitSessionDisplayLabel({
               sessionId,
               ...(session?.label ? { sessionLabel: session.label } : {}),
@@ -954,7 +829,6 @@ export class TransportMenuFactories {
               ...(display.shortLabel ? { sessionLabel: display.shortLabel } : {}),
               ...(display.ownerLabel ? { ownerLabel: display.ownerLabel } : {}),
               active: sessionId === activeSessionId,
-              inboxCount,
               sortKey: `${display.shortLabel}\u0000${sessionId}`,
             });
             groupedSessions.set(groupKey, items);
@@ -1012,7 +886,6 @@ export class TransportMenuFactories {
                   text: this.host.formatSessionMenuLabel({
                     sessionId: item.sessionId,
                     active: item.active,
-                    inboxCount: item.inboxCount,
                     ...(item.sessionLabel ? { sessionLabel: item.sessionLabel } : {}),
                   }),
                   payload: async () =>
@@ -1107,31 +980,6 @@ export class TransportMenuFactories {
             ),
           });
           await this.host.showDeveloperMenu(ctx);
-        },
-      );
-  }
-
-  public createInboxMessageMenu(): Menu<TelegramMenuContext> {
-    return new Menu<TelegramMenuContext>("telegram-inbox-message-menu", {
-      fingerprint: (ctx) => readMenuPayloadKey(ctx) ?? "no-payload",
-      ...this.host.createMenuOptions((ctx) => this.host.showInboxMenu(ctx)),
-    })
-      .text(
-        {
-          text: async (ctx) => this.host.tForContext(ctx, "common:menu.delete"),
-          payload: (ctx) => readMenuPayloadKey(ctx) ?? "missing",
-        },
-        async (ctx) => {
-          await this.host.handleInboxMessageDelete(ctx);
-        },
-      )
-      .text(
-        async (ctx) => this.host.tForContext(ctx, "common:menu.close"),
-        async (ctx) => {
-          await ctx.answerCallbackQuery({
-            text: await this.host.tForContext(ctx, "common:menu.close"),
-          });
-          await ctx.deleteMessage();
         },
       );
   }

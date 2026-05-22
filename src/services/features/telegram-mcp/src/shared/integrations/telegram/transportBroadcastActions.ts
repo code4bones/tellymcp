@@ -1,14 +1,14 @@
 import { InlineKeyboard } from "grammy";
 
+import type { AppConfig } from "../../../app/config/env";
 import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
 import type {
   SendPartnerNoteOutput,
 } from "../../../entities/collaboration/model/types";
-import type { TelegramInboxMessage } from "../../../entities/inbox/model/types";
 import type { SessionContext } from "../../../entities/session/model/types";
-import { createInboxMessageId } from "../../lib/ids/ids";
 import type { Logger } from "../../lib/logger/logger";
 import { redactSecrets } from "../../lib/redact-secrets/redactSecrets";
+import { writeTelegramMessageXchangeRecord } from "../../lib/telegramXchangeRecords";
 import { parsePartnerNoteText } from "./transportFormatting";
 import type {
   PendingBroadcastRecord,
@@ -20,6 +20,7 @@ import { buildPrincipalKey } from "./transportUtils";
 type Principal = { telegramChatId: number; telegramUserId: number };
 
 export interface TransportBroadcastHost {
+  config: AppConfig;
   logger: Logger;
   pendingBroadcasts: Map<string, PendingBroadcastRecord>;
   pendingRenames: Map<string, { sessionId: string }>;
@@ -64,9 +65,6 @@ export interface TransportBroadcastHost {
   };
   sessionStore: {
     getSession(sessionId: string): Promise<SessionContext | null>;
-  };
-  inboxStore: {
-    createInboxMessage(message: TelegramInboxMessage): Promise<void>;
   };
   routeTelegramInboxToRelaySession(input: {
     ctx: TelegramMenuContext;
@@ -303,12 +301,11 @@ export class TransportBroadcastActions {
       const sourceLabel = sourceSession?.label ?? pending.sessionId ?? "session";
 
       for (const sessionId of pending.localTargetSessionIds ?? []) {
-        const inboxMessage: TelegramInboxMessage = {
-          id: createInboxMessageId(),
+        const session = await this.host.sessionStore.getSession(sessionId);
+        await writeTelegramMessageXchangeRecord({
+          config: this.host.config,
+          session,
           sessionId,
-          telegramChatId: principal.telegramChatId,
-          telegramUserId: principal.telegramUserId,
-          sourceTelegramMessageId: ctx.message?.message_id ?? 0,
           text: [
             "Collab broadcast from Telegram user.",
             `Source session: ${sourceLabel}`,
@@ -317,15 +314,15 @@ export class TransportBroadcastActions {
             "Message:",
             parsed.message,
           ].join("\n"),
-          receivedAt,
-        };
-        await this.host.inboxStore.createInboxMessage(inboxMessage);
+          createdAt: receivedAt,
+          summary: parsed.summary,
+          tags: ["telegram", "broadcast", "collab", "human"],
+        });
         storedCount += 1;
-        const session = await this.host.sessionStore.getSession(sessionId);
         try {
           this.host.scheduleTmuxNudgeForInboxMessage(sessionId, session);
         } catch (error) {
-          this.host.logger.error("tmux nudge failed after project broadcast inbox capture", {
+          this.host.logger.error("tmux nudge failed after project broadcast xchange capture", {
             sessionId,
             error: error instanceof Error ? (error.stack ?? error.message) : String(error),
           });
@@ -390,29 +387,27 @@ export class TransportBroadcastActions {
           }
         }
 
-        const inboxMessage: TelegramInboxMessage = {
-          id: createInboxMessageId(),
+        const session = await this.host.sessionStore.getSession(sessionId);
+        await writeTelegramMessageXchangeRecord({
+          config: this.host.config,
+          session,
           sessionId,
-          telegramChatId: principal.telegramChatId,
-          telegramUserId: principal.telegramUserId,
-          sourceTelegramMessageId: ctx.message?.message_id ?? 0,
           text: broadcastText,
-          receivedAt,
-        };
-        await this.host.inboxStore.createInboxMessage(inboxMessage);
+          createdAt: receivedAt,
+          summary: parsePartnerNoteText(broadcastText).summary,
+          tags: ["telegram", "broadcast", "human"],
+        });
         storedCount += 1;
-        this.host.logger.info("Telegram broadcast message stored in inbox", {
+        this.host.logger.info("Telegram broadcast message stored in xchange", {
           sessionId,
           chatId: principal.telegramChatId,
           userId: principal.telegramUserId,
-          inboxMessageId: inboxMessage.id,
           text: redactSecrets(broadcastText),
         });
-        const session = await this.host.sessionStore.getSession(sessionId);
         try {
           this.host.scheduleTmuxNudgeForInboxMessage(sessionId, session);
         } catch (error) {
-          this.host.logger.error("tmux nudge failed after broadcast inbox capture", {
+          this.host.logger.error("tmux nudge failed after broadcast xchange capture", {
             sessionId,
             error: error instanceof Error ? (error.stack ?? error.message) : String(error),
           });

@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import type { TelegramInboxMessage, TelegramXchangeFileMeta } from "../../../entities/inbox/model/types";
+import type { TelegramXchangeFileMeta } from "../../../entities/inbox/model/types";
 import type { AdminClientSessionViewRecord } from "./transportTypes";
 
 export function buildAdminClientSessionButtonLabel(
@@ -27,14 +27,6 @@ export function buildAdminClientSessionViewButtonLabel(
     .join("");
   const prefix = markers ? `${markers} ` : "";
   return `${prefix}${buildAdminClientSessionButtonLabel(session)}`.slice(0, 56);
-}
-
-export function formatInboxPreviewLabel(message: TelegramInboxMessage): string {
-  const compact = message.text.replace(/\s+/g, " ").trim();
-  const preview =
-    compact.length > 28 ? `${compact.slice(0, 28).trimEnd()}...` : compact;
-  const label = preview.length > 0 ? preview : "(empty message)";
-  return message.attachments?.length ? `📎 ${label}` : label;
 }
 
 export function formatFilePreviewLabel(
@@ -69,12 +61,10 @@ export function formatSessionMenuLabel(input: {
   sessionId: string;
   sessionLabel?: string;
   active: boolean;
-  inboxCount: number;
 }): string {
   const base = input.sessionLabel ?? input.sessionId;
   const activePrefix = input.active ? "✅ " : "📁 ";
-  const inboxSuffix = input.inboxCount > 0 ? ` (${input.inboxCount})` : "";
-  return `${activePrefix}${base}${inboxSuffix}`;
+  return `${activePrefix}${base}`;
 }
 
 export function buildInboxText(

@@ -5,12 +5,8 @@ import { InlineKeyboard } from "grammy";
 
 import type { AppConfig } from "../../../app/config/env";
 import type { SendPartnerNoteOutput } from "../../../entities/collaboration/model/types";
-import type {
-  TelegramInboxMessage,
-  TelegramXchangeFileMeta,
-} from "../../../entities/inbox/model/types";
+import type { TelegramXchangeFileMeta } from "../../../entities/inbox/model/types";
 import type { SessionContext } from "../../../entities/session/model/types";
-import { createInboxMessageId } from "../../lib/ids/ids";
 import type { Logger } from "../../lib/logger/logger";
 import { buildLocalHandoffActionDesc, buildLocalHandoffTools } from "../../lib/xchangeRecordHints";
 import { upsertXchangeRecord } from "../xchange/sqliteRecordStore";
@@ -87,9 +83,6 @@ export interface TransportFileHandoffHost {
   };
   sessionStore: {
     getSession(sessionId: string): Promise<SessionContext | null>;
-  };
-  inboxStore: {
-    createInboxMessage(message: TelegramInboxMessage): Promise<void>;
   };
   maintenanceStore: {
     setOutgoingDeliveryNotice(input: {
@@ -488,28 +481,6 @@ export class TransportFileHandoffActions {
       },
     );
 
-    const inboxMessage: TelegramInboxMessage = {
-      id: createInboxMessageId(),
-      sessionId: input.sessionId,
-      telegramChatId: input.principal.telegramChatId,
-      telegramUserId: input.principal.telegramUserId,
-      sourceTelegramMessageId: input.sourceTelegramMessageId,
-      text: [
-        "Получен локальный handoff файла.",
-        `Кратко: ${handoffSummary}`,
-        `Xchange record: ${handoffId}`,
-        "",
-        "Immediate action: call get_xchange_record for this record and follow its action_desc.",
-        `Note: ${notePath}`,
-        "",
-        "Artifacts:",
-        `- ${ensuredFilePath}`,
-      ].join("\n"),
-      attachments: [notePath, ensuredFilePath],
-      receivedAt: createdAt,
-    };
-
-    await this.host.inboxStore.createInboxMessage(inboxMessage);
     try {
       await this.host.nudgeSessionInbox(input.sessionId);
     } catch (error) {

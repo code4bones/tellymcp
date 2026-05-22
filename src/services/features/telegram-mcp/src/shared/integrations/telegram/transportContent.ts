@@ -1,7 +1,6 @@
 import path from "node:path";
 
 import type {
-  TelegramInboxMessage,
   TelegramXchangeFileMeta,
 } from "../../../entities/inbox/model/types";
 import type {
@@ -29,25 +28,6 @@ export function formatStorageDetail(
       : []),
     `Path: ${filePath}`,
     ...(meta?.caption ? ["", "Caption:", meta.caption] : []),
-  ].join("\n");
-}
-
-export function formatInboxDetail(message: TelegramInboxMessage): string {
-  return [
-    "Inbox message",
-    "",
-    `Session: ${message.sessionId}`,
-    `Received: ${message.receivedAt}`,
-    `Message ID: ${message.id}`,
-    "",
-    message.text,
-    ...(message.attachments?.length
-      ? [
-          "",
-          "Attachments:",
-          ...message.attachments.map((attachment) => `- ${attachment}`),
-        ]
-      : []),
   ].join("\n");
 }
 

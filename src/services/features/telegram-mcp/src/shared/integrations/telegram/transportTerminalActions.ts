@@ -12,7 +12,6 @@ import type { AppConfig } from "../../../app/config/env";
 import type {
   SessionBindingStore,
   SessionStore,
-  TelegramInboxStore,
 } from "../../api/storage/contract";
 import type { HumanTransportNotification } from "../../api/transport/contract";
 import type { Logger } from "../../lib/logger/logger";
@@ -33,7 +32,6 @@ type BindingRecord = Awaited<ReturnType<SessionBindingStore["getBinding"]>>;
 export interface TransportTerminalHost {
   config: AppConfig;
   sessionStore: SessionStore;
-  inboxStore: TelegramInboxStore;
   bindingStore: SessionBindingStore;
   logger: Logger;
   tmuxNudgeFailureNoticeAt: Map<string, number>;

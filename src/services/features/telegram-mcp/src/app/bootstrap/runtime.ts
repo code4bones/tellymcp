@@ -25,7 +25,6 @@ import type {
   SessionStore,
   SessionBindingStore,
   TelegramAdminAuthStore,
-  TelegramInboxStore,
   TelegramUserLocaleStore,
   TelegramXchangeFileMetaStore,
 } from "../../shared/api/storage/contract";
@@ -44,7 +43,6 @@ export type AppRuntime = {
   sessionStore: SessionStore;
   bindingStore: SessionBindingStore;
   adminAuthStore: TelegramAdminAuthStore;
-  inboxStore: TelegramInboxStore;
   localeStore: TelegramUserLocaleStore;
   xchangeFileMetaStore: TelegramXchangeFileMetaStore;
   maintenanceStore: MaintenanceStore;
@@ -286,15 +284,12 @@ export async function createAppRuntime(input: {
     stateStore,
     stateStore,
     stateStore,
-    stateStore,
     objectStore,
     webAppLaunchRegistry,
     logger,
   );
   await telegramTransport.start();
   logger.info("Telegram transport ready");
-  await telegramTransport.recoverPendingInboxNudges();
-  logger.info("Startup inbox nudge recovery completed");
   await telegramTransport.sendStartupNotifications();
   logger.info("Startup Telegram notifications completed");
 
@@ -310,7 +305,6 @@ export async function createAppRuntime(input: {
     sessionStore,
     bindingStore: stateStore,
     adminAuthStore: stateStore,
-    inboxStore: stateStore,
     localeStore: stateStore,
     xchangeFileMetaStore: stateStore,
     maintenanceStore: stateStore,

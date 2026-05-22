@@ -13,17 +13,6 @@ export interface TransportPayloadStateHost {
 export class TransportPayloadState {
   public constructor(private readonly host: TransportPayloadStateHost) {}
 
-  public async createInboxMenuPayload(
-    sessionId: string,
-    messageId: string,
-  ): Promise<string> {
-    return this.createPayload({
-      kind: "inbox-message",
-      sessionId,
-      messageId,
-    });
-  }
-
   public async createFileMenuPayload(
     sessionId: string,
     filePath: string,

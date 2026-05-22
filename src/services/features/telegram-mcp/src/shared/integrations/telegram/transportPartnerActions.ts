@@ -1,10 +1,10 @@
 import { InlineKeyboard } from "grammy";
 
+import type { AppConfig } from "../../../app/config/env";
 import type { PartnerNoteKind } from "../../../entities/collaboration/model/types";
-import type { TelegramInboxMessage } from "../../../entities/inbox/model/types";
 import type { SessionContext } from "../../../entities/session/model/types";
-import { createInboxMessageId } from "../../lib/ids/ids";
 import type { Logger } from "../../lib/logger/logger";
+import { writeLocalTaskXchangeRecord } from "../../lib/telegramXchangeRecords";
 import { buildPartnerNotePromptText } from "./collabUi";
 import { isExecutorTargetKind } from "./collabSemantics";
 import { parsePartnerNoteText } from "./transportFormatting";
@@ -14,6 +14,7 @@ import { buildPrincipalKey } from "./transportUtils";
 type Principal = { telegramChatId: number; telegramUserId: number };
 
 export interface TransportPartnerHost {
+  config: AppConfig;
   logger: Logger;
   pendingPartnerNotes: Map<string, PendingPartnerNoteRecord>;
   getPrincipalFromContext(ctx: TelegramMenuContext): Principal | null;
@@ -37,9 +38,6 @@ export interface TransportPartnerHost {
   };
   sessionStore: {
     getSession(sessionId: string): Promise<SessionContext | null>;
-  };
-  inboxStore: {
-    createInboxMessage(message: TelegramInboxMessage): Promise<void>;
   };
   maintenanceStore: {
     setOutgoingDeliveryNotice(input: {
@@ -355,14 +353,14 @@ export class TransportPartnerActions {
     const session = await this.host.sessionStore.getSession(input.sessionId);
     const sourceLabel = session?.label ?? input.sessionId;
     const targetLabel = input.targetSessionLabel ?? input.targetSessionId ?? "напарник";
-    const inboxMessage: TelegramInboxMessage = {
-      id: createInboxMessageId(),
+    await writeLocalTaskXchangeRecord({
+      config: this.host.config,
+      session,
       sessionId: input.sessionId,
-      telegramChatId: input.principal.telegramChatId,
-      telegramUserId: input.principal.telegramUserId,
-      sourceTelegramMessageId: input.sourceTelegramMessageId,
+      summary: input.summary,
+      kind: input.kind,
       text: [
-        "Пользователь просит текущую сессию выполнить работу и отправить результат другой сессии.",
+        "Пользователь просит текущую консоль выполнить работу и отправить результат другой консоли.",
         `Маршрут отправки: ${sourceLabel} -> ${targetLabel}`,
         `Тип: ${input.kind}`,
         `Кратко: ${input.summary}`,
@@ -372,21 +370,20 @@ export class TransportPartnerActions {
         "Содержимое для отправки:",
         input.message,
         "",
-        "Не пересылай это как новую задачу в target-сессию.",
-        "Сначала выполни работу в текущей сессии сам.",
+        "Не пересылай это как новую задачу в target-консоль.",
+        "Сначала выполни работу в текущей консоли сам.",
         "Через send_partner_note или send_partner_file отправляй только результат, а не исходное поручение.",
-        "Не используй linked partner для отправки. Передай target_session_id явно в send_partner_note.",
+        "Передай target_session_id явно в send_partner_note.",
         "После подготовки обязательно используй send_partner_note.",
         "Задача не завершена, пока send_partner_note не отработал успешно.",
-        "Если запрос касается существующего локального файла, не ограничивайся note.",
-        "Найди файл в локальном workspace и вызови send_partner_file.",
-        "Не заменяй это на plain send_partner_note с упоминанием имени файла.",
-        "Недостаточно просто упомянуть имя файла в тексте note.",
+        "Если запрос касается существующего локального файла, вызови send_partner_file.",
       ].join("\n"),
-      receivedAt: new Date().toISOString(),
-    };
-
-    await this.host.inboxStore.createInboxMessage(inboxMessage);
+      createdAt: new Date().toISOString(),
+      actionDesc:
+        "Read body_text and complete the work in this console, then send the final result to the target console with send_partner_note or send_partner_file. The task is not complete until the outbound tool succeeds.",
+      tools: ["get_xchange_record", "mark_xchange_record_read", "send_partner_note", "send_partner_file"],
+      tags: ["telegram", "human", "local", "partner-routing"],
+    });
     await this.host.nudgeSessionInbox(input.sessionId);
   }
 }

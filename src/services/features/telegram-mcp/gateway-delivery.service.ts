@@ -6,8 +6,6 @@ import {
   TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
   type TelegramMcpRuntimeServiceInstance,
 } from "./runtime.service";
-import type { TelegramInboxMessage } from "./src/entities/inbox/model/types";
-import { createInboxMessageId } from "./src/shared/lib/ids/ids";
 import {
   buildIncomingPartnerActionDesc,
   buildIncomingTelegramMessageActionDesc,
@@ -188,76 +186,6 @@ function buildNoteContent(input: {
   }
 
   return `${lines.join("\n")}\n`;
-}
-
-function buildPartnerInboxText(input: {
-  delivery: GatewayDelivery;
-  recordId: string;
-  actionDesc: string;
-  notePath: string;
-  copiedArtifacts: string[];
-}): string {
-  const isDirectRoute = input.delivery.route_mode === "direct";
-  const sourceActorLabel =
-    input.delivery.source_actor_label || input.delivery.source_session_label;
-  const kindTitle =
-    input.delivery.kind === "question"
-      ? `Получен вопрос от ${sourceActorLabel}.`
-      : input.delivery.kind === "reply"
-        ? `Получен ответ от ${sourceActorLabel}.`
-        : input.delivery.kind === "request"
-          ? `Получен запрос от ${sourceActorLabel}.`
-          : input.delivery.kind === "handoff"
-            ? `Получен handoff от ${sourceActorLabel}.`
-            : `Получено обновление от ${sourceActorLabel}.`;
-
-  return [
-    kindTitle,
-    ...(input.delivery.project_name
-      ? [`Проект: ${input.delivery.project_name}`]
-      : []),
-    `Сессия: ${input.delivery.source_session_label} -> ${input.delivery.target_session_label}`,
-    `Кратко: ${input.delivery.summary}`,
-    `Xchange record: ${input.recordId}`,
-    "",
-    "Действие: вызови get_xchange_record для этой записи и следуй action_desc.",
-    `Action: ${input.actionDesc}`,
-    `Note: ${input.notePath}`,
-    ...(input.copiedArtifacts.length > 0
-      ? ["", "Файлы:", ...input.copiedArtifacts.map((item) => `- ${item}`)]
-      : []),
-    ...(input.delivery.requires_reply
-      ? [
-          "",
-          `Reply message_uuid: ${input.delivery.message_uuid}`,
-          ...(isDirectRoute
-            ? [
-                ...(input.delivery.source_client_uuid
-                  ? [
-                      `Reply target_client_uuid: ${input.delivery.source_client_uuid}`,
-                    ]
-                  : []),
-                `Reply target_local_session_id: ${input.delivery.source_local_session_id}`,
-              ]
-            : [`Reply target_session_id: ${input.delivery.source_session_uuid}`]),
-          ...(!isDirectRoute && input.delivery.project_uuid
-            ? [`Reply project_uuid: ${input.delivery.project_uuid}`]
-            : []),
-          "Обязательно отправь reply через send_partner_note.",
-          "Задача не завершена, пока send_partner_note не отработал успешно.",
-          "Не останавливайся на локальном объяснении.",
-          ...(isDirectRoute
-            ? [
-                "Не используй linked partner или project-scoped target_session_id для ответа.",
-                "Передай target_client_uuid и target_local_session_id явно в send_partner_note.",
-              ]
-            : [
-                "Не используй linked partner для ответа. Передай эти параметры явно в send_partner_note.",
-              ]),
-          "Только после успешного tool call можно считать ответ отправленным.",
-        ]
-      : []),
-  ].join("\n");
 }
 
 function buildTelegramDeliveryNotification(input: {
@@ -562,24 +490,6 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
       );
 
       if (targetBinding && !isTelegramHumanSource) {
-        const inboxMessage: TelegramInboxMessage = {
-          id: createInboxMessageId(new Date(delivery.created_at)),
-          sessionId: targetSession.sessionId,
-          telegramChatId: targetBinding.telegramChatId,
-          telegramUserId: targetBinding.telegramUserId,
-          sourceTelegramMessageId: Date.now(),
-          text: buildPartnerInboxText({
-            delivery,
-            recordId: delivery.share_id,
-            actionDesc,
-            notePath,
-            copiedArtifacts,
-          }),
-          attachments: [notePath, ...copiedArtifacts],
-          receivedAt: delivery.created_at,
-        };
-        await runtime.inboxStore.createInboxMessage(inboxMessage);
-
         try {
           await runtime.telegramTransport.sendNotification({
             sessionId: targetSession.sessionId,

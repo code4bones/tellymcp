@@ -50,6 +50,7 @@ export async function ensureGatewayClientUuid(input: {
   projectName?: string;
   botUsername?: string;
   gatewayToken?: string;
+  gatewayUserUuid?: string;
   namespace?: string;
   nodeId?: string;
   systemUsername?: string;
@@ -88,10 +89,14 @@ export async function ensureGatewayClientUuid(input: {
         "tellymcp client",
       ...(input.botUsername ? { bot_username: input.botUsername } : {}),
       ...(input.gatewayToken ? { gateway_token: input.gatewayToken } : {}),
+      ...(input.gatewayUserUuid ? { owner_user_uuid: input.gatewayUserUuid } : {}),
       meta: {
         ...(namespace ? { namespace } : {}),
         ...(nodeId ? { node_id: nodeId } : {}),
         ...(systemUsername ? { system_username: systemUsername } : {}),
+        ...(input.gatewayUserUuid
+          ? { gateway_user_uuid: input.gatewayUserUuid }
+          : {}),
       },
     },
   });

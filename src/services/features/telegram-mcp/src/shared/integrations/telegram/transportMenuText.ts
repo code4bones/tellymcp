@@ -36,18 +36,12 @@ export function buildMainMenuText(input: {
   title: string;
   inboxMessagesLine: string;
   projectLine?: string | null;
-  partnerLine?: string | null;
-  partnerHintLine?: string | null;
-  linkHintLine?: string | null;
 }): string {
   return [
     input.title,
     "",
     input.inboxMessagesLine,
     ...(input.projectLine ? [input.projectLine] : []),
-    ...(input.partnerLine
-      ? ["", input.partnerLine, "", input.partnerHintLine]
-      : ["", input.linkHintLine]),
   ]
     .filter((line): line is string => Boolean(line))
     .join("\n");

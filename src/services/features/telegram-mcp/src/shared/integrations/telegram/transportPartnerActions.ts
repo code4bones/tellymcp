@@ -30,7 +30,8 @@ export interface TransportPartnerHost {
     options?: { reply_markup?: InlineKeyboard },
   ): Promise<{ message_id: number } | void>;
   deleteMessage(chatId: number, messageId: number): Promise<void>;
-  showPartnerMenu(ctx: TelegramMenuContext): Promise<void>;
+  showProjectsMenu(ctx: TelegramMenuContext, introText?: string): Promise<void>;
+  showMainMenu(ctx: TelegramMenuContext, introText?: string): Promise<void>;
   bindingStore: {
     getActiveSessionIdForPrincipal(principal: Principal): Promise<string | null>;
   };
@@ -113,20 +114,16 @@ export class TransportPartnerActions {
     }
 
     const session = await this.host.sessionStore.getSession(sessionId);
-    if (!target && !session?.linkedSessionId) {
+    if (!target) {
       await ctx.answerCallbackQuery({
-        text: this.host.t(locale, "menu:partner.screen.use_link_first"),
+        text: "Choose a target from Collab project members first.",
         show_alert: true,
       });
       return;
     }
 
-    const linkedSession =
-      target ? null : await this.host.sessionStore.getSession(session!.linkedSessionId!);
     const targetLabel =
       target?.targetSessionLabel ??
-      linkedSession?.label ??
-      session?.linkedSessionId ??
       this.host.t(locale, "menu:partner.screen.default_partner");
     const sourceLabel = session?.label ?? sessionId;
     const prompt = buildPartnerNotePromptText({
@@ -186,7 +183,11 @@ export class TransportPartnerActions {
     await ctx.answerCallbackQuery({
       text: this.host.t(locale, "menu:partner.actions.cancel_note_input"),
     });
-    await this.host.showPartnerMenu(ctx);
+    if (pending.projectUuid) {
+      await this.host.showProjectsMenu(ctx);
+      return;
+    }
+    await this.host.showMainMenu(ctx);
   }
 
   public async handlePendingPartnerNote(
@@ -214,18 +215,10 @@ export class TransportPartnerActions {
     const parsed = parsePartnerNoteText(text);
     const sourceSession = await this.host.sessionStore.getSession(pending.sessionId);
     const sourceLabel = sourceSession?.label ?? pending.sessionId;
-    let resolvedTargetLabel = pending.targetSessionLabel;
-    if (!resolvedTargetLabel && sourceSession?.linkedSessionId) {
-      const linkedSession = await this.host.sessionStore.getSession(
-        sourceSession.linkedSessionId,
-      );
-      resolvedTargetLabel =
-        linkedSession?.label ??
-        sourceSession.linkedSessionId ??
-        this.host.t(locale, "menu:partner.screen.default_partner");
-    }
     const targetLabel =
-      resolvedTargetLabel ?? this.host.t(locale, "menu:partner.screen.default_partner");
+      pending.targetSessionLabel ??
+      pending.targetSessionId ??
+      this.host.t(locale, "menu:partner.screen.default_partner");
 
     this.host.pendingPartnerNotes.delete(principalKey);
     await this.deletePendingPartnerNotePrompt(ctx, pending);

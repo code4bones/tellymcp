@@ -21,9 +21,29 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
     async ensureGatewaySchema(this: EnsureDbServiceCarrier): Promise<void> {
       await this.db.raw(`create schema if not exists "${MCP_SCHEMA}"`);
 
+      if (!(await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_users"))) {
+        await this.db.schema.withSchema(MCP_SCHEMA).createTable("gateway_users", (table) => {
+          table.uuid("gateway_user_uuid").primary();
+          table.bigInteger("telegram_user_id").notNullable().unique();
+          table.bigInteger("telegram_chat_id");
+          table.text("telegram_username");
+          table.text("telegram_display_name");
+          table
+            .timestamp("created_at", { useTz: true })
+            .notNullable()
+            .defaultTo(this.db.fn.now());
+          table
+            .timestamp("updated_at", { useTz: true })
+            .notNullable()
+            .defaultTo(this.db.fn.now());
+          table.timestamp("last_auth_at", { useTz: true });
+        });
+      }
+
       if (!(await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_clients"))) {
         await this.db.schema.withSchema(MCP_SCHEMA).createTable("gateway_clients", (table) => {
           table.uuid("client_uuid").primary();
+          table.uuid("owner_user_uuid");
           table.text("scope_key");
           table.text("client_label");
           table.text("bot_token_fingerprint");
@@ -38,6 +58,28 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
             .notNullable()
             .defaultTo(this.db.fn.now());
           table.timestamp("last_seen_at", { useTz: true });
+          table
+            .foreign("owner_user_uuid")
+            .references("gateway_user_uuid")
+            .inTable(`${MCP_SCHEMA}.gateway_users`)
+            .onDelete("SET NULL");
+        });
+      }
+
+      if (
+        (await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_clients")) &&
+        !(await this.db.schema.withSchema(MCP_SCHEMA).hasColumn(
+          "gateway_clients",
+          "owner_user_uuid",
+        ))
+      ) {
+        await this.db.schema.withSchema(MCP_SCHEMA).alterTable("gateway_clients", (table) => {
+          table.uuid("owner_user_uuid");
+          table
+            .foreign("owner_user_uuid")
+            .references("gateway_user_uuid")
+            .inTable(`${MCP_SCHEMA}.gateway_users`)
+            .onDelete("SET NULL");
         });
       }
 
@@ -251,6 +293,13 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
         `
         CREATE INDEX IF NOT EXISTS gateway_clients_scope_idx
         ON "${MCP_SCHEMA}"."gateway_clients" ("scope_key")
+        `,
+      );
+
+      await this.db.raw(
+        `
+        CREATE INDEX IF NOT EXISTS gateway_clients_owner_user_idx
+        ON "${MCP_SCHEMA}"."gateway_clients" ("owner_user_uuid")
         `,
       );
 

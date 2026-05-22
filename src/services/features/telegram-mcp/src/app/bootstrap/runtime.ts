@@ -228,6 +228,9 @@ export async function createAppRuntime(input: {
       ...(config.distributed.gatewayToken
         ? { gatewayToken: config.distributed.gatewayToken }
         : {}),
+      ...(config.distributed.gatewayUserUuid
+        ? { gatewayUserUuid: config.distributed.gatewayUserUuid }
+        : {}),
       ...(process.env.NAMESPACE?.trim()
         ? { namespace: process.env.NAMESPACE.trim() }
         : {}),

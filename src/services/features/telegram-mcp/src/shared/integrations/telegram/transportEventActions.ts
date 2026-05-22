@@ -1,6 +1,7 @@
 import { InlineKeyboard } from "grammy";
 
 import type { WebAppLaunchRegistry } from "../../../app/webapp/auth";
+import { buildLiveRelaySessionId } from "../../../app/webapp/relay";
 import type { TelegramInboxMessage } from "../../../entities/inbox/model/types";
 import type { AppConfig } from "../../../app/config/env";
 import type { SessionBindingStore, SessionStore, TelegramInboxStore } from "../../api/storage/contract";
@@ -248,9 +249,14 @@ export class TransportEventActions {
   public async handleLiveViewApprovalRequestEvent(
     input: LiveApprovalEventPayload,
   ): Promise<void> {
-    const targetSession = await this.host.sessionStore.getSession(
-      input.target_local_session_id,
-    );
+    const targetSession =
+      (await this.host.sessionStore.getSession(input.target_local_session_id)) ??
+      (await this.host.sessionStore.getSession(
+        buildLiveRelaySessionId(
+          input.target_client_uuid,
+          input.target_local_session_id,
+        ),
+      ));
     if (!targetSession) {
       this.host.logger.warn("Skipping live approval request because target session is unavailable", {
         targetLocalSessionId: input.target_local_session_id,
@@ -329,9 +335,14 @@ export class TransportEventActions {
   public async handleLiveViewApprovalResolvedEvent(
     input: LiveApprovalEventPayload & { approved: boolean },
   ): Promise<void> {
-    const sourceSession = await this.host.sessionStore.getSession(
-      input.source_local_session_id,
-    );
+    const sourceSession =
+      (await this.host.sessionStore.getSession(input.source_local_session_id)) ??
+      (await this.host.sessionStore.getSession(
+        buildLiveRelaySessionId(
+          input.source_client_uuid,
+          input.source_local_session_id,
+        ),
+      ));
     if (!sourceSession) {
       this.host.logger.warn("Skipping live approval resolution because source session is unavailable", {
         sourceLocalSessionId: input.source_local_session_id,
@@ -382,7 +393,6 @@ export class TransportEventActions {
       targetSessionId: input.target_session_id,
       targetClientUuid: input.target_client_uuid,
       targetLocalSessionId: input.target_local_session_id,
-      sourceClientUuid: input.source_client_uuid,
     });
     if (!liveViewUrl) {
       throw new Error("Unable to build Live View URL for approved request.");
@@ -414,7 +424,6 @@ export class TransportEventActions {
               targetSessionId: input.target_session_id,
               targetClientUuid: input.target_client_uuid,
               targetLocalSessionId: input.target_local_session_id,
-              sourceClientUuid: input.source_client_uuid,
               launchMode: mode,
             }),
           locale,

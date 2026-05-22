@@ -134,6 +134,10 @@ export interface TransportConstructorWiringHost {
     telegramChatId: number;
     telegramUserId: number;
   }): Promise<void>;
+  ensureGatewayUserForPrincipal(input: {
+    principal: { telegramChatId: number; telegramUserId: number };
+    ctx: TelegramMenuContext;
+  }): Promise<{ gateway_user_uuid: string }>;
 }
 
 export interface TransportConstructorWiringResult {
@@ -414,10 +418,10 @@ export function buildTransportConstructorWiring(
       payloadState.createInboxMenuPayload(sessionId, messageId),
     createFileMenuPayload: (sessionId, filePath) =>
       payloadState.createFileMenuPayload(sessionId, filePath),
-    createSessionMenuPayload: (sessionId, ownerLabel) =>
-      payloadState.createSessionMenuPayload(sessionId, ownerLabel),
-    createSessionGroupMenuPayload: (ownerLabel) =>
-      payloadState.createSessionGroupMenuPayload(ownerLabel),
+    createSessionMenuPayload: (sessionId, ownerLabel, ownerKey) =>
+      payloadState.createSessionMenuPayload(sessionId, ownerLabel, ownerKey),
+    createSessionGroupMenuPayload: (ownerLabel, ownerKey) =>
+      payloadState.createSessionGroupMenuPayload(ownerLabel, ownerKey),
     createLinkMenuPayload: (sessionId, targetSessionId) =>
       payloadState.createLinkMenuPayload(sessionId, targetSessionId),
     formatInboxPreviewLabel: (message) => formatInboxPreviewLabel(message),
@@ -679,7 +683,8 @@ export function buildTransportConstructorWiring(
     replyText: (ctx, text, meta, options) =>
       outputActions.replyText(ctx, text, meta, options as TelegramSendMessageOptions),
     deleteMessage: (chatId, messageId) => host.deleteMessage(chatId, messageId),
-    showPartnerMenu: (ctx) => menuFlow.showPartnerMenu(ctx),
+    showProjectsMenu: (ctx, introText) => menuFlow.showProjectsMenu(ctx, introText),
+    showMainMenu: (ctx, introText) => menuState.showMainMenu(ctx, introText),
     bindingStore: host.bindingStore,
     sessionStore: host.sessionStore,
     inboxStore: host.inboxStore,
@@ -822,6 +827,8 @@ export function buildTransportConstructorWiring(
     listGatewayProjects: (principal) => gatewayActions.listGatewayProjects(principal),
     callGatewayJson: (path, payload) => host.callGatewayJson(path, payload),
     activateProjectForSession: (input) => gatewayActions.activateProjectForSession(input),
+    ensureProjectSessionRegistered: (input) =>
+      gatewayActions.ensureProjectSessionRegistered(input),
     ensureOpenedProjectIsActive: (input) =>
       gatewayActions.ensureOpenedProjectIsActive(input),
     getProjectPayloadByUuid: (sessionId, projectUuid) =>
@@ -892,6 +899,8 @@ export function buildTransportConstructorWiring(
     currentAttachmentTargets: host.currentAttachmentTargets,
     isAdminBotProfile: () => host.isAdminBotProfile(),
     getPrincipalFromContext: (ctx) => context.getPrincipalFromContext(ctx),
+    ensureGatewayUserForPrincipal: ({ principal, ctx }) =>
+      host.ensureGatewayUserForPrincipal({ principal, ctx }),
     extractIncomingText: (message) => extractIncomingText(message),
     collectIncomingAttachments: (message) => collectIncomingAttachments(message),
     buildInboxText: (text, attachments) => buildInboxText(text, attachments),

@@ -1,3 +1,4 @@
+import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
 import { buildPrincipalKey, readMenuPayloadKey } from "./transportUtils";
 import type {
   PendingProjectRecord,
@@ -273,7 +274,10 @@ export class TransportProjectEntryActions {
       return;
     }
 
-    const clientUuid = await this.host.ensureGatewayClientUuid(principal);
+    const sourceRelay = parseLiveRelaySessionId(sessionId);
+    const clientUuid =
+      sourceRelay?.clientUuid ??
+      (await this.host.ensureGatewayClientUuid(principal));
     await this.host.callGatewayJson("/projects/leave", {
       client_uuid: clientUuid,
       project_uuid: session.activeProjectUuid,

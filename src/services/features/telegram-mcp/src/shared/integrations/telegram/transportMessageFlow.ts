@@ -46,6 +46,10 @@ export interface TransportMessageFlowHost {
     telegramChatId: number;
     telegramUserId: number;
   }): Promise<void>;
+  ensureGatewayUserForPrincipal(input: {
+    principal: { telegramChatId: number; telegramUserId: number };
+    ctx: TelegramMenuContext;
+  }): Promise<{ gateway_user_uuid: string }>;
   waiters: Map<string, WaiterRecord>;
   currentAttachmentTargets: Map<
     string,
@@ -207,11 +211,21 @@ export class TransportMessageFlow {
         return true;
       }
 
+      const user = await this.host.ensureGatewayUserForPrincipal({
+        principal,
+        ctx,
+      });
       await this.host.setPrincipalAdminAuthorized(principal);
       await this.host.replyText(
         ctx,
-        await this.host.tForContext(ctx, "menu:admin.auth.success"),
+        [
+          await this.host.tForContext(ctx, "menu:admin.auth.success"),
+          "",
+          `<code>GATEWAY_USER_UUID=${user.gateway_user_uuid}</code>`,
+          "Set this in your agent .env.",
+        ].join("\n"),
         { sessionId: "gateway-auth", kind: "transport" },
+        { parse_mode: "HTML" },
       );
       return true;
     }

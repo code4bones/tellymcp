@@ -139,6 +139,7 @@ const TelegramMcpCollaborationService: ServiceSchema = {
       runtime.config.distributed.gatewayPublicUrl,
       runtime.config.distributed.gatewayAuthToken,
       runtime.config.distributed.gatewayToken,
+      runtime.config.distributed.gatewayUserUuid,
       runtime.config.project.name,
       runtime.config.telegram.botUsername,
     );

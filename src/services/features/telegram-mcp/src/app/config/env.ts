@@ -84,6 +84,7 @@ const envSchema = z.object({
     .min(1)
     .default(`${(process.env.ROOT_PREFIX || "/api").replace(/\/+$/u, "")}/gateway/ws`),
   GATEWAY_TOKEN: optionalNonEmptyString,
+  GATEWAY_USER_UUID: optionalNonEmptyString,
   GATEWAY_AUTH_TOKEN: optionalNonEmptyString,
   GATEWAY_DATABASE_URL: optionalNonEmptyString,
   GATEWAY_S3_ENDPOINT: optionalNonEmptyString,
@@ -254,6 +255,7 @@ export type AppConfig = {
     gatewayWsUrl?: string;
     gatewayWsPath: string;
     gatewayToken?: string;
+    gatewayUserUuid?: string;
     gatewayAuthToken?: string;
     gatewayDatabaseUrl?: string;
     gatewayS3Endpoint?: string;
@@ -429,6 +431,9 @@ export function loadConfig(): AppConfig {
       gatewayWsPath: parsed.GATEWAY_WS_PATH,
       ...(parsed.GATEWAY_TOKEN
         ? { gatewayToken: parsed.GATEWAY_TOKEN }
+        : {}),
+      ...(parsed.GATEWAY_USER_UUID
+        ? { gatewayUserUuid: parsed.GATEWAY_USER_UUID }
         : {}),
       ...(parsed.GATEWAY_AUTH_TOKEN
         ? { gatewayAuthToken: parsed.GATEWAY_AUTH_TOKEN }

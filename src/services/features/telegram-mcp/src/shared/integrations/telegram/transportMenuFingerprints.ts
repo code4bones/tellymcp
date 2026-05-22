@@ -54,8 +54,7 @@ export class TransportMenuFingerprints {
     }
 
     const count = await this.host.inboxStore.countInboxMessages(sessionId);
-    const session = await this.host.sessionStore.getSession(sessionId);
-    return `${locale}:${sessionId}:${count}:${session?.linkedSessionId ?? "none"}`;
+    return `${locale}:${sessionId}:${count}`;
   }
 
   public async buildInboxFingerprint(
@@ -137,9 +136,9 @@ export class TransportMenuFingerprints {
         if (
           payload &&
           (payload.kind === "session-group" || payload.kind === "active-session") &&
-          typeof payload.ownerLabel === "string"
+          typeof payload.ownerKey === "string"
         ) {
-          selectedOwnerLabel = payload.ownerLabel;
+          selectedOwnerLabel = payload.ownerKey;
         }
       }
 

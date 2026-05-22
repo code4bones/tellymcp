@@ -1,6 +1,7 @@
 import type { PartnerNoteKind } from "../../../entities/collaboration/model/types";
 import type { SessionContext } from "../../../entities/session/model/types";
 import type { GatewayActorProfile, TelegramMenuContext } from "./transportTypes";
+import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
 
 type Principal = { telegramChatId: number; telegramUserId: number };
 
@@ -35,6 +36,11 @@ export interface TransportProjectHost {
     sessionId: string;
     projectUuid: string;
     projectName: string;
+  }): Promise<void>;
+  ensureProjectSessionRegistered(input: {
+    principal: Principal;
+    sessionId: string;
+    projectUuid: string;
   }): Promise<void>;
   ensureOpenedProjectIsActive(input: {
     principal: Principal;
@@ -296,9 +302,14 @@ export class TransportProjectActions {
       await ctx.answerCallbackQuery({ text: this.host.t(locale, "menu:project.no_telegram_user"), show_alert: true });
       return;
     }
+    const sourceRelay = parseLiveRelaySessionId(payload.sessionId);
     const session = await this.host.sessionStore.getSession(payload.sessionId);
     const actor = this.host.getGatewayActorFromContext(ctx);
-    const sourceClientUuid = await this.host.ensureGatewayClientUuid(principal, actor);
+    const sourceClientUuid =
+      sourceRelay?.clientUuid ??
+      (await this.host.ensureGatewayClientUuid(principal, actor));
+    const sourceLocalSessionId =
+      sourceRelay?.localSessionId ?? payload.sessionId;
     const result = await this.host.callGatewayJson<{ delivered?: boolean }>("/live/request-approval", {
       client_uuid: payload.targetClientUuid,
       payload: {
@@ -307,7 +318,7 @@ export class TransportProjectActions {
         source_session_id: payload.sessionId,
         source_session_label: session?.label ?? payload.sessionId,
         source_client_uuid: sourceClientUuid,
-        source_local_session_id: payload.sessionId,
+        source_local_session_id: sourceLocalSessionId,
         target_session_id: payload.targetSessionId,
         target_session_label: payload.targetSessionLabel,
         target_client_uuid: payload.targetClientUuid,
@@ -467,7 +478,10 @@ export class TransportProjectActions {
       return;
     }
     const session = await this.host.sessionStore.getSession(sessionId);
-    const clientUuid = await this.host.ensureGatewayClientUuid(principal);
+    const sourceRelay = parseLiveRelaySessionId(sessionId);
+    const clientUuid =
+      sourceRelay?.clientUuid ??
+      (await this.host.ensureGatewayClientUuid(principal));
     await this.host.callGatewayJson("/projects/leave", {
       client_uuid: clientUuid,
       project_uuid: projectUuid,
@@ -507,7 +521,10 @@ export class TransportProjectActions {
       await ctx.answerCallbackQuery({ text: this.host.t(locale, "menu:project.delete_only_owner"), show_alert: true });
       return;
     }
-    const clientUuid = await this.host.ensureGatewayClientUuid(principal);
+    const sourceRelay = parseLiveRelaySessionId(sessionId);
+    const clientUuid =
+      sourceRelay?.clientUuid ??
+      (await this.host.ensureGatewayClientUuid(principal));
     await this.host.callGatewayJson("/projects/delete", {
       client_uuid: clientUuid,
       project_uuid: projectUuid,
@@ -547,7 +564,10 @@ export class TransportProjectActions {
     if (!value) {
       return true;
     }
-    const clientUuid = await this.host.ensureGatewayClientUuid(principal);
+    const sourceRelay = parseLiveRelaySessionId(pending.sessionId);
+    const clientUuid =
+      sourceRelay?.clientUuid ??
+      (await this.host.ensureGatewayClientUuid(principal));
     let projectName = "";
     let projectUuid = "";
     if (pending.mode === "create") {
@@ -558,6 +578,11 @@ export class TransportProjectActions {
       }>("/projects/create", { client_uuid: clientUuid, name: value });
       projectUuid = created.project_uuid;
       projectName = created.name;
+      await this.host.ensureProjectSessionRegistered({
+        principal,
+        sessionId: pending.sessionId,
+        projectUuid,
+      });
       await this.host.activateProjectForSession({
         principal,
         sessionId: pending.sessionId,
@@ -580,6 +605,11 @@ export class TransportProjectActions {
       }>("/projects/join", { client_uuid: clientUuid, invite_token: value });
       projectUuid = joined.project_uuid;
       projectName = joined.name;
+      await this.host.ensureProjectSessionRegistered({
+        principal,
+        sessionId: pending.sessionId,
+        projectUuid,
+      });
       await this.host.activateProjectForSession({
         principal,
         sessionId: pending.sessionId,

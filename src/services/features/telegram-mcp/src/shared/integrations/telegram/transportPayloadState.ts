@@ -38,17 +38,23 @@ export class TransportPayloadState {
   public async createSessionMenuPayload(
     sessionId: string,
     ownerLabel?: string,
+    ownerKey?: string,
   ): Promise<string> {
     return this.createPayload({
       kind: "active-session",
       sessionId,
+      ...(ownerKey ? { ownerKey } : {}),
       ...(ownerLabel ? { ownerLabel } : {}),
     });
   }
 
-  public async createSessionGroupMenuPayload(ownerLabel: string): Promise<string> {
+  public async createSessionGroupMenuPayload(
+    ownerLabel: string,
+    ownerKey?: string,
+  ): Promise<string> {
     return this.createPayload({
       kind: "session-group",
+      ...(ownerKey ? { ownerKey } : {}),
       ownerLabel,
     });
   }

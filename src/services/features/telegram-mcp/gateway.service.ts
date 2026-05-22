@@ -22,6 +22,21 @@ const GATEWAY_ENABLED =
 type GatewayServiceCarrier = Service & {
   normalizeOptionalText?: (value: unknown) => string | null;
   requireText?: (value: unknown, fieldName: string) => string;
+  resolveOwnerUserUuidFilter?: (
+    input: Record<string, unknown>,
+  ) => Promise<string | null>;
+  resolveGatewayUserRouteRecord?: (input: Record<string, unknown>) => Promise<{
+    gateway_user_uuid: string;
+    telegram_user_id: number;
+    telegram_chat_id: number | null;
+    telegram_username?: string | null;
+    telegram_display_name?: string | null;
+  } | null>;
+  upsertGatewayUserRecord?: (input: Record<string, unknown>) => Promise<{
+    gateway_user_uuid: string;
+    created: boolean;
+    updated_at: string;
+  }>;
   registerClientRecord?: (input: Record<string, unknown>) => Promise<{
     client_uuid: string;
     created: boolean;
@@ -74,7 +89,7 @@ type GatewayServiceCarrier = Service & {
       updated_at?: string;
     }>;
   }>;
-  listAllSessionsRecord?: () => Promise<{
+  listAllSessionsRecord?: (input: Record<string, unknown>) => Promise<{
     sessions: Array<{
       session_uuid: string;
       client_uuid: string;
@@ -263,6 +278,142 @@ const TelegramMcpGatewayService: ServiceSchema = {
       return text;
     },
 
+    async resolveOwnerUserUuidFilter(
+      this: GatewayServiceCarrier,
+      input: Record<string, unknown>,
+    ): Promise<string | null> {
+      const explicitOwnerUserUuid = this.normalizeOptionalText?.(input.owner_user_uuid);
+      if (explicitOwnerUserUuid) {
+        return explicitOwnerUserUuid;
+      }
+
+      const telegramUserId = this.normalizeOptionalText?.(input.telegram_user_id);
+      if (!telegramUserId) {
+        return null;
+      }
+
+      const user = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_users")
+        .where({ telegram_user_id: telegramUserId })
+        .first("gateway_user_uuid");
+
+      return user?.gateway_user_uuid
+        ? String(user.gateway_user_uuid)
+        : "__missing_gateway_user__";
+    },
+
+    async upsertGatewayUserRecord(
+      this: GatewayServiceCarrier,
+      input: Record<string, unknown>,
+    ) {
+      const telegramUserId = this.requireText?.(input.telegram_user_id, "telegram_user_id");
+      const telegramChatId = this.normalizeOptionalText?.(input.telegram_chat_id);
+      const telegramUsername = this.normalizeOptionalText?.(input.telegram_username);
+      const telegramDisplayName = this.normalizeOptionalText?.(input.telegram_display_name);
+      const now = new Date().toISOString();
+
+      const existing = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_users")
+        .where({ telegram_user_id: telegramUserId })
+        .first();
+
+      if (existing) {
+        await this.db
+          .withSchema(MCP_SCHEMA)
+          .table("gateway_users")
+          .where({ gateway_user_uuid: existing.gateway_user_uuid })
+          .update({
+            ...(telegramChatId ? { telegram_chat_id: telegramChatId } : {}),
+            ...(telegramUsername ? { telegram_username: telegramUsername } : {}),
+            ...(telegramDisplayName ? { telegram_display_name: telegramDisplayName } : {}),
+            updated_at: now,
+            last_auth_at: now,
+          });
+
+        return {
+          gateway_user_uuid: String(existing.gateway_user_uuid),
+          created: false,
+          updated_at: now,
+        };
+      }
+
+      const gatewayUserUuid = randomUUID();
+      await this.db.withSchema(MCP_SCHEMA).table("gateway_users").insert({
+        gateway_user_uuid: gatewayUserUuid,
+        telegram_user_id: telegramUserId,
+        ...(telegramChatId ? { telegram_chat_id: telegramChatId } : {}),
+        ...(telegramUsername ? { telegram_username: telegramUsername } : {}),
+        ...(telegramDisplayName ? { telegram_display_name: telegramDisplayName } : {}),
+        created_at: now,
+        updated_at: now,
+        last_auth_at: now,
+      });
+
+      return {
+        gateway_user_uuid: gatewayUserUuid,
+        created: true,
+        updated_at: now,
+      };
+    },
+
+    async resolveGatewayUserRouteRecord(
+      this: GatewayServiceCarrier,
+      input: Record<string, unknown>,
+    ) {
+      const explicitGatewayUserUuid =
+        this.normalizeOptionalText?.(input.gateway_user_uuid);
+      const clientUuid = this.normalizeOptionalText?.(input.client_uuid);
+
+      let gatewayUserUuid = explicitGatewayUserUuid;
+      if (!gatewayUserUuid && clientUuid) {
+        const client = await this.db
+          .withSchema(MCP_SCHEMA)
+          .table("gateway_clients")
+          .where({ client_uuid: clientUuid })
+          .first("owner_user_uuid");
+        gatewayUserUuid =
+          client?.owner_user_uuid ? String(client.owner_user_uuid) : null;
+      }
+
+      if (!gatewayUserUuid) {
+        return null;
+      }
+
+      const user = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_users")
+        .where({ gateway_user_uuid: gatewayUserUuid })
+        .first(
+          "gateway_user_uuid",
+          "telegram_user_id",
+          "telegram_chat_id",
+          "telegram_username",
+          "telegram_display_name",
+        );
+      if (!user?.gateway_user_uuid || !user.telegram_user_id) {
+        return null;
+      }
+
+      return {
+        gateway_user_uuid: String(user.gateway_user_uuid),
+        telegram_user_id: Number(user.telegram_user_id),
+        telegram_chat_id:
+          typeof user.telegram_chat_id === "number"
+            ? user.telegram_chat_id
+            : user.telegram_chat_id
+              ? Number(user.telegram_chat_id)
+              : null,
+        ...(user.telegram_username
+          ? { telegram_username: String(user.telegram_username) }
+          : {}),
+        ...(user.telegram_display_name
+          ? { telegram_display_name: String(user.telegram_display_name) }
+          : {}),
+      };
+    },
+
     async registerClientRecord(this: GatewayServiceCarrier, input: Record<string, unknown>) {
       const clientUuid =
         this.normalizeOptionalText?.(input.client_uuid) || randomUUID();
@@ -271,6 +422,16 @@ const TelegramMcpGatewayService: ServiceSchema = {
       const clientLabel = this.normalizeOptionalText?.(input.client_label);
       const botUsername = this.normalizeOptionalText?.(input.bot_username);
       const tokenFingerprint = this.normalizeOptionalText?.(input.bot_token_fingerprint);
+      const ownerUserUuid =
+        this.normalizeOptionalText?.(input.owner_user_uuid) ||
+        (input.meta &&
+        typeof input.meta === "object" &&
+        !Array.isArray(input.meta) &&
+        typeof (input.meta as Record<string, unknown>).gateway_user_uuid === "string"
+          ? this.normalizeOptionalText?.(
+              (input.meta as Record<string, unknown>).gateway_user_uuid,
+            )
+          : null);
       const meta =
         input.meta && typeof input.meta === "object" && !Array.isArray(input.meta)
           ? input.meta
@@ -293,6 +454,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
           .table("gateway_clients")
           .where({ client_uuid: clientUuid })
           .update({
+            ...(ownerUserUuid ? { owner_user_uuid: ownerUserUuid } : {}),
             ...(scopeKey ? { scope_key: scopeKey } : {}),
             ...(clientLabel ? { client_label: clientLabel } : {}),
             ...(botUsername ? { bot_username: botUsername } : {}),
@@ -311,6 +473,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
 
       await this.db.withSchema(MCP_SCHEMA).table("gateway_clients").insert({
         client_uuid: clientUuid,
+        ...(ownerUserUuid ? { owner_user_uuid: ownerUserUuid } : {}),
         ...(scopeKey ? { scope_key: scopeKey } : {}),
         ...(clientLabel ? { client_label: clientLabel } : {}),
         ...(botUsername ? { bot_username: botUsername } : {}),
@@ -617,6 +780,21 @@ const TelegramMcpGatewayService: ServiceSchema = {
         await this.db
           .withSchema(MCP_SCHEMA)
           .table("gateway_sessions")
+          .where({
+            project_uuid: projectUuid,
+            client_uuid: clientUuid,
+          })
+          .whereNot({
+            local_session_id: localSessionId,
+          })
+          .update({
+            status: "inactive",
+            updated_at: now,
+          });
+
+        await this.db
+          .withSchema(MCP_SCHEMA)
+          .table("gateway_sessions")
           .where({ session_uuid: existing.session_uuid })
           .update(payload);
 
@@ -628,6 +806,20 @@ const TelegramMcpGatewayService: ServiceSchema = {
       }
 
       const sessionUuid = randomUUID();
+      await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_sessions")
+        .where({
+          project_uuid: projectUuid,
+          client_uuid: clientUuid,
+        })
+        .whereNot({
+          local_session_id: localSessionId,
+        })
+        .update({
+          status: "inactive",
+          updated_at: now,
+        });
       await this.db.withSchema(MCP_SCHEMA).table("gateway_sessions").insert({
         session_uuid: sessionUuid,
         ...payload,
@@ -646,6 +838,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
       input: Record<string, unknown> = {},
     ) {
       const scopeKey = resolveGatewayScopeKey(input);
+      const ownerUserUuid = await this.resolveOwnerUserUuidFilter?.(input);
       const rows = await this.db
         .withSchema(MCP_SCHEMA)
         .table("gateway_clients as c")
@@ -653,6 +846,9 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .modify((query) => {
           if (scopeKey) {
             query.where("c.scope_key", scopeKey);
+          }
+          if (ownerUserUuid) {
+            query.where("c.owner_user_uuid", ownerUserUuid);
           }
         })
         .groupBy(
@@ -716,6 +912,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
     ) {
       const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
       const scopeKey = resolveGatewayScopeKey(input);
+      const ownerUserUuid = await this.resolveOwnerUserUuidFilter?.(input);
       const rows = await this.db
         .withSchema(MCP_SCHEMA)
         .table("gateway_sessions as s")
@@ -726,6 +923,9 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .modify((query) => {
           if (scopeKey) {
             query.where("c.scope_key", scopeKey);
+          }
+          if (ownerUserUuid) {
+            query.where("c.owner_user_uuid", ownerUserUuid);
           }
         })
         .select(
@@ -769,6 +969,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
       input: Record<string, unknown> = {},
     ) {
       const scopeKey = resolveGatewayScopeKey(input);
+      const ownerUserUuid = await this.resolveOwnerUserUuidFilter?.(input);
       const rows = await this.db
         .withSchema(MCP_SCHEMA)
         .table("gateway_sessions as s")
@@ -778,6 +979,9 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .modify((query) => {
           if (scopeKey) {
             query.where("c.scope_key", scopeKey);
+          }
+          if (ownerUserUuid) {
+            query.where("c.owner_user_uuid", ownerUserUuid);
           }
         })
         .select(
@@ -855,6 +1059,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
 
     async listProjectsRecord(this: GatewayServiceCarrier, input: Record<string, unknown>) {
       const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
+      const localSessionId = this.normalizeOptionalText?.(input.local_session_id);
       const scopeKey = resolveGatewayScopeKey(input);
       const rows = await this.db
         .withSchema(MCP_SCHEMA)
@@ -865,6 +1070,14 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .where("m.status", "active")
         .where("p.is_active", true)
         .modify((query) => {
+          if (localSessionId) {
+            query.join("gateway_sessions as s", function joinProjectSession() {
+              this.on("s.project_uuid", "=", "m.project_uuid")
+                .andOn("s.client_uuid", "=", "m.client_uuid");
+            });
+            query.where("s.status", "active");
+            query.where("s.local_session_id", localSessionId);
+          }
           if (scopeKey) {
             query.where("c.scope_key", scopeKey);
           }
@@ -935,6 +1148,20 @@ const TelegramMcpGatewayService: ServiceSchema = {
           status: "left",
         });
 
+      if (updated > 0) {
+        await this.db
+          .withSchema(MCP_SCHEMA)
+          .table("gateway_sessions")
+          .where({
+            client_uuid: clientUuid,
+            project_uuid: projectUuid,
+          })
+          .update({
+            status: "inactive",
+            updated_at: new Date().toISOString(),
+          });
+      }
+
       const notifyRows =
         updated > 0
           ? await this.db
@@ -949,6 +1176,17 @@ const TelegramMcpGatewayService: ServiceSchema = {
               })
               .distinct("client_uuid")
           : [];
+
+      if (updated > 0 && notifyRows.length === 0) {
+        await this.db
+          .withSchema(MCP_SCHEMA)
+          .table("gateway_projects")
+          .where({ project_uuid: projectUuid })
+          .update({
+            is_active: false,
+            updated_at: new Date().toISOString(),
+          });
+      }
 
       return {
         project_uuid: projectUuid,
@@ -1010,6 +1248,15 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .where({ project_uuid: projectUuid })
         .del();
 
+      await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_sessions")
+        .where({ project_uuid: projectUuid })
+        .update({
+          status: "inactive",
+          updated_at: new Date().toISOString(),
+        });
+
       return {
         project_uuid: projectUuid,
         deleted: deleted > 0,
@@ -1050,7 +1297,9 @@ const TelegramMcpGatewayService: ServiceSchema = {
       const rows = await this.db
         .withSchema(MCP_SCHEMA)
         .table("gateway_sessions as s")
+        .distinctOn("s.client_uuid")
         .leftJoin("gateway_clients as c", "c.client_uuid", "s.client_uuid")
+        .leftJoin("gateway_users as u", "u.gateway_user_uuid", "c.owner_user_uuid")
         .leftJoin("gateway_project_members as m", function joinMember() {
           this.on("m.project_uuid", "=", "s.project_uuid").andOn(
             "m.client_uuid",
@@ -1061,6 +1310,9 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .where("s.project_uuid", projectUuid)
         .where("s.status", "active")
         .where("m.status", "active")
+        .orderBy("s.client_uuid", "asc")
+        .orderBy("s.created_at", "asc")
+        .orderBy("s.updated_at", "desc")
         .select(
           "s.session_uuid",
           "s.project_uuid",
@@ -1071,8 +1323,12 @@ const TelegramMcpGatewayService: ServiceSchema = {
           "s.updated_at",
           "c.client_label",
           this.db.raw(
-            "coalesce(nullif(m.telegram_username, ''), nullif(c.meta->>'telegram_username', '')) as telegram_username",
+            "coalesce(nullif(u.telegram_display_name, ''), nullif(m.display_name, ''), nullif(c.meta->>'telegram_display_name', '')) as display_name",
           ),
+          this.db.raw(
+            "coalesce(nullif(u.telegram_username, ''), nullif(m.telegram_username, ''), nullif(c.meta->>'telegram_username', '')) as telegram_username",
+          ),
+          this.db.raw("nullif(c.meta->>'system_username', '') as system_username"),
           "c.bot_username",
           "m.joined_at",
         )
@@ -1088,7 +1344,9 @@ const TelegramMcpGatewayService: ServiceSchema = {
           label: row.label ?? null,
           status: row.status,
           client_label: row.client_label ?? null,
+          display_name: row.display_name ?? null,
           telegram_username: row.telegram_username ?? null,
+          system_username: row.system_username ?? null,
           bot_username: row.bot_username ?? null,
           ...(row.joined_at ? { joined_at: String(row.joined_at) } : {}),
           ...(row.updated_at ? { updated_at: String(row.updated_at) } : {}),
@@ -1716,6 +1974,22 @@ const TelegramMcpGatewayService: ServiceSchema = {
   },
 
   actions: {
+    upsertGatewayUser: {
+      async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
+        return this.upsertGatewayUserRecord?.(ctx.params as Record<string, unknown>);
+      },
+    },
+    resolveGatewayUserRoute: {
+      async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
+        return this.resolveGatewayUserRouteRecord?.(ctx.params as Record<string, unknown>);
+      },
+    },
     registerClient: {
       async handler(this: GatewayServiceCarrier, ctx) {
         if (!GATEWAY_ENABLED) {
@@ -1749,11 +2023,11 @@ const TelegramMcpGatewayService: ServiceSchema = {
       },
     },
     listClients: {
-      async handler(this: GatewayServiceCarrier) {
+      async handler(this: GatewayServiceCarrier, ctx) {
         if (!GATEWAY_ENABLED) {
           throw new Error("Gateway service is disabled in client mode");
         }
-        return this.listClientsRecord?.({});
+        return this.listClientsRecord?.(ctx.params as Record<string, unknown>);
       },
     },
     listClientSessions: {
@@ -1765,11 +2039,11 @@ const TelegramMcpGatewayService: ServiceSchema = {
       },
     },
     listAllSessions: {
-      async handler(this: GatewayServiceCarrier) {
+      async handler(this: GatewayServiceCarrier, ctx) {
         if (!GATEWAY_ENABLED) {
           throw new Error("Gateway service is disabled in client mode");
         }
-        return this.listAllSessionsRecord?.();
+        return this.listAllSessionsRecord?.(ctx.params as Record<string, unknown>);
       },
     },
     unregisterSession: {

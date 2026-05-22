@@ -1,4 +1,5 @@
 import { Menu, MenuRange } from "@grammyjs/menu";
+import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
 
 import type {
   SessionBindingStore,
@@ -113,8 +114,9 @@ export interface TransportMenuFactoriesHost {
   createSessionMenuPayload(
     sessionId: string,
     ownerLabel?: string,
+    ownerKey?: string,
   ): Promise<string>;
-  createSessionGroupMenuPayload(ownerLabel: string): Promise<string>;
+  createSessionGroupMenuPayload(ownerLabel: string, ownerKey?: string): Promise<string>;
   createLinkMenuPayload(
     sessionId: string,
     targetSessionId: string,
@@ -128,7 +130,6 @@ export interface TransportMenuFactoriesHost {
   formatSessionMenuLabel(input: {
     sessionId: string;
     sessionLabel?: string;
-    linkedSessionLabel?: string;
     active: boolean;
     inboxCount: number;
   }): string;
@@ -171,12 +172,6 @@ export class TransportMenuFactories {
         },
       )
       .row()
-      .text(
-        async (ctx) => this.host.tForContext(ctx, "menu:main.buttons.local"),
-        async (ctx) => {
-          await this.host.showLocalEntryPoint(ctx);
-        },
-      )
       .text(
         async (ctx) => this.host.tForContext(ctx, "menu:main.buttons.collab"),
         async (ctx) => {
@@ -929,7 +924,7 @@ export class TransportMenuFactories {
             Array<{
               sessionId: string;
               sessionLabel?: string;
-              linkedSessionLabel?: string;
+              ownerLabel?: string;
               active: boolean;
               inboxCount: number;
               sortKey: string;
@@ -938,25 +933,21 @@ export class TransportMenuFactories {
 
           for (const sessionId of sessionIds) {
             const session = await this.host.sessionStore.getSession(sessionId);
-            const linkedSession = session?.linkedSessionId
-              ? await this.host.sessionStore.getSession(session.linkedSessionId)
-              : null;
             const inboxCount =
               await this.host.inboxStore.countInboxMessages(sessionId);
             const display = splitSessionDisplayLabel({
               sessionId,
               ...(session?.label ? { sessionLabel: session.label } : {}),
             });
-            const groupKey = display.ownerLabel ?? "";
+            const groupKey =
+              parseLiveRelaySessionId(sessionId)?.clientUuid ??
+              display.ownerLabel ??
+              sessionId;
             const items = groupedSessions.get(groupKey) ?? [];
             items.push({
               sessionId,
               ...(display.shortLabel ? { sessionLabel: display.shortLabel } : {}),
-              ...(linkedSession?.label
-                ? { linkedSessionLabel: linkedSession.label }
-                : session?.linkedSessionId
-                  ? { linkedSessionLabel: session.linkedSessionId }
-                  : {}),
+              ...(display.ownerLabel ? { ownerLabel: display.ownerLabel } : {}),
               active: sessionId === activeSessionId,
               inboxCount,
               sortKey: `${display.shortLabel}\u0000${sessionId}`,
@@ -972,9 +963,9 @@ export class TransportMenuFactories {
               payload &&
               (payload.kind === "session-group" ||
                 payload.kind === "active-session") &&
-              typeof payload.ownerLabel === "string"
+              typeof payload.ownerKey === "string"
             ) {
-              selectedOwnerLabel = payload.ownerLabel;
+              selectedOwnerLabel = payload.ownerKey;
             }
           }
 
@@ -987,12 +978,14 @@ export class TransportMenuFactories {
           if (!selectedOwnerLabel) {
             for (const [groupKey, items] of sortedGroups) {
               const title =
-                groupKey || (items.length === 1 ? items[0]?.sessionLabel : null) || "Sessions";
+                items[0]?.ownerLabel ||
+                (items.length === 1 ? items[0]?.sessionLabel : null) ||
+                "Sessions";
               range.text(
                 {
                   text: `👤 ${title}`.slice(0, 56),
                   payload: async () =>
-                    this.host.createSessionGroupMenuPayload(groupKey),
+                    this.host.createSessionGroupMenuPayload(title, groupKey),
                 },
                 async (innerCtx) => {
                   await this.host.handleSessionGroupSelection(innerCtx);
@@ -1016,13 +1009,11 @@ export class TransportMenuFactories {
                     active: item.active,
                     inboxCount: item.inboxCount,
                     ...(item.sessionLabel ? { sessionLabel: item.sessionLabel } : {}),
-                    ...(item.linkedSessionLabel
-                      ? { linkedSessionLabel: item.linkedSessionLabel }
-                      : {}),
                   }),
                   payload: async () =>
                     this.host.createSessionMenuPayload(
                       item.sessionId,
+                      item.ownerLabel ?? items[0]?.ownerLabel ?? undefined,
                       selectedOwnerLabel ?? groupKey,
                     ),
                 },
@@ -1070,7 +1061,7 @@ export class TransportMenuFactories {
             if (
               payload &&
               payload.kind === "session-group" &&
-              typeof payload.ownerLabel === "string"
+              typeof payload.ownerKey === "string"
             ) {
               return currentPayloadKey;
             }
@@ -1096,7 +1087,7 @@ export class TransportMenuFactories {
             if (
               payload &&
               payload.kind === "session-group" &&
-              typeof payload.ownerLabel === "string"
+              typeof payload.ownerKey === "string"
             ) {
               return currentPayloadKey;
             }

@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 import { InlineKeyboard, InputFile } from "grammy";
 
 import type { AppConfig } from "../../../app/config/env";
+import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
 import { buildProjectMemberDetailText } from "./collabUi";
 import {
   buildCollabDeleteMenuText,
@@ -205,10 +206,6 @@ export class TransportProjectView {
         gatewayNotConfiguredLine: this.host.t(
           locale,
           "menu:collab.screen.gateway_not_configured",
-        ),
-        useLocalInsteadLine: this.host.t(
-          locale,
-          "menu:collab.screen.use_local_instead",
         ),
       });
     }
@@ -614,12 +611,21 @@ export class TransportProjectView {
           },
         );
       }
-      await this.host.editText(
-        ctx,
-        text,
-        { kind: "menu", sessionId: input.sessionId },
-        { parse_mode: "HTML", reply_markup: keyboard },
-      );
+      try {
+        await this.host.editText(
+          ctx,
+          text,
+          { kind: "menu", sessionId: input.sessionId },
+          { parse_mode: "HTML", reply_markup: keyboard },
+        );
+      } catch {
+        await this.host.replyText(
+          ctx,
+          text,
+          { kind: "menu", sessionId: input.sessionId },
+          { parse_mode: "HTML", reply_markup: keyboard },
+        );
+      }
       return;
     }
 
@@ -729,12 +735,21 @@ export class TransportProjectView {
 
     const text = lines.join("\n");
     if (ctx.callbackQuery?.message) {
-      await this.host.editText(
-        ctx,
-        text,
-        { kind: "menu", sessionId: input.sessionId },
-        { reply_markup: keyboard },
-      );
+      try {
+        await this.host.editText(
+          ctx,
+          text,
+          { kind: "menu", sessionId: input.sessionId },
+          { reply_markup: keyboard },
+        );
+      } catch {
+        await this.host.replyText(
+          ctx,
+          text,
+          { kind: "menu", sessionId: input.sessionId },
+          { reply_markup: keyboard },
+        );
+      }
       return;
     }
 
@@ -772,9 +787,14 @@ export class TransportProjectView {
       },
       input.projectUuid,
     );
-    const activeSessionId = session?.sessionId ?? null;
+    const activeRelay = parseLiveRelaySessionId(input.sessionId);
+    const activeSessionId =
+      activeRelay?.localSessionId ?? session?.sessionId ?? null;
+    const activeClientUuid = activeRelay?.clientUuid ?? null;
     const selectableMembers = sessions.filter(
-      (item) => item.local_session_id !== activeSessionId,
+      (item) =>
+        item.local_session_id !== activeSessionId &&
+        item.client_uuid !== activeClientUuid,
     );
 
     const lines = [
@@ -802,30 +822,34 @@ export class TransportProjectView {
     const keyboard = new InlineKeyboard();
     for (const member of selectableMembers) {
       const sessionLabel = member.label?.trim() || member.local_session_id;
+      const displayNameRaw = member.display_name?.trim() || null;
       const telegramUsernameRaw = member.telegram_username?.trim() || null;
-      const botUsernameRaw = member.bot_username?.trim() || null;
+      const systemUsernameRaw = member.system_username?.trim() || null;
+      const clientLabelRaw = member.client_label?.trim() || null;
       const normalizedTelegramUsername =
         telegramUsernameRaw?.replace(/^@/u, "") || null;
-      const normalizedBotUsername = botUsernameRaw?.replace(/^@/u, "") || null;
-      const identityParts = [
-        normalizedTelegramUsername ? `👤${normalizedTelegramUsername}` : null,
-        normalizedBotUsername ? `🤖${normalizedBotUsername}` : null,
-      ].filter(Boolean);
-      const buttonLabel = identityParts.length > 0
-        ? `${sessionLabel} · ${identityParts.join(" / ")}`.slice(0, 56)
-        : sessionLabel.slice(0, 56);
+      const primaryIdentity =
+        displayNameRaw ||
+        (normalizedTelegramUsername ? `@${normalizedTelegramUsername}` : null) ||
+        clientLabelRaw ||
+        systemUsernameRaw ||
+        sessionLabel;
+      const targetDisplayLabel =
+        primaryIdentity !== sessionLabel
+          ? `${primaryIdentity}/${sessionLabel}`
+          : primaryIdentity;
       const payloadKey = await this.host.createProjectMemberMenuPayload(
         input.sessionId,
         input.projectUuid,
         member.session_uuid,
-        sessionLabel,
+        targetDisplayLabel,
         {
           ...(options?.filePath ? { filePath: options.filePath } : {}),
           targetClientUuid: member.client_uuid,
           targetLocalSessionId: member.local_session_id,
         },
       );
-      keyboard.text(buttonLabel, `project-member-open:${payloadKey}`).row();
+      keyboard.text(targetDisplayLabel.slice(0, 56), `project-member-open:${payloadKey}`).row();
     }
 
     keyboard

@@ -251,6 +251,8 @@ export class TelegramTransport implements HumanTransport {
         this.isPrincipalAdminAuthorized(principal),
       setPrincipalAdminAuthorized: (principal) =>
         this.setPrincipalAdminAuthorized(principal),
+      ensureGatewayUserForPrincipal: (input) =>
+        this.ensureGatewayUserForPrincipal(input.principal, input.ctx),
     });
     this.telegramFetch = composition.telegramFetch;
     this.bot = composition.bot;
@@ -341,6 +343,23 @@ export class TelegramTransport implements HumanTransport {
     telegramUserId: number;
   }): Promise<void> {
     await this.adminAuthStore.setAdminAuthorized(principal);
+  }
+
+  private async ensureGatewayUserForPrincipal(
+    principal: { telegramChatId: number; telegramUserId: number },
+    ctx: TelegramMenuContext,
+  ): Promise<{ gateway_user_uuid: string }> {
+    const actor = this.context.getGatewayActorFromContext(ctx);
+    return this.callGatewayJson<{ gateway_user_uuid: string }>("/user/auth", {
+      telegram_user_id: principal.telegramUserId,
+      telegram_chat_id: principal.telegramChatId,
+      ...(actor?.telegramUsername
+        ? { telegram_username: actor.telegramUsername }
+        : {}),
+      ...(actor?.telegramDisplayName
+        ? { telegram_display_name: actor.telegramDisplayName }
+        : {}),
+    });
   }
 
   public setCollaborationService(service: CollaborationService): void {
@@ -564,6 +583,7 @@ export class TelegramTransport implements HumanTransport {
 
   public async sendAdminGatewayRegistrationNotifications(input: {
     clientUuid: string;
+    gatewayUserUuid?: string;
     nodeId?: string;
     packageVersion?: string;
     totalSessions: number;

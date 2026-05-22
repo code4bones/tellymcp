@@ -1,5 +1,5 @@
 import type { AppConfig } from "../../../app/config/env";
-import { buildLiveRelaySessionId } from "../../../app/webapp/relay";
+import { buildLiveRelaySessionId, parseLiveRelaySessionId } from "../../../app/webapp/relay";
 import type { SessionContext } from "../../../entities/session/model/types";
 import type {
   GatewayActorProfile,
@@ -55,6 +55,46 @@ export interface TransportProjectStateHost {
 export class TransportProjectState {
   public constructor(private readonly host: TransportProjectStateHost) {}
 
+  private extractShortSessionLabel(session: SessionContext, fallback: string): string {
+    const label = session.label?.trim() || fallback;
+    const separator = " · ";
+    const separatorIndex = label.indexOf(separator);
+    if (separatorIndex <= 0) {
+      return label;
+    }
+    return label.slice(0, separatorIndex).trim() || fallback;
+  }
+
+  private async resolveProjectClientTarget(input: {
+    principal: Principal;
+    sessionId?: string;
+    actor?: GatewayActorProfile;
+  }): Promise<{
+    clientUuid: string;
+    localSessionId: string | null;
+    sessionId: string | null;
+  }> {
+    const resolvedSessionId =
+      input.sessionId ??
+      (await this.host.bindingStore.getActiveSessionIdForPrincipal(input.principal));
+    if (resolvedSessionId) {
+      const relay = parseLiveRelaySessionId(resolvedSessionId);
+      if (relay) {
+        return {
+          clientUuid: relay.clientUuid,
+          localSessionId: relay.localSessionId,
+          sessionId: resolvedSessionId,
+        };
+      }
+    }
+
+    return {
+      clientUuid: await this.ensureGatewayClientUuid(input.principal, input.actor),
+      localSessionId: resolvedSessionId ?? null,
+      sessionId: resolvedSessionId ?? null,
+    };
+  }
+
   public async ensureGatewayClientUuid(
     principal: Principal,
     actor?: GatewayActorProfile,
@@ -100,11 +140,17 @@ export class TransportProjectState {
     principal: Principal,
     actor?: GatewayActorProfile,
   ): Promise<GatewayProjectRecord[]> {
-    const clientUuid = await this.ensureGatewayClientUuid(principal, actor);
+    const target = await this.resolveProjectClientTarget({
+      principal,
+      ...(actor ? { actor } : {}),
+    });
     const response = await this.host.callGatewayJson<{
       projects: GatewayProjectRecord[];
     }>("/projects/list", {
-      client_uuid: clientUuid,
+      client_uuid: target.clientUuid,
+      ...(target.localSessionId
+        ? { local_session_id: target.localSessionId }
+        : {}),
     });
     return response.projects;
   }
@@ -113,7 +159,9 @@ export class TransportProjectState {
     principal: Principal,
     projectUuid: string,
   ): Promise<GatewayProjectSessionRecord[]> {
-    const clientUuid = await this.ensureGatewayClientUuid(principal);
+    const { clientUuid } = await this.resolveProjectClientTarget({
+      principal,
+    });
     const response = await this.host.callGatewayJson<{
       sessions: GatewayProjectSessionRecord[];
     }>("/projects/sessions", {
@@ -142,7 +190,9 @@ export class TransportProjectState {
       delivery_status?: string;
     }>
   > {
-    const clientUuid = await this.ensureGatewayClientUuid(principal);
+    const { clientUuid } = await this.resolveProjectClientTarget({
+      principal,
+    });
     const response = await this.host.callGatewayJson<{
       history: Array<{
         message_uuid: string;
@@ -176,12 +226,16 @@ export class TransportProjectState {
       throw new Error("Active session not found.");
     }
 
-    const clientUuid = await this.ensureGatewayClientUuid(input.principal);
+    const target = await this.resolveProjectClientTarget({
+      principal: input.principal,
+      sessionId: input.sessionId,
+    });
+    const localSessionId = target.localSessionId ?? session.sessionId;
     await this.host.callGatewayJson("/sessions/register", {
-      client_uuid: clientUuid,
+      client_uuid: target.clientUuid,
       project_uuid: input.projectUuid,
-      local_session_id: session.sessionId,
-      label: session.label ?? session.sessionId,
+      local_session_id: localSessionId,
+      label: this.extractShortSessionLabel(session, localSessionId),
       cwd: session.cwd,
       tmux_session_name: session.tmuxSessionName,
       tmux_window_name: session.tmuxWindowName,
@@ -233,12 +287,6 @@ export class TransportProjectState {
     if (!session) {
       throw new Error("Active session not found.");
     }
-
-    await this.ensureProjectSessionRegistered({
-      principal: input.principal,
-      sessionId: input.sessionId,
-      projectUuid: input.projectUuid,
-    });
 
     await this.host.sessionStore.setSession({
       ...session,

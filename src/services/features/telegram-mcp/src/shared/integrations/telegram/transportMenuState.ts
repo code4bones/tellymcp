@@ -1,5 +1,6 @@
 import type { Logger } from "../../lib/logger/logger";
 import type { SupportedLocale } from "../../i18n";
+import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
 import type {
   CurrentAttachmentTargetRecord,
   TelegramMenuContext,
@@ -154,9 +155,6 @@ export class TransportMenuState {
     const projectName = session?.activeProjectName
       ? escapeHtml(session.activeProjectName)
       : null;
-    const linkedSession = session?.linkedSessionId
-      ? await this.host.sessionStore.getSession(session.linkedSessionId)
-      : null;
     return buildMainMenuText({
       title: this.host.t(locale, "menu:main.screen.title", { sessionName }),
       inboxMessagesLine: this.host.t(locale, "menu:main.screen.inbox_messages", {
@@ -165,19 +163,6 @@ export class TransportMenuState {
       projectLine: projectName
         ? this.host.t(locale, "menu:main.screen.project", { projectName })
         : null,
-      partnerLine: session?.linkedSessionId
-        ? this.host.t(locale, "menu:main.screen.partner", {
-            partnerName: escapeHtml(
-              linkedSession?.label ?? session.linkedSessionId,
-            ),
-          })
-        : null,
-      partnerHintLine: session?.linkedSessionId
-        ? this.host.t(locale, "menu:main.screen.partner_hint")
-        : null,
-      linkHintLine: session?.linkedSessionId
-        ? null
-        : this.host.t(locale, "menu:main.screen.link_hint"),
     });
   }
 
@@ -295,28 +280,37 @@ export class TransportMenuState {
       if (
         payload &&
         (payload.kind === "session-group" || payload.kind === "active-session") &&
-        typeof payload.ownerLabel === "string"
+        typeof payload.ownerKey === "string"
       ) {
-        selectedOwnerLabel = payload.ownerLabel;
+        selectedOwnerLabel = payload.ownerKey;
       }
     }
 
-    const groupedSessions = new Map<string, string[]>();
+    const groupedSessions = new Map<string, { ownerLabel: string | null; labels: string[] }>();
     for (const sessionId of sessionIds) {
       const session = await this.host.sessionStore.getSession(sessionId);
       const display = splitSessionDisplayLabel({
         sessionId,
         ...(session?.label ? { sessionLabel: session.label } : {}),
       });
-      const groupKey = display.ownerLabel ?? "";
-      const labels = groupedSessions.get(groupKey) ?? [];
-      labels.push(display.shortLabel);
-      groupedSessions.set(groupKey, labels);
+      const groupKey =
+        parseLiveRelaySessionId(sessionId)?.clientUuid ??
+        display.ownerLabel ??
+        sessionId;
+      const currentGroup = groupedSessions.get(groupKey) ?? {
+        ownerLabel: display.ownerLabel,
+        labels: [],
+      };
+      currentGroup.labels.push(display.shortLabel);
+      if (!currentGroup.ownerLabel && display.ownerLabel) {
+        currentGroup.ownerLabel = display.ownerLabel;
+      }
+      groupedSessions.set(groupKey, currentGroup);
     }
 
     if (groupedSessions.size > 0) {
       lines.push(this.host.t(locale, "menu:sessions.screen.choose_session"));
-      for (const [groupKey, labels] of [...groupedSessions.entries()].sort(
+      for (const [groupKey, group] of [...groupedSessions.entries()].sort(
         (left, right) => {
           const leftKey = left[0] || "\uffff";
           const rightKey = right[0] || "\uffff";
@@ -326,12 +320,12 @@ export class TransportMenuState {
         if (selectedOwnerLabel !== null && groupKey !== selectedOwnerLabel) {
           continue;
         }
-        const renderedLabels = labels.sort((left, right) =>
+        const renderedLabels = group.labels.sort((left, right) =>
           left.localeCompare(right),
         );
         if (selectedOwnerLabel !== null) {
-          if (groupKey) {
-            lines.push(`• ${escapeHtml(groupKey)}`);
+          if (group.ownerLabel) {
+            lines.push(`• ${escapeHtml(group.ownerLabel)}`);
             lines.push("");
           }
           for (const label of renderedLabels) {
@@ -339,9 +333,9 @@ export class TransportMenuState {
           }
           break;
         }
-        if (groupKey) {
+        if (group.ownerLabel) {
           lines.push(
-            `• ${escapeHtml(groupKey)}: ${escapeHtml(renderedLabels.join(", "))}`,
+            `• ${escapeHtml(group.ownerLabel)}: ${escapeHtml(renderedLabels.join(", "))}`,
           );
         } else {
           lines.push(`• ${escapeHtml(renderedLabels.join(", "))}`);

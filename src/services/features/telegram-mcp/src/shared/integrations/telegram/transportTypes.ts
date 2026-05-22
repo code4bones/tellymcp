@@ -133,7 +133,9 @@ export type GatewayProjectSessionRecord = {
   label: string | null;
   status: string;
   client_label: string | null;
+  display_name: string | null;
   telegram_username: string | null;
+  system_username: string | null;
   bot_username: string | null;
   joined_at?: string;
   updated_at?: string;

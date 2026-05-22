@@ -39,6 +39,8 @@ export interface TransportConsoleRegistryHost {
 export class TransportConsoleRegistry {
   public constructor(private readonly host: TransportConsoleRegistryHost) {}
 
+  private readonly labelSeparator = " · ";
+
   private async clearStaleRelaySessions(input: {
     existingBound: Set<string>;
     liveRelaySessionIds: Set<string>;
@@ -56,11 +58,16 @@ export class TransportConsoleRegistry {
     }
   }
 
-  public async listScopedConsoles(): Promise<GatewayKnownSessionRecord[]> {
+  public async listScopedConsoles(input?: {
+    principal?: Principal;
+  }): Promise<GatewayKnownSessionRecord[]> {
     const response = await this.host.callGatewayJson<{
       sessions?: GatewayKnownSessionRecord[];
     }>("/sessions/known", {
       connected_only: true,
+      ...(input?.principal
+        ? { telegram_user_id: input.principal.telegramUserId }
+        : {}),
       ...(this.host.config.distributed.gatewayToken
         ? { gateway_token: this.host.config.distributed.gatewayToken }
         : {}),
@@ -79,7 +86,9 @@ export class TransportConsoleRegistry {
     const existingBound = new Set(
       await this.host.bindingStore.listBoundSessionIdsForPrincipal(input.principal),
     );
-    const consoles = await this.listScopedConsoles();
+    const consoles = await this.listScopedConsoles({
+      principal: input.principal,
+    });
     const liveRelaySessionIds = new Set(
       consoles.map((consoleSession) =>
         buildLiveRelaySessionId(
@@ -161,10 +170,8 @@ export class TransportConsoleRegistry {
     const nextSession: SessionContext = {
       sessionId: input.relaySessionId,
       label,
-      ...(input.consoleSession.project_uuids[0]
-        ? { activeProjectUuid: input.consoleSession.project_uuids[0] }
-        : {}),
-      ...(projectName ? { activeProjectName: projectName } : {}),
+      activeProjectUuid: input.consoleSession.project_uuids[0] ?? undefined,
+      activeProjectName: projectName ?? undefined,
       updatedAt: new Date().toISOString(),
     };
 
@@ -210,6 +217,9 @@ export class TransportConsoleRegistry {
       session.client_label?.trim() ||
       session.node_id?.trim() ||
       session.client_uuid.slice(0, 8);
+    if (base.includes(this.labelSeparator)) {
+      return base;
+    }
     return owner ? `${base} · ${owner}` : base;
   }
 }

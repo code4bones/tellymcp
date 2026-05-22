@@ -808,6 +808,52 @@ export class GatewayHttpService {
       }
     }
 
+    if (pathname === "/gateway/user/auth") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const result = await this.callBroker(
+          "telegramMcp.gateway.upsertGatewayUser",
+          body,
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, result);
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/user/route") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const result = await this.callBroker(
+          "telegramMcp.gateway.resolveGatewayUserRoute",
+          body,
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, result ?? {});
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
     if (pathname === "/gateway/relay/inbox") {
       if (req.method !== "POST") {
         writeText(res, 405, "Method not allowed");
@@ -1114,6 +1160,16 @@ export class GatewayHttpService {
           typeof body.client_uuid === "string" && body.client_uuid.trim()
             ? body.client_uuid.trim()
             : null;
+        const ownerUserUuid =
+          typeof body.owner_user_uuid === "string" && body.owner_user_uuid.trim()
+            ? body.owner_user_uuid.trim()
+            : null;
+        const telegramUserId =
+          typeof body.telegram_user_id === "number"
+            ? String(body.telegram_user_id)
+            : typeof body.telegram_user_id === "string" && body.telegram_user_id.trim()
+              ? body.telegram_user_id.trim()
+              : null;
         const connectedOnly = typeof body.connected_only === "boolean"
           ? body.connected_only
           : false;
@@ -1165,7 +1221,21 @@ export class GatewayHttpService {
             }>;
           }>,
         ]);
-        void scopedClientsResult;
+        const allowedClientUuids =
+          ownerUserUuid || telegramUserId
+            ? new Set(
+                (Array.isArray(scopedClientsResult.clients)
+                  ? scopedClientsResult.clients
+                  : []
+                )
+                  .map((client) =>
+                    typeof client.client_uuid === "string"
+                      ? client.client_uuid.trim()
+                      : "",
+                  )
+                  .filter(Boolean),
+              )
+            : null;
 
         const merged = new Map<
           string,
@@ -1228,6 +1298,12 @@ export class GatewayHttpService {
         for (const client of Array.isArray(connectedResult.clients)
           ? connectedResult.clients
           : []) {
+          if (
+            allowedClientUuids &&
+            !allowedClientUuids.has(client.client_uuid)
+          ) {
+            continue;
+          }
           for (const sessionTool of Array.isArray(client.session_tools)
             ? client.session_tools
             : []) {
@@ -1238,7 +1314,7 @@ export class GatewayHttpService {
               client_uuid: client.client_uuid,
               local_session_id: sessionTool.local_session_id,
               session_label:
-                current?.session_label ?? sessionTool.session_label ?? null,
+                sessionTool.session_label ?? current?.session_label ?? null,
               ...(current?.client_label
                 ? { client_label: current.client_label }
                 : client.client_label
@@ -1271,6 +1347,9 @@ export class GatewayHttpService {
         }
 
         const sessions = Array.from(merged.values())
+          .filter((session) =>
+            allowedClientUuids ? allowedClientUuids.has(session.client_uuid) : true,
+          )
           .filter((session) =>
             filterClientUuid ? session.client_uuid === filterClientUuid : true,
           )

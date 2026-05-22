@@ -47,6 +47,7 @@ export class TransportRequestFlow {
 
   public async sendAdminGatewayRegistrationNotifications(input: {
     clientUuid: string;
+    gatewayUserUuid?: string;
     nodeId?: string;
     packageVersion?: string;
     totalSessions: number;
@@ -57,88 +58,93 @@ export class TransportRequestFlow {
       return;
     }
 
-    if (!this.host.isAdminAuthEnabled()) {
-      return;
-    }
+    const ownerRoute = await this.host.callGatewayJson<{
+      gateway_user_uuid?: string;
+      telegram_user_id?: number;
+      telegram_chat_id?: number | null;
+      telegram_username?: string;
+      telegram_display_name?: string;
+    }>("/user/route", {
+      client_uuid: input.clientUuid,
+      ...(input.gatewayUserUuid ? { gateway_user_uuid: input.gatewayUserUuid } : {}),
+    });
 
-    const principals = await this.host.adminAuthStore.listAdminAuthorizedPrincipals();
-    if (principals.length === 0) {
+    if (
+      typeof ownerRoute.telegram_user_id !== "number" ||
+      typeof ownerRoute.telegram_chat_id !== "number"
+    ) {
       this.host.logger.debug(
-        "Skipping gateway registration admin notifications because no admins are authorized",
+        "Skipping gateway registration notification because owner Telegram route is unavailable",
         {
           clientUuid: input.clientUuid,
+          gatewayUserUuid: input.gatewayUserUuid ?? null,
         },
       );
       return;
     }
 
-    const notifiedChats = new Set<string>();
-    for (const principal of principals) {
-      const dedupeKey = `${principal.telegramChatId}:${principal.telegramUserId}`;
-      if (notifiedChats.has(dedupeKey)) {
-        continue;
-      }
-
-      const locale = await this.host.resolveLocaleForTelegramUserId(
-        principal.telegramUserId,
-      );
-      const lines = [
-        this.host.t(
-          locale,
-          input.isNewClient
-            ? "menu:notices.admin.gateway_client_registered_title"
-            : "menu:notices.admin.gateway_session_registered_title",
-        ),
-        this.host.t(locale, "menu:notices.admin.gateway_client_uuid", {
-          value: input.clientUuid,
-        }),
-        ...(input.nodeId
-          ? [
-              this.host.t(locale, "menu:notices.admin.gateway_node_id", {
-                value: input.nodeId,
+    const principal = {
+      telegramChatId: ownerRoute.telegram_chat_id,
+      telegramUserId: ownerRoute.telegram_user_id,
+    };
+    const locale = await this.host.resolveLocaleForTelegramUserId(
+      principal.telegramUserId,
+    );
+    const lines = [
+      this.host.t(
+        locale,
+        input.isNewClient
+          ? "menu:notices.admin.gateway_client_registered_title"
+          : "menu:notices.admin.gateway_session_registered_title",
+      ),
+      this.host.t(locale, "menu:notices.admin.gateway_client_uuid", {
+        value: input.clientUuid,
+      }),
+      ...(input.nodeId
+        ? [
+            this.host.t(locale, "menu:notices.admin.gateway_node_id", {
+              value: input.nodeId,
+            }),
+          ]
+        : []),
+      ...(input.packageVersion
+        ? [
+            this.host.t(locale, "menu:notices.admin.gateway_package_version", {
+              value: input.packageVersion,
+            }),
+          ]
+        : []),
+      this.host.t(locale, "menu:notices.admin.gateway_session_count", {
+        count: input.totalSessions,
+      }),
+      ...(input.newSessions.length > 0
+        ? [
+            "",
+            this.host.t(locale, "menu:notices.admin.gateway_new_sessions"),
+            ...input.newSessions.map((session) =>
+              this.host.t(locale, "menu:notices.admin.gateway_session_item", {
+                label: session.session_label?.trim() || session.local_session_id,
+                localSessionId: session.local_session_id,
               }),
-            ]
-          : []),
-        ...(input.packageVersion
-          ? [
-              this.host.t(locale, "menu:notices.admin.gateway_package_version", {
-                value: input.packageVersion,
-              }),
-            ]
-          : []),
-        this.host.t(locale, "menu:notices.admin.gateway_session_count", {
-          count: input.totalSessions,
-        }),
-        ...(input.newSessions.length > 0
-          ? [
-              "",
-              this.host.t(locale, "menu:notices.admin.gateway_new_sessions"),
-              ...input.newSessions.map((session) =>
-                this.host.t(locale, "menu:notices.admin.gateway_session_item", {
-                  label: session.session_label?.trim() || session.local_session_id,
-                  localSessionId: session.local_session_id,
-                }),
-              ),
-            ]
-          : []),
-      ];
+            ),
+          ]
+        : []),
+    ];
 
-      try {
-        await this.sendNotification({
-          sessionId: `gateway-admin:${input.clientUuid}`,
-          sessionLabel: "Gateway Admin",
-          recipient: principal,
-          message: lines.join("\n"),
-        });
-        notifiedChats.add(dedupeKey);
-      } catch (error) {
-        this.host.logger.warn("Failed to deliver gateway registration admin notification", {
-          telegramChatId: principal.telegramChatId,
-          telegramUserId: principal.telegramUserId,
-          clientUuid: input.clientUuid,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
+    try {
+      await this.sendNotification({
+        sessionId: `gateway-owner:${input.clientUuid}`,
+        sessionLabel: "Gateway",
+        recipient: principal,
+        message: lines.join("\n"),
+      });
+    } catch (error) {
+      this.host.logger.warn("Failed to deliver gateway registration owner notification", {
+        telegramChatId: principal.telegramChatId,
+        telegramUserId: principal.telegramUserId,
+        clientUuid: input.clientUuid,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

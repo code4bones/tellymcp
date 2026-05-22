@@ -68,14 +68,10 @@ export function formatStoragePreviewLabel(
 export function formatSessionMenuLabel(input: {
   sessionId: string;
   sessionLabel?: string;
-  linkedSessionLabel?: string;
   active: boolean;
   inboxCount: number;
 }): string {
-  const baseName = input.sessionLabel ?? input.sessionId;
-  const base = input.linkedSessionLabel
-    ? `${baseName} → ${input.linkedSessionLabel}`
-    : baseName;
+  const base = input.sessionLabel ?? input.sessionId;
   const activePrefix = input.active ? "✅ " : "📁 ";
   const inboxSuffix = input.inboxCount > 0 ? ` (${input.inboxCount})` : "";
   return `${activePrefix}${base}${inboxSuffix}`;

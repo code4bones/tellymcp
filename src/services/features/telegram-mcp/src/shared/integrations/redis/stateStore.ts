@@ -167,7 +167,6 @@ export class RedisStateStore
   }
 
   public async clearSession(sessionId: string): Promise<void> {
-    await this.unlinkPartnerSession(sessionId);
     await this.clearXchangeFileMetas(sessionId);
     await this.clearProjectMenuViewStates(sessionId);
     await this.clearOutgoingDeliveryNoticesForSession(sessionId);
@@ -284,7 +283,6 @@ export class RedisStateStore
   }
 
   public async clearBinding(sessionId: string): Promise<void> {
-    await this.unlinkPartnerSession(sessionId);
     const existing = await this.getBinding(sessionId);
     await this.redis.del(bindingKey(sessionId));
     if (existing) {
@@ -649,32 +647,6 @@ export class RedisStateStore
     }
 
     await this.redis.del(activeKey);
-  }
-
-  private async unlinkPartnerSession(sessionId: string): Promise<void> {
-    const sourceSession = await this.getSession(sessionId);
-    if (!sourceSession?.linkedSessionId) {
-      return;
-    }
-
-    const { linkedSessionId: partnerId } = sourceSession;
-    const { linkedSessionId: _linkedSessionId, ...restSource } = sourceSession;
-    await this.setSession({
-      ...restSource,
-      updatedAt: new Date().toISOString(),
-    });
-
-    const partnerSession = await this.getSession(partnerId);
-    if (!partnerSession || partnerSession.linkedSessionId !== sessionId) {
-      return;
-    }
-
-    const { linkedSessionId: _partnerLinkedSessionId, ...restPartner } =
-      partnerSession;
-    await this.setSession({
-      ...restPartner,
-      updatedAt: new Date().toISOString(),
-    });
   }
 
   private async clearXchangeFileMetas(sessionId: string): Promise<void> {

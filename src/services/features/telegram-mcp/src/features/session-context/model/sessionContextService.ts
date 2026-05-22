@@ -63,9 +63,6 @@ export class SessionContextService {
             ? { label: existing.label }
             : {}),
       ...(existing?.cwd ? { cwd: existing.cwd } : { cwd: resolved.cwd }),
-      ...(existing?.linkedSessionId
-        ? { linkedSessionId: existing.linkedSessionId }
-        : {}),
       ...(existing?.activeProjectUuid
         ? { activeProjectUuid: existing.activeProjectUuid }
         : {}),
@@ -163,9 +160,6 @@ export class SessionContextService {
       sessionId: resolved.sessionId,
       label,
       ...(existing?.cwd ? { cwd: existing.cwd } : { cwd: resolved.cwd }),
-      ...(existing?.linkedSessionId
-        ? { linkedSessionId: existing.linkedSessionId }
-        : {}),
       ...(existing?.activeProjectUuid
         ? { activeProjectUuid: existing.activeProjectUuid }
         : {}),
@@ -236,9 +230,6 @@ export class SessionContextService {
     }
     const session = await this.sessionStore.getSession(resolved.sessionId);
     const binding = await this.bindingStore.getBinding(resolved.sessionId);
-    const linkedSession = session?.linkedSessionId
-      ? await this.sessionStore.getSession(session.linkedSessionId)
-      : null;
 
     this.logger.debug("Session context requested", {
       sessionId: resolved.sessionId,
@@ -265,12 +256,6 @@ export class SessionContextService {
             context: {
               ...(session.label ? { session_label: session.label } : {}),
               ...(session.cwd ? { cwd: session.cwd } : {}),
-              ...(session.linkedSessionId
-                ? { linked_session_id: session.linkedSessionId }
-                : {}),
-              ...(linkedSession?.label
-                ? { linked_session_label: linkedSession.label }
-                : {}),
               ...(session.activeProjectUuid
                 ? { active_project_uuid: session.activeProjectUuid }
                 : {}),

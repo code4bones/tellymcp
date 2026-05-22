@@ -30,8 +30,6 @@ export interface TransportMenuCallbacksHost {
   ): Promise<void>;
   showMainMenu(ctx: TelegramMenuContext, introText?: string): Promise<void>;
   showSessionsMenu(ctx: TelegramMenuContext, introText?: string): Promise<void>;
-  showLinkMenu(ctx: TelegramMenuContext): Promise<void>;
-  showPartnerMenu(ctx: TelegramMenuContext): Promise<void>;
   showScreenshotsMenu(ctx: TelegramMenuContext, introText?: string): Promise<void>;
   showStorageMenu(ctx: TelegramMenuContext, introText?: string): Promise<void>;
   storageMessageMenu: unknown;
@@ -85,129 +83,11 @@ export interface TransportMenuCallbacksHost {
     source: "browser-screenshot" | "telegram-upload",
   ): Promise<{ session: SessionContext | null; filePath: string }>;
   sendDocumentToChat(chatId: number, filePath: string, caption: string): Promise<{ messageId: number }>;
-  linkSessions(sessionId: string, targetSessionId: string): Promise<void>;
   maybeNotifyToolsMismatchForSession(sessionId: string): Promise<void>;
 }
 
 export class TransportMenuCallbacks {
   public constructor(private readonly host: TransportMenuCallbacksHost) {}
-
-  public async showPartnerEntryPoint(ctx: TelegramMenuContext): Promise<void> {
-    const principal = this.host.getPrincipalFromContext(ctx);
-    if (!principal) {
-      await ctx.answerCallbackQuery({
-        text: await this.host.tForContext(ctx, "common:errors.no_telegram_identity"),
-        show_alert: true,
-      });
-      return;
-    }
-    const sessionId = await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
-    if (!sessionId) {
-      await ctx.answerCallbackQuery({
-        text: await this.host.tForContext(ctx, "common:errors.no_active_session"),
-        show_alert: true,
-      });
-      return;
-    }
-    const session = await this.host.sessionStore.getSession(sessionId);
-    if (!session?.linkedSessionId) {
-      await ctx.answerCallbackQuery({
-        text: await this.host.tForContext(ctx, "menu:partner.screen.use_link_first"),
-        show_alert: true,
-      });
-      return;
-    }
-    await ctx.answerCallbackQuery({
-      text: await this.host.tForContext(ctx, "menu:partner.actions.open_partner_menu"),
-    });
-    await this.host.showPartnerMenu(ctx);
-  }
-
-  public async showPartnerFiles(ctx: TelegramMenuContext): Promise<void> {
-    const principal = this.host.getPrincipalFromContext(ctx);
-    if (!principal) {
-      await ctx.answerCallbackQuery({
-        text: await this.host.tForContext(ctx, "common:errors.no_telegram_identity"),
-        show_alert: true,
-      });
-      return;
-    }
-    const sessionId = await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
-    if (!sessionId) {
-      await ctx.answerCallbackQuery({
-        text: await this.host.tForContext(ctx, "common:errors.no_active_session"),
-        show_alert: true,
-      });
-      return;
-    }
-    const session = await this.host.sessionStore.getSession(sessionId);
-    if (!session?.linkedSessionId) {
-      await ctx.answerCallbackQuery({
-        text: await this.host.tForContext(ctx, "menu:partner.screen.use_link_first"),
-        show_alert: true,
-      });
-      return;
-    }
-
-    const linkedSession = await this.host.sessionStore.getSession(session.linkedSessionId);
-    const files = await this.host.listActiveSessionFiles(sessionId);
-    const lines = [
-      await this.host.tForContext(ctx, "menu:handoff.choose_title"),
-      "",
-      await this.host.tForContext(ctx, "menu:handoff.choose_recipient", {
-        label: linkedSession?.label ?? session.linkedSessionId,
-      }),
-      "",
-      files.length > 0
-        ? await this.host.tForContext(ctx, "menu:handoff.choose_local")
-        : await this.host.tForContext(ctx, "menu:handoff.no_files"),
-    ];
-
-    const { InlineKeyboard } = await import("grammy");
-    const keyboard = new InlineKeyboard();
-    for (const filePath of files) {
-      const meta = await this.host.xchangeFileMetaStore.getXchangeFileMeta(sessionId, filePath);
-      const label = this.host.formatFilePreviewLabel(filePath, meta).slice(0, 56);
-      const key = await this.host.createPartnerFileTargetPayload(
-        sessionId,
-        session.linkedSessionId,
-        linkedSession?.label ?? session.linkedSessionId,
-        filePath,
-      );
-      keyboard.text(label, `partner-file-open:${key}`).row();
-    }
-    keyboard.text(await this.host.tForContext(ctx, "common:menu.back"), "partner-back");
-    const text = lines.join("\n");
-    if (ctx.callbackQuery?.message) {
-      await this.host.editText(ctx, text, { kind: "menu", sessionId }, { reply_markup: keyboard });
-      return;
-    }
-    await this.host.replyText(ctx, text, { kind: "menu", sessionId }, { reply_markup: keyboard });
-  }
-
-  public async handleLinkTargetSelect(
-    ctx: TelegramMenuContext,
-    payloadKey: string | null,
-  ): Promise<void> {
-    if (!payloadKey) {
-      await ctx.answerCallbackQuery({ text: "Link payload is missing.", show_alert: true });
-      return;
-    }
-    const payload = await this.host.getMenuPayloadByKey(payloadKey);
-    if (!payload || payload.kind !== "link-target" || !payload.sessionId || !payload.targetSessionId) {
-      await ctx.answerCallbackQuery({ text: "Link payload is invalid or expired.", show_alert: true });
-      return;
-    }
-    await this.host.linkSessions(String(payload.sessionId), String(payload.targetSessionId));
-    const linkedSession = await this.host.sessionStore.getSession(String(payload.targetSessionId));
-    await ctx.answerCallbackQuery({ text: "Sessions linked." });
-    await this.host.showMainMenu(
-      ctx,
-      linkedSession?.label
-        ? `Linked with ${linkedSession.label}. Share API details, changes, errors, and git context with your teammate.`
-        : `Linked with ${String(payload.targetSessionId)}. Share API details, changes, errors, and git context with your teammate.`,
-    );
-  }
 
   public async handleScreenshotOpen(ctx: TelegramMenuContext, payloadKey: string | null): Promise<void> {
     const payload = await this.requireFileEntryPayload(ctx, payloadKey, "Screenshot");

@@ -54,7 +54,6 @@ import { TransportEventActions } from "./transportEventActions";
 import { TransportFileHandoffActions } from "./transportFileHandoffActions";
 import { TransportGatewayActions } from "./transportGatewayActions";
 import { TransportLifecycleActions } from "./transportLifecycleActions";
-import { TransportLinkingActions } from "./transportLinkingActions";
 import { TransportLiveActions } from "./transportLiveActions";
 import { TransportMenuCallbacks } from "./transportMenuCallbacks";
 import { TransportMenuFactories } from "./transportMenuFactories";
@@ -145,10 +144,7 @@ export interface TransportConstructorWiringResult {
   projectsMenu: Menu<TelegramMenuContext>;
   collabToolsMenu: Menu<TelegramMenuContext>;
   collabDeleteMenu: Menu<TelegramMenuContext>;
-  localMenu: Menu<TelegramMenuContext>;
   screenshotsMenu: Menu<TelegramMenuContext>;
-  linkMenu: Menu<TelegramMenuContext>;
-  partnerMenu: Menu<TelegramMenuContext>;
   sessionsMenu: Menu<TelegramMenuContext>;
   bufferMenu: Menu<TelegramMenuContext>;
   settingsMenu: Menu<TelegramMenuContext>;
@@ -167,7 +163,6 @@ export interface TransportConstructorWiringResult {
   eventActions: TransportEventActions;
   partnerActions: TransportPartnerActions;
   fileHandoffActions: TransportFileHandoffActions;
-  linkingActions: TransportLinkingActions;
   menuFactories: TransportMenuFactories;
   menuFingerprints: TransportMenuFingerprints;
   menuFlow: TransportMenuFlow;
@@ -294,20 +289,6 @@ export function buildTransportConstructorWiring(
     logger: host.logger,
   });
 
-  const linkingActions = new TransportLinkingActions({
-    config: host.config,
-    sessionStore: host.sessionStore,
-    bindingStore: host.bindingStore,
-    resolveLocaleForContext: (ctx) => context.resolveLocaleForContext(ctx),
-    getPrincipalFromContext: (ctx) => context.getPrincipalFromContext(ctx),
-    t: (locale, key, vars) => context.t(locale, key, vars),
-    tForContext: (ctx, key, vars) => context.tForContext(ctx, key, vars),
-    showMainMenu: (ctx, introText) => menuState.showMainMenu(ctx, introText),
-    showLinkMenu: (ctx) => menuFlow.showLinkMenu(ctx),
-    showLocalMenu: (ctx) => menuFlow.showLocalMenu(ctx),
-    showProjectsMenu: (ctx) => menuFlow.showProjectsMenu(ctx),
-  });
-
   const projectMenus: TransportProjectMenus = new TransportProjectMenus({
     createMenuOptions: (onMenuOutdated) => host.createMenuOptions(onMenuOutdated),
     buildProjectsFingerprint: (ctx) => gatewayActions.buildProjectsFingerprint(ctx),
@@ -343,31 +324,17 @@ export function buildTransportConstructorWiring(
       menuFingerprints.buildScreenshotsFingerprint(ctx),
     buildSessionsFingerprint: (ctx) =>
       menuFingerprints.buildSessionsFingerprint(ctx),
-    buildLinkFingerprint: (ctx) =>
-      menuFingerprints.buildLinkFingerprint(ctx),
     buildScreenshotsButtonLabel: (ctx) =>
       menuFingerprints.buildScreenshotsButtonLabel(ctx),
-    buildLinkButtonLabel: (ctx) =>
-      menuFingerprints.buildLinkButtonLabel(ctx),
     showLiveViewLauncher: (ctx) => menuFlow.showLiveViewLauncher(ctx),
     showBufferMenu: (ctx) => menuFlow.showBufferMenu(ctx),
     showBrowserMenu: (ctx) => menuFlow.showBrowserMenu(ctx),
     showMainMenu: (ctx) => menuState.showMainMenu(ctx),
-    showLocalEntryPoint: (ctx) => linkingActions.showLocalEntryPoint(ctx),
-    showProjectsEntryPoint: (ctx) => linkingActions.showProjectsEntryPoint(ctx),
+    showProjectsEntryPoint: (ctx) => menuFlow.showProjectsMenu(ctx),
     showStorageMenu: (ctx) => menuFlow.showStorageMenu(ctx),
     showSettingsMenu: (ctx) => menuFlow.showSettingsMenu(ctx),
     showSessionsMenu: (ctx) => menuFlow.showSessionsMenu(ctx),
     showScreenshotsMenu: (ctx) => menuFlow.showScreenshotsMenu(ctx),
-    showLocalMenu: (ctx) => menuFlow.showLocalMenu(ctx),
-    showLinkMenu: (ctx) => menuFlow.showLinkMenu(ctx),
-    showPartnerMenu: (ctx) => menuFlow.showPartnerMenu(ctx),
-    showPartnerEntryPoint: (ctx) => menuCallbacks.showPartnerEntryPoint(ctx),
-    handleLinkButton: (ctx) => linkingActions.handleLinkButton(ctx),
-    handleLinkTargetSelect: (ctx) =>
-      menuCallbacks.handleLinkTargetSelect(ctx, readMenuPayloadKey(ctx)),
-    beginPartnerNoteMode: (ctx, kind) =>
-      partnerActions.beginPartnerNoteMode(ctx, kind),
     sendActiveSessionBuffer: (ctx, input) =>
       menuFlow.sendActiveSessionBuffer(ctx, input),
     showUnpairConfirmMenu: (ctx) => menuFlow.showUnpairConfirmMenu(ctx),
@@ -403,8 +370,6 @@ export function buildTransportConstructorWiring(
       payloadState.createSessionMenuPayload(sessionId, ownerLabel, ownerKey),
     createSessionGroupMenuPayload: (ownerLabel, ownerKey) =>
       payloadState.createSessionGroupMenuPayload(ownerLabel, ownerKey),
-    createLinkMenuPayload: (sessionId, targetSessionId) =>
-      payloadState.createLinkMenuPayload(sessionId, targetSessionId),
     formatStoragePreviewLabel: (filePath, meta) =>
       formatStoragePreviewLabel(filePath, meta),
     formatFilePreviewLabel: (filePath) => formatFilePreviewLabel(filePath),
@@ -418,10 +383,7 @@ export function buildTransportConstructorWiring(
   const mainMenu: Menu<TelegramMenuContext> = menuFactories.createMainMenu();
   const storageMenu: Menu<TelegramMenuContext> = menuFactories.createStorageMenu();
   const browserMenu: Menu<TelegramMenuContext> = menuFactories.createBrowserMenu();
-  const localMenu: Menu<TelegramMenuContext> = menuFactories.createLocalMenu();
   const screenshotsMenu: Menu<TelegramMenuContext> = menuFactories.createScreenshotsMenu();
-  const linkMenu: Menu<TelegramMenuContext> = menuFactories.createLinkMenu();
-  const partnerMenu: Menu<TelegramMenuContext> = menuFactories.createPartnerMenu();
   const sessionsMenu: Menu<TelegramMenuContext> = menuFactories.createSessionsMenu();
   const bufferMenu: Menu<TelegramMenuContext> = menuFactories.createBufferMenu();
   const settingsMenu: Menu<TelegramMenuContext> = menuFactories.createSettingsMenu();
@@ -462,9 +424,6 @@ export function buildTransportConstructorWiring(
     getStorageMenu: () => storageMenu,
     getBrowserMenu: () => browserMenu,
     getScreenshotsMenu: () => screenshotsMenu,
-    getLinkMenu: () => linkMenu,
-    getPartnerMenu: () => partnerMenu,
-    getLocalMenu: () => localMenu,
     getSettingsMenu: () => settingsMenu,
     getBufferMenu: () => bufferMenu,
     getDeveloperMenu: () => developerMenu,
@@ -680,8 +639,8 @@ export function buildTransportConstructorWiring(
     replyText: (ctx, text, meta, options) =>
       outputActions.replyText(ctx, text, meta, options as TelegramSendMessageOptions),
     deleteMessage: (chatId, messageId) => host.deleteMessage(chatId, messageId),
-    showPartnerMenu: (ctx) => menuFlow.showPartnerMenu(ctx),
-    showLocalMenu: (ctx) => menuFlow.showLocalMenu(ctx),
+    showProjectsMenu: (ctx) => menuFlow.showProjectsMenu(ctx),
+    showMainMenu: (ctx) => menuState.showMainMenu(ctx),
     showProjectMemberDetail: (ctx, input) =>
       projectView.showProjectMemberDetail(ctx, {
         ...input,
@@ -709,8 +668,6 @@ export function buildTransportConstructorWiring(
       outputActions.editText(ctx, text, meta, options as TelegramEditMessageOptions),
     showMainMenu: (ctx, introText) => menuState.showMainMenu(ctx, introText),
     showSessionsMenu: (ctx, introText) => menuFlow.showSessionsMenu(ctx, introText),
-    showLinkMenu: (ctx) => menuFlow.showLinkMenu(ctx),
-    showPartnerMenu: (ctx) => menuFlow.showPartnerMenu(ctx),
     showScreenshotsMenu: (ctx, introText) => menuFlow.showScreenshotsMenu(ctx, introText),
     showStorageMenu: (ctx, introText) => menuFlow.showStorageMenu(ctx, introText),
     storageMessageMenu,
@@ -731,8 +688,6 @@ export function buildTransportConstructorWiring(
       attachmentStore.ensureStoredXchangeFile(sessionId, filePath, source),
     sendDocumentToChat: (chatId, filePath, caption) =>
       host.sendDocumentToChat(chatId, filePath, caption),
-    linkSessions: (sessionId, targetSessionId) =>
-      linkingActions.linkSessions(sessionId, targetSessionId),
     maybeNotifyToolsMismatchForSession: (sessionId) =>
       host.maybeNotifyToolsMismatchForSession(sessionId),
   });
@@ -953,10 +908,7 @@ export function buildTransportConstructorWiring(
     projectsMenu,
     collabToolsMenu,
     collabDeleteMenu,
-    localMenu,
     screenshotsMenu,
-    linkMenu,
-    partnerMenu,
     sessionsMenu,
     bufferMenu,
     settingsMenu,
@@ -976,10 +928,7 @@ export function buildTransportConstructorWiring(
     projectsMenu,
     collabToolsMenu,
     collabDeleteMenu,
-    localMenu,
     screenshotsMenu,
-    linkMenu,
-    partnerMenu,
     sessionsMenu,
     bufferMenu,
     settingsMenu,
@@ -998,7 +947,6 @@ export function buildTransportConstructorWiring(
     eventActions,
     partnerActions,
     fileHandoffActions,
-    linkingActions,
     menuFactories,
     menuFingerprints,
     menuFlow,

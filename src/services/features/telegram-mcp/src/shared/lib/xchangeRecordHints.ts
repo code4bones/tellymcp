@@ -3,8 +3,12 @@ import type { PartnerNoteKind } from "../../entities/collaboration/model/types";
 export function buildIncomingPartnerActionDesc(
   kind: PartnerNoteKind,
   requiresReply: boolean,
+  prefersFileDelivery = false,
 ): string {
   if (requiresReply || kind === "question" || kind === "request") {
+    if (prefersFileDelivery) {
+      return "Read body_text and attachments, carry out the requested work in this session, and send the result back as a real file with send_partner_file. Do not paste file contents into send_partner_note. The task is not complete until send_partner_file succeeds.";
+    }
     return "Read body_text and attachments, carry out the requested work in this session, then send the result back with send_partner_note. The task is not complete until send_partner_note succeeds.";
   }
 
@@ -22,16 +26,19 @@ export function buildIncomingPartnerActionDesc(
 export function buildIncomingPartnerTools(
   kind: PartnerNoteKind,
   requiresReply: boolean,
+  prefersFileDelivery = false,
 ): string[] {
-  const tools = ["get_xchange_record", "mark_xchange_record_read"];
+  const tools = ["get_xchange_record"];
+
+  if (prefersFileDelivery || kind === "handoff") {
+    tools.push("send_partner_file");
+  }
 
   if (requiresReply || kind === "question" || kind === "request") {
     tools.push("send_partner_note");
   }
 
-  if (kind === "handoff") {
-    tools.push("send_partner_file");
-  }
+  tools.push("mark_xchange_record_read");
 
   return tools;
 }

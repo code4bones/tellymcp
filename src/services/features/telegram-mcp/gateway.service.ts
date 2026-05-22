@@ -234,6 +234,11 @@ type GatewayServiceCarrier = Service & {
       acked_at?: string;
     }>;
   }>;
+  registerProjectConsoleForSession?: (input: Record<string, unknown>) => Promise<{
+    session_uuid: string;
+    created: boolean;
+    updated_at: string;
+  }>;
 };
 
 function trimOptionalText(value: unknown): string | null {
@@ -976,6 +981,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
     async createProjectRecord(this: GatewayServiceCarrier, input: Record<string, unknown>) {
       const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
       const name = this.requireText?.(input.name, "name");
+      const localSessionId = this.requireText?.(input.local_session_id, "local_session_id");
 
       const client = await this.db
         .withSchema(MCP_SCHEMA)
@@ -1001,32 +1007,78 @@ const TelegramMcpGatewayService: ServiceSchema = {
       const inviteToken = randomUUID();
       const now = new Date().toISOString();
 
-      await this.db.withSchema(MCP_SCHEMA).table("gateway_projects").insert({
-        project_uuid: projectUuid,
-        name,
-        invite_token: inviteToken,
-        created_by_client_uuid: clientUuid,
-        ...(ownerTelegramUserId
-          ? { owner_telegram_user_id: ownerTelegramUserId }
-          : {}),
-        ...(ownerTelegramUsername
-          ? { owner_telegram_username: ownerTelegramUsername }
-          : {}),
-        ...(ownerDisplayName ? { owner_display_name: ownerDisplayName } : {}),
-        is_active: true,
-        created_at: now,
-        updated_at: now,
+      await this.db.transaction(async (trx) => {
+        await trx.withSchema(MCP_SCHEMA).table("gateway_projects").insert({
+          project_uuid: projectUuid,
+          name,
+          invite_token: inviteToken,
+          created_by_client_uuid: clientUuid,
+          ...(ownerTelegramUserId
+            ? { owner_telegram_user_id: ownerTelegramUserId }
+            : {}),
+          ...(ownerTelegramUsername
+            ? { owner_telegram_username: ownerTelegramUsername }
+            : {}),
+          ...(ownerDisplayName ? { owner_display_name: ownerDisplayName } : {}),
+          is_active: true,
+          created_at: now,
+          updated_at: now,
+        });
+
+        await trx.withSchema(MCP_SCHEMA).table("gateway_project_members").insert({
+          project_uuid: projectUuid,
+          client_uuid: clientUuid,
+          role: "owner",
+          status: "active",
+          ...(ownerTelegramUserId ? { telegram_user_id: ownerTelegramUserId } : {}),
+          ...(ownerTelegramUsername ? { telegram_username: ownerTelegramUsername } : {}),
+          ...(ownerDisplayName ? { display_name: ownerDisplayName } : {}),
+          joined_at: now,
+        });
       });
 
-      await this.db.withSchema(MCP_SCHEMA).table("gateway_project_members").insert({
-        project_uuid: projectUuid,
-        client_uuid: clientUuid,
-        role: "owner",
-        status: "active",
-        ...(ownerTelegramUserId ? { telegram_user_id: ownerTelegramUserId } : {}),
-        ...(ownerTelegramUsername ? { telegram_username: ownerTelegramUsername } : {}),
-        ...(ownerDisplayName ? { display_name: ownerDisplayName } : {}),
-        joined_at: now,
+      let registration:
+        | {
+            session_uuid: string;
+            created: boolean;
+            updated_at: string;
+          }
+        | undefined;
+      try {
+        registration = await this.registerProjectConsoleForSession?.({
+          client_uuid: clientUuid,
+          project_uuid: projectUuid,
+          local_session_id: localSessionId,
+          ...(this.normalizeOptionalText?.(input.label)
+            ? { label: this.normalizeOptionalText?.(input.label) }
+            : {}),
+          ...(this.normalizeOptionalText?.(input.cwd)
+            ? { cwd: this.normalizeOptionalText?.(input.cwd) }
+            : {}),
+          status: "active",
+          ...(input.meta && typeof input.meta === "object" && !Array.isArray(input.meta)
+            ? { meta: input.meta }
+            : {}),
+        });
+        if (!registration?.session_uuid) {
+          throw new Error(
+            `Project ${projectUuid} was created, but console registration for ${clientUuid}:${localSessionId} failed.`,
+          );
+        }
+      } catch (error) {
+        await this.db
+          .withSchema(MCP_SCHEMA)
+          .table("gateway_projects")
+          .where({ project_uuid: projectUuid })
+          .del();
+        throw error;
+      }
+
+      this.logger.info("Gateway project created and console bound", {
+        projectUuid,
+        clientUuid,
+        localSessionId,
+        sessionUuid: registration.session_uuid,
       });
 
       return {
@@ -1040,6 +1092,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
     async joinProjectRecord(this: GatewayServiceCarrier, input: Record<string, unknown>) {
       const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
       const inviteToken = this.requireText?.(input.invite_token, "invite_token");
+      const localSessionId = this.requireText?.(input.local_session_id, "local_session_id");
 
       const client = await this.db
         .withSchema(MCP_SCHEMA)
@@ -1131,6 +1184,44 @@ const TelegramMcpGatewayService: ServiceSchema = {
             });
         }
 
+        try {
+          const registration = await this.registerProjectConsoleForSession?.({
+            client_uuid: clientUuid,
+            project_uuid: String(project.project_uuid),
+            local_session_id: localSessionId,
+            ...(this.normalizeOptionalText?.(input.label)
+              ? { label: this.normalizeOptionalText?.(input.label) }
+              : {}),
+            ...(this.normalizeOptionalText?.(input.cwd)
+              ? { cwd: this.normalizeOptionalText?.(input.cwd) }
+              : {}),
+            status: "active",
+            ...(input.meta && typeof input.meta === "object" && !Array.isArray(input.meta)
+              ? { meta: input.meta }
+              : {}),
+          });
+          if (!registration?.session_uuid) {
+            throw new Error(
+              `Project ${String(project.project_uuid)} membership exists, but console registration for ${clientUuid}:${localSessionId} failed.`,
+            );
+          }
+        } catch (error) {
+          if (existing.status !== "active") {
+            await this.db
+              .withSchema(MCP_SCHEMA)
+              .table("gateway_project_members")
+              .where({
+                project_uuid: project.project_uuid,
+                client_uuid: clientUuid,
+              })
+              .update({
+                status: existing.status,
+                joined_at: existing.joined_at,
+              } as Record<string, unknown>);
+          }
+          throw error;
+        }
+
         return {
           project_uuid: project.project_uuid,
           invite_token: project.invite_token,
@@ -1158,6 +1249,39 @@ const TelegramMcpGatewayService: ServiceSchema = {
         ...(memberDisplayName ? { display_name: memberDisplayName } : {}),
         joined_at: new Date().toISOString(),
       });
+
+      try {
+        const registration = await this.registerProjectConsoleForSession?.({
+          client_uuid: clientUuid,
+          project_uuid: String(project.project_uuid),
+          local_session_id: localSessionId,
+          ...(this.normalizeOptionalText?.(input.label)
+            ? { label: this.normalizeOptionalText?.(input.label) }
+            : {}),
+          ...(this.normalizeOptionalText?.(input.cwd)
+            ? { cwd: this.normalizeOptionalText?.(input.cwd) }
+            : {}),
+          status: "active",
+          ...(input.meta && typeof input.meta === "object" && !Array.isArray(input.meta)
+            ? { meta: input.meta }
+            : {}),
+        });
+        if (!registration?.session_uuid) {
+          throw new Error(
+            `Project ${String(project.project_uuid)} was joined, but console registration for ${clientUuid}:${localSessionId} failed.`,
+          );
+        }
+      } catch (error) {
+        await this.db
+          .withSchema(MCP_SCHEMA)
+          .table("gateway_project_members")
+          .where({
+            project_uuid: project.project_uuid,
+            client_uuid: clientUuid,
+          })
+          .del();
+        throw error;
+      }
 
       const notifyRows = await this.db
         .withSchema(MCP_SCHEMA)
@@ -1296,6 +1420,14 @@ const TelegramMcpGatewayService: ServiceSchema = {
           });
         }
 
+        this.logger.info("Gateway project console session registered", {
+          projectUuid,
+          clientUuid,
+          localSessionId,
+          sessionUuid: existing.session_uuid,
+          created: false,
+        });
+
         return {
           session_uuid: existing.session_uuid,
           created: false,
@@ -1333,11 +1465,30 @@ const TelegramMcpGatewayService: ServiceSchema = {
         });
       }
 
+      this.logger.info("Gateway project console session registered", {
+        projectUuid,
+        clientUuid,
+        localSessionId,
+        sessionUuid,
+        created: true,
+      });
+
       return {
         session_uuid: sessionUuid,
         created: true,
         updated_at: now,
       };
+    },
+
+    async registerProjectConsoleForSession(
+      this: GatewayServiceCarrier,
+      input: Record<string, unknown>,
+    ) {
+      const result = await this.registerSessionRecord?.(input);
+      if (!result?.session_uuid) {
+        throw new Error("Console registration returned no session_uuid.");
+      }
+      return result;
     },
 
     async listClientsRecord(
@@ -1427,12 +1578,14 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .where("p.is_active", true)
         .modify((query) => {
           if (localSessionId) {
-            query.join("gateway_project_consoles as pc", function joinProjectConsole() {
-              this.on("pc.project_uuid", "=", "m.project_uuid")
-                .andOn("pc.client_uuid", "=", "m.client_uuid");
+            query.whereExists(function matchBoundConsole() {
+              this.select(this.client.raw("1"))
+                .from("mcp.gateway_project_consoles as pc")
+                .whereRaw("pc.project_uuid = m.project_uuid")
+                .whereRaw("pc.client_uuid = m.client_uuid")
+                .where("pc.status", "active")
+                .where("pc.local_session_id", localSessionId);
             });
-            query.where("pc.status", "active");
-            query.where("pc.local_session_id", localSessionId);
           }
           if (scopeKey) {
             query.where("c.scope_key", scopeKey);
@@ -1746,9 +1899,15 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .leftJoin("gateway_clients as c", "c.client_uuid", "pc.client_uuid")
         .leftJoin("gateway_projects as p", "p.project_uuid", "pc.project_uuid")
         .where("pc.gateway_session_uuid", targetSessionId)
+        .modify((query) => {
+          if (requestedProjectUuid) {
+            query.where("pc.project_uuid", requestedProjectUuid);
+          }
+        })
         .where("pc.status", "active")
         .select(
           "s.*",
+          "pc.project_uuid",
           "p.name as project_name",
           this.db.raw(
             "coalesce(nullif(c.meta->>'telegram_display_name', ''), nullif(c.meta->>'telegram_username', ''), c.client_label, c.bot_username) as target_actor_label",

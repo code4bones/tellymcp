@@ -380,6 +380,21 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
         `,
       );
 
+      if (
+        (await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_sessions")) &&
+        (await this.db.schema.withSchema(MCP_SCHEMA).hasColumn(
+          "gateway_sessions",
+          "project_uuid",
+        ))
+      ) {
+        await this.db.raw(
+          `
+          ALTER TABLE "${MCP_SCHEMA}"."gateway_sessions"
+          ALTER COLUMN "project_uuid" DROP NOT NULL
+          `,
+        );
+      }
+
       await this.db.raw(
         `
         CREATE UNIQUE INDEX IF NOT EXISTS gateway_project_consoles_project_client_local_unique

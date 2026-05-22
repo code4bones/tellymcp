@@ -175,9 +175,6 @@ export class TransportSessionActions {
       sessionId: pending.sessionId,
       label,
       ...(session?.cwd ? { cwd: session.cwd } : {}),
-      ...(session?.linkedSessionId
-        ? { linkedSessionId: session.linkedSessionId }
-        : {}),
       ...(session?.task ? { task: session.task } : {}),
       ...(session?.summary ? { summary: session.summary } : {}),
       ...(session?.files ? { files: session.files } : {}),

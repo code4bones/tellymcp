@@ -204,18 +204,13 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     const sourceSession = await this.sessionStore.getSession(resolved.sessionId);
 
     if (!sourceSession) {
-      throw new Error(
-        `Session ${resolved.sessionId} was not found. Pair the session before collaborating.`,
-      );
+      throw new Error(`Session ${resolved.sessionId} was not found.`);
     }
 
-    const targetSessionId =
-      trimOptional(input.target_session_id) ?? sourceSession.linkedSessionId;
+    const targetSessionId = trimOptional(input.target_session_id);
 
     if (!targetSessionId) {
-      throw new Error(
-        "This session has no linked partner. Link another session in Telegram first.",
-      );
+      throw new Error("target_session_id is required for send_partner_note.");
     }
 
     const targetSession = await this.sessionStore.getSession(targetSessionId);
@@ -229,9 +224,7 @@ export class LocalCollaborationBackend implements CollaborationBackend {
       targetSession.sessionId,
     );
     if (!targetBinding) {
-      throw new Error(
-        `Linked partner session ${targetSession.sessionId} has no active Telegram route.`,
-      );
+      throw new Error(`Target session ${targetSession.sessionId} has no active Telegram route.`);
     }
 
     const now = new Date();

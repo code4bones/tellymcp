@@ -48,17 +48,6 @@ export class TransportPayloadState {
     });
   }
 
-  public async createLinkMenuPayload(
-    sessionId: string,
-    targetSessionId: string,
-  ): Promise<string> {
-    return this.createPayload({
-      kind: "link-target",
-      sessionId,
-      targetSessionId,
-    });
-  }
-
   public async createProjectMenuPayload(
     sessionId: string,
     projectUuid: string,

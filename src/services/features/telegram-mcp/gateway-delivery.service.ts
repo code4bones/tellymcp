@@ -79,12 +79,47 @@ function renderYamlArray(values: string[]): string {
   return `\n${values.map((value) => `  - ${JSON.stringify(value)}`).join("\n")}`;
 }
 
+function looksLikeFileDeliveryRequest(input: {
+  kind: string;
+  summary: string;
+  message: string;
+  expectedReply?: string;
+}): boolean {
+  if (input.kind !== "request" && input.kind !== "question") {
+    return false;
+  }
+
+  const haystack = [
+    input.summary,
+    input.message,
+    input.expectedReply ?? "",
+  ]
+    .join("\n")
+    .toLowerCase();
+
+  return (
+    /\b(send_partner_file|file delivery path|artifact|artifacts)\b/u.test(haystack) ||
+    /\b(файл|артефакт|артефакты)\b/u.test(haystack) ||
+    /\b[\w.-]+\.(html|txt|md|json|ts|tsx|js|jsx|css|scss|png|jpg|jpeg|webp|pdf|zip)\b/u.test(
+      haystack,
+    )
+  );
+}
+
 function buildNoteContent(input: {
   delivery: GatewayDelivery;
   copiedArtifacts: string[];
 }): string {
   const isDirectRoute = input.delivery.route_mode === "direct";
   const isTelegramHumanSource = input.delivery.source_client_uuid === "gateway-telegram";
+  const prefersFileDelivery = looksLikeFileDeliveryRequest({
+    kind: input.delivery.kind,
+    summary: input.delivery.summary,
+    message: input.delivery.message,
+    ...(input.delivery.expected_reply
+      ? { expectedReply: input.delivery.expected_reply }
+      : {}),
+  });
   const lines = ["---"];
   lines.push(`message_uuid: ${JSON.stringify(input.delivery.message_uuid)}`);
   lines.push(`kind: ${JSON.stringify(input.delivery.kind)}`);
@@ -136,22 +171,60 @@ function buildNoteContent(input: {
         : []),
       "",
       "# Action Required",
-      "You must send a reply via send_partner_note.",
-      "Your task is not complete until send_partner_note succeeds.",
+      ...(prefersFileDelivery
+        ? [
+            "You must send the requested file via send_partner_file.",
+            "Do not paste file contents into send_partner_note.",
+            "Your task is not complete until send_partner_file succeeds.",
+            "Do not mark_xchange_record_read before send_partner_file succeeds.",
+          ]
+        : [
+            "You must send a reply via send_partner_note.",
+            "Your task is not complete until send_partner_note succeeds.",
+            "Do not mark_xchange_record_read before send_partner_note succeeds.",
+          ]),
       "Do not stop after local analysis or a chat explanation.",
       ...(isDirectRoute
         ? [
-            "Do not rely on linked partner or project-scoped target_session_id.",
+            "Do not rely on implicit partner selection or project-scoped target_session_id.",
             "Pass target_client_uuid and target_local_session_id explicitly.",
           ]
         : [
-            "Do not rely on linked partner.",
+            "Do not rely on implicit partner selection.",
             "Pass target_session_id explicitly.",
           ]),
       "If possible, also pass in_reply_to=message_uuid.",
       "Only after the tool succeeds may you say that the reply was sent.",
       "",
-      "# Reply Tool Call Example",
+      ...(prefersFileDelivery
+        ? [
+            "# Preferred Reply Tool Call Example",
+            "send_partner_file(",
+            `  session_id=${JSON.stringify(input.delivery.target_local_session_id)},`,
+            ...(isDirectRoute
+              ? [
+                  ...(input.delivery.source_client_uuid
+                    ? [
+                        `  target_client_uuid=${JSON.stringify(input.delivery.source_client_uuid)},`,
+                      ]
+                    : []),
+                  `  target_local_session_id=${JSON.stringify(input.delivery.source_local_session_id)},`,
+                ]
+              : [
+                  `  target_session_id=${JSON.stringify(input.delivery.source_session_uuid)},`,
+                ]),
+            ...(!isDirectRoute && input.delivery.project_uuid
+              ? [`  project_uuid=${JSON.stringify(input.delivery.project_uuid)},`]
+              : []),
+            "  file_path=\"index.html\",",
+            `  in_reply_to=${JSON.stringify(input.delivery.message_uuid)},`,
+            "  summary=\"Передаю запрошенный файл\",",
+            "  message=\"Передаю реальный файл как артефакт\"",
+            ")",
+            "",
+            "# Alternate Reply Tool Call Example",
+          ]
+        : ["# Reply Tool Call Example"]),
       "send_partner_note(",
       `  session_id=${JSON.stringify(input.delivery.target_local_session_id)},`,
       ...(isDirectRoute
@@ -406,6 +479,14 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
         sizeBytes: Buffer.byteLength(noteContent, "utf8"),
       });
       const isTelegramHumanSource = delivery.source_client_uuid === "gateway-telegram";
+      const prefersFileDelivery = looksLikeFileDeliveryRequest({
+        kind: delivery.kind,
+        summary: delivery.summary,
+        message: delivery.message,
+        ...(delivery.expected_reply
+          ? { expectedReply: delivery.expected_reply }
+          : {}),
+      });
       const actionDesc = isTelegramHumanSource
         ? buildIncomingTelegramMessageActionDesc(
             delivery.kind as Parameters<typeof buildIncomingTelegramMessageActionDesc>[0],
@@ -413,6 +494,7 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
         : buildIncomingPartnerActionDesc(
             delivery.kind as Parameters<typeof buildIncomingPartnerActionDesc>[0],
             delivery.requires_reply,
+            prefersFileDelivery,
           );
       await upsertXchangeRecord(
         runtime.config.tmux,
@@ -435,6 +517,7 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
             : buildIncomingPartnerTools(
                 delivery.kind as Parameters<typeof buildIncomingPartnerTools>[0],
                 delivery.requires_reply,
+                prefersFileDelivery,
               ),
           note_path: notePath,
           note_relative_path: delivery.note_relative_path,

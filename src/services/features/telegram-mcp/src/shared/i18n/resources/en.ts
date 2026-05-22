@@ -56,16 +56,16 @@ export const enMenu = {
       last_worked: "🕘 Last worked: <i>{{sessionName}}</i>",
       updated: "⏱ Updated: <i>{{timestamp}}</i>",
       current_active: "📌 Current active: <b>{{sessionName}}</b>",
-      no_linked_sessions: "No linked sessions found for this Telegram identity.",
+      no_linked_sessions: "No visible sessions found for this Telegram identity.",
     },
     labels: {
-      no_linked_sessions: "🫥 No linked sessions",
+      no_linked_sessions: "🫥 No visible sessions",
       unavailable: "⚠ Sessions unavailable",
       tools: "🛠 Tools",
     },
     actions: {
       no_linked_sessions:
-        "No linked sessions found for this Telegram identity.",
+        "No visible sessions found for this Telegram identity.",
       unavailable: "Sessions menu is temporarily unavailable.",
       refreshed: "Sessions refreshed.",
       open_tools: "Opening tools menu.",
@@ -521,7 +521,7 @@ export const enMenu = {
   developer: {
     screen: {
       title: "🛠 Tools",
-      linked_sessions: "🔗 Linked sessions: {{count}}",
+      linked_sessions: "🗂 Visible sessions: {{count}}",
       broadcast_help:
         "Broadcast writes your next text message into every linked session inbox and nudges every configured tmux target.",
       prune_help:
@@ -556,7 +556,7 @@ export const enMenu = {
   },
   prune: {
     title: "⚠ Confirm prune",
-    linked_sessions: "🔗 Linked sessions visible here: {{count}}",
+    linked_sessions: "🗂 Visible sessions here: {{count}}",
     body_1: "This clears every Redis key under the telegram-mcp namespace.",
     body_2:
       "Bindings, sessions, inbox, menu payloads, and pending requests will all be deleted.",
@@ -573,7 +573,7 @@ export const enMenu = {
     begin: "Broadcast to {{count}} sessions.",
     title: "📣 Broadcast",
     body:
-      "Send the next text message to broadcast it to all {{count}} linked sessions.",
+      "Send the next text message to broadcast it to all {{count}} visible sessions.",
     hint:
       "The message will be stored in every session inbox and the service will nudge every configured tmux target.",
     cancel_hint: "Commands like /menu or /help cancel broadcast mode.",
@@ -585,14 +585,14 @@ export const enMenu = {
       "Send the next text message to broadcast it to all Collab sessions across bots without duplication.",
     collab_hint:
       "Local sessions receive an inbox message, remote sessions receive a gateway delivery.",
-    no_linked_sessions: "No linked sessions found.",
+    no_linked_sessions: "No visible sessions found.",
     no_collab_targets: "No Collab sessions are available for broadcast.",
     no_projects_first: "Create a project or join an existing one first.",
     mode_not_active: "Broadcast mode is not active.",
     cancelled: "Broadcast cancelled.",
     cancelled_no_sessions:
-      "Broadcast was cancelled because no linked sessions were found.",
-    completed_linked: "Broadcast completed for {{count}} linked sessions.",
+      "Broadcast was cancelled because no visible sessions were found.",
+    completed_linked: "Broadcast completed for {{count}} visible sessions.",
     completed_collab: "Broadcast completed for {{count}} Collab sessions.",
     completed_collab_local: "Local inbox: {{count}}",
     completed_collab_remote: "Remote deliveries: {{count}}",

@@ -237,12 +237,6 @@ export class TransportProjectState {
       local_session_id: localSessionId,
       label: this.extractShortSessionLabel(session, localSessionId),
       cwd: session.cwd,
-      tmux_session_name: session.tmuxSessionName,
-      tmux_window_name: session.tmuxWindowName,
-      tmux_window_index: session.tmuxWindowIndex,
-      tmux_pane_id: session.tmuxPaneId,
-      tmux_pane_index: session.tmuxPaneIndex,
-      tmux_target: session.tmuxTarget,
       status: "active",
     });
   }

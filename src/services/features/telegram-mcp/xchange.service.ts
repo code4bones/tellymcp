@@ -10,6 +10,9 @@ import type {
   GetXchangeRecordInput,
   ListXchangeRecordsInput,
   MarkXchangeRecordReadInput,
+  XchangeRecordCategory,
+  XchangeRecordDirection,
+  XchangeRecordStatus,
 } from "./src/entities/xchange/model/types";
 
 export const TELEGRAM_MCP_XCHANGE_SERVICE_NAME = "telegramMcp.xchange";
@@ -30,7 +33,30 @@ const TelegramMcpXchangeService: ServiceSchema = {
 
   actions: {
     listRecordsRemote: {
-      params: { type: "object" },
+      params: {
+        $$strict: false,
+        session_id: { type: "string", optional: true, trim: true, min: 1 },
+        status: {
+          type: "enum",
+          optional: true,
+          values: ["new", "read", "archived"] satisfies XchangeRecordStatus[],
+        },
+        category: {
+          type: "enum",
+          optional: true,
+          values: [
+            "partner_note",
+            "local_handoff",
+            "telegram_message",
+          ] satisfies XchangeRecordCategory[],
+        },
+        direction: {
+          type: "enum",
+          optional: true,
+          values: ["incoming", "outgoing", "local"] satisfies XchangeRecordDirection[],
+        },
+        limit: { type: "number", integer: true, positive: true, optional: true },
+      },
       async handler(
         this: XchangeServiceCarrier,
         ctx: { params: ListXchangeRecordsInput },
@@ -39,7 +65,11 @@ const TelegramMcpXchangeService: ServiceSchema = {
       },
     },
     getRecordRemote: {
-      params: { type: "object" },
+      params: {
+        $$strict: false,
+        session_id: { type: "string", optional: true, trim: true, min: 1 },
+        record_id: { type: "string", trim: true, min: 1 },
+      },
       async handler(
         this: XchangeServiceCarrier,
         ctx: { params: GetXchangeRecordInput },
@@ -48,7 +78,11 @@ const TelegramMcpXchangeService: ServiceSchema = {
       },
     },
     markReadRemote: {
-      params: { type: "object" },
+      params: {
+        $$strict: false,
+        session_id: { type: "string", optional: true, trim: true, min: 1 },
+        record_id: { type: "string", trim: true, min: 1 },
+      },
       async handler(
         this: XchangeServiceCarrier,
         ctx: { params: MarkXchangeRecordReadInput },
@@ -90,6 +124,7 @@ const TelegramMcpXchangeService: ServiceSchema = {
     this.xchangeService = new XchangeService(
       runtime.config,
       runtime.sessionStore,
+      runtime.stateStore,
       runtime.logger,
       runtime.projectIdentityResolver,
       new RemoteConsoleActionClient((actionName, params) =>

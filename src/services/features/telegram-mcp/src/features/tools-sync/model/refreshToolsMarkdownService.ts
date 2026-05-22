@@ -157,9 +157,6 @@ export class RefreshToolsMarkdownService {
       sessionId: resolved.sessionId,
       ...(session?.label ? { label: session.label } : {}),
       ...(session?.cwd ? { cwd: session.cwd } : workspaceDir ? { cwd: workspaceDir } : {}),
-      ...(session?.linkedSessionId
-        ? { linkedSessionId: session.linkedSessionId }
-        : {}),
       ...(session?.activeProjectUuid
         ? { activeProjectUuid: session.activeProjectUuid }
         : {}),

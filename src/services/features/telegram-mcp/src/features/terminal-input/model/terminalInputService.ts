@@ -74,9 +74,6 @@ export class TerminalInputService {
         sessionId,
         ...(typeof session?.label === "string" ? { label: session.label } : {}),
         ...(typeof session?.cwd === "string" ? { cwd: session.cwd } : {}),
-        ...(typeof session?.linkedSessionId === "string"
-          ? { linkedSessionId: session.linkedSessionId }
-          : {}),
         ...(typeof session?.activeProjectUuid === "string"
           ? { activeProjectUuid: session.activeProjectUuid }
           : {}),

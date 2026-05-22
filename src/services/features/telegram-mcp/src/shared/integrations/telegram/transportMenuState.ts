@@ -16,10 +16,7 @@ import type {
 import {
   buildBrowserMenuText,
   buildBufferMenuText,
-  buildLinkMenuText,
-  buildLocalMenuText,
   buildMainMenuText,
-  buildPartnerMenuText,
   buildScreenshotsMenuText,
   buildSettingsMenuText,
   buildStorageMenuText,
@@ -100,9 +97,6 @@ export interface TransportMenuStateHost {
   getStorageMenu(): unknown;
   getBrowserMenu(): unknown;
   getScreenshotsMenu(): unknown;
-  getLinkMenu(): unknown;
-  getPartnerMenu(): unknown;
-  getLocalMenu(): unknown;
   getSettingsMenu(): unknown;
   getBufferMenu(): unknown;
   getDeveloperMenu(): unknown;
@@ -112,7 +106,6 @@ export interface TransportMenuStateHost {
     getSession(sessionId: string): Promise<{
       sessionId: string;
       label?: string | undefined;
-      linkedSessionId?: string | undefined;
       activeProjectName?: string | undefined;
       tmuxTarget?: string | undefined;
       updatedAt?: string | undefined;
@@ -604,169 +597,6 @@ export class TransportMenuState {
       ),
       emptyLine: this.host.t(locale, "menu:screenshots.screen.empty"),
       total: files.length,
-    });
-  }
-
-  public async showLinkMenu(
-    ctx: TelegramMenuContext,
-    introText?: string,
-  ): Promise<void> {
-    const text = await this.buildLinkMenuText(ctx);
-    await this.host.renderMenuScreen(
-      ctx,
-      introText ? `${introText}\n\n${text}` : text,
-      { kind: "menu" },
-      this.host.getLinkMenu(),
-    );
-  }
-
-  public async buildLinkMenuText(ctx: TelegramMenuContext): Promise<string> {
-    const locale = await this.host.resolveLocaleForContext(ctx);
-    const principal = this.host.getPrincipalFromContext(ctx);
-    if (!principal) {
-      return this.host.t(locale, "common:errors.no_telegram_identity");
-    }
-
-    const activeSessionId =
-      await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
-    if (!activeSessionId) {
-      return this.host.t(locale, "common:errors.no_active_session");
-    }
-
-    const session = await this.host.sessionStore.getSession(activeSessionId);
-    return buildLinkMenuText({
-      title: this.host.t(locale, "menu:link.screen.title"),
-      activeSessionLine: this.host.t(locale, "menu:link.screen.active_session", {
-        sessionName: session?.label ?? activeSessionId,
-      }),
-      choosePartnerLine: this.host.t(locale, "menu:link.screen.choose_partner"),
-      hintLine: this.host.t(locale, "menu:link.screen.hint"),
-    });
-  }
-
-  public async showPartnerMenu(
-    ctx: TelegramMenuContext,
-    introText?: string,
-  ): Promise<void> {
-    const principal = this.host.getPrincipalFromContext(ctx);
-    if (principal) {
-      const sessionId =
-        await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
-      const session = sessionId
-        ? await this.host.sessionStore.getSession(sessionId)
-        : null;
-      if (sessionId && session?.linkedSessionId) {
-        const linkedSession = await this.host.sessionStore.getSession(
-          session.linkedSessionId,
-        );
-        this.host.setCurrentAttachmentTargetForContext(ctx, {
-          sessionId,
-          targetSessionId: session.linkedSessionId,
-          targetSessionLabel: linkedSession?.label ?? session.linkedSessionId,
-        });
-      } else {
-        this.host.setCurrentAttachmentTargetForContext(ctx, null);
-      }
-    }
-    const text = await this.buildPartnerMenuText(ctx);
-    await this.host.renderMenuScreen(
-      ctx,
-      introText ? `${introText}\n\n${text}` : text,
-      { kind: "menu" },
-      this.host.getPartnerMenu(),
-    );
-  }
-
-  public async buildPartnerMenuText(
-    ctx: TelegramMenuContext,
-  ): Promise<string> {
-    const locale = await this.host.resolveLocaleForContext(ctx);
-    const principal = this.host.getPrincipalFromContext(ctx);
-    if (!principal) {
-      return this.host.t(locale, "common:errors.no_telegram_identity");
-    }
-
-    const activeSessionId =
-      await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
-    if (!activeSessionId) {
-      return this.host.t(locale, "common:errors.no_active_session");
-    }
-
-    const session = await this.host.sessionStore.getSession(activeSessionId);
-    if (!session?.linkedSessionId) {
-      return buildPartnerMenuText({
-        title: this.host.t(locale, "menu:partner.screen.title"),
-        activeSessionLine: this.host.t(locale, "menu:partner.screen.active_session", {
-          sessionName: session?.label ?? activeSessionId,
-        }),
-        noPartnerLine: this.host.t(locale, "menu:partner.screen.no_partner"),
-        useLinkFirstLine: this.host.t(locale, "menu:partner.screen.use_link_first"),
-      });
-    }
-
-    const linkedSession = await this.host.sessionStore.getSession(
-      session.linkedSessionId,
-    );
-
-    return buildPartnerMenuText({
-      title: this.host.t(locale, "menu:partner.screen.title"),
-      activeSessionLine: this.host.t(locale, "menu:partner.screen.active_session", {
-        sessionName: session.label ?? activeSessionId,
-      }),
-      linkedPartnerLine: this.host.t(locale, "menu:partner.screen.linked_partner", {
-        partnerName: linkedSession?.label ?? session.linkedSessionId,
-      }),
-      promptHintLine: this.host.t(locale, "menu:partner.screen.prompt_hint"),
-      promptFormatLine: this.host.t(locale, "menu:partner.screen.prompt_format"),
-    });
-  }
-
-  public async showLocalMenu(
-    ctx: TelegramMenuContext,
-    introText?: string,
-  ): Promise<void> {
-    this.host.setCurrentAttachmentTargetForContext(ctx, null);
-    const text = await this.buildLocalMenuText(ctx);
-    await this.host.renderMenuScreen(
-      ctx,
-      introText ? `${introText}\n\n${text}` : text,
-      { kind: "menu" },
-      this.host.getLocalMenu(),
-    );
-  }
-
-  public async buildLocalMenuText(
-    ctx: TelegramMenuContext,
-  ): Promise<string> {
-    const locale = await this.host.resolveLocaleForContext(ctx);
-    const principal = this.host.getPrincipalFromContext(ctx);
-    if (!principal) {
-      return this.host.t(locale, "menu:local.screen.unavailable");
-    }
-
-    const activeSessionId =
-      await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
-    if (!activeSessionId) {
-      return this.host.t(locale, "menu:local.screen.no_active_session");
-    }
-
-    const session = await this.host.sessionStore.getSession(activeSessionId);
-    const linkedSession = session?.linkedSessionId
-      ? await this.host.sessionStore.getSession(session.linkedSessionId)
-      : null;
-
-    return buildLocalMenuText({
-      title: this.host.t(locale, "menu:main.buttons.local"),
-      activeSessionLine: this.host.t(locale, "menu:local.screen.active_session", {
-        sessionName: session?.label ?? activeSessionId,
-      }),
-      linkStatusLine: linkedSession?.label
-        ? this.host.t(locale, "menu:local.screen.link_status", {
-            linkedSessionName: linkedSession.label,
-          })
-        : this.host.t(locale, "menu:local.screen.link_status_none"),
-      hintTitleLine: this.host.t(locale, "menu:local.screen.hint_title"),
-      hintBodyLine: this.host.t(locale, "menu:local.screen.hint_body"),
     });
   }
 

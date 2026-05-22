@@ -80,9 +80,6 @@ async function ensureForegroundPtySession(
       ? { label: existing.label }
       : { label: resolved.sessionLabel }),
     ...(typeof existing?.cwd === "string" ? { cwd: existing.cwd } : { cwd: resolved.cwd }),
-    ...(typeof existing?.linkedSessionId === "string"
-      ? { linkedSessionId: existing.linkedSessionId }
-      : {}),
     ...(typeof existing?.activeProjectUuid === "string"
       ? { activeProjectUuid: existing.activeProjectUuid }
       : {}),

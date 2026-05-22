@@ -131,31 +131,6 @@ export class TransportMenuFingerprints {
     }
   }
 
-  public async buildLinkFingerprint(
-    ctx: TelegramMenuContext,
-  ): Promise<string> {
-    const locale = await this.host.resolveLocaleForContext(ctx);
-    const principal = this.host.getPrincipalFromContext(ctx);
-    if (!principal) {
-      return `${locale}:no-principal`;
-    }
-
-    const activeSessionId =
-      await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
-    if (!activeSessionId) {
-      return `${locale}:no-active-session`;
-    }
-
-    const session = await this.host.sessionStore.getSession(activeSessionId);
-    const sessionIds = (
-      await this.host.bindingStore.listBoundSessionIdsForPrincipal(principal)
-    )
-      .filter((sessionId) => sessionId !== activeSessionId)
-      .sort();
-
-    return `${locale}:${activeSessionId}:${session?.linkedSessionId ?? "none"}:${sessionIds.join(",")}`;
-  }
-
   public async buildScreenshotsButtonLabel(
     ctx: TelegramMenuContext,
   ): Promise<string> {
@@ -177,33 +152,4 @@ export class TransportMenuFingerprints {
       : this.host.t(locale, "menu:browser.buttons.screenshots");
   }
 
-  public async buildLinkButtonLabel(
-    ctx: TelegramMenuContext,
-  ): Promise<string> {
-    const locale = await this.host.resolveLocaleForContext(ctx);
-    const principal = this.host.getPrincipalFromContext(ctx);
-    if (!principal) {
-      return this.host.t(locale, "menu:local.buttons.link");
-    }
-
-    const sessionId =
-      await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
-    if (!sessionId) {
-      return this.host.t(locale, "menu:local.buttons.link");
-    }
-
-    const session = await this.host.sessionStore.getSession(sessionId);
-    if (!session?.linkedSessionId) {
-      return this.host.t(locale, "menu:local.buttons.link");
-    }
-
-    const linkedSession = await this.host.sessionStore.getSession(
-      session.linkedSessionId,
-    );
-    return linkedSession?.label
-      ? this.host.t(locale, "menu:link.buttons.unlink_with_name", {
-          sessionName: linkedSession.label,
-        })
-      : this.host.t(locale, "menu:link.buttons.unlink");
-  }
 }

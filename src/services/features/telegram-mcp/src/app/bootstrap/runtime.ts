@@ -166,9 +166,6 @@ export async function createAppRuntime(input: {
       ...(typeof existingSession?.cwd === "string"
         ? { cwd: existingSession.cwd }
         : { cwd: resolvedSession.cwd }),
-      ...(typeof existingSession?.linkedSessionId === "string"
-        ? { linkedSessionId: existingSession.linkedSessionId }
-        : {}),
       ...(typeof existingSession?.activeProjectUuid === "string"
         ? { activeProjectUuid: existingSession.activeProjectUuid }
         : {}),

@@ -43,6 +43,38 @@ function writeText(
   res.end(message);
 }
 
+function isBackendErrorLike(
+  value: unknown,
+): value is { statusCode: number; code: string; name?: string; message?: string; data?: unknown } {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as { statusCode?: unknown }).statusCode === "number" &&
+      typeof (value as { code?: unknown }).code === "string",
+  );
+}
+
+function parseCanonicalGatewaySessionId(
+  value: string | undefined,
+): { clientUuid: string; localSessionId: string } | null {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const separatorIndex = trimmed.indexOf(":");
+  if (separatorIndex <= 0 || separatorIndex === trimmed.length - 1) {
+    return null;
+  }
+
+  const clientUuid = trimmed.slice(0, separatorIndex).trim();
+  const localSessionId = trimmed.slice(separatorIndex + 1).trim();
+  if (!clientUuid || !localSessionId) {
+    return null;
+  }
+
+  return { clientUuid, localSessionId };
+}
+
 type LiveRelayBootstrapResult = {
   session_id: string;
   session_label: string | null;
@@ -437,15 +469,45 @@ export class GatewayHttpService {
       try {
         const body = await this.readJsonBody(req);
         const input = sendPartnerNoteInputSchema.parse(body);
-        const useDirectGatewayDelivery =
-          typeof (body as { client_uuid?: unknown })?.client_uuid === "string" &&
+        const canonicalSource = parseCanonicalGatewaySessionId(input.session_id);
+        const relaySource = parseLiveRelaySessionId(input.session_id);
+        const resolvedSourceClientUuid =
+          canonicalSource?.clientUuid ||
+          relaySource?.clientUuid ||
+          (typeof (body as { client_uuid?: unknown })?.client_uuid === "string"
+            ? String((body as { client_uuid: string }).client_uuid).trim()
+            : "");
+        const resolvedSourceLocalSessionId =
+          canonicalSource?.localSessionId ||
+          relaySource?.localSessionId ||
+          input.session_id?.trim() ||
+          "";
+        const explicitTargetClientUuid =
           typeof (body as { target_client_uuid?: unknown })?.target_client_uuid ===
-            "string" &&
+          "string"
+            ? String((body as { target_client_uuid: string }).target_client_uuid).trim()
+            : "";
+        const explicitTargetLocalSessionId =
           typeof (body as { target_local_session_id?: unknown })
-            ?.target_local_session_id === "string";
+            ?.target_local_session_id === "string"
+            ? String(
+                (body as { target_local_session_id: string }).target_local_session_id,
+              ).trim()
+            : "";
+        const canonicalTarget = parseCanonicalGatewaySessionId(input.target_session_id);
+        const resolvedTargetClientUuid =
+          explicitTargetClientUuid || canonicalTarget?.clientUuid || "";
+        const resolvedTargetLocalSessionId =
+          explicitTargetLocalSessionId || canonicalTarget?.localSessionId || "";
+        const useDirectGatewayDelivery =
+          Boolean(resolvedSourceClientUuid) &&
+          Boolean(resolvedSourceLocalSessionId) &&
+          Boolean(resolvedTargetClientUuid) &&
+          Boolean(resolvedTargetLocalSessionId);
         const useQueuedGatewayDelivery =
           !useDirectGatewayDelivery &&
-          typeof (body as { client_uuid?: unknown })?.client_uuid === "string" &&
+          Boolean(resolvedSourceClientUuid) &&
+          Boolean(resolvedSourceLocalSessionId) &&
           typeof input.target_session_id === "string" &&
           input.target_session_id.trim().length > 0;
 
@@ -453,18 +515,10 @@ export class GatewayHttpService {
           ? await this.callBroker(
               "telegramMcp.gatewaySocket.sendDirectPartnerNote",
               {
-                clientUuid: String(
-                  (body as { client_uuid: string }).client_uuid,
-                ).trim(),
-                localSessionId: input.session_id?.trim() || "",
-                targetClientUuid: String(
-                  (body as { target_client_uuid: string }).target_client_uuid,
-                ).trim(),
-                targetLocalSessionId: String(
-                  (
-                    body as { target_local_session_id: string }
-                  ).target_local_session_id,
-                ).trim(),
+                clientUuid: resolvedSourceClientUuid,
+                localSessionId: resolvedSourceLocalSessionId,
+                targetClientUuid: resolvedTargetClientUuid,
+                targetLocalSessionId: resolvedTargetLocalSessionId,
                 kind: input.kind,
                 summary: input.summary,
                 message: input.message,
@@ -486,7 +540,11 @@ export class GatewayHttpService {
           : useQueuedGatewayDelivery
           ? await this.callBroker(
               "telegramMcp.gateway.sendPartnerNote",
-              body,
+              {
+                ...(body as Record<string, unknown>),
+                client_uuid: resolvedSourceClientUuid,
+                session_id: resolvedSourceLocalSessionId,
+              },
               { meta: { internal_call: true } },
             )
           : this.partnerNoteRelayHandler
@@ -496,6 +554,28 @@ export class GatewayHttpService {
                   "Gateway partner relay handler is not configured.",
                 );
               })();
+        if (isBackendErrorLike(output)) {
+          const detail =
+            typeof output.data !== "undefined"
+              ? (() => {
+                  try {
+                    return JSON.stringify(output.data);
+                  } catch {
+                    return String(output.data);
+                  }
+                })()
+              : "";
+          throw new Error(
+            [
+              typeof output.message === "string" && output.message.trim()
+                ? output.message.trim()
+                : `${output.name ?? "BackendError"} (${output.code})`,
+              `code=${output.code}`,
+              `statusCode=${output.statusCode}`,
+              ...(detail ? [`data=${detail}`] : []),
+            ].join("\n"),
+          );
+        }
         if (
           useQueuedGatewayDelivery &&
           output &&
@@ -538,6 +618,9 @@ export class GatewayHttpService {
         writeJson(res, 200, parsedOutput.data);
         return true;
       } catch (error) {
+        console.error("Gateway project create request failed", {
+          error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+        });
         writeJson(res, 400, {
           error: error instanceof Error ? error.message : String(error),
         });
@@ -575,6 +658,9 @@ export class GatewayHttpService {
         writeJson(res, 200, { delivered: Boolean(result?.delivered) });
         return true;
       } catch (error) {
+        console.error("Gateway project join request failed", {
+          error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+        });
         writeJson(res, 400, {
           error: error instanceof Error ? error.message : String(error),
         });
@@ -614,6 +700,9 @@ export class GatewayHttpService {
         writeJson(res, 200, { delivered: Boolean(result?.delivered) });
         return true;
       } catch (error) {
+        console.error("Gateway project session register request failed", {
+          error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+        });
         writeJson(res, 400, {
           error: error instanceof Error ? error.message : String(error),
         });
@@ -1117,11 +1206,18 @@ export class GatewayHttpService {
 
       try {
         const body = (await this.readJsonBody(req)) as Record<string, unknown>;
-        const result = await this.callBroker(
+        const result = await this.callBroker<Record<string, unknown>>(
           "telegramMcp.gateway.createProject",
           body,
           { meta: { internal_call: true } },
         );
+        if (isBackendErrorLike(result)) {
+          throw new Error(
+            result.message
+              ? `${result.message}${result.code ? ` [${result.code}]` : ""}`
+              : `Gateway createProject failed [${result.code}]`,
+          );
+        }
         writeJson(res, 200, result);
         return true;
       } catch (error) {
@@ -1145,6 +1241,13 @@ export class GatewayHttpService {
           body,
           { meta: { internal_call: true } },
         );
+        if (isBackendErrorLike(result)) {
+          throw new Error(
+            result.message
+              ? `${result.message}${result.code ? ` [${result.code}]` : ""}`
+              : `Gateway joinProject failed [${result.code}]`,
+          );
+        }
         if (
           Array.isArray(result.notify_client_uuids) &&
           result.notify_client_uuids.length > 0 &&
@@ -1206,11 +1309,18 @@ export class GatewayHttpService {
 
       try {
         const body = (await this.readJsonBody(req)) as Record<string, unknown>;
-        const result = await this.callBroker(
+        const result = await this.callBroker<Record<string, unknown>>(
           "telegramMcp.gateway.registerSession",
           body,
           { meta: { internal_call: true } },
         );
+        if (isBackendErrorLike(result)) {
+          throw new Error(
+            result.message
+              ? `${result.message}${result.code ? ` [${result.code}]` : ""}`
+              : `Gateway registerSession failed [${result.code}]`,
+          );
+        }
         writeJson(res, 200, result);
         return true;
       } catch (error) {

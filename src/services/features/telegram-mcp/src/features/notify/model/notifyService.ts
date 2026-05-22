@@ -390,9 +390,6 @@ export class NotifyService {
           ? { label: remote.context.session_label }
           : {}),
         ...(remote.context.cwd ? { cwd: remote.context.cwd } : {}),
-        ...(remote.context.linked_session_id
-          ? { linkedSessionId: remote.context.linked_session_id }
-          : {}),
         ...(remote.context.active_project_uuid
           ? { activeProjectUuid: remote.context.active_project_uuid }
           : {}),

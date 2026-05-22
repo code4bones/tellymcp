@@ -182,6 +182,11 @@ export class TransportProjectActions {
       await ctx.answerCallbackQuery({ text: this.host.t(locale, "menu:project.not_found"), show_alert: true });
       return;
     }
+    await this.host.ensureProjectSessionRegistered({
+      principal,
+      sessionId,
+      projectUuid: payload.projectUuid,
+    });
     await this.host.activateProjectForSession({
       principal,
       sessionId,
@@ -210,6 +215,11 @@ export class TransportProjectActions {
       await ctx.answerCallbackQuery({ text: this.host.t(locale, "menu:project.not_found"), show_alert: true });
       return;
     }
+    await this.host.ensureProjectSessionRegistered({
+      principal,
+      sessionId,
+      projectUuid: payload.projectUuid,
+    });
     await this.host.ensureOpenedProjectIsActive({
       principal,
       sessionId,
@@ -570,12 +580,27 @@ export class TransportProjectActions {
       (await this.host.ensureGatewayClientUuid(principal));
     let projectName = "";
     let projectUuid = "";
+    const activeSession = await this.host.sessionStore.getSession(pending.sessionId);
+    const localSessionId = sourceRelay?.localSessionId ?? activeSession?.sessionId ?? null;
+    const shortLabel = activeSession?.label?.trim() || localSessionId || pending.sessionId;
+    const sessionRegistrationPayload = localSessionId
+      ? {
+          local_session_id: localSessionId,
+          label: shortLabel,
+          ...(activeSession?.cwd ? { cwd: activeSession.cwd } : {}),
+          status: "active",
+        }
+      : {};
     if (pending.mode === "create") {
       const created = await this.host.callGatewayJson<{
         project_uuid: string;
         invite_token: string;
         name: string;
-      }>("/projects/create", { client_uuid: clientUuid, name: value });
+      }>("/projects/create", {
+        client_uuid: clientUuid,
+        name: value,
+        ...sessionRegistrationPayload,
+      });
       projectUuid = created.project_uuid;
       projectName = created.name;
       await this.host.ensureProjectSessionRegistered({
@@ -602,7 +627,11 @@ export class TransportProjectActions {
         project_uuid: string;
         invite_token: string;
         name: string;
-      }>("/projects/join", { client_uuid: clientUuid, invite_token: value });
+      }>("/projects/join", {
+        client_uuid: clientUuid,
+        invite_token: value,
+        ...sessionRegistrationPayload,
+      });
       projectUuid = joined.project_uuid;
       projectName = joined.name;
       await this.host.ensureProjectSessionRegistered({

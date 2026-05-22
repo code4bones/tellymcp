@@ -31,8 +31,8 @@ export interface TransportFileHandoffHost {
     options?: { reply_markup?: InlineKeyboard },
   ): Promise<{ message_id: number } | void>;
   deleteMessage(chatId: number, messageId: number): Promise<void>;
-  showPartnerMenu(ctx: TelegramMenuContext): Promise<void>;
-  showLocalMenu(ctx: TelegramMenuContext): Promise<void>;
+  showProjectsMenu(ctx: TelegramMenuContext): Promise<void>;
+  showMainMenu(ctx: TelegramMenuContext): Promise<void>;
   showProjectMemberDetail(
     ctx: TelegramMenuContext,
     input: {
@@ -231,12 +231,12 @@ export class TransportFileHandoffActions {
       }
     }
 
-    if (pending.target === "partner") {
-      await this.host.showPartnerMenu(ctx);
+    if (pending.projectUuid) {
+      await this.host.showProjectsMenu(ctx);
       return;
     }
 
-    await this.host.showLocalMenu(ctx);
+    await this.host.showMainMenu(ctx);
   }
 
   public async handlePending(

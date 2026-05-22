@@ -57,16 +57,16 @@ export const ruMenu = {
       updated: "⏱ Обновлено: <i>{{timestamp}}</i>",
       current_active: "📌 Текущая активная: <b>{{sessionName}}</b>",
       no_linked_sessions:
-        "Для этой Telegram identity не найдено привязанных сессий.",
+        "Для этой Telegram identity не найдено видимых сессий.",
     },
     labels: {
-      no_linked_sessions: "🫥 Нет привязанных сессий",
+      no_linked_sessions: "🫥 Нет видимых сессий",
       unavailable: "⚠ Сессии недоступны",
       tools: "🛠 Tools",
     },
     actions: {
       no_linked_sessions:
-        "Для этой Telegram identity не найдено привязанных сессий.",
+        "Для этой Telegram identity не найдено видимых сессий.",
       unavailable: "Меню сессий временно недоступно.",
       refreshed: "Список сессий обновлён.",
       open_tools: "Открываю инструменты.",
@@ -564,7 +564,7 @@ export const ruMenu = {
   },
   prune: {
     title: "⚠ Подтверди prune",
-    linked_sessions: "🔗 Видимых здесь привязанных сессий: {{count}}",
+    linked_sessions: "🗂 Видимых здесь сессий: {{count}}",
     body_1: "Это очистит каждый Redis key внутри namespace telegram-mcp.",
     body_2:
       "Будут удалены bindings, sessions, inbox, menu payloads и pending requests.",
@@ -581,7 +581,7 @@ export const ruMenu = {
     begin: "Broadcast в {{count}} сессий.",
     title: "📣 Broadcast",
     body:
-      "Отправь следующее текстовое сообщение, чтобы разослать его всем {{count}} привязанным сессиям.",
+      "Отправь следующее текстовое сообщение, чтобы разослать его всем {{count}} видимым сессиям.",
     hint:
       "Сообщение будет сохранено в inbox каждой сессии, а сервис разбудит все настроенные tmux target.",
     cancel_hint: "Команды вроде /menu или /help отменят режим broadcast.",
@@ -593,14 +593,14 @@ export const ruMenu = {
       "Отправь следующее текстовое сообщение, чтобы разослать его всем Collab-сессиям на ботах без дублирования.",
     collab_hint:
       "Локальные сессии получат inbox message, удалённые — gateway delivery.",
-    no_linked_sessions: "Привязанных сессий не найдено.",
+    no_linked_sessions: "Видимых сессий не найдено.",
     no_collab_targets: "Нет доступных Collab-сессий для broadcast.",
     no_projects_first: "Сначала создай проект или войди в существующий.",
     mode_not_active: "Режим broadcast не активен.",
     cancelled: "Broadcast отменён.",
     cancelled_no_sessions:
-      "Broadcast отменён, потому что привязанных сессий не найдено.",
-    completed_linked: "Broadcast завершён для {{count}} привязанных сессий.",
+      "Broadcast отменён, потому что видимых сессий не найдено.",
+    completed_linked: "Broadcast завершён для {{count}} видимых сессий.",
     completed_collab: "Broadcast завершён для {{count}} Collab-сессий.",
     completed_collab_local: "Локальных inbox: {{count}}",
     completed_collab_remote: "Удалённых deliveries: {{count}}",

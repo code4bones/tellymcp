@@ -49,15 +49,6 @@ export class TransportMenuShell {
     bot.callbackQuery("partner-note-cancel", async (ctx) => {
       await this.host.cancelPendingPartnerNote(ctx);
     });
-    bot.callbackQuery("partner-back", async (ctx) => {
-      await ctx.answerCallbackQuery({
-        text: await this.host.tForContext(
-          ctx,
-          "menu:partner.actions.back_to_partner",
-        ),
-      });
-      await this.host.showProjectsMenu(ctx);
-    });
     bot.callbackQuery("file-handoff-cancel", async (ctx) => {
       await this.host.cancelPendingFileHandoff(ctx);
     });

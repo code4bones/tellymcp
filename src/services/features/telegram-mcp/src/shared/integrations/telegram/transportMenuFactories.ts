@@ -57,29 +57,16 @@ export interface TransportMenuFactoriesHost {
   buildStorageFingerprint(ctx: TelegramMenuContext): Promise<string>;
   buildScreenshotsFingerprint(ctx: TelegramMenuContext): Promise<string>;
   buildSessionsFingerprint(ctx: TelegramMenuContext): Promise<string>;
-  buildLinkFingerprint(ctx: TelegramMenuContext): Promise<string>;
   buildScreenshotsButtonLabel(ctx: TelegramMenuContext): Promise<string>;
-  buildLinkButtonLabel(ctx: TelegramMenuContext): Promise<string>;
   showLiveViewLauncher(ctx: TelegramMenuContext): Promise<void>;
   showBufferMenu(ctx: TelegramMenuContext): Promise<void>;
   showBrowserMenu(ctx: TelegramMenuContext): Promise<void>;
   showMainMenu(ctx: TelegramMenuContext): Promise<void>;
-  showLocalEntryPoint(ctx: TelegramMenuContext): Promise<void>;
   showProjectsEntryPoint(ctx: TelegramMenuContext): Promise<void>;
   showStorageMenu(ctx: TelegramMenuContext): Promise<void>;
   showSettingsMenu(ctx: TelegramMenuContext): Promise<void>;
   showSessionsMenu(ctx: TelegramMenuContext): Promise<void>;
   showScreenshotsMenu(ctx: TelegramMenuContext): Promise<void>;
-  showLocalMenu(ctx: TelegramMenuContext): Promise<void>;
-  showLinkMenu(ctx: TelegramMenuContext): Promise<void>;
-  showPartnerMenu(ctx: TelegramMenuContext): Promise<void>;
-  showPartnerEntryPoint(ctx: TelegramMenuContext): Promise<void>;
-  handleLinkButton(ctx: TelegramMenuContext): Promise<void>;
-  handleLinkTargetSelect(ctx: TelegramMenuContext): Promise<void>;
-  beginPartnerNoteMode(
-    ctx: TelegramMenuContext,
-    kind: "question" | "share",
-  ): Promise<void>;
   sendActiveSessionBuffer(
     ctx: TelegramMenuContext,
     input: TmuxCaptureScope,
@@ -109,10 +96,6 @@ export interface TransportMenuFactoriesHost {
     ownerKey?: string,
   ): Promise<string>;
   createSessionGroupMenuPayload(ownerLabel: string, ownerKey?: string): Promise<string>;
-  createLinkMenuPayload(
-    sessionId: string,
-    targetSessionId: string,
-  ): Promise<string>;
   formatStoragePreviewLabel(
     filePath: string,
     meta?: TelegramXchangeFileMeta | null,
@@ -223,169 +206,6 @@ export class TransportMenuFactories {
             text: await this.host.tForContext(
               ctx,
               "menu:browser.actions.back_to_session_menu",
-            ),
-          });
-          await this.host.showMainMenu(ctx);
-        },
-      );
-  }
-
-  public createLocalMenu(): Menu<TelegramMenuContext> {
-    return new Menu<TelegramMenuContext>(
-      "telegram-local-menu",
-      this.host.createMenuOptions((ctx) => this.host.showLocalMenu(ctx)),
-    )
-      .text(
-        async (ctx) => this.host.tForContext(ctx, "menu:local.buttons.partner"),
-        async (ctx) => {
-          await this.host.showPartnerEntryPoint(ctx);
-        },
-      )
-      .text(async (ctx) => this.host.buildLinkButtonLabel(ctx), async (ctx) => {
-        await this.host.handleLinkButton(ctx);
-      })
-      .row()
-      .text(
-        async (ctx) => this.host.tForContext(ctx, "common:menu.back"),
-        async (ctx) => {
-          await ctx.answerCallbackQuery({
-            text: await this.host.tForContext(
-              ctx,
-              "menu:local.actions.back_to_session_menu",
-            ),
-          });
-          await this.host.showMainMenu(ctx);
-        },
-      );
-  }
-
-  public createLinkMenu(): Menu<TelegramMenuContext> {
-    return new Menu<TelegramMenuContext>("telegram-link-menu", {
-      fingerprint: async (ctx) => this.host.buildLinkFingerprint(ctx),
-      ...this.host.createMenuOptions((ctx) => this.host.showLinkMenu(ctx)),
-    })
-      .dynamic(async (ctx) => {
-        const range = new MenuRange<TelegramMenuContext>();
-        const principal = this.host.getPrincipalFromContext(ctx);
-        if (!principal) {
-          range.text(
-            await this.host.tForContext(ctx, "common:menu.no_telegram_identity_label"),
-            async (innerCtx) => {
-              await innerCtx.answerCallbackQuery({
-                text: await this.host.tForContext(
-                  innerCtx,
-                  "common:errors.missing_telegram_context",
-                ),
-                show_alert: true,
-              });
-            },
-          );
-          return range;
-        }
-
-        const activeSessionId =
-          await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
-        if (!activeSessionId) {
-          range.text(
-            await this.host.tForContext(ctx, "common:menu.no_active_session_label"),
-            async (innerCtx) => {
-              await innerCtx.answerCallbackQuery({
-                text: await this.host.tForContext(
-                  innerCtx,
-                  "common:errors.no_active_session",
-                ),
-                show_alert: true,
-              });
-            },
-          );
-          return range;
-        }
-
-        const sessionIds = (
-          await this.host.bindingStore.listBoundSessionIdsForPrincipal(principal)
-        )
-          .filter((sessionId) => sessionId !== activeSessionId)
-          .sort();
-
-        if (sessionIds.length === 0) {
-          range.text(
-            await this.host.tForContext(ctx, "menu:link.labels.no_partner_sessions"),
-            async (innerCtx) => {
-              await innerCtx.answerCallbackQuery({
-                text: await this.host.tForContext(
-                  innerCtx,
-                  "menu:link.actions.no_partner_sessions",
-                ),
-                show_alert: true,
-              });
-            },
-          );
-          return range;
-        }
-
-        for (const sessionId of sessionIds) {
-          const session = await this.host.sessionStore.getSession(sessionId);
-          range
-            .text(
-              {
-                text: `🔗 ${session?.label ?? sessionId}`,
-                payload: async () =>
-                  this.host.createLinkMenuPayload(activeSessionId, sessionId),
-              },
-              async (innerCtx) => {
-                await this.host.handleLinkTargetSelect(innerCtx);
-              },
-            )
-            .row();
-        }
-
-        return range;
-      })
-      .text(
-        async (ctx) => this.host.tForContext(ctx, "common:menu.back"),
-        async (ctx) => {
-          await ctx.answerCallbackQuery({
-            text: await this.host.tForContext(
-              ctx,
-              "menu:link.actions.back_to_session_menu",
-            ),
-          });
-          await this.host.showMainMenu(ctx);
-        },
-      );
-  }
-
-  public createPartnerMenu(): Menu<TelegramMenuContext> {
-    return new Menu<TelegramMenuContext>(
-      "telegram-partner-menu",
-      this.host.createMenuOptions((ctx) => this.host.showPartnerMenu(ctx)),
-    )
-      .text(
-        async (ctx) => this.host.tForContext(ctx, "menu:partner.buttons.ask"),
-        async (ctx) => {
-          await this.host.beginPartnerNoteMode(ctx, "question");
-        },
-      )
-      .text(
-        async (ctx) => this.host.tForContext(ctx, "menu:partner.buttons.share"),
-        async (ctx) => {
-          await this.host.beginPartnerNoteMode(ctx, "share");
-        },
-      )
-      .row()
-      .text(
-        async (ctx) => this.host.tForContext(ctx, "menu:partner.buttons.unlink"),
-        async (ctx) => {
-          await this.host.handleLinkButton(ctx);
-        },
-      )
-      .text(
-        async (ctx) => this.host.tForContext(ctx, "common:menu.back"),
-        async (ctx) => {
-          await ctx.answerCallbackQuery({
-            text: await this.host.tForContext(
-              ctx,
-              "menu:partner.actions.back_to_session_menu",
             ),
           });
           await this.host.showMainMenu(ctx);

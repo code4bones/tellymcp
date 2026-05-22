@@ -129,51 +129,6 @@ export class TransportMenuFlow {
     await this.host.menuState.showScreenshotsMenu(ctx, introText);
   }
 
-  public async showLinkMenu(
-    ctx: TelegramMenuContext,
-    introText?: string,
-  ): Promise<void> {
-    const locale = await this.host.resolveLocaleForContext(ctx);
-    await this.host.projectView.showProjectsMenu(
-      ctx,
-      introText ??
-        this.host.t(
-          locale,
-          "menu:projects.screen.title",
-        ),
-    );
-  }
-
-  public async showPartnerMenu(
-    ctx: TelegramMenuContext,
-    introText?: string,
-  ): Promise<void> {
-    const locale = await this.host.resolveLocaleForContext(ctx);
-    await this.host.projectView.showProjectsMenu(
-      ctx,
-      introText ??
-        this.host.t(
-          locale,
-          "menu:projects.screen.title",
-        ),
-    );
-  }
-
-  public async showLocalMenu(
-    ctx: TelegramMenuContext,
-    introText?: string,
-  ): Promise<void> {
-    const locale = await this.host.resolveLocaleForContext(ctx);
-    await this.host.projectView.showProjectsMenu(
-      ctx,
-      introText ??
-        this.host.t(
-          locale,
-          "menu:projects.screen.title",
-        ),
-    );
-  }
-
   public async showProjectsMenu(
     ctx: TelegramMenuContext,
     introText?: string,
@@ -571,18 +526,6 @@ export class TransportMenuFlow {
     return this.host.menuState.buildStorageMenuText(ctx);
   }
 
-  public async buildLinkMenuText(ctx: TelegramMenuContext): Promise<string> {
-    return this.host.menuState.buildLinkMenuText(ctx);
-  }
-
-  public async buildPartnerMenuText(ctx: TelegramMenuContext): Promise<string> {
-    return this.host.menuState.buildPartnerMenuText(ctx);
-  }
-
-  public async buildLocalMenuText(ctx: TelegramMenuContext): Promise<string> {
-    return this.host.menuState.buildLocalMenuText(ctx);
-  }
-
   public async buildProjectsMenuText(ctx: TelegramMenuContext): Promise<string> {
     return this.host.projectView.buildProjectsMenuText(ctx);
   }
@@ -640,9 +583,6 @@ export class TransportMenuFlow {
 
     const session = await this.host.sessionStore.getSession(sessionId);
     const binding = await this.host.bindingStore.getBinding(sessionId);
-    const linkedSession = session?.linkedSessionId
-      ? await this.host.sessionStore.getSession(session.linkedSessionId)
-      : null;
 
     await ctx.answerCallbackQuery({
       text: this.host.t(locale, "menu:session_info.opened"),
@@ -662,12 +602,6 @@ export class TransportMenuFlow {
           value: binding
             ? this.host.t(locale, "menu:session_info.yes")
             : this.host.t(locale, "menu:session_info.no"),
-        }),
-        this.host.t(locale, "menu:session_info.partner", {
-          value:
-            linkedSession?.label ??
-            session?.linkedSessionId ??
-            this.host.t(locale, "menu:session_info.not_linked"),
         }),
       ].join("\n"),
       { kind: "menu", sessionId },

@@ -281,7 +281,7 @@ export class TransportBroadcastActions {
       await this.deletePendingBroadcastArtifacts(ctx, pending, false);
       await this.host.replyText(
         ctx,
-        "Broadcast cancelled because no linked sessions were found.",
+        "Broadcast cancelled because no visible sessions were found.",
         { kind: "menu" },
       );
       return true;

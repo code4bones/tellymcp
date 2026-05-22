@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 import type { AppConfig } from "../../../app/config/env";
 import type {
@@ -10,7 +10,10 @@ import type {
 import { refreshToolsMarkdownOutputSchema } from "../../../entities/request/model/schema";
 import type { SessionStore } from "../../../shared/api/storage/contract";
 import type { Logger } from "../../../shared/lib/logger/logger";
-import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
+import {
+  ProjectIdentityResolver,
+  writeTellySessionRuntimeState,
+} from "../../../shared/lib/project-identity/projectIdentity";
 import { getTellyMcpPackageRoot } from "../../../shared/lib/version/versionHandshake";
 
 type RemoteConsoleInvoker = {
@@ -18,7 +21,7 @@ type RemoteConsoleInvoker = {
     sessionId: string,
     actionName: string,
     params: Record<string, unknown>,
-  ): Promise<T | null>;
+  ): Promise<T>;
 };
 
 function normalizeGatewayBaseUrl(value: string): URL {
@@ -65,6 +68,7 @@ export class RefreshToolsMarkdownService {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
     const explicitCwd = input.cwd?.trim() ? resolve(input.cwd.trim()) : null;
     const requestedSessionId = input.session_id?.trim() ?? "";
+    const knownHash = input.known_hash?.trim() || null;
     const remoteLookupRequested =
       Boolean(this.remoteConsoleInvoker) &&
       this.config.distributed.mode !== "client";
@@ -111,11 +115,11 @@ export class RefreshToolsMarkdownService {
     const workspaceDir = requestedSessionId
       ? sessionCwd ?? explicitCwd ?? resolved.cwd
       : explicitCwd ?? sessionCwd ?? resolved.cwd;
-    const saveLocally = input.save_locally !== false;
-    const gatewayToolsPath = join(
-      getTellyMcpPackageRoot(__dirname) ?? process.cwd(),
-      "TOOLS.md",
-    );
+    const packageRoot = getTellyMcpPackageRoot(__dirname);
+    if (!packageRoot) {
+      throw new Error("Could not resolve installed package root for TOOLS.md.");
+    }
+    const gatewayToolsPath = join(packageRoot, "TOOLS.md");
 
     let source: "gateway" | "local" = "local";
     let content: string;
@@ -146,81 +150,72 @@ export class RefreshToolsMarkdownService {
       content = readFileSync(gatewayToolsPath, "utf8");
     }
 
-    if (!workspaceDir) {
-      throw new Error(
-        "Could not resolve target workspace for TOOLS.md. Pass cwd explicitly or ensure the console session has a workspace cwd.",
-      );
-    }
+    const currentHash = computeContentHash(content);
+    const changed = knownHash !== currentHash;
 
-    const toolsPath = join(workspaceDir, "TOOLS.md");
-
-    if (saveLocally) {
-      if (sessionCwd && explicitCwd && sessionCwd !== explicitCwd) {
-        this.logger.warn(
-          "refresh_tools_markdown ignored explicit cwd in favor of console workspace",
-          {
-            sessionId: resolved.sessionId,
-            explicitCwd,
-            sessionCwd,
-          },
-        );
-      }
-      mkdirSync(dirname(toolsPath), { recursive: true });
-      writeFileSync(toolsPath, content, "utf8");
-      const appliedHash = computeContentHash(content);
-      await this.sessionStore.setSession({
+    await this.sessionStore.setSession({
+      sessionId: resolved.sessionId,
+      ...(session?.label ? { label: session.label } : {}),
+      ...(session?.cwd ? { cwd: session.cwd } : workspaceDir ? { cwd: workspaceDir } : {}),
+      ...(session?.linkedSessionId
+        ? { linkedSessionId: session.linkedSessionId }
+        : {}),
+      ...(session?.activeProjectUuid
+        ? { activeProjectUuid: session.activeProjectUuid }
+        : {}),
+      ...(session?.activeProjectName
+        ? { activeProjectName: session.activeProjectName }
+        : {}),
+      ...(session?.task ? { task: session.task } : {}),
+      ...(session?.summary ? { summary: session.summary } : {}),
+      ...(session?.files ? { files: session.files } : {}),
+      ...(session?.decisions ? { decisions: session.decisions } : {}),
+      ...(session?.risks ? { risks: session.risks } : {}),
+      ...(session?.tmuxSessionName
+        ? { tmuxSessionName: session.tmuxSessionName }
+        : {}),
+      ...(session?.tmuxWindowName
+        ? { tmuxWindowName: session.tmuxWindowName }
+        : {}),
+      ...(typeof session?.tmuxWindowIndex === "number"
+        ? { tmuxWindowIndex: session.tmuxWindowIndex }
+        : {}),
+      ...(session?.tmuxPaneId ? { tmuxPaneId: session.tmuxPaneId } : {}),
+      ...(typeof session?.tmuxPaneIndex === "number"
+        ? { tmuxPaneIndex: session.tmuxPaneIndex }
+        : {}),
+      ...(session?.tmuxTarget ? { tmuxTarget: session.tmuxTarget } : {}),
+      ...(session?.lastTmuxNudgeAt
+        ? { lastTmuxNudgeAt: session.lastTmuxNudgeAt }
+        : {}),
+      lastSeenToolsHash: currentHash,
+      lastNotifiedToolsHash: currentHash,
+      updatedAt: new Date().toISOString(),
+    });
+    if (workspaceDir) {
+      writeTellySessionRuntimeState({
+        cwd: workspaceDir,
         sessionId: resolved.sessionId,
-        ...(session?.label ? { label: session.label } : {}),
-        ...(session?.cwd ? { cwd: session.cwd } : { cwd: workspaceDir }),
-        ...(session?.linkedSessionId
-          ? { linkedSessionId: session.linkedSessionId }
-          : {}),
-        ...(session?.activeProjectUuid
-          ? { activeProjectUuid: session.activeProjectUuid }
-          : {}),
-        ...(session?.activeProjectName
-          ? { activeProjectName: session.activeProjectName }
-          : {}),
-        ...(session?.task ? { task: session.task } : {}),
-        ...(session?.summary ? { summary: session.summary } : {}),
-        ...(session?.files ? { files: session.files } : {}),
-        ...(session?.decisions ? { decisions: session.decisions } : {}),
-        ...(session?.risks ? { risks: session.risks } : {}),
-        ...(session?.tmuxSessionName
-          ? { tmuxSessionName: session.tmuxSessionName }
-          : {}),
-        ...(session?.tmuxWindowName
-          ? { tmuxWindowName: session.tmuxWindowName }
-          : {}),
-        ...(typeof session?.tmuxWindowIndex === "number"
-          ? { tmuxWindowIndex: session.tmuxWindowIndex }
-          : {}),
-        ...(session?.tmuxPaneId ? { tmuxPaneId: session.tmuxPaneId } : {}),
-        ...(typeof session?.tmuxPaneIndex === "number"
-          ? { tmuxPaneIndex: session.tmuxPaneIndex }
-          : {}),
-        ...(session?.tmuxTarget ? { tmuxTarget: session.tmuxTarget } : {}),
-        ...(session?.lastTmuxNudgeAt
-          ? { lastTmuxNudgeAt: session.lastTmuxNudgeAt }
-          : {}),
-        lastSeenToolsHash: appliedHash,
-        lastNotifiedToolsHash: appliedHash,
-        updatedAt: new Date().toISOString(),
+        lastSeenToolsHash: currentHash,
+        lastNotifiedToolsHash: currentHash,
+        logger: this.logger,
       });
     }
 
     this.logger.info("TOOLS.md refreshed", {
       source,
-      saved: saveLocally,
-      path: toolsPath,
       bytes: Buffer.byteLength(content, "utf8"),
+      currentHash,
+      changed,
     });
 
     return {
       source,
-      saved: saveLocally,
+      session_id: resolved.sessionId,
+      current_hash: currentHash,
+      changed,
+      ...(changed ? { content } : {}),
       bytes: Buffer.byteLength(content, "utf8"),
-      ...(saveLocally ? { path: toolsPath } : {}),
     };
   }
 }

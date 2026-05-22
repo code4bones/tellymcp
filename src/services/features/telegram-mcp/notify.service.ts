@@ -148,6 +148,16 @@ const TelegramMcpNotifyService: ServiceSchema = {
       new RemoteConsoleActionClient((actionName, params) =>
         this.broker.call(actionName, params, { meta: { internal_call: true } }),
       ),
+      async (sessionId) =>
+        (await this.broker.call(
+          "telegramMcp.gatewaySocket.resolveConnectedSessionTarget",
+          { sessionId },
+          { meta: { internal_call: true } },
+        )) as {
+          client_uuid: string;
+          local_session_id: string;
+          session_label?: string;
+        } | null,
     );
     this.logger.info("telegram_mcp notify service is ready");
   },

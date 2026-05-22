@@ -386,6 +386,7 @@ export function buildTransportConstructorWiring(
       menuFlow.sendActiveSessionBuffer(ctx, input),
     showUnpairConfirmMenu: (ctx) => menuFlow.showUnpairConfirmMenu(ctx),
     showDeveloperMenu: (ctx) => menuFlow.showDeveloperMenu(ctx),
+    showDeveloperInfo: (ctx) => menuFlow.showDeveloperInfo(ctx),
     showPruneConfirmMenu: (ctx) => menuFlow.showPruneConfirmMenu(ctx),
     showActiveSessionInfo: (ctx) => menuFlow.showActiveSessionInfo(ctx),
     beginRenameActiveSession: (ctx) =>
@@ -469,6 +470,8 @@ export function buildTransportConstructorWiring(
       menuFlow.renderMenuHtmlScreen(ctx, text, meta, menu as Menu<TelegramMenuContext>),
     renderMenuScreen: (ctx, text, meta, menu) =>
       menuFlow.renderMenuScreen(ctx, text, meta, menu as Menu<TelegramMenuContext>),
+    renderMenuMarkdownScreen: (ctx, text, meta, menu) =>
+      menuFlow.renderMenuMarkdownScreen(ctx, text, meta, menu as Menu<TelegramMenuContext>),
     replyText: (ctx, text, meta, options) =>
       outputActions.replyText(
         ctx,
@@ -498,6 +501,7 @@ export function buildTransportConstructorWiring(
       xchangeState.listActiveSessionScreenshots(sessionId),
     listActiveSessionStorageEntries: (sessionId) =>
       xchangeState.listActiveSessionStorageEntries(sessionId),
+    callGatewayJson: (path, payload) => host.callGatewayJson(path, payload),
   });
 
   const projectState: TransportProjectState = new TransportProjectState({

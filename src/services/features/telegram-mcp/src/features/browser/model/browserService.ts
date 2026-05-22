@@ -169,7 +169,7 @@ type RemoteConsoleInvoker = {
     sessionId: string,
     actionName: string,
     params: Record<string, unknown>,
-  ): Promise<T | null>;
+  ): Promise<T>;
 };
 
 export class BrowserService {
@@ -1054,20 +1054,22 @@ export class BrowserService {
   }
 
   private resolveWorkspaceDir(session: SessionContext | null): string {
-    return session?.cwd?.trim() || process.cwd();
+    const workspaceDir = session?.cwd?.trim();
+    if (!workspaceDir) {
+      throw new Error("Workspace cwd is not registered for this browser console.");
+    }
+    return workspaceDir;
   }
 
   private async invokeRemote<T>(
     sessionId: string,
     actionName: string,
     input: Record<string, unknown>,
-  ): Promise<T | null> {
-    return (
-      (await this.remoteConsoleInvoker?.invokeForRelaySession<T>(
-        sessionId,
-        actionName,
-        input,
-      )) ?? null
+  ): Promise<T | undefined> {
+    return await this.remoteConsoleInvoker?.invokeForRelaySession<T>(
+      sessionId,
+      actionName,
+      input,
     );
   }
 

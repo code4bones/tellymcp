@@ -74,14 +74,16 @@ export const listGatewaySessionsOutputSchema = z.object({
 export const refreshToolsMarkdownInputSchema = z.object({
   session_id: z.string().trim().min(1).optional(),
   cwd: z.string().trim().min(1).optional(),
-  save_locally: z.boolean().optional(),
+  known_hash: z.string().trim().min(1).optional(),
 });
 
 export const refreshToolsMarkdownOutputSchema = z.object({
   source: z.enum(["gateway", "local"]),
-  saved: z.boolean(),
+  session_id: z.string().trim().min(1).optional(),
+  current_hash: z.string().trim().min(1),
+  changed: z.boolean(),
+  content: z.string().optional(),
   bytes: z.number().int().nonnegative(),
-  path: z.string().optional(),
 });
 
 export const getTelegramInboxInputSchema = z.object({

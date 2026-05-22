@@ -5,7 +5,10 @@ import {
   type RedisClient,
 } from "../providers/redis/client";
 import { createLogger, type Logger } from "../../shared/lib/logger/logger";
-import { ProjectIdentityResolver } from "../../shared/lib/project-identity/projectIdentity";
+import {
+  ProjectIdentityResolver,
+  readTellySessionRuntimeState,
+} from "../../shared/lib/project-identity/projectIdentity";
 import { RedisStateStore } from "../../shared/integrations/redis/stateStore";
 import { ProcessLocalSessionStore } from "../../shared/integrations/memory/processLocalSessionStore";
 import { TelegramTransport } from "../../shared/integrations/telegram/transport";
@@ -28,6 +31,11 @@ import type {
 } from "../../shared/api/storage/contract";
 
 export type AppRuntime = {
+  callBroker: <T>(
+    actionName: string,
+    params?: unknown,
+    options?: { meta?: Record<string, unknown> },
+  ) => Promise<T>;
   config: AppConfig;
   logger: Logger;
   redis: RedisClient;
@@ -135,6 +143,11 @@ export async function createAppRuntime(input: {
       cwd: process.cwd(),
     });
     const existingSession = await stateStore.getSession(resolvedSession.sessionId);
+    const persistedToolsState = readTellySessionRuntimeState(
+      resolvedSession.cwd,
+      resolvedSession.sessionId,
+      logger,
+    );
     const terminalTarget = ensureTerminalTargetForSession(config.tmux, {
       sessionId: resolvedSession.sessionId,
       cwd: resolvedSession.cwd,
@@ -194,9 +207,13 @@ export async function createAppRuntime(input: {
         : {}),
       ...(typeof existingSession?.lastSeenToolsHash === "string"
         ? { lastSeenToolsHash: existingSession.lastSeenToolsHash }
+        : typeof persistedToolsState?.lastSeenToolsHash === "string"
+          ? { lastSeenToolsHash: persistedToolsState.lastSeenToolsHash }
         : {}),
       ...(typeof existingSession?.lastNotifiedToolsHash === "string"
         ? { lastNotifiedToolsHash: existingSession.lastNotifiedToolsHash }
+        : typeof persistedToolsState?.lastNotifiedToolsHash === "string"
+          ? { lastNotifiedToolsHash: persistedToolsState.lastNotifiedToolsHash }
         : {}),
       updatedAt: new Date().toISOString(),
     };
@@ -284,6 +301,7 @@ export async function createAppRuntime(input: {
   const gatewayHttpService = new GatewayHttpService(config, input.callBroker);
 
   return {
+    callBroker: input.callBroker,
     config,
     logger,
     redis,

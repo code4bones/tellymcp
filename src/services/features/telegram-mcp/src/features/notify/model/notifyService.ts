@@ -3,6 +3,7 @@ import type {
   NotifyTelegramInput,
   NotifyTelegramOutput,
 } from "../../../entities/request/model/types";
+import { notifyTelegramOutputSchema } from "../../../entities/request/model/schema";
 import type {
   GetSessionContextOutput,
   SessionContext,
@@ -69,8 +70,32 @@ type RemoteConsoleInvoker = {
     sessionId: string,
     actionName: string,
     params: Record<string, unknown>,
-  ): Promise<T | null>;
+  ): Promise<T>;
 };
+
+type GatewaySessionTargetResolver = (sessionId: string) => Promise<{
+  client_uuid: string;
+  local_session_id: string;
+  session_label?: string;
+} | null>;
+
+function normalizeNotifyTelegramOutput(
+  value: unknown,
+): NotifyTelegramOutput | null {
+  const candidate =
+    value && typeof value === "object" && "structuredContent" in value
+      ? (value as { structuredContent?: unknown }).structuredContent
+      : value && typeof value === "object" && "result" in value
+        ? (value as { result?: unknown }).result
+        : value;
+
+  const parsed = notifyTelegramOutputSchema.safeParse(candidate);
+  if (parsed.success) {
+    return parsed.data;
+  }
+
+  return null;
+}
 
 export class NotifyService {
   public constructor(
@@ -82,12 +107,32 @@ export class NotifyService {
     private readonly logger: Logger,
     private readonly projectIdentityResolver: ProjectIdentityResolver,
     private readonly remoteConsoleInvoker?: RemoteConsoleInvoker,
+    private readonly gatewaySessionTargetResolver?: GatewaySessionTargetResolver,
   ) {}
 
   public async send(input: NotifyTelegramInput): Promise<NotifyTelegramOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
     const binding = await this.bindingStore.getBinding(resolved.sessionId);
     if (!binding) {
+      const remoteTarget =
+        this._config.distributed.mode !== "client" &&
+        this.gatewaySessionTargetResolver
+          ? await this.gatewaySessionTargetResolver(resolved.sessionId)
+          : null;
+      if (remoteTarget) {
+        return this.sendForGatewayBoundSession({
+          clientUuid: remoteTarget.client_uuid,
+          localSessionId: remoteTarget.local_session_id,
+          message: input.message,
+          sessionLabel:
+            remoteTarget.session_label ??
+            resolved.sessionLabel ??
+            remoteTarget.local_session_id,
+          ...(input.task ? { task: input.task } : {}),
+          ...(input.context ? { context: input.context } : {}),
+          ...(input.risk_level ? { riskLevel: input.risk_level } : {}),
+        });
+      }
       if (this._config.distributed.gatewayPublicUrl) {
         return this.sendViaGatewayBoundSession({
           sessionId: resolved.sessionId,
@@ -165,7 +210,9 @@ export class NotifyService {
     );
     const binding = await this.bindingStore.getBinding(relaySessionId);
     if (!binding) {
-      throw new Error("Gateway relay session has no active Telegram route yet.");
+      throw new Error(
+        `Gateway relay session '${relaySessionId}' has no active Telegram route.`,
+      );
     }
 
     const session = await this.sessionStore.getSession(relaySessionId);
@@ -313,7 +360,19 @@ export class NotifyService {
       throw new Error(message || response.statusText);
     }
 
-    return (await response.json()) as NotifyTelegramOutput;
+    const rawOutput = (await response.json()) as unknown;
+    const normalized = normalizeNotifyTelegramOutput(rawOutput);
+    if (normalized) {
+      return normalized;
+    }
+
+    this.logger.error("notify_telegram received invalid gateway output", {
+      sessionId: input.sessionId,
+      output: rawOutput,
+    });
+    throw new Error(
+      `Invalid notify_telegram gateway output: ${JSON.stringify(rawOutput)}`,
+    );
   }
 
   private async resolveSessionContextForNotification(

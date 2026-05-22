@@ -113,6 +113,7 @@ type GatewaySocketSessionTools = {
   local_session_id: string;
   session_label?: string;
   tools_hash?: string;
+  cwd?: string;
 };
 
 type GatewaySocketHello = {
@@ -532,15 +533,6 @@ type GatewaySocketCarrier = Service & {
     clientUuid: string;
     payload: GatewaySocketTransportReplyPayload;
   }) => Promise<boolean>;
-  listConnectedClients?: () => Array<{
-    client_uuid: string;
-    gateway_user_uuid?: string;
-    node_id?: string;
-    package_version?: string;
-    protocol_version?: string;
-    session_tools: GatewaySocketSessionTools[];
-    capabilities: TellyMcpCapability[];
-  }>;
 };
 
 export type TelegramMcpGatewaySocketServiceInstance = GatewaySocketCarrier;
@@ -587,7 +579,7 @@ function computePackageToolsHash(currentDir: string): string | null {
 
 function isBackendErrorLike(
   value: unknown,
-): value is { message?: string; statusCode: number; code: string; name?: string } {
+): value is { message?: string; statusCode: number; code: string; name?: string; data?: unknown } {
   return Boolean(
     value &&
       typeof value === "object" &&
@@ -598,7 +590,37 @@ function isBackendErrorLike(
   );
 }
 
+function formatBackendErrorLike(
+  value: { message?: string; statusCode: number; code: string; name?: string; data?: unknown },
+): string {
+  const details: string[] = [];
+
+  if (typeof value.code === "string" && value.code.trim()) {
+    details.push(`code=${value.code.trim()}`);
+  }
+  if (typeof value.statusCode === "number") {
+    details.push(`statusCode=${value.statusCode}`);
+  }
+  if (value.data !== undefined) {
+    try {
+      details.push(`data=${JSON.stringify(value.data)}`);
+    } catch {
+      details.push(`data=${String(value.data)}`);
+    }
+  }
+
+  const base =
+    typeof value.message === "string" && value.message.trim()
+      ? value.message.trim()
+      : `${value.name ?? "BackendError"} (${value.code})`;
+
+  return details.length > 0 ? `${base}\n${details.join("\n")}` : base;
+}
+
 function formatRemoteActionError(error: unknown): string {
+  if (isBackendErrorLike(error)) {
+    return formatBackendErrorLike(error);
+  }
   if (!(error instanceof Error)) {
     return inspect(error, { depth: 6, breakLength: 140 });
   }
@@ -675,12 +697,6 @@ function listConnectedSocketsForClient(
       continue;
     }
     sockets.push(socket);
-  }
-  if (sockets.length === 0) {
-    const fallback = carrier.connectedClientsByUuid?.get(clientUuid);
-    if (fallback && (fallback.readyState === undefined || fallback.readyState === 1)) {
-      sockets.push(fallback);
-    }
   }
   return sockets;
 }
@@ -933,13 +949,6 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         };
       },
     },
-    listConnectedClients: {
-      async handler(this: GatewaySocketCarrier) {
-        return {
-          clients: this.listConnectedClients?.() ?? [],
-        };
-      },
-    },
     sendDirectPartnerNote: {
       params: {
         clientUuid: "string",
@@ -1077,15 +1086,13 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
               });
               const session =
                 await runtime.sessionStore.getSession(resolved.sessionId);
+              if (!session) {
+                throw new Error(
+                  `Current console '${resolved.sessionId}' is missing from session store during gateway hello.`,
+                );
+              }
 
-              return [
-                session ?? {
-                  sessionId: resolved.sessionId,
-                  label: resolved.sessionLabel,
-                  cwd: resolved.cwd,
-                  updatedAt: new Date().toISOString(),
-                },
-              ];
+              return [session];
             })()
           : (
             await Promise.all(
@@ -1104,13 +1111,12 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             );
       const sessionTools = sessionsForHello
         .map((session) => {
-          const toolsHash = session.cwd
-            ? computeToolsHashForDir(session.cwd)
-            : null;
+          const effectiveHash = session.lastSeenToolsHash?.trim() ?? null;
           return {
             local_session_id: session.sessionId,
             ...(session.label ? { session_label: session.label } : {}),
-            ...(toolsHash ? { tools_hash: toolsHash } : {}),
+            ...(effectiveHash ? { tools_hash: effectiveHash } : {}),
+            ...(session.cwd ? { cwd: session.cwd } : {}),
           } satisfies GatewaySocketSessionTools;
         })
         .sort((left, right) =>
@@ -1133,56 +1139,6 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         protocolVersion: TELLYMCP_PROTOCOL_VERSION,
         capabilities: [...TELLYMCP_CAPABILITIES],
       };
-    },
-
-    listConnectedClients(this: GatewaySocketCarrier) {
-      const result: Array<{
-        client_uuid: string;
-        gateway_user_uuid?: string;
-        client_label?: string;
-        system_username?: string;
-        namespace?: string;
-        node_id?: string;
-        package_version?: string;
-        protocol_version?: string;
-        session_tools: GatewaySocketSessionTools[];
-        capabilities: TellyMcpCapability[];
-      }> = [];
-
-      for (const hello of this.connectedClients?.values() ?? []) {
-        if (!hello?.client_uuid) {
-          continue;
-        }
-
-        result.push({
-          client_uuid: hello.client_uuid,
-          ...(hello.gateway_user_uuid
-            ? { gateway_user_uuid: hello.gateway_user_uuid }
-            : {}),
-          ...(hello.client_label ? { client_label: hello.client_label } : {}),
-          ...(hello.system_username
-            ? { system_username: hello.system_username }
-            : {}),
-          ...(hello.namespace ? { namespace: hello.namespace } : {}),
-          ...(hello.node_id ? { node_id: hello.node_id } : {}),
-          ...(hello.package_version
-            ? { package_version: hello.package_version }
-            : {}),
-          ...(hello.protocol_version
-            ? { protocol_version: hello.protocol_version }
-            : {}),
-          session_tools: Array.isArray(hello.session_tools)
-            ? hello.session_tools
-            : [],
-          capabilities: Array.isArray(hello.capabilities)
-            ? hello.capabilities
-            : [],
-        });
-      }
-
-      return result.sort((left, right) =>
-        left.client_uuid.localeCompare(right.client_uuid),
-      );
     },
 
     findConnectedSessionTool(
@@ -1232,87 +1188,25 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       if (!sessionId || sessionId.startsWith("relay~")) {
         return null;
       }
+      const resolved = await (this.broker.call as any)(
+        "telegramMcp.gateway.resolveLiveConsole",
+        { sessionId },
+        { meta: { internal_call: true } },
+      ) as {
+        client_uuid: string;
+        local_session_id: string;
+        session_label?: string | null;
+      } | null;
 
-      const compositeSeparatorIndex = sessionId.indexOf(":");
-      const compositeClientUuid =
-        compositeSeparatorIndex > 0 ? sessionId.slice(0, compositeSeparatorIndex).trim() : "";
-      const compositeLocalSessionId =
-        compositeSeparatorIndex > 0
-          ? sessionId.slice(compositeSeparatorIndex + 1).trim()
-          : "";
-
-      if (compositeClientUuid && compositeLocalSessionId) {
-        for (const hello of this.connectedClients?.values() ?? []) {
-          if (
-            hello?.client_uuid !== compositeClientUuid ||
-            !Array.isArray(hello.session_tools)
-          ) {
-            continue;
-          }
-
-          const sessionTool = hello.session_tools.find(
-            (item) => item.local_session_id === compositeLocalSessionId,
-          );
-          if (!sessionTool) {
-            continue;
-          }
-
-          return {
-            client_uuid: compositeClientUuid,
-            local_session_id: compositeLocalSessionId,
-            ...(sessionTool.session_label
-              ? { session_label: sessionTool.session_label }
-              : {}),
-          };
-        }
-
+      if (!resolved) {
         return null;
       }
 
-      const matches = new Map<
-        string,
-        {
-          client_uuid: string;
-          local_session_id: string;
-          session_label?: string;
-        }
-      >();
-
-      for (const hello of this.connectedClients?.values() ?? []) {
-        if (!hello?.client_uuid || !Array.isArray(hello.session_tools)) {
-          continue;
-        }
-
-        const sessionTool = hello.session_tools.find(
-          (item) => item.local_session_id === sessionId,
-        );
-        if (!sessionTool) {
-          continue;
-        }
-
-        const key = `${hello.client_uuid}:${sessionTool.local_session_id}`;
-        if (!matches.has(key)) {
-          matches.set(key, {
-            client_uuid: hello.client_uuid,
-            local_session_id: sessionTool.local_session_id,
-            ...(sessionTool.session_label
-              ? { session_label: sessionTool.session_label }
-              : {}),
-          });
-        }
-      }
-
-      if (matches.size === 0) {
-        return null;
-      }
-
-      if (matches.size > 1) {
-      throw new Error(
-        `Console session_id '${sessionId}' is ambiguous across connected clients. Use the canonical gateway session_id format client_uuid:local_session_id.`,
-      );
-      }
-
-      return [...matches.values()][0] ?? null;
+      return {
+        client_uuid: resolved.client_uuid,
+        local_session_id: resolved.local_session_id,
+        ...(resolved.session_label ? { session_label: resolved.session_label } : {}),
+      };
     },
 
     async sendDirectPartnerNote(
@@ -1530,9 +1424,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
       let delivered = 0;
       for (const session of boundSessions) {
-        const localHash = session.cwd
-          ? computeToolsHashForDir(session.cwd)
-          : null;
+        const localHash = session.lastSeenToolsHash?.trim() ?? null;
         if (localHash === gatewayToolsHash) {
           continue;
         }
@@ -1550,7 +1442,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           gateway_tools_hash: gatewayToolsHash,
           reason: localHash ? "outdated" : "missing",
           instruction:
-            "Call refresh_tools_markdown for this session, then re-read the local TOOLS.md and apply it before continuing.",
+            "Call refresh_tools_markdown with the current known_hash for this session. If changed=true, read and apply the returned content before continuing.",
         });
         delivered += 1;
       }
@@ -1606,7 +1498,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
               gateway_tools_hash: gatewayToolsHash,
               reason: clientToolsHash ? "outdated" : "missing",
               instruction:
-                "Call refresh_tools_markdown for this session, then re-read the local TOOLS.md and apply it before continuing.",
+                "Call refresh_tools_markdown with the current known_hash for this session. If changed=true, read and apply the returned content before continuing.",
             },
           } satisfies GatewaySocketToolsEvent),
         );
@@ -2241,6 +2133,12 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
                                 ).tools_hash.trim(),
                               }
                             : {}),
+                          ...(typeof (item as { cwd?: unknown }).cwd === "string" &&
+                          (item as { cwd: string }).cwd.trim()
+                            ? {
+                                cwd: (item as { cwd: string }).cwd.trim(),
+                              }
+                            : {}),
                         }
                       : null,
                   )
@@ -2268,6 +2166,43 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           this.connectedClientsByUuid?.set(hello.client_uuid, socket);
         }
         runtime.logger.info("Gateway WS hello received", hello);
+        if (hello.client_uuid) {
+          await this.broker.call(
+            "telegramMcp.gateway.syncLiveConsoles",
+            {
+              client_uuid: hello.client_uuid,
+              connection_id: hello.connection_id,
+              ...(hello.gateway_user_uuid
+                ? { gateway_user_uuid: hello.gateway_user_uuid }
+                : {}),
+              ...(hello.client_label ? { client_label: hello.client_label } : {}),
+              ...(hello.system_username
+                ? { system_username: hello.system_username }
+                : {}),
+              ...(hello.namespace ? { namespace: hello.namespace } : {}),
+              ...(hello.node_id ? { node_id: hello.node_id } : {}),
+              ...(hello.package_version
+                ? { package_version: hello.package_version }
+                : {}),
+              ...(hello.protocol_version
+                ? { protocol_version: hello.protocol_version }
+                : {}),
+              session_tools: Array.isArray(hello.session_tools)
+                ? hello.session_tools.map((sessionTool) => ({
+                    local_session_id: sessionTool.local_session_id,
+                    ...(sessionTool.session_label
+                      ? { session_label: sessionTool.session_label }
+                      : {}),
+                    ...(sessionTool.tools_hash
+                      ? { tools_hash: sessionTool.tools_hash }
+                      : {}),
+                    ...(sessionTool.cwd ? { cwd: sessionTool.cwd } : {}),
+                  }))
+                : [],
+            },
+            { meta: { internal_call: true } },
+          );
+        }
         const localVersionInfo = this.getLocalVersionInfo?.() ?? {
           packageVersion: "0.0.0-unknown",
           protocolVersion: TELLYMCP_PROTOCOL_VERSION,
@@ -2688,10 +2623,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
                 type: "action_response",
                 request_id: requestId,
                 ok: false,
-                error:
-                  typeof result.message === "string" && result.message.trim()
-                    ? result.message
-                    : `${result.name ?? "BackendError"} (${result.code})`,
+                error: formatBackendErrorLike(result),
               } satisfies GatewaySocketActionResponse),
             );
             return;
@@ -3307,6 +3239,24 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
         socket.on("close", () => {
           const hello = this.connectedClients?.get(socket);
+          if (hello?.connection_id) {
+            void this.broker
+              .call(
+                "telegramMcp.gateway.removeLiveConsoles",
+                {
+                  connection_id: hello.connection_id,
+                  ...(hello.client_uuid ? { client_uuid: hello.client_uuid } : {}),
+                },
+                { meta: { internal_call: true } },
+              )
+              .catch((error: unknown) => {
+                runtime.logger.warn("Failed to remove gateway live consoles on disconnect", {
+                  connectionId: hello.connection_id,
+                  clientUuid: hello?.client_uuid ?? null,
+                  error: error instanceof Error ? error.message : String(error),
+                });
+              });
+          }
           if (hello?.client_uuid) {
             if (this.connectedClientsByUuid?.get(hello.client_uuid) === socket) {
               const replacement =

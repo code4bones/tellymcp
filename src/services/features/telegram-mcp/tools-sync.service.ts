@@ -30,7 +30,7 @@ const TelegramMcpToolsSyncService: ServiceSchema = {
         $$strict: false,
         session_id: { type: "string", optional: true, empty: false },
         cwd: { type: "string", optional: true, empty: false },
-        save_locally: { type: "boolean", optional: true },
+        known_hash: { type: "string", optional: true, empty: false },
       },
       async handler(
         this: ToolsSyncServiceCarrier,

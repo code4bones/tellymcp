@@ -23,7 +23,7 @@ type RemoteConsoleInvoker = {
     sessionId: string,
     actionName: string,
     params: Record<string, unknown>,
-  ): Promise<T | null>;
+  ): Promise<T>;
 };
 
 export class InboxService {
@@ -176,10 +176,15 @@ export class InboxService {
   private async resolveWorkspaceDir(sessionId: string): Promise<string> {
     const getSession = (this._sessionStore as { getSession?: (sessionId: string) => Promise<{ cwd?: string } | null> }).getSession;
     if (!getSession) {
-      return process.cwd();
+      throw new Error("Session store does not expose getSession; cannot resolve console workspace.");
     }
     const session = await getSession(sessionId);
     const workspaceDir = session?.cwd?.trim();
-    return workspaceDir || process.cwd();
+    if (!workspaceDir) {
+      throw new Error(
+        `Workspace cwd is not registered for console '${sessionId}'.`,
+      );
+    }
+    return workspaceDir;
   }
 }

@@ -146,6 +146,7 @@ export type GatewayClientRecord = {
   client_label: string | null;
   namespace?: string | null;
   node_id?: string | null;
+  system_username?: string | null;
   telegram_username: string | null;
   telegram_display_name: string | null;
   bot_username: string | null;
@@ -178,6 +179,9 @@ export type AdminGatewayRegistrationSessionRecord = {
 
 export type GatewayConnectedClientRecord = {
   client_uuid: string;
+  gateway_user_uuid?: string;
+  client_label?: string;
+  system_username?: string;
   namespace?: string;
   node_id?: string;
   package_version?: string;

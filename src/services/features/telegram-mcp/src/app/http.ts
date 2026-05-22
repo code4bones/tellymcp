@@ -1283,14 +1283,37 @@ export function createMcpHttpHandler(
       }
 
       const result = await runtime.maintenanceStore.pruneAll();
+      let gatewayDeleted: Record<string, number> | null = null;
+      if (
+        runtime.config.distributed.mode === "gateway" ||
+        runtime.config.distributed.mode === "both"
+      ) {
+        try {
+          const gatewayResult = await runtime.callBroker<{
+            deleted?: Record<string, number>;
+          }>("telegramMcp.gateway.pruneGatewayState", {}, {
+            meta: { internal_call: true },
+          });
+          gatewayDeleted =
+            gatewayResult?.deleted && typeof gatewayResult.deleted === "object"
+              ? gatewayResult.deleted
+              : null;
+        } catch (error) {
+          runtime.logger.warn("Gateway DB prune failed through HTTP endpoint", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
       runtime.logger.warn("MCP service state pruned through HTTP endpoint", {
         deletedKeys: result.deletedKeys,
+        gatewayDeleted,
         remoteAddress: req.socket.remoteAddress,
       });
 
       writeJson(res, 200, {
         ok: true,
         deleted_keys: result.deletedKeys,
+        ...(gatewayDeleted ? { gateway_deleted: gatewayDeleted } : {}),
       });
       return;
     }

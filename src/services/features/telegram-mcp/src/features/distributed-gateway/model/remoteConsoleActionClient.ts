@@ -2,13 +2,37 @@ import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
 
 function isBackendErrorLike(
   value: unknown,
-): value is { message?: string; statusCode: number; code: string; name?: string } {
+): value is { message?: string; statusCode: number; code: string; name?: string; data?: unknown } {
   return Boolean(
     value &&
       typeof value === "object" &&
       typeof (value as { statusCode?: unknown }).statusCode === "number" &&
       typeof (value as { code?: unknown }).code === "string",
   );
+}
+
+function formatBackendErrorLike(
+  value: { message?: string; statusCode: number; code: string; name?: string; data?: unknown },
+): string {
+  const details: string[] = [];
+  if (typeof value.code === "string" && value.code.trim()) {
+    details.push(`code=${value.code.trim()}`);
+  }
+  if (typeof value.statusCode === "number") {
+    details.push(`statusCode=${value.statusCode}`);
+  }
+  if (value.data !== undefined) {
+    try {
+      details.push(`data=${JSON.stringify(value.data)}`);
+    } catch {
+      details.push(`data=${String(value.data)}`);
+    }
+  }
+  const base =
+    typeof value.message === "string" && value.message.trim()
+      ? value.message.trim()
+      : `${value.name ?? "BackendError"} (${value.code})`;
+  return details.length > 0 ? `${base}\n${details.join("\n")}` : base;
 }
 
 export class RemoteConsoleActionClient {
@@ -22,7 +46,7 @@ export class RemoteConsoleActionClient {
   private async resolveTarget(
     sessionId: string,
     _params: Record<string, unknown>,
-  ): Promise<{ clientUuid: string; localSessionId: string } | null> {
+  ): Promise<{ clientUuid: string; localSessionId: string }> {
     const relayTarget = parseLiveRelaySessionId(sessionId);
     if (relayTarget) {
       return {
@@ -33,7 +57,9 @@ export class RemoteConsoleActionClient {
 
     const trimmedSessionId = sessionId.trim();
     if (!trimmedSessionId) {
-      return null;
+      throw new Error(
+        "Gateway-routed action requires a non-empty canonical session_id in the format client_uuid:local_session_id.",
+      );
     }
 
     const resolved = await this.callBroker<{
@@ -44,7 +70,9 @@ export class RemoteConsoleActionClient {
     });
 
     if (!resolved) {
-      return null;
+      throw new Error(
+        `Could not resolve live console target for session_id '${trimmedSessionId}'.`,
+      );
     }
 
     return {
@@ -57,11 +85,8 @@ export class RemoteConsoleActionClient {
     sessionId: string,
     actionName: string,
     params: Record<string, unknown>,
-  ): Promise<T | null> {
+  ): Promise<T> {
     const target = await this.resolveTarget(sessionId, params);
-    if (!target) {
-      return null;
-    }
 
     const result = await this.callBroker<T>("telegramMcp.gatewaySocket.requestClientAction", {
       clientUuid: target.clientUuid,
@@ -73,11 +98,7 @@ export class RemoteConsoleActionClient {
     });
 
     if (isBackendErrorLike(result)) {
-      throw new Error(
-        typeof result.message === "string" && result.message.trim()
-          ? result.message
-          : `${result.name ?? "BackendError"} (${result.code})`,
-      );
+      throw new Error(formatBackendErrorLike(result));
     }
 
     return result;

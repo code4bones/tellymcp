@@ -21,7 +21,7 @@ type RemoteConsoleInvoker = {
     sessionId: string,
     actionName: string,
     params: Record<string, unknown>,
-  ): Promise<T | null>;
+  ): Promise<T>;
 };
 
 export class XchangeService {
@@ -148,6 +148,11 @@ export class XchangeService {
   private async resolveWorkspaceDir(sessionId: string): Promise<string> {
     const session = await this.sessionStore.getSession(sessionId);
     const workspaceDir = session?.cwd?.trim();
-    return workspaceDir || process.cwd();
+    if (!workspaceDir) {
+      throw new Error(
+        `Workspace cwd is not registered for console '${sessionId}'.`,
+      );
+    }
+    return workspaceDir;
   }
 }

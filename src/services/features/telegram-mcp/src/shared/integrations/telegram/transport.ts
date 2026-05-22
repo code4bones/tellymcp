@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import path from "node:path";
+import { basename } from "node:path";
 import { readFile } from "node:fs/promises";
 
 import { Menu } from "@grammyjs/menu";
@@ -506,7 +505,7 @@ export class TelegramTransport implements HumanTransport {
     const fileBuffer = await readFile(filePath);
     const response = await this.bot.api.sendDocument(
       telegramChatId,
-      new InputFile(fileBuffer, path.basename(filePath)),
+      new InputFile(fileBuffer, basename(filePath)),
       caption?.trim()
         ? {
             caption: caption.trim(),
@@ -903,17 +902,7 @@ export class TelegramTransport implements HumanTransport {
 
   private async computeSessionToolsHash(sessionId: string): Promise<string | null> {
     const session = await this.sessionStore.getSession(sessionId);
-    const workspaceDir = session?.cwd?.trim();
-    if (!workspaceDir) {
-      return null;
-    }
-
-    try {
-      const content = await readFile(path.join(workspaceDir, "TOOLS.md"), "utf8");
-      return createHash("sha256").update(content).digest("hex");
-    } catch {
-      return null;
-    }
+    return session?.lastSeenToolsHash?.trim() || null;
   }
 
   private async maybeNotifyToolsMismatchForSession(
@@ -941,7 +930,7 @@ export class TelegramTransport implements HumanTransport {
       gateway_tools_hash: expectedGatewayHash,
       reason: localHash ? "outdated" : "missing",
       instruction:
-        "Call refresh_tools_markdown for this session, then re-read the local TOOLS.md and apply it before continuing.",
+        "Call refresh_tools_markdown with the current known_hash for this session. If changed=true, read and apply the returned content before continuing.",
     });
   }
 

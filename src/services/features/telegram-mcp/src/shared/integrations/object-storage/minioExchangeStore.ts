@@ -41,7 +41,10 @@ function resolveWorkspaceDir(
   _tmuxConfig: TmuxRuntimeConfig,
 ): string {
   const workspaceDir = session?.cwd?.trim() || "";
-  return workspaceDir || process.cwd();
+  if (!workspaceDir) {
+    throw new Error("Workspace cwd is not registered for this console.");
+  }
+  return workspaceDir;
 }
 
 export class MinioExchangeStore {

@@ -527,8 +527,9 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     if (workspaceDir) {
       return workspaceDir;
     }
-
-    return process.cwd();
+    throw new Error(
+      `Workspace cwd is not registered for console '${session.sessionId}'.`,
+    );
   }
 
   private async copyArtifactsToPartner(

@@ -12,11 +12,62 @@ export class BackendError extends Error {
 	}
 }
 
+type ErrorLikeRecord = Error & {
+	code?: unknown;
+	type?: unknown;
+	data?: unknown;
+	fields?: unknown;
+	retryable?: unknown;
+	statusCode?: unknown;
+};
+
+function collectOwnProps(err: Error): Record<string, unknown> {
+	try {
+		return Object.fromEntries(
+			Object.getOwnPropertyNames(err).map((key) => [
+				key,
+				(err as unknown as Record<string, unknown>)[key],
+			])
+		);
+	} catch {
+		return {};
+	}
+}
+
+export function extractErrorDetails(err: unknown): Record<string, unknown> | undefined {
+	if (!(err instanceof Error)) {
+		return undefined;
+	}
+
+	const named = err as ErrorLikeRecord;
+	const ownProps = collectOwnProps(err);
+
+	return {
+		name: err.name,
+		message: err.message,
+		...(typeof named.code === "string" || typeof named.code === "number"
+			? { code: named.code }
+			: {}),
+		...(typeof named.type === "string" ? { type: named.type } : {}),
+		...(typeof named.statusCode === "number" ? { statusCode: named.statusCode } : {}),
+		...(named.data !== undefined ? { data: named.data } : {}),
+		...(named.fields !== undefined ? { fields: named.fields } : {}),
+		...(typeof named.retryable === "boolean" ? { retryable: named.retryable } : {}),
+		...(err.stack ? { stack: err.stack } : {}),
+		...(Object.keys(ownProps).length > 0 ? { props: ownProps } : {}),
+	};
+}
+
 export const buildUnhandledBackendErrorCode = (rawName: string): string =>
 	`XC_${rawName.toUpperCase()}`;
 
 export const wrapUnhandledBackendError = (err: Error, rawName: string): BackendError =>
-	new BackendError(err.message, 502, buildUnhandledBackendErrorCode(rawName));
+	new BackendError(
+		err.message,
+		502,
+		buildUnhandledBackendErrorCode(rawName),
+		extractErrorDetails(err)
+	);
 
 export class UnauthorizedError extends BackendError {
 	constructor(message: string = "Unauthorized", data?: any) {

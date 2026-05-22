@@ -42,6 +42,62 @@ type GatewayServiceCarrier = Service & {
     created: boolean;
     updated_at: string;
   }>;
+  syncLiveConsolesRecord?: (input: Record<string, unknown>) => Promise<{
+    client_uuid: string;
+    connection_id: string;
+    total: number;
+  }>;
+  clearLiveConsolesRecord?: (input?: Record<string, unknown>) => Promise<{
+    deleted: number;
+  }>;
+  removeLiveConsolesRecord?: (input: Record<string, unknown>) => Promise<{
+    deleted: number;
+  }>;
+  pruneGatewayStateRecord?: () => Promise<{
+    deleted: Record<string, number>;
+  }>;
+  listLiveClientsRecord?: (input: Record<string, unknown>) => Promise<{
+    clients: Array<{
+      client_uuid: string;
+      gateway_user_uuid?: string | null;
+      client_label?: string | null;
+      system_username?: string | null;
+      namespace?: string | null;
+      node_id?: string | null;
+      package_version?: string | null;
+      protocol_version?: string | null;
+      session_tools: Array<{
+        local_session_id: string;
+        session_label?: string | null;
+        tools_hash?: string | null;
+      }>;
+    }>;
+  }>;
+  listLiveConsolesRecord?: (input: Record<string, unknown>) => Promise<{
+    sessions: Array<{
+      session_id: string;
+      client_uuid: string;
+      local_session_id: string;
+      session_label?: string | null;
+      client_label?: string | null;
+      system_username?: string | null;
+      telegram_username?: string | null;
+      telegram_display_name?: string | null;
+      bot_username?: string | null;
+      node_id?: string | null;
+      package_version?: string | null;
+      protocol_version?: string | null;
+      project_uuids: string[];
+      project_names: string[];
+      connected: boolean;
+      registered: boolean;
+    }>;
+  }>;
+  resolveLiveConsoleRecord?: (input: Record<string, unknown>) => Promise<{
+    client_uuid: string;
+    local_session_id: string;
+    session_label?: string | null;
+  } | null>;
   createProjectRecord?: (input: Record<string, unknown>) => Promise<{
     project_uuid: string;
     invite_token: string;
@@ -59,10 +115,6 @@ type GatewayServiceCarrier = Service & {
     created: boolean;
     updated_at: string;
   }>;
-  unregisterSessionRecord?: (input: Record<string, unknown>) => Promise<{
-    local_session_id: string;
-    deleted: number;
-  }>;
   listClientsRecord?: (input: Record<string, unknown>) => Promise<{
     clients: Array<{
       client_uuid: string;
@@ -75,34 +127,6 @@ type GatewayServiceCarrier = Service & {
       last_seen_at?: string;
       updated_at?: string;
       session_count: number;
-    }>;
-  }>;
-  listClientSessionsRecord?: (input: Record<string, unknown>) => Promise<{
-    sessions: Array<{
-      session_uuid: string;
-      client_uuid: string;
-      local_session_id: string;
-      label: string | null;
-      status: string;
-      project_uuid?: string;
-      project_name?: string | null;
-      updated_at?: string;
-    }>;
-  }>;
-  listAllSessionsRecord?: (input: Record<string, unknown>) => Promise<{
-    sessions: Array<{
-      session_uuid: string;
-      client_uuid: string;
-      local_session_id: string;
-      label: string | null;
-      status: string;
-      client_label: string | null;
-      telegram_username: string | null;
-      telegram_display_name: string | null;
-      bot_username: string | null;
-      project_uuid?: string;
-      project_name?: string | null;
-      updated_at?: string;
     }>;
   }>;
   listProjectsRecord?: (input: Record<string, unknown>) => Promise<{
@@ -491,6 +515,464 @@ const TelegramMcpGatewayService: ServiceSchema = {
       };
     },
 
+    async clearLiveConsolesRecord(
+      this: GatewayServiceCarrier,
+      input: Record<string, unknown> = {},
+    ) {
+      const connectionId = this.normalizeOptionalText?.(input.connection_id);
+      const clientUuid = this.normalizeOptionalText?.(input.client_uuid);
+      const query = this.db.withSchema(MCP_SCHEMA).table("gateway_live_consoles");
+      if (connectionId) {
+        query.where({ connection_id: connectionId });
+      }
+      if (clientUuid) {
+        query.where({ client_uuid: clientUuid });
+      }
+
+      const deleted = await query.del();
+      return { deleted };
+    },
+
+    async removeLiveConsolesRecord(
+      this: GatewayServiceCarrier,
+      input: Record<string, unknown>,
+    ) {
+      const clientUuid = this.normalizeOptionalText?.(input.client_uuid);
+      const connectionId = this.normalizeOptionalText?.(input.connection_id);
+      if (!clientUuid && !connectionId) {
+        throw new Error("client_uuid or connection_id is required");
+      }
+
+      const query = this.db.withSchema(MCP_SCHEMA).table("gateway_live_consoles");
+      if (clientUuid) {
+        query.where({ client_uuid: clientUuid });
+      }
+      if (connectionId) {
+        query.where({ connection_id: connectionId });
+      }
+
+      const deleted = await query.del();
+      return { deleted };
+    },
+
+    async pruneGatewayStateRecord(this: GatewayServiceCarrier) {
+      const deleted: Record<string, number> = {};
+      const truncate = async (tableName: string) => {
+        deleted[tableName] = await this.db.withSchema(MCP_SCHEMA).table(tableName).del();
+      };
+
+      await truncate("gateway_live_consoles");
+      await truncate("gateway_session_links");
+      await truncate("gateway_deliveries");
+      await truncate("gateway_message_artifacts");
+      await truncate("gateway_messages");
+      await truncate("gateway_project_consoles");
+      await truncate("gateway_sessions");
+      await truncate("gateway_project_members");
+      await truncate("gateway_projects");
+      await truncate("gateway_clients");
+      await truncate("gateway_users");
+
+      return { deleted };
+    },
+
+    async syncLiveConsolesRecord(
+      this: GatewayServiceCarrier,
+      input: Record<string, unknown>,
+    ) {
+      const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
+      const connectionId = this.requireText?.(input.connection_id, "connection_id");
+      const now = new Date().toISOString();
+      const gatewayUserUuid = this.normalizeOptionalText?.(input.gateway_user_uuid);
+      const clientLabel = this.normalizeOptionalText?.(input.client_label);
+      const systemUsername = this.normalizeOptionalText?.(input.system_username);
+      const namespace = this.normalizeOptionalText?.(input.namespace);
+      const nodeId = this.normalizeOptionalText?.(input.node_id);
+      const packageVersion = this.normalizeOptionalText?.(input.package_version);
+      const protocolVersion = this.normalizeOptionalText?.(input.protocol_version);
+      const sessionTools: Array<{
+        local_session_id: string;
+        session_label: string | null;
+        tools_hash: string | null;
+        cwd: string | null;
+      }> = Array.isArray(input.session_tools)
+        ? input.session_tools.flatMap((item) => {
+            if (!item || typeof item !== "object") {
+              return [];
+            }
+            const record = item as Record<string, unknown>;
+            const localSessionId = this.normalizeOptionalText?.(record.local_session_id);
+            if (!localSessionId) {
+              return [];
+            }
+            return [
+              {
+                local_session_id: localSessionId,
+                session_label: this.normalizeOptionalText?.(record.session_label) ?? null,
+                tools_hash: this.normalizeOptionalText?.(record.tools_hash) ?? null,
+                cwd: this.normalizeOptionalText?.(record.cwd) ?? null,
+              },
+            ];
+          })
+        : [];
+
+      await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_clients")
+        .where({ client_uuid: clientUuid })
+        .update({
+          ...(gatewayUserUuid ? { owner_user_uuid: gatewayUserUuid } : {}),
+          ...(clientLabel ? { client_label: clientLabel } : {}),
+          updated_at: now,
+          last_seen_at: now,
+        });
+
+      await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_live_consoles")
+        .where({ connection_id: connectionId })
+        .del();
+
+      for (const sessionTool of sessionTools) {
+        const existing = await this.db
+          .withSchema(MCP_SCHEMA)
+          .table("gateway_live_consoles")
+          .where({
+            client_uuid: clientUuid,
+            local_session_id: sessionTool.local_session_id,
+          })
+          .first("live_console_uuid", "connected_at");
+
+        const payload = {
+          connection_id: connectionId,
+          client_uuid: clientUuid,
+          local_session_id: sessionTool.local_session_id,
+          ...(sessionTool.session_label
+            ? { session_label: sessionTool.session_label }
+            : {}),
+          ...(sessionTool.cwd ? { cwd: sessionTool.cwd } : {}),
+          ...(sessionTool.tools_hash ? { tools_hash: sessionTool.tools_hash } : {}),
+          ...(gatewayUserUuid ? { gateway_user_uuid: gatewayUserUuid } : {}),
+          ...(clientLabel ? { client_label: clientLabel } : {}),
+          ...(systemUsername ? { system_username: systemUsername } : {}),
+          ...(namespace ? { namespace } : {}),
+          ...(nodeId ? { node_id: nodeId } : {}),
+          ...(packageVersion ? { package_version: packageVersion } : {}),
+          ...(protocolVersion ? { protocol_version: protocolVersion } : {}),
+          meta: this.db.raw(`?::jsonb`, [
+            JSON.stringify({
+              ...(sessionTool.cwd ? { cwd: sessionTool.cwd } : {}),
+            }),
+          ]),
+          last_seen_at: now,
+        };
+
+        if (existing?.live_console_uuid) {
+          await this.db
+            .withSchema(MCP_SCHEMA)
+            .table("gateway_live_consoles")
+            .where({ live_console_uuid: existing.live_console_uuid })
+            .update(payload);
+          continue;
+        }
+
+        await this.db.withSchema(MCP_SCHEMA).table("gateway_live_consoles").insert({
+          live_console_uuid: randomUUID(),
+          ...payload,
+          connected_at: now,
+        });
+      }
+
+      return {
+        client_uuid: clientUuid,
+        connection_id: connectionId,
+        total: sessionTools.length,
+      };
+    },
+
+    async listLiveClientsRecord(
+      this: GatewayServiceCarrier,
+      input: Record<string, unknown> = {},
+    ) {
+      const scopeKey = resolveGatewayScopeKey(input);
+      const ownerUserUuid = await this.resolveOwnerUserUuidFilter?.(input);
+      const rows = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_live_consoles as lc")
+        .join("gateway_clients as c", "c.client_uuid", "lc.client_uuid")
+        .modify((query) => {
+          if (scopeKey) {
+            query.where("c.scope_key", scopeKey);
+          }
+          if (ownerUserUuid) {
+            query.where("c.owner_user_uuid", ownerUserUuid);
+          }
+        })
+        .select(
+          "lc.client_uuid",
+          "lc.local_session_id",
+          "lc.session_label",
+          "lc.tools_hash",
+          "lc.gateway_user_uuid",
+          "lc.client_label",
+          "lc.system_username",
+          "lc.namespace",
+          "lc.node_id",
+          "lc.package_version",
+          "lc.protocol_version",
+          "lc.last_seen_at",
+        )
+        .orderBy("lc.client_uuid", "asc")
+        .orderBy("lc.local_session_id", "asc");
+
+      const grouped = new Map<
+        string,
+        {
+          client_uuid: string;
+          gateway_user_uuid?: string | null;
+          client_label?: string | null;
+          system_username?: string | null;
+          namespace?: string | null;
+          node_id?: string | null;
+          package_version?: string | null;
+          protocol_version?: string | null;
+          session_tools: Array<{
+            local_session_id: string;
+            session_label?: string | null;
+            tools_hash?: string | null;
+          }>;
+        }
+      >();
+
+      for (const row of rows) {
+        const current = grouped.get(String(row.client_uuid)) ?? {
+          client_uuid: String(row.client_uuid),
+          ...(row.gateway_user_uuid
+            ? { gateway_user_uuid: String(row.gateway_user_uuid) }
+            : {}),
+          ...(row.client_label ? { client_label: String(row.client_label) } : {}),
+          ...(row.system_username
+            ? { system_username: String(row.system_username) }
+            : {}),
+          ...(row.namespace ? { namespace: String(row.namespace) } : {}),
+          ...(row.node_id ? { node_id: String(row.node_id) } : {}),
+          ...(row.package_version
+            ? { package_version: String(row.package_version) }
+            : {}),
+          ...(row.protocol_version
+            ? { protocol_version: String(row.protocol_version) }
+            : {}),
+          session_tools: [],
+        };
+        current.session_tools.push({
+          local_session_id: String(row.local_session_id),
+          ...(row.session_label ? { session_label: String(row.session_label) } : {}),
+          ...(row.tools_hash ? { tools_hash: String(row.tools_hash) } : {}),
+        });
+        grouped.set(current.client_uuid, current);
+      }
+
+      return {
+        clients: Array.from(grouped.values()).sort((left, right) =>
+          left.client_uuid.localeCompare(right.client_uuid),
+        ),
+      };
+    },
+
+    async listLiveConsolesRecord(
+      this: GatewayServiceCarrier,
+      input: Record<string, unknown> = {},
+    ) {
+      const scopeKey = resolveGatewayScopeKey(input);
+      const ownerUserUuid = await this.resolveOwnerUserUuidFilter?.(input);
+      const filterClientUuid = this.normalizeOptionalText?.(input.client_uuid);
+      const rows = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_live_consoles as lc")
+        .join("gateway_clients as c", "c.client_uuid", "lc.client_uuid")
+        .leftJoin("gateway_users as u", "u.gateway_user_uuid", "c.owner_user_uuid")
+        .leftJoin("gateway_project_consoles as pc", function joinProjectConsole() {
+          this.on("pc.client_uuid", "=", "lc.client_uuid")
+            .andOn("pc.local_session_id", "=", "lc.local_session_id")
+            .andOnVal("pc.status", "=", "active");
+        })
+        .leftJoin("gateway_projects as p", "p.project_uuid", "pc.project_uuid")
+        .modify((query) => {
+          if (scopeKey) {
+            query.where("c.scope_key", scopeKey);
+          }
+          if (ownerUserUuid) {
+            query.where("c.owner_user_uuid", ownerUserUuid);
+          }
+          if (filterClientUuid) {
+            query.where("lc.client_uuid", filterClientUuid);
+          }
+        })
+        .select(
+          "lc.client_uuid",
+          "lc.local_session_id",
+          "lc.session_label",
+          "lc.client_label",
+          "lc.system_username",
+          "lc.node_id",
+          "lc.package_version",
+          "lc.protocol_version",
+          "c.bot_username",
+          "pc.project_uuid",
+          "p.name as project_name",
+          this.db.raw("nullif(u.telegram_username, '') as telegram_username"),
+          this.db.raw(
+            "nullif(u.telegram_display_name, '') as telegram_display_name",
+          ),
+        )
+        .orderBy("lc.client_uuid", "asc")
+        .orderBy("lc.local_session_id", "asc");
+
+      const merged = new Map<
+        string,
+        {
+          session_id: string;
+          client_uuid: string;
+          local_session_id: string;
+          session_label?: string | null;
+          client_label?: string | null;
+          system_username?: string | null;
+          telegram_username?: string | null;
+          telegram_display_name?: string | null;
+          bot_username?: string | null;
+          node_id?: string | null;
+          package_version?: string | null;
+          protocol_version?: string | null;
+          project_uuids: string[];
+          project_names: string[];
+          connected: boolean;
+          registered: boolean;
+        }
+      >();
+
+      for (const row of rows) {
+        const key = `${row.client_uuid}:${row.local_session_id}`;
+        const current = merged.get(key);
+        const projectUuids = new Set(current?.project_uuids ?? []);
+        const projectNames = new Set(current?.project_names ?? []);
+        if (row.project_uuid) {
+          projectUuids.add(String(row.project_uuid));
+        }
+        if (row.project_name) {
+          projectNames.add(String(row.project_name));
+        }
+        merged.set(key, {
+          session_id: key,
+          client_uuid: String(row.client_uuid),
+          local_session_id: String(row.local_session_id),
+          session_label:
+            current?.session_label ??
+            (row.session_label ? String(row.session_label) : null),
+          client_label:
+            current?.client_label ??
+            (row.client_label ? String(row.client_label) : null),
+          system_username:
+            current?.system_username ??
+            (row.system_username ? String(row.system_username) : null),
+          telegram_username:
+            current?.telegram_username ??
+            (row.telegram_username ? String(row.telegram_username) : null),
+          telegram_display_name:
+            current?.telegram_display_name ??
+            (row.telegram_display_name ? String(row.telegram_display_name) : null),
+          bot_username:
+            current?.bot_username ??
+            (row.bot_username ? String(row.bot_username) : null),
+          node_id: current?.node_id ?? (row.node_id ? String(row.node_id) : null),
+          package_version:
+            current?.package_version ??
+            (row.package_version ? String(row.package_version) : null),
+          protocol_version:
+            current?.protocol_version ??
+            (row.protocol_version ? String(row.protocol_version) : null),
+          project_uuids: Array.from(projectUuids),
+          project_names: Array.from(projectNames),
+          connected: true,
+          registered: projectUuids.size > 0,
+        });
+      }
+
+      return {
+        sessions: Array.from(merged.values()).sort((left, right) =>
+          left.session_id.localeCompare(right.session_id),
+        ),
+      };
+    },
+
+    async resolveLiveConsoleRecord(
+      this: GatewayServiceCarrier,
+      input: Record<string, unknown>,
+    ) {
+      const sessionId = this.requireText?.(input.sessionId ?? input.session_id, "sessionId");
+      if (!sessionId) {
+        throw new Error("sessionId is required");
+      }
+      const ownerUserUuid = await this.resolveOwnerUserUuidFilter?.(input);
+      const compositeSeparatorIndex = sessionId.indexOf(":");
+      const clientUuid =
+        compositeSeparatorIndex > 0 ? sessionId.slice(0, compositeSeparatorIndex).trim() : "";
+      const localSessionId =
+        compositeSeparatorIndex > 0
+          ? sessionId.slice(compositeSeparatorIndex + 1).trim()
+          : sessionId;
+
+      if (clientUuid && localSessionId) {
+        const row = await this.db
+          .withSchema(MCP_SCHEMA)
+          .table("gateway_live_consoles as lc")
+          .join("gateway_clients as c", "c.client_uuid", "lc.client_uuid")
+          .where("lc.client_uuid", clientUuid)
+          .where("lc.local_session_id", localSessionId)
+          .modify((query) => {
+            if (ownerUserUuid) {
+              query.where("c.owner_user_uuid", ownerUserUuid);
+            }
+          })
+          .first("lc.client_uuid", "lc.local_session_id", "lc.session_label");
+
+        return row
+          ? {
+              client_uuid: String(row.client_uuid),
+              local_session_id: String(row.local_session_id),
+              ...(row.session_label ? { session_label: String(row.session_label) } : {}),
+            }
+          : null;
+      }
+
+      const rows = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_live_consoles as lc")
+        .join("gateway_clients as c", "c.client_uuid", "lc.client_uuid")
+        .where("lc.local_session_id", localSessionId)
+        .modify((query) => {
+          if (ownerUserUuid) {
+            query.where("c.owner_user_uuid", ownerUserUuid);
+          }
+        })
+        .select("lc.client_uuid", "lc.local_session_id", "lc.session_label");
+
+      if (rows.length === 0) {
+        return null;
+      }
+      if (rows.length > 1) {
+        throw new Error(
+          `Console session_id '${localSessionId}' is ambiguous across live clients. Use the canonical gateway session_id format client_uuid:local_session_id.`,
+        );
+      }
+
+      const row = rows[0];
+      return {
+        client_uuid: String(row.client_uuid),
+        local_session_id: String(row.local_session_id),
+        ...(row.session_label ? { session_label: String(row.session_label) } : {}),
+      };
+    },
+
     async createProjectRecord(this: GatewayServiceCarrier, input: Record<string, unknown>) {
       const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
       const name = this.requireText?.(input.name, "name");
@@ -731,14 +1213,22 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .withSchema(MCP_SCHEMA)
         .table("gateway_sessions")
         .where({
-          project_uuid: projectUuid,
           client_uuid: clientUuid,
           local_session_id: localSessionId,
         })
         .first();
 
+      const existingProjectConsole = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_project_consoles")
+        .where({
+          project_uuid: projectUuid,
+          client_uuid: clientUuid,
+          local_session_id: localSessionId,
+        })
+        .first("project_console_uuid");
+
       const payload = {
-        project_uuid: projectUuid,
         client_uuid: clientUuid,
         local_session_id: localSessionId,
         ...(this.normalizeOptionalText?.(input.label)
@@ -780,23 +1270,31 @@ const TelegramMcpGatewayService: ServiceSchema = {
         await this.db
           .withSchema(MCP_SCHEMA)
           .table("gateway_sessions")
-          .where({
-            project_uuid: projectUuid,
-            client_uuid: clientUuid,
-          })
-          .whereNot({
-            local_session_id: localSessionId,
-          })
-          .update({
-            status: "inactive",
-            updated_at: now,
-          });
-
-        await this.db
-          .withSchema(MCP_SCHEMA)
-          .table("gateway_sessions")
           .where({ session_uuid: existing.session_uuid })
           .update(payload);
+
+        if (existingProjectConsole?.project_console_uuid) {
+          await this.db
+            .withSchema(MCP_SCHEMA)
+            .table("gateway_project_consoles")
+            .where({ project_console_uuid: existingProjectConsole.project_console_uuid })
+            .update({
+              gateway_session_uuid: existing.session_uuid,
+              status: "active",
+              updated_at: now,
+            });
+        } else {
+          await this.db.withSchema(MCP_SCHEMA).table("gateway_project_consoles").insert({
+            project_console_uuid: randomUUID(),
+            project_uuid: projectUuid,
+            client_uuid: clientUuid,
+            local_session_id: localSessionId,
+            gateway_session_uuid: existing.session_uuid,
+            status: "active",
+            joined_at: now,
+            updated_at: now,
+          });
+        }
 
         return {
           session_uuid: existing.session_uuid,
@@ -806,25 +1304,34 @@ const TelegramMcpGatewayService: ServiceSchema = {
       }
 
       const sessionUuid = randomUUID();
-      await this.db
-        .withSchema(MCP_SCHEMA)
-        .table("gateway_sessions")
-        .where({
-          project_uuid: projectUuid,
-          client_uuid: clientUuid,
-        })
-        .whereNot({
-          local_session_id: localSessionId,
-        })
-        .update({
-          status: "inactive",
-          updated_at: now,
-        });
       await this.db.withSchema(MCP_SCHEMA).table("gateway_sessions").insert({
         session_uuid: sessionUuid,
         ...payload,
         created_at: now,
       });
+
+      if (existingProjectConsole?.project_console_uuid) {
+        await this.db
+          .withSchema(MCP_SCHEMA)
+          .table("gateway_project_consoles")
+          .where({ project_console_uuid: existingProjectConsole.project_console_uuid })
+          .update({
+            gateway_session_uuid: sessionUuid,
+            status: "active",
+            updated_at: now,
+          });
+      } else {
+        await this.db.withSchema(MCP_SCHEMA).table("gateway_project_consoles").insert({
+          project_console_uuid: randomUUID(),
+          project_uuid: projectUuid,
+          client_uuid: clientUuid,
+          local_session_id: localSessionId,
+          gateway_session_uuid: sessionUuid,
+          status: "active",
+          joined_at: now,
+          updated_at: now,
+        });
+      }
 
       return {
         session_uuid: sessionUuid,
@@ -842,7 +1349,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
       const rows = await this.db
         .withSchema(MCP_SCHEMA)
         .table("gateway_clients as c")
-        .leftJoin("gateway_sessions as s", "c.client_uuid", "s.client_uuid")
+        .leftJoin("gateway_live_consoles as lc", "c.client_uuid", "lc.client_uuid")
         .modify((query) => {
           if (scopeKey) {
             query.where("c.scope_key", scopeKey);
@@ -875,7 +1382,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
           "c.last_seen_at",
           "c.updated_at",
           this.db.raw(
-            "count(case when s.status = 'active' then s.session_uuid end) as session_count",
+            "count(lc.live_console_uuid) as session_count",
           ),
         )
         .orderBy("c.last_seen_at", "desc")
@@ -906,157 +1413,6 @@ const TelegramMcpGatewayService: ServiceSchema = {
       };
     },
 
-    async listClientSessionsRecord(
-      this: GatewayServiceCarrier,
-      input: Record<string, unknown>,
-    ) {
-      const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
-      const scopeKey = resolveGatewayScopeKey(input);
-      const ownerUserUuid = await this.resolveOwnerUserUuidFilter?.(input);
-      const rows = await this.db
-        .withSchema(MCP_SCHEMA)
-        .table("gateway_sessions as s")
-        .join("gateway_clients as c", "c.client_uuid", "s.client_uuid")
-        .leftJoin("gateway_projects as p", "p.project_uuid", "s.project_uuid")
-        .where("s.client_uuid", clientUuid)
-        .where("s.status", "active")
-        .modify((query) => {
-          if (scopeKey) {
-            query.where("c.scope_key", scopeKey);
-          }
-          if (ownerUserUuid) {
-            query.where("c.owner_user_uuid", ownerUserUuid);
-          }
-        })
-        .select(
-          "s.session_uuid",
-          "s.client_uuid",
-          "s.local_session_id",
-          "s.label",
-          "s.status",
-          "s.project_uuid",
-          "s.updated_at",
-          "p.name as project_name",
-        )
-        .orderByRaw("coalesce(s.label, s.local_session_id) asc")
-        .orderBy("s.updated_at", "desc");
-
-      this.logger.info("Gateway client sessions queried", {
-        clientUuid,
-        count: rows.length,
-        ...(scopeKey ? { scopeKey } : {}),
-        localSessionIds: rows
-          .map((row: Record<string, unknown>) => String(row.local_session_id ?? ""))
-          .filter(Boolean),
-      });
-
-      return {
-        sessions: rows.map((row: Record<string, unknown>) => ({
-          session_uuid: String(row.session_uuid),
-          client_uuid: String(row.client_uuid),
-          local_session_id: String(row.local_session_id),
-          label: row.label ? String(row.label) : null,
-          status: String(row.status),
-          ...(row.project_uuid ? { project_uuid: String(row.project_uuid) } : {}),
-          ...(row.project_name ? { project_name: String(row.project_name) } : {}),
-          ...(row.updated_at ? { updated_at: String(row.updated_at) } : {}),
-        })),
-      };
-    },
-
-    async listAllSessionsRecord(
-      this: GatewayServiceCarrier,
-      input: Record<string, unknown> = {},
-    ) {
-      const scopeKey = resolveGatewayScopeKey(input);
-      const ownerUserUuid = await this.resolveOwnerUserUuidFilter?.(input);
-      const rows = await this.db
-        .withSchema(MCP_SCHEMA)
-        .table("gateway_sessions as s")
-        .leftJoin("gateway_projects as p", "p.project_uuid", "s.project_uuid")
-        .leftJoin("gateway_clients as c", "c.client_uuid", "s.client_uuid")
-        .where("s.status", "active")
-        .modify((query) => {
-          if (scopeKey) {
-            query.where("c.scope_key", scopeKey);
-          }
-          if (ownerUserUuid) {
-            query.where("c.owner_user_uuid", ownerUserUuid);
-          }
-        })
-        .select(
-          "s.session_uuid",
-          "s.client_uuid",
-          "s.local_session_id",
-          "s.label",
-          "s.status",
-          "s.project_uuid",
-          "s.updated_at",
-          "p.name as project_name",
-          "c.client_label",
-          "c.bot_username",
-          this.db.raw("nullif(c.meta->>'system_username', '') as system_username"),
-          this.db.raw("nullif(c.meta->>'telegram_username', '') as telegram_username"),
-          this.db.raw(
-            "nullif(c.meta->>'telegram_display_name', '') as telegram_display_name",
-          ),
-        )
-        .orderBy("s.client_uuid", "asc")
-        .orderByRaw("coalesce(s.label, s.local_session_id) asc")
-        .orderBy("s.updated_at", "desc");
-
-      this.logger.info("Gateway all sessions queried", {
-        count: rows.length,
-        ...(scopeKey ? { scopeKey } : {}),
-      });
-
-      return {
-        sessions: rows.map((row: Record<string, unknown>) => ({
-          session_uuid: String(row.session_uuid),
-          client_uuid: String(row.client_uuid),
-          local_session_id: String(row.local_session_id),
-          label: row.label ? String(row.label) : null,
-          status: String(row.status),
-          client_label: row.client_label ? String(row.client_label) : null,
-          system_username: row.system_username
-            ? String(row.system_username)
-            : null,
-          telegram_username: row.telegram_username
-            ? String(row.telegram_username)
-            : null,
-          telegram_display_name: row.telegram_display_name
-            ? String(row.telegram_display_name)
-            : null,
-          bot_username: row.bot_username ? String(row.bot_username) : null,
-          ...(row.project_uuid ? { project_uuid: String(row.project_uuid) } : {}),
-          ...(row.project_name ? { project_name: String(row.project_name) } : {}),
-          ...(row.updated_at ? { updated_at: String(row.updated_at) } : {}),
-        })),
-      };
-    },
-
-    async unregisterSessionRecord(
-      this: GatewayServiceCarrier,
-      input: Record<string, unknown>,
-    ) {
-      const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
-      const localSessionId = this.requireText?.(input.local_session_id, "local_session_id");
-
-      const deleted = await this.db
-        .withSchema(MCP_SCHEMA)
-        .table("gateway_sessions")
-        .where({
-          client_uuid: clientUuid,
-          local_session_id: localSessionId,
-        })
-        .del();
-
-      return {
-        local_session_id: localSessionId,
-        deleted,
-      };
-    },
-
     async listProjectsRecord(this: GatewayServiceCarrier, input: Record<string, unknown>) {
       const clientUuid = this.requireText?.(input.client_uuid, "client_uuid");
       const localSessionId = this.normalizeOptionalText?.(input.local_session_id);
@@ -1071,12 +1427,12 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .where("p.is_active", true)
         .modify((query) => {
           if (localSessionId) {
-            query.join("gateway_sessions as s", function joinProjectSession() {
-              this.on("s.project_uuid", "=", "m.project_uuid")
-                .andOn("s.client_uuid", "=", "m.client_uuid");
+            query.join("gateway_project_consoles as pc", function joinProjectConsole() {
+              this.on("pc.project_uuid", "=", "m.project_uuid")
+                .andOn("pc.client_uuid", "=", "m.client_uuid");
             });
-            query.where("s.status", "active");
-            query.where("s.local_session_id", localSessionId);
+            query.where("pc.status", "active");
+            query.where("pc.local_session_id", localSessionId);
           }
           if (scopeKey) {
             query.where("c.scope_key", scopeKey);
@@ -1151,7 +1507,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
       if (updated > 0) {
         await this.db
           .withSchema(MCP_SCHEMA)
-          .table("gateway_sessions")
+          .table("gateway_project_consoles")
           .where({
             client_uuid: clientUuid,
             project_uuid: projectUuid,
@@ -1250,7 +1606,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
 
       await this.db
         .withSchema(MCP_SCHEMA)
-        .table("gateway_sessions")
+        .table("gateway_project_consoles")
         .where({ project_uuid: projectUuid })
         .update({
           status: "inactive",
@@ -1296,31 +1652,37 @@ const TelegramMcpGatewayService: ServiceSchema = {
 
       const rows = await this.db
         .withSchema(MCP_SCHEMA)
-        .table("gateway_sessions as s")
-        .distinctOn("s.client_uuid")
-        .leftJoin("gateway_clients as c", "c.client_uuid", "s.client_uuid")
-        .leftJoin("gateway_users as u", "u.gateway_user_uuid", "c.owner_user_uuid")
-        .leftJoin("gateway_project_members as m", function joinMember() {
-          this.on("m.project_uuid", "=", "s.project_uuid").andOn(
-            "m.client_uuid",
+        .table("gateway_project_consoles as pc")
+        .leftJoin("gateway_live_consoles as lc", function joinLiveConsole() {
+          this.on("lc.client_uuid", "=", "pc.client_uuid").andOn(
+            "lc.local_session_id",
             "=",
-            "s.client_uuid",
+            "pc.local_session_id",
           );
         })
-        .where("s.project_uuid", projectUuid)
-        .where("s.status", "active")
+        .leftJoin("gateway_clients as c", "c.client_uuid", "pc.client_uuid")
+        .leftJoin("gateway_users as u", "u.gateway_user_uuid", "c.owner_user_uuid")
+        .leftJoin("gateway_project_members as m", function joinMember() {
+          this.on("m.project_uuid", "=", "pc.project_uuid").andOn(
+            "m.client_uuid",
+            "=",
+            "pc.client_uuid",
+          );
+        })
+        .where("pc.project_uuid", projectUuid)
+        .where("pc.status", "active")
         .where("m.status", "active")
-        .orderBy("s.client_uuid", "asc")
-        .orderBy("s.created_at", "asc")
-        .orderBy("s.updated_at", "desc")
+        .orderBy("pc.client_uuid", "asc")
+        .orderBy("pc.joined_at", "asc")
+        .orderBy("pc.updated_at", "desc")
         .select(
-          "s.session_uuid",
-          "s.project_uuid",
-          "s.client_uuid",
-          "s.local_session_id",
-          "s.label",
-          "s.status",
-          "s.updated_at",
+          "pc.gateway_session_uuid as session_uuid",
+          "pc.project_uuid",
+          "pc.client_uuid",
+          "pc.local_session_id",
+          "pc.status",
+          "pc.updated_at",
+          "lc.session_label as label",
           "c.client_label",
           this.db.raw(
             "coalesce(nullif(u.telegram_display_name, ''), nullif(m.display_name, ''), nullif(c.meta->>'telegram_display_name', '')) as display_name",
@@ -1332,12 +1694,14 @@ const TelegramMcpGatewayService: ServiceSchema = {
           "c.bot_username",
           "m.joined_at",
         )
-        .orderByRaw("coalesce(s.label, s.local_session_id) asc")
-        .orderBy("s.updated_at", "desc");
+        .orderByRaw("coalesce(lc.session_label, pc.local_session_id) asc")
+        .orderBy("pc.updated_at", "desc");
 
       return {
         sessions: rows.map((row) => ({
-          session_uuid: row.session_uuid,
+          session_uuid:
+            row.session_uuid ??
+            `${String(row.client_uuid)}:${String(row.local_session_id)}`,
           project_uuid: row.project_uuid,
           client_uuid: row.client_uuid,
           local_session_id: row.local_session_id,
@@ -1377,13 +1741,12 @@ const TelegramMcpGatewayService: ServiceSchema = {
 
       const targetSession = await this.db
         .withSchema(MCP_SCHEMA)
-        .table("gateway_sessions as s")
-        .leftJoin("gateway_clients as c", "c.client_uuid", "s.client_uuid")
-        .leftJoin("gateway_projects as p", "p.project_uuid", "s.project_uuid")
-        .where({
-          "s.session_uuid": targetSessionId,
-          "s.status": "active",
-        })
+        .table("gateway_project_consoles as pc")
+        .join("gateway_sessions as s", "s.session_uuid", "pc.gateway_session_uuid")
+        .leftJoin("gateway_clients as c", "c.client_uuid", "pc.client_uuid")
+        .leftJoin("gateway_projects as p", "p.project_uuid", "pc.project_uuid")
+        .where("pc.gateway_session_uuid", targetSessionId)
+        .where("pc.status", "active")
         .select(
           "s.*",
           "p.name as project_name",
@@ -1404,20 +1767,32 @@ const TelegramMcpGatewayService: ServiceSchema = {
         throw new Error("Target session does not belong to the requested project.");
       }
 
-      const sourceSession = await this.db
+      const sourceProjectConsole = await this.db
         .withSchema(MCP_SCHEMA)
-        .table("gateway_sessions")
+        .table("gateway_project_consoles")
         .where({
           project_uuid: String(targetSession.project_uuid),
           client_uuid: clientUuid,
           local_session_id: localSessionId,
           status: "active",
         })
+        .first("gateway_session_uuid");
+
+      if (!sourceProjectConsole?.gateway_session_uuid) {
+        throw new Error(
+          `Active project session '${localSessionId}' is not registered for client ${clientUuid} in project ${targetSession.project_uuid}.`,
+        );
+      }
+
+      const sourceSession = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_sessions")
+        .where({ session_uuid: String(sourceProjectConsole.gateway_session_uuid) })
         .first();
 
       if (!sourceSession) {
         throw new Error(
-          `Active project session '${localSessionId}' is not registered for client ${clientUuid} in project ${targetSession.project_uuid}.`,
+          `Gateway session anchor for '${localSessionId}' was not found in project ${targetSession.project_uuid}.`,
         );
       }
 
@@ -1998,6 +2373,62 @@ const TelegramMcpGatewayService: ServiceSchema = {
         return this.registerClientRecord?.(ctx.params as Record<string, unknown>);
       },
     },
+    syncLiveConsoles: {
+      async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
+        return this.syncLiveConsolesRecord?.(ctx.params as Record<string, unknown>);
+      },
+    },
+    clearLiveConsoles: {
+      async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
+        return this.clearLiveConsolesRecord?.(ctx.params as Record<string, unknown>);
+      },
+    },
+    removeLiveConsoles: {
+      async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
+        return this.removeLiveConsolesRecord?.(ctx.params as Record<string, unknown>);
+      },
+    },
+    pruneGatewayState: {
+      async handler(this: GatewayServiceCarrier) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
+        return this.pruneGatewayStateRecord?.();
+      },
+    },
+    listLiveClients: {
+      async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
+        return this.listLiveClientsRecord?.(ctx.params as Record<string, unknown>);
+      },
+    },
+    listLiveConsoles: {
+      async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
+        return this.listLiveConsolesRecord?.(ctx.params as Record<string, unknown>);
+      },
+    },
+    resolveLiveConsole: {
+      async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
+        return this.resolveLiveConsoleRecord?.(ctx.params as Record<string, unknown>);
+      },
+    },
     createProject: {
       async handler(this: GatewayServiceCarrier, ctx) {
         if (!GATEWAY_ENABLED) {
@@ -2028,30 +2459,6 @@ const TelegramMcpGatewayService: ServiceSchema = {
           throw new Error("Gateway service is disabled in client mode");
         }
         return this.listClientsRecord?.(ctx.params as Record<string, unknown>);
-      },
-    },
-    listClientSessions: {
-      async handler(this: GatewayServiceCarrier, ctx) {
-        if (!GATEWAY_ENABLED) {
-          throw new Error("Gateway service is disabled in client mode");
-        }
-        return this.listClientSessionsRecord?.(ctx.params as Record<string, unknown>);
-      },
-    },
-    listAllSessions: {
-      async handler(this: GatewayServiceCarrier, ctx) {
-        if (!GATEWAY_ENABLED) {
-          throw new Error("Gateway service is disabled in client mode");
-        }
-        return this.listAllSessionsRecord?.(ctx.params as Record<string, unknown>);
-      },
-    },
-    unregisterSession: {
-      async handler(this: GatewayServiceCarrier, ctx) {
-        if (!GATEWAY_ENABLED) {
-          throw new Error("Gateway service is disabled in client mode");
-        }
-        return this.unregisterSessionRecord?.(ctx.params as Record<string, unknown>);
       },
     },
     listProjects: {
@@ -2134,6 +2541,17 @@ const TelegramMcpGatewayService: ServiceSchema = {
         return this.listSenderDeliveryStatusesRecord?.(ctx.params as Record<string, unknown>);
       },
     },
+  },
+
+  async started(this: GatewayServiceCarrier) {
+    if (!GATEWAY_ENABLED) {
+      return;
+    }
+
+    const cleared = await this.clearLiveConsolesRecord?.();
+    this.logger.info("Gateway live consoles registry cleared on startup", {
+      deleted: cleared?.deleted ?? 0,
+    });
   },
 };
 

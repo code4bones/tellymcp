@@ -60,13 +60,6 @@ export class TransportSessionActions {
 
     const session = await this.host.sessionStore.getSession(sessionId);
     if (session && this.host.config.distributed.gatewayPublicUrl) {
-      const clientUuid = await this.host.maintenanceStore.getGatewayClientUuid();
-      if (clientUuid) {
-        await this.host.callGatewayJson("/sessions/unregister", {
-          client_uuid: clientUuid,
-          local_session_id: sessionId,
-        });
-      }
       await this.host.sessionStore.setSession({
         ...session,
         activeProjectUuid: undefined,
@@ -135,12 +128,23 @@ export class TransportSessionActions {
 
   public async pruneAllSessions(ctx: TelegramMenuContext): Promise<void> {
     await ctx.answerCallbackQuery({ text: "Pruning all state..." });
+    let prunedGateway = false;
+    if (this.host.config.distributed.gatewayPublicUrl) {
+      try {
+        await this.host.callGatewayJson("/admin/prune-state", {});
+        prunedGateway = true;
+      } catch (error) {
+        this.host.logger.warn("Gateway DB prune failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
     const result = await this.host.maintenanceStore.pruneAll();
     this.host.clearPendingInteractionsForContext(ctx);
     this.host.clearTmuxNudgeDebounceTimers();
     await this.host.showSessionsMenu(
       ctx,
-      `Prune complete. Deleted ${result.deletedKeys} Redis keys.`,
+      `Prune complete. Deleted ${result.deletedKeys} Redis keys.${prunedGateway ? " Gateway DB cleared." : ""}`,
     );
   }
 

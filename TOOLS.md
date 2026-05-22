@@ -164,19 +164,21 @@ Output:
 Purpose:
 
 - Download the canonical `TOOLS.md` from the configured gateway.
-- Overwrite the local `TOOLS.md` so the agent can refresh instructions without manual copying.
+- Return the canonical instructions in a hash-based form so the agent can refresh without mandatory local file writes.
 
 Input:
 
 - `session_id`
-- `save_locally?`
+- `known_hash?`
 
 Output:
 
 - `source`
-- `saved`
+- `session_id?`
+- `current_hash`
+- `changed`
+- `content?`
 - `bytes`
-- `path?`
 
 Behavior:
 
@@ -185,8 +187,13 @@ Behavior:
 - the canonical source is the installed gateway package copy, not an arbitrary current working directory
 - in gateway mode, routing to the target console is done only by explicit `session_id = -s`
 - `cwd` is workspace metadata for the target console after routing succeeds; it is not a routing key
-- if the live console id is not already known, call `list_gateway_sessions` first and use `local_session_id`
-- after successful refresh, treat the target workspace `TOOLS.md` as updated state for this console and re-read it before continuing
+- if the live console id is not already known, call `list_gateway_sessions` first and use `session_id`
+- prefer hash-based refresh:
+  - pass `known_hash` from the last applied TOOLS state
+  - if `changed=false`, keep current instructions
+  - if `changed=true`, read and apply returned `content`
+- there is no local file-save mode in the normal flow
+- do not create or rely on workspace `TOOLS.md` copies
 
 ## `clear_session_context`
 

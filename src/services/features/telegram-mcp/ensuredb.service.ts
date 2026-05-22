@@ -137,10 +137,98 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
           });
       }
 
+      if (!(await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_project_consoles"))) {
+        await this.db.schema
+          .withSchema(MCP_SCHEMA)
+          .createTable("gateway_project_consoles", (table) => {
+            table.uuid("project_console_uuid").primary();
+            table.uuid("project_uuid").notNullable();
+            table.uuid("client_uuid").notNullable();
+            table.text("local_session_id").notNullable();
+            table.uuid("gateway_session_uuid");
+            table.text("status").notNullable().defaultTo("active");
+            table
+              .timestamp("joined_at", { useTz: true })
+              .notNullable()
+              .defaultTo(this.db.fn.now());
+            table
+              .timestamp("updated_at", { useTz: true })
+              .notNullable()
+              .defaultTo(this.db.fn.now());
+            table
+              .foreign("project_uuid")
+              .references("project_uuid")
+              .inTable(`${MCP_SCHEMA}.gateway_projects`)
+              .onDelete("CASCADE");
+            table
+              .foreign("client_uuid")
+              .references("client_uuid")
+              .inTable(`${MCP_SCHEMA}.gateway_clients`)
+              .onDelete("CASCADE");
+            table
+              .foreign("gateway_session_uuid")
+              .references("session_uuid")
+              .inTable(`${MCP_SCHEMA}.gateway_sessions`)
+              .onDelete("SET NULL");
+            table.unique(
+              ["project_uuid", "client_uuid", "local_session_id"],
+              "gateway_project_consoles_project_client_local_unique",
+            );
+            table.index(["project_uuid"], "gateway_project_consoles_project_idx");
+            table.index(["client_uuid"], "gateway_project_consoles_client_idx");
+          });
+      }
+
+      if (!(await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_live_consoles"))) {
+        await this.db.schema
+          .withSchema(MCP_SCHEMA)
+          .createTable("gateway_live_consoles", (table) => {
+            table.uuid("live_console_uuid").primary();
+            table.uuid("client_uuid").notNullable();
+            table.text("connection_id").notNullable();
+            table.text("local_session_id").notNullable();
+            table.text("session_label");
+            table.text("cwd");
+            table.text("tools_hash");
+            table.uuid("gateway_user_uuid");
+            table.text("client_label");
+            table.text("system_username");
+            table.text("namespace");
+            table.text("node_id");
+            table.text("package_version");
+            table.text("protocol_version");
+            table.jsonb("meta").notNullable().defaultTo(this.db.raw(`'{}'::jsonb`));
+            table
+              .timestamp("connected_at", { useTz: true })
+              .notNullable()
+              .defaultTo(this.db.fn.now());
+            table
+              .timestamp("last_seen_at", { useTz: true })
+              .notNullable()
+              .defaultTo(this.db.fn.now());
+            table
+              .foreign("client_uuid")
+              .references("client_uuid")
+              .inTable(`${MCP_SCHEMA}.gateway_clients`)
+              .onDelete("CASCADE");
+            table
+              .foreign("gateway_user_uuid")
+              .references("gateway_user_uuid")
+              .inTable(`${MCP_SCHEMA}.gateway_users`)
+              .onDelete("SET NULL");
+            table.unique(
+              ["client_uuid", "local_session_id"],
+              "gateway_live_consoles_client_local_unique",
+            );
+            table.index(["connection_id"], "gateway_live_consoles_connection_idx");
+            table.index(["client_uuid"], "gateway_live_consoles_client_idx");
+            table.index(["gateway_user_uuid"], "gateway_live_consoles_owner_idx");
+          });
+      }
+
       if (!(await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_sessions"))) {
         await this.db.schema.withSchema(MCP_SCHEMA).createTable("gateway_sessions", (table) => {
           table.uuid("session_uuid").primary();
-          table.uuid("project_uuid").notNullable();
           table.uuid("client_uuid").notNullable();
           table.text("local_session_id").notNullable();
           table.text("label");
@@ -162,41 +250,16 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
             .notNullable()
             .defaultTo(this.db.fn.now());
           table
-            .foreign("project_uuid")
-            .references("project_uuid")
-            .inTable(`${MCP_SCHEMA}.gateway_projects`)
-            .onDelete("CASCADE");
-          table
             .foreign("client_uuid")
             .references("client_uuid")
             .inTable(`${MCP_SCHEMA}.gateway_clients`)
             .onDelete("CASCADE");
           table.unique(
-            ["project_uuid", "client_uuid", "local_session_id"],
-            "gateway_sessions_project_client_local_unique",
+            ["client_uuid", "local_session_id"],
+            "gateway_sessions_client_local_unique",
           );
-          table.index(["project_uuid"], "gateway_sessions_project_idx");
           table.index(["client_uuid"], "gateway_sessions_client_idx");
         });
-      }
-
-      const legacyConstraint = await this.db
-        .select<{ conname: string }[]>("con.conname")
-        .from({ con: "pg_constraint" })
-        .join({ rel: "pg_class" }, "rel.oid", "con.conrelid")
-        .join({ nsp: "pg_namespace" }, "nsp.oid", "rel.relnamespace")
-        .where("nsp.nspname", MCP_SCHEMA)
-        .where("rel.relname", "gateway_sessions")
-        .where("con.contype", "u")
-        .whereRaw("pg_get_constraintdef(con.oid) = ?", [
-          "UNIQUE (client_uuid, local_session_id)",
-        ])
-        .first();
-
-      if (legacyConstraint?.conname) {
-        await this.db.raw(
-          `ALTER TABLE "${MCP_SCHEMA}"."gateway_sessions" DROP CONSTRAINT "${legacyConstraint.conname}"`,
-          );
       }
 
       if (
@@ -305,10 +368,25 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
 
       await this.db.raw(
         `
-        CREATE UNIQUE INDEX IF NOT EXISTS gateway_sessions_project_client_local_unique
-        ON "${MCP_SCHEMA}"."gateway_sessions" ("project_uuid", "client_uuid", "local_session_id")
+        CREATE UNIQUE INDEX IF NOT EXISTS gateway_live_consoles_client_local_unique
+        ON "${MCP_SCHEMA}"."gateway_live_consoles" ("client_uuid", "local_session_id")
         `,
       );
+
+      await this.db.raw(
+        `
+        CREATE UNIQUE INDEX IF NOT EXISTS gateway_sessions_client_local_unique
+        ON "${MCP_SCHEMA}"."gateway_sessions" ("client_uuid", "local_session_id")
+        `,
+      );
+
+      await this.db.raw(
+        `
+        CREATE UNIQUE INDEX IF NOT EXISTS gateway_project_consoles_project_client_local_unique
+        ON "${MCP_SCHEMA}"."gateway_project_consoles" ("project_uuid", "client_uuid", "local_session_id")
+        `,
+      );
+
 
       if (!(await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_session_links"))) {
         await this.db.schema

@@ -402,10 +402,10 @@ export const ruMenu = {
       member: "Участник",
     },
     tools: {
-      changed: "TOOLS.md обновлён на шлюзе или отсутствует локально.",
+      changed: "TOOLS.md обновлён на шлюзе или хэш текущей сессии ещё неизвестен.",
       session: "Сессия: {{sessionName}}",
       action_required:
-        "Действие обязательно: вызови refresh_tools_markdown, затем перечитай локальный TOOLS.md и применяй его перед продолжением работы.",
+        "Действие обязательно: вызови refresh_tools_markdown с текущим known hash. Если changed=true, прочитай и примени возвращённый content перед продолжением работы.",
     },
     version: {
       reject:

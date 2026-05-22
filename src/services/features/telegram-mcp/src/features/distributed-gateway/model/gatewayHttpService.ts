@@ -132,65 +132,6 @@ function normalizeLiveRelayBootstrapResult(
   };
 }
 
-function buildPartnerNoteOutputFallback(
-  input: SendPartnerNoteInput,
-  rawOutput: unknown,
-): SendPartnerNoteOutput {
-  const outputRecord =
-    rawOutput && typeof rawOutput === "object"
-      ? (rawOutput as Record<string, unknown>)
-      : {};
-
-  return {
-    session_id:
-      typeof outputRecord.session_id === "string"
-        ? outputRecord.session_id
-        : input.session_id ?? "unknown-session",
-    partner_session_id:
-      typeof outputRecord.partner_session_id === "string"
-        ? outputRecord.partner_session_id
-        : input.target_session_id ?? "unknown-partner-session",
-    kind:
-      typeof outputRecord.kind === "string"
-        ? (outputRecord.kind as SendPartnerNoteOutput["kind"])
-        : input.kind,
-    share_id:
-      typeof outputRecord.share_id === "string"
-        ? outputRecord.share_id
-        : `gateway-${Date.now()}`,
-    delivery_status:
-      outputRecord.delivery_status === "delivered" ? "delivered" : "queued",
-    note_path:
-      typeof outputRecord.note_path === "string"
-        ? outputRecord.note_path
-        : "gateway://shares/pending.md",
-    xchange_record_id:
-      typeof outputRecord.xchange_record_id === "string"
-        ? outputRecord.xchange_record_id
-        : (typeof outputRecord.share_id === "string"
-            ? outputRecord.share_id
-            : `gateway-${Date.now()}`),
-    copied_artifacts: Array.isArray(outputRecord.copied_artifacts)
-      ? outputRecord.copied_artifacts.filter(
-          (item): item is string => typeof item === "string",
-        )
-      : [
-          ...(input.artifact_refs?.map(
-            (item) => item.original_name ?? item.relative_path ?? item.file_path,
-          ) ?? []),
-          ...(input.artifacts ?? []),
-        ],
-    inbox_message_id:
-      typeof outputRecord.inbox_message_id === "string"
-        ? outputRecord.inbox_message_id
-        : `gateway-${Date.now()}`,
-    requires_reply:
-      typeof outputRecord.requires_reply === "boolean"
-        ? outputRecord.requires_reply
-        : Boolean(input.requires_reply ?? (input.kind === "question" || input.kind === "request")),
-  };
-}
-
 function slugifyGatewayFilenamePart(value: string): string {
   return value
     .trim()
@@ -467,8 +408,12 @@ export class GatewayHttpService {
       }
 
       try {
+        const packageRoot = getTellyMcpPackageRoot(__dirname);
+        if (!packageRoot) {
+          throw new Error("Could not resolve installed package root for TOOLS.md.");
+        }
         const toolsPath = join(
-          getTellyMcpPackageRoot(__dirname) ?? process.cwd(),
+          packageRoot,
           "TOOLS.md",
         );
         res.statusCode = 200;
@@ -581,17 +526,13 @@ export class GatewayHttpService {
         }
         const parsedOutput = sendPartnerNoteOutputSchema.safeParse(output);
         if (!parsedOutput.success) {
-          if (useQueuedGatewayDelivery) {
-            writeJson(res, 500, {
-              error: "Invalid queued gateway partner-note response",
-              details: parsedOutput.error.issues,
-              output,
-            });
-            return true;
-          }
-
-          const fallback = buildPartnerNoteOutputFallback(input, output);
-          writeJson(res, 200, fallback);
+          writeJson(res, 500, {
+            error: useQueuedGatewayDelivery
+              ? "Invalid queued gateway partner-note response"
+              : "Invalid direct gateway partner-note response",
+            details: parsedOutput.error.issues,
+            output,
+          });
           return true;
         }
         writeJson(res, 200, parsedOutput.data);
@@ -845,6 +786,28 @@ export class GatewayHttpService {
           { meta: { internal_call: true } },
         );
         writeJson(res, 200, result ?? {});
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/admin/prune-state") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const result = await this.callBroker(
+          "telegramMcp.gateway.pruneGatewayState",
+          {},
+          { meta: { internal_call: true } },
+        );
+        writeJson(res, 200, result);
         return true;
       } catch (error) {
         writeJson(res, 400, {
@@ -1110,31 +1073,9 @@ export class GatewayHttpService {
       }
 
       try {
-        const result = await this.callBroker(
-          "telegramMcp.gatewaySocket.listConnectedClients",
-          {},
-          { meta: { internal_call: true } },
-        );
-        writeJson(res, 200, result);
-        return true;
-      } catch (error) {
-        writeJson(res, 400, {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return true;
-      }
-    }
-
-    if (pathname === "/gateway/clients/sessions") {
-      if (req.method !== "POST") {
-        writeText(res, 405, "Method not allowed");
-        return true;
-      }
-
-      try {
         const body = (await this.readJsonBody(req)) as Record<string, unknown>;
         const result = await this.callBroker(
-          "telegramMcp.gateway.listClientSessions",
+          "telegramMcp.gateway.listLiveClients",
           body,
           { meta: { internal_call: true } },
         );
@@ -1173,42 +1114,28 @@ export class GatewayHttpService {
         const connectedOnly = typeof body.connected_only === "boolean"
           ? body.connected_only
           : false;
-        const [registeredResult, connectedResult, scopedClientsResult] = await Promise.all([
+        const [liveResult, scopedClientsResult] = await Promise.all([
           this.callBroker(
-            "telegramMcp.gateway.listAllSessions",
+            "telegramMcp.gateway.listLiveConsoles",
             body,
             { meta: { internal_call: true } },
           ) as Promise<{
             sessions?: Array<{
-              session_uuid: string;
+              session_id: string;
               client_uuid: string;
               local_session_id: string;
-              label: string | null;
-              status: string;
-              client_label: string | null;
-              system_username: string | null;
-              telegram_username: string | null;
-              telegram_display_name: string | null;
-              bot_username: string | null;
-              project_uuid?: string;
-              project_name?: string | null;
-            }>;
-          }>,
-          this.callBroker(
-            "telegramMcp.gatewaySocket.listConnectedClients",
-            {},
-            { meta: { internal_call: true } },
-          ) as Promise<{
-            clients?: Array<{
-              client_uuid: string;
-              client_label?: string;
-              system_username?: string;
-              node_id?: string;
-              package_version?: string;
-              session_tools?: Array<{
-                local_session_id: string;
-                session_label?: string;
-              }>;
+              session_label?: string | null;
+              client_label?: string | null;
+              system_username?: string | null;
+              telegram_username?: string | null;
+              telegram_display_name?: string | null;
+              bot_username?: string | null;
+              node_id?: string | null;
+              package_version?: string | null;
+              project_uuids: string[];
+              project_names: string[];
+              connected: boolean;
+              registered: boolean;
             }>;
           }>,
           this.callBroker(
@@ -1237,116 +1164,7 @@ export class GatewayHttpService {
               )
             : null;
 
-        const merged = new Map<
-          string,
-          {
-            session_id: string;
-            client_uuid: string;
-            local_session_id: string;
-            session_label?: string | null;
-            client_label?: string | null;
-            system_username?: string | null;
-            telegram_username?: string | null;
-            telegram_display_name?: string | null;
-            bot_username?: string | null;
-            node_id?: string;
-            package_version?: string;
-            project_uuids: string[];
-            project_names: string[];
-            connected: boolean;
-            registered: boolean;
-          }
-        >();
-
-        for (const session of Array.isArray(registeredResult.sessions)
-          ? registeredResult.sessions
-          : []) {
-          const key = `${session.client_uuid}:${session.local_session_id}`;
-          const current = merged.get(key);
-          const projectUuids = new Set(current?.project_uuids ?? []);
-          const projectNames = new Set(current?.project_names ?? []);
-          if (session.project_uuid) {
-            projectUuids.add(session.project_uuid);
-          }
-          if (session.project_name) {
-            projectNames.add(session.project_name);
-          }
-          merged.set(key, {
-            session_id: key,
-            client_uuid: session.client_uuid,
-            local_session_id: session.local_session_id,
-            session_label: current?.session_label ?? session.label,
-            client_label: current?.client_label ?? session.client_label,
-            system_username:
-              current?.system_username ?? session.system_username,
-            telegram_username:
-              current?.telegram_username ?? session.telegram_username,
-            telegram_display_name:
-              current?.telegram_display_name ?? session.telegram_display_name,
-            bot_username: current?.bot_username ?? session.bot_username,
-            ...(current?.node_id ? { node_id: current.node_id } : {}),
-            ...(current?.package_version
-              ? { package_version: current.package_version }
-              : {}),
-            project_uuids: Array.from(projectUuids),
-            project_names: Array.from(projectNames),
-            connected: current?.connected ?? false,
-            registered: true,
-          });
-        }
-
-        for (const client of Array.isArray(connectedResult.clients)
-          ? connectedResult.clients
-          : []) {
-          if (
-            allowedClientUuids &&
-            !allowedClientUuids.has(client.client_uuid)
-          ) {
-            continue;
-          }
-          for (const sessionTool of Array.isArray(client.session_tools)
-            ? client.session_tools
-            : []) {
-            const key = `${client.client_uuid}:${sessionTool.local_session_id}`;
-            const current = merged.get(key);
-            merged.set(key, {
-              session_id: key,
-              client_uuid: client.client_uuid,
-              local_session_id: sessionTool.local_session_id,
-              session_label:
-                sessionTool.session_label ?? current?.session_label ?? null,
-              ...(current?.client_label
-                ? { client_label: current.client_label }
-                : client.client_label
-                  ? { client_label: client.client_label }
-                : {}),
-              ...(current?.system_username
-                ? { system_username: current.system_username }
-                : client.system_username
-                  ? { system_username: client.system_username }
-                : {}),
-              ...(current?.telegram_username
-                ? { telegram_username: current.telegram_username }
-                : {}),
-              ...(current?.telegram_display_name
-                ? { telegram_display_name: current.telegram_display_name }
-                : {}),
-              ...(current?.bot_username
-                ? { bot_username: current.bot_username }
-                : {}),
-              ...(client.node_id ? { node_id: client.node_id } : {}),
-              ...(client.package_version
-                ? { package_version: client.package_version }
-                : {}),
-              project_uuids: current?.project_uuids ?? [],
-              project_names: current?.project_names ?? [],
-              connected: true,
-              registered: current?.registered ?? false,
-            });
-          }
-        }
-
-        const sessions = Array.from(merged.values())
+        const sessions = (Array.isArray(liveResult.sessions) ? liveResult.sessions : [])
           .filter((session) =>
             allowedClientUuids ? allowedClientUuids.has(session.client_uuid) : true,
           )
@@ -1475,29 +1293,6 @@ export class GatewayHttpService {
         const body = (await this.readJsonBody(req)) as Record<string, unknown>;
         const result = await this.callBroker(
           "telegramMcp.gateway.registerSession",
-          body,
-          { meta: { internal_call: true } },
-        );
-        writeJson(res, 200, result);
-        return true;
-      } catch (error) {
-        writeJson(res, 400, {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return true;
-      }
-    }
-
-    if (pathname === "/gateway/sessions/unregister") {
-      if (req.method !== "POST") {
-        writeText(res, 405, "Method not allowed");
-        return true;
-      }
-
-      try {
-        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
-        const result = await this.callBroker(
-          "telegramMcp.gateway.unregisterSession",
           body,
           { meta: { internal_call: true } },
         );

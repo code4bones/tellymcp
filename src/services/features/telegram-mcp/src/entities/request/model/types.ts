@@ -47,14 +47,16 @@ export type NotifyTelegramOutput = {
 export type RefreshToolsMarkdownInput = {
   session_id?: string | undefined;
   cwd?: string | undefined;
-  save_locally?: boolean | undefined;
+  known_hash?: string | undefined;
 };
 
 export type RefreshToolsMarkdownOutput = {
   source: "gateway" | "local";
-  saved: boolean;
+  session_id?: string | undefined;
+  current_hash: string;
+  changed: boolean;
+  content?: string | undefined;
   bytes: number;
-  path?: string | undefined;
 };
 
 export type SendPartnerFileInput = {

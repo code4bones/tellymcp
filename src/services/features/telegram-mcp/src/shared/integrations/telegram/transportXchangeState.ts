@@ -54,8 +54,12 @@ export class TransportXchangeState {
 
   public async listSessionFilesystemXchangeFiles(sessionId: string): Promise<string[]> {
     const session = await this.host.sessionStore.getSession(sessionId);
-    const workspaceDir = session?.cwd?.trim() || "";
-    const resolvedWorkspaceDir = workspaceDir || process.cwd();
+    const resolvedWorkspaceDir = session?.cwd?.trim() || "";
+    if (!resolvedWorkspaceDir) {
+      throw new Error(
+        `Workspace cwd is not registered for console '${sessionId}'.`,
+      );
+    }
     const files = await listXchangeFiles(
       this.host.config.tmux,
       resolvedWorkspaceDir,

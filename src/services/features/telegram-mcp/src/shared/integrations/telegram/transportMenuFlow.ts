@@ -207,6 +207,13 @@ export class TransportMenuFlow {
     await this.host.menuState.showDeveloperMenu(ctx, introText);
   }
 
+  public async showDeveloperInfo(
+    ctx: TelegramMenuContext,
+    introText?: string,
+  ): Promise<void> {
+    await this.host.menuState.showDeveloperInfo(ctx, introText);
+  }
+
   public async showUnpairConfirmMenu(
     ctx: TelegramMenuContext,
     introText?: string,

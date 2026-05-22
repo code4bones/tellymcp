@@ -397,10 +397,10 @@ export const enMenu = {
       member: "Participant",
     },
     tools: {
-      changed: "Gateway TOOLS.md changed or is missing locally.",
+      changed: "Gateway TOOLS.md changed or the current session hash is unknown.",
       session: "Session: {{sessionName}}",
       action_required:
-        "Action required: call refresh_tools_markdown, then re-read the local TOOLS.md and apply it before continuing work.",
+        "Action required: call refresh_tools_markdown with the current known hash. If changed=true, read and apply the returned content before continuing work.",
     },
     version: {
       reject:

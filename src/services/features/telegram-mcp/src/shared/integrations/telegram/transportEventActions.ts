@@ -7,6 +7,7 @@ import type { AppConfig } from "../../../app/config/env";
 import type { SessionBindingStore, SessionStore, TelegramInboxStore } from "../../api/storage/contract";
 import { createInboxMessageId } from "../../lib/ids/ids";
 import type { Logger } from "../../lib/logger/logger";
+import { writeTellySessionRuntimeState } from "../../lib/project-identity/projectIdentity";
 import type { SupportedLocale } from "../../i18n";
 import type { LiveApprovalEventPayload, SendMessageMeta, TelegramSendMessageOptions } from "./transportTypes";
 
@@ -132,6 +133,15 @@ export class TransportEventActions {
       lastNotifiedToolsHash: input.gateway_tools_hash,
       updatedAt: new Date().toISOString(),
     });
+    if (session.cwd?.trim()) {
+      writeTellySessionRuntimeState({
+        cwd: session.cwd,
+        sessionId: session.sessionId,
+        lastSeenToolsHash: session.lastSeenToolsHash,
+        lastNotifiedToolsHash: input.gateway_tools_hash,
+        logger: this.host.logger,
+      });
+    }
   }
 
   public async handleGatewayVersionCompatibilityEvent(input: {

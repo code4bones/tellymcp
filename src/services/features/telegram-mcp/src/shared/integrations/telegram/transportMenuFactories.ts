@@ -92,6 +92,7 @@ export interface TransportMenuFactoriesHost {
   ): Promise<void>;
   showUnpairConfirmMenu(ctx: TelegramMenuContext): Promise<void>;
   showDeveloperMenu(ctx: TelegramMenuContext): Promise<void>;
+  showDeveloperInfo(ctx: TelegramMenuContext): Promise<void>;
   showPruneConfirmMenu(ctx: TelegramMenuContext): Promise<void>;
   showActiveSessionInfo(ctx: TelegramMenuContext): Promise<void>;
   beginRenameActiveSession(ctx: TelegramMenuContext): Promise<void>;
@@ -516,6 +517,10 @@ export class TransportMenuFactories {
       "telegram-developer-menu",
       this.host.createMenuOptions((ctx) => this.host.showDeveloperMenu(ctx)),
     )
+      .text("ℹ Info", async (ctx) => {
+        await this.host.showDeveloperInfo(ctx);
+      })
+      .row()
       .text("📣 Broadcast", async (ctx) => {
         await this.host.beginBroadcast(ctx);
       })

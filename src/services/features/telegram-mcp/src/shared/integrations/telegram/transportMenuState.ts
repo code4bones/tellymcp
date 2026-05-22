@@ -1,9 +1,17 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import type { Logger } from "../../lib/logger/logger";
 import type { SupportedLocale } from "../../i18n";
 import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
+import { getTellyMcpPackageRoot, getTellyMcpPackageVersion } from "../../lib/version/versionHandshake";
 import type {
   CurrentAttachmentTargetRecord,
+  GatewayClientRecord,
+  GatewayConnectedClientRecord,
   TelegramMenuContext,
+  TelegramSendMessageOptions,
 } from "./transportTypes";
 import {
   buildBrowserMenuText,
@@ -21,6 +29,7 @@ import {
   escapeHtml,
   formatMenuTimestamp,
   readMenuPayloadKey,
+  renderMarkdownChunk,
 } from "./transportUtils";
 
 function splitSessionDisplayLabel(input: {
@@ -74,11 +83,17 @@ export interface TransportMenuStateHost {
     meta: { kind: "menu"; sessionId?: string },
     menu: unknown,
   ): Promise<void>;
+  renderMenuMarkdownScreen(
+    ctx: TelegramMenuContext,
+    text: string,
+    meta: { kind: "menu"; sessionId?: string },
+    menu: unknown,
+  ): Promise<void>;
   replyText(
     ctx: TelegramMenuContext,
     text: string,
     meta: { kind: "menu"; sessionId?: string },
-    options?: { reply_markup?: unknown },
+    options?: TelegramSendMessageOptions,
   ): Promise<void | { message_id: number }>;
   getMenuPayloadByKey(key: string): Promise<Record<string, unknown> | null>;
   getMainMenu(): unknown;
@@ -116,10 +131,118 @@ export interface TransportMenuStateHost {
   listActiveSessionStorageEntries(
     sessionId: string,
   ): Promise<Array<{ filePath: string }>>;
+  callGatewayJson<T>(
+    endpointPath: string,
+    body?: Record<string, unknown>,
+  ): Promise<T>;
 }
 
 export class TransportMenuState {
   public constructor(private readonly host: TransportMenuStateHost) {}
+
+  private async collectDeveloperInfo(
+    ctx: TelegramMenuContext,
+  ): Promise<{
+    headerMarkdown: string;
+    clientMarkdownChunks: string[];
+  }> {
+    const principal = this.host.getPrincipalFromContext(ctx);
+    if (!principal) {
+      return {
+        headerMarkdown: renderMarkdownChunk("Gateway Info", "No Telegram identity."),
+        clientMarkdownChunks: [],
+      };
+    }
+
+    const clientsResult = await this.host.callGatewayJson<{
+      clients: GatewayClientRecord[];
+    }>("/clients/list", {
+      telegram_user_id: principal.telegramUserId,
+    });
+    const connectedResult = await this.host.callGatewayJson<{
+      clients: GatewayConnectedClientRecord[];
+    }>("/clients/connected", {});
+
+    const ownedClientUuids = new Set(
+      clientsResult.clients.map((client) => client.client_uuid),
+    );
+    const connectedClients = connectedResult.clients.filter((client) =>
+      ownedClientUuids.has(client.client_uuid),
+    );
+
+    const packageVersion = getTellyMcpPackageVersion(__dirname);
+    const toolsHash = this.getGatewayToolsHash();
+    const connectedClientCount = new Set(
+      connectedClients.map((client) => client.client_uuid),
+    ).size;
+    const connectedSessionCount = connectedClients.reduce(
+      (total, client) => total + client.session_tools.length,
+      0,
+    );
+
+    const headerLines: string[] = [
+      `Gateway package: ${packageVersion}`,
+      `Gateway TOOLS hash: ${toolsHash ?? "unknown"}`,
+      `Clients: ${clientsResult.clients.length}`,
+      `Connected clients: ${connectedClientCount}`,
+      `Connected sessions: ${connectedSessionCount}`,
+    ];
+
+    const clientByUuid = new Map(
+      clientsResult.clients.map((client) => [client.client_uuid, client]),
+    );
+
+    const clientMarkdownChunks = connectedClients.flatMap((connectedClient) => {
+      const client = clientByUuid.get(connectedClient.client_uuid);
+      if (!client) {
+        return [];
+      }
+
+      return connectedClient.session_tools.map((sessionTool) => {
+        const owner =
+          client.telegram_display_name ||
+          (client.telegram_username
+            ? `@${client.telegram_username}`
+            : client.system_username || client.client_label || client.node_id || client.client_uuid);
+        const sessionName =
+          sessionTool.session_label?.trim() || sessionTool.local_session_id;
+        const title = `${owner} / ${sessionName}`;
+        const bodyLines = [
+          `client_uuid: ${client.client_uuid}`,
+          `session_id: ${sessionTool.local_session_id}`,
+          `node: ${client.node_id || client.client_label || "unknown"}`,
+          ...(sessionTool.tools_hash
+            ? [`tools_hash: ${sessionTool.tools_hash}`]
+            : []),
+          ...(connectedClient.package_version
+            ? [`agent_version: ${connectedClient.package_version}`]
+            : []),
+          ...(client.last_seen_at ? [`last_seen_at: ${client.last_seen_at}`] : []),
+        ];
+
+        return renderMarkdownChunk(title, bodyLines.join("\n"));
+      });
+    });
+
+    return {
+      headerMarkdown: renderMarkdownChunk("Gateway Info", headerLines.join("\n")),
+      clientMarkdownChunks,
+    };
+  }
+
+  private getGatewayToolsHash(): string | null {
+    const packageRoot = getTellyMcpPackageRoot(__dirname);
+    if (!packageRoot) {
+      return null;
+    }
+
+    try {
+      const content = readFileSync(join(packageRoot, "TOOLS.md"), "utf8");
+      return createHash("sha256").update(content).digest("hex");
+    } catch {
+      return null;
+    }
+  }
 
   public async showMainMenu(
     ctx: TelegramMenuContext,
@@ -794,6 +917,30 @@ export class TransportMenuState {
     );
   }
 
+  public async showDeveloperInfo(
+    ctx: TelegramMenuContext,
+    introText?: string,
+  ): Promise<void> {
+    const info = await this.collectDeveloperInfo(ctx);
+    const headerText = introText
+      ? `${renderMarkdownChunk("Gateway Info", introText)}\n\n${info.headerMarkdown}`
+      : info.headerMarkdown;
+    await this.host.renderMenuMarkdownScreen(
+      ctx,
+      headerText,
+      { kind: "menu" },
+      this.host.getDeveloperMenu(),
+    );
+    for (const clientMarkdown of info.clientMarkdownChunks) {
+      await this.host.replyText(
+        ctx,
+        clientMarkdown,
+        { kind: "menu" },
+        { parse_mode: "MarkdownV2" },
+      );
+    }
+  }
+
   public async buildDeveloperMenuText(
     ctx: TelegramMenuContext,
   ): Promise<string> {
@@ -816,6 +963,13 @@ export class TransportMenuState {
       this.host.t(locale, "menu:developer.screen.broadcast_help"),
       this.host.t(locale, "menu:developer.screen.prune_help"),
     ].join("\n");
+  }
+
+  public async buildDeveloperInfoMarkdown(
+    ctx: TelegramMenuContext,
+  ): Promise<string> {
+    const info = await this.collectDeveloperInfo(ctx);
+    return info.headerMarkdown;
   }
 
   public async showUnpairConfirmMenu(

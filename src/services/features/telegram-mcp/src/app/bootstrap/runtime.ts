@@ -111,6 +111,12 @@ export async function createAppRuntime(input: {
       nudgeDebounceSeconds: config.tmux.nudgeDebounceSeconds,
       nudgeCooldownSeconds: config.tmux.nudgeCooldownSeconds,
     },
+    telegram: {
+      webhookEnabled: config.telegram.webhook.enabled,
+      webhookPath: config.telegram.webhook.path,
+      webhookPublicUrlConfigured: Boolean(config.telegram.webhook.publicUrl),
+      webhookTrace: config.telegram.webhook.trace,
+    },
     project: projectIdentityResolver.getIdentity(),
   });
 

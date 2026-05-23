@@ -1,0 +1,18 @@
+{
+  "name": "telly-workflows",
+  "version": "0.1.0+codex.20260522215959",
+  "description": "Static workflows and operational rules for telegram_mcp consoles.",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Telly Workflows",
+    "shortDescription": "Stable workflows for telegram_mcp sessions.",
+    "longDescription": "Telly Workflows adds static Codex skills for partner-note execution, human Telegram replies, browser screenshots, and artifact-return paths without relying on ad-hoc polling or route guessing.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Use the telly-workflows skills when working through telegram_mcp, especially for partner-note execution, browser screenshots, and human Telegram replies."
+  }
+}

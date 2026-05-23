@@ -70,7 +70,7 @@ export function buildOutgoingPartnerActionDesc(
   requiresReply: boolean,
 ): string {
   if (requiresReply || kind === "question" || kind === "request") {
-    return "Waiting for the target session to process this note and send a reply.";
+    return "Outgoing collaboration note was sent to the target session. Do not block on sleep, polling, or repeated list_xchange_records calls in the same turn. The target console will be nudged separately and can reply later through the normal xchange path.";
   }
 
   return "Outgoing collaboration note was sent to the target session.";
@@ -80,13 +80,9 @@ export function buildOutgoingPartnerTools(
   kind: PartnerNoteKind,
   requiresReply: boolean,
 ): string[] {
-  const tools = ["get_xchange_record"];
-
-  if (requiresReply || kind === "question" || kind === "request") {
-    tools.push("list_xchange_records");
-  }
-
-  return tools;
+  void kind;
+  void requiresReply;
+  return ["get_xchange_record"];
 }
 
 export function buildLocalHandoffActionDesc(): string {

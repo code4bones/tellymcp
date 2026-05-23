@@ -10,6 +10,7 @@
     "dist",
     "scripts",
     "config/templates",
+    "config/codex",
     "README.md",
     "README-ru.md",
     "STANDALONE.md",

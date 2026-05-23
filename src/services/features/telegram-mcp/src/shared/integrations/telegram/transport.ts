@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 
 import { Menu } from "@grammyjs/menu";
 import { Bot, GrammyError, InputFile } from "grammy";
+import type { Update } from "grammy/types";
 
 import type { AppConfig } from "../../../app/config/env";
 import type { WebAppLaunchRegistry } from "../../../app/webapp/auth";
@@ -402,6 +403,8 @@ export class TelegramTransport implements HumanTransport {
 
     this.logger.info("Telegram transport initialization started", {
       pollingTimeoutSeconds: 30,
+      webhookEnabled: this.config.telegram.webhook.enabled,
+      webhookPath: this.config.telegram.webhook.path,
       proxyEnabled: Boolean(this.config.telegram.proxy),
       proxyType: this.config.telegram.proxy?.type,
     });
@@ -420,36 +423,56 @@ export class TelegramTransport implements HumanTransport {
       commands: ["/menu", "/help"],
     });
 
-    this.logger.debug("Telegram polling start scheduled");
-    this.pollingTask = this.bot.start({
-      timeout: Math.max(
-        1,
-        Math.floor(this.config.telegram.pollIntervalMs / 1000),
-      ),
-      allowed_updates: ["message", "callback_query"],
-      drop_pending_updates: false,
-      onStart: (botInfo) => {
-        this.logger.info("Telegram polling entered running state", {
-          botId: botInfo.id,
-          botUsername: botInfo.username,
-          isRunning: this.bot.isRunning(),
-          isInited: this.bot.isInited(),
-        });
-      },
-    });
-    this.pollingTask.catch((error: unknown) => {
-      this.logger.error("Telegram polling task crashed", {
-        error:
-          error instanceof Error
-            ? (error.stack ?? error.message)
-            : String(error),
+    if (this.config.telegram.webhook.enabled) {
+      const webhookUrl = this.config.telegram.webhook.publicUrl!.trim();
+      const webhookSecret = this.config.telegram.webhook.secret!.trim();
+      await this.bot.api.setWebhook(webhookUrl, {
+        secret_token: webhookSecret,
+        allowed_updates: ["message", "callback_query"],
+        drop_pending_updates: this.config.telegram.webhook.dropPendingUpdates,
       });
-    });
+      this.logger.info("Telegram webhook registered", {
+        webhookUrl,
+        webhookPath: this.config.telegram.webhook.path,
+        dropPendingUpdates: this.config.telegram.webhook.dropPendingUpdates,
+      });
+    } else {
+      await this.bot.api.deleteWebhook({
+        drop_pending_updates: false,
+      });
+      this.logger.info("Telegram webhook disabled; polling mode selected");
+      this.logger.debug("Telegram polling start scheduled");
+      this.pollingTask = this.bot.start({
+        timeout: Math.max(
+          1,
+          Math.floor(this.config.telegram.pollIntervalMs / 1000),
+        ),
+        allowed_updates: ["message", "callback_query"],
+        drop_pending_updates: false,
+        onStart: (botInfo) => {
+          this.logger.info("Telegram polling entered running state", {
+            botId: botInfo.id,
+            botUsername: botInfo.username,
+            isRunning: this.bot.isRunning(),
+            isInited: this.bot.isInited(),
+          });
+        },
+      });
+      this.pollingTask.catch((error: unknown) => {
+        this.logger.error("Telegram polling task crashed", {
+          error:
+            error instanceof Error
+              ? (error.stack ?? error.message)
+              : String(error),
+        });
+      });
+    }
     this.started = true;
     this.tmuxRuntime.startPromptScan();
     this.logger.info("Telegram transport start returned control to app", {
       isRunning: this.bot.isRunning(),
       isInited: this.bot.isInited(),
+      mode: this.config.telegram.webhook.enabled ? "webhook" : "polling",
     });
   }
 
@@ -464,12 +487,17 @@ export class TelegramTransport implements HumanTransport {
     this.logger.info("Telegram transport stopping");
     this.tmuxRuntime.clearTmuxNudgeDebounceTimers();
     this.tmuxRuntime.clearTmuxPromptScanTimer();
-    if (this.isTelegramEnabled()) {
+    if (this.isTelegramEnabled() && !this.config.telegram.webhook.enabled) {
       await this.bot.stop();
     }
     this.started = false;
     this.pollingTask = undefined;
     this.logger.info("Telegram transport stopped");
+  }
+
+  public async handleWebhookUpdate(update: Update): Promise<void> {
+    this.ensureTelegramEnabledFor("handle Telegram webhook updates");
+    await this.bot.handleUpdate(update);
   }
 
   public async deleteMessage(

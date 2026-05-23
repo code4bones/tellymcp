@@ -8,6 +8,10 @@ import { parse as parseDotenv } from "dotenv";
 import Redis from "ioredis";
 import pc from "picocolors";
 import WebSocket from "ws";
+import {
+  getCodexPluginStatus,
+  installCodexPlugin,
+} from "./codexPluginInstaller";
 import { getTellyMcpPackageVersion } from "./services/features/telegram-mcp/src/shared/lib/version/versionHandshake";
 import {
   isForegroundPtyClientMode,
@@ -24,6 +28,7 @@ type CliCommand =
   | "mcp"
   | "doctor"
   | "browser"
+  | "codex-plugin"
   | "system-prune";
 
 const distDir = __dirname;
@@ -131,6 +136,8 @@ function printHelp(): void {
     "  tellymcp doctor [--env <file>]",
     "  tellymcp system-prune [--env <file>] --yes",
     "  tellymcp browser install",
+    "  tellymcp codex-plugin install",
+    "  tellymcp codex-plugin status",
     "  tellymcp mcp [--url <url>] [--bearer <token>] [--format claude|legacy]",
     "  tellymcp help",
   ]);
@@ -144,6 +151,8 @@ function printHelp(): void {
     "  tellymcp doctor --env .env.client",
     "  tellymcp system-prune --env .env.gateway --yes",
     "  tellymcp browser install",
+    "  tellymcp codex-plugin install",
+    "  tellymcp codex-plugin status",
     "  tellymcp mcp --help",
   ]);
   if (tmux.found) {
@@ -278,6 +287,19 @@ function printBrowserHelp(): void {
     "  Installs the bundled Playwright Chromium browser.",
     "  Uses the Playwright dependency shipped with TellyMCP.",
     "  Avoids generic npx warnings about missing local project dependencies.",
+  ]);
+}
+
+function printCodexPluginHelp(): void {
+  printBanner("codex plugin", "Install or inspect the bundled Codex workflow plugin");
+  printSection("Usage", [
+    "  tellymcp codex-plugin install",
+    "  tellymcp codex-plugin status",
+  ]);
+  printSection("What this command does", [
+    "  Copies the bundled telly-workflows plugin from the package into a managed local Codex plugin directory.",
+    "  Ensures the local personal marketplace entry points at that managed plugin source.",
+    "  If the Codex CLI is installed, checks whether the installed plugin version matches the bundled package version and installs or updates it when needed.",
   ]);
 }
 
@@ -997,6 +1019,61 @@ function runBrowserCommand(args: string[]): void {
   });
 }
 
+function runCodexPluginCommand(args: string[]): void {
+  const [subcommand] = args;
+  if (!subcommand || subcommand === "--help" || subcommand === "-h") {
+    printCodexPluginHelp();
+    return;
+  }
+
+  if (subcommand !== "install" && subcommand !== "status") {
+    fail("Supported codex-plugin subcommands: install, status");
+  }
+
+  if (subcommand === "status") {
+    const status = getCodexPluginStatus(packageRoot);
+    printBanner("codex plugin status", "Bundled telly-workflows plugin");
+    printSection("plugin", [
+      `  name: ${status.pluginName}`,
+      `  bundled version: ${status.bundledVersion}`,
+      `  source version: ${status.sourceVersion ?? "not synced yet"}`,
+      `  installed version: ${status.installedVersion ?? "not installed"}`,
+      `  codex cli: ${status.codexAvailable ? "detected" : "not detected"}`,
+      `  marketplace registered: ${status.marketplaceRegistered ? "yes" : "no"}`,
+      `  up to date: ${status.upToDate ? "yes" : "no"}`,
+    ]);
+    printSection("paths", [
+      `  bundled: ${status.bundledPluginDir}`,
+      `  managed: ${status.managedPluginDir}`,
+      `  marketplace root: ${status.marketplaceRoot}`,
+      `  marketplace file: ${status.marketplaceFile}`,
+    ]);
+    return;
+  }
+
+  const status = installCodexPlugin(packageRoot);
+  printBanner("codex plugin install", "Bundled telly-workflows plugin");
+  printSection("result", [
+    `  plugin: ${status.pluginName}@${status.marketplaceName}`,
+    `  bundled version: ${status.bundledVersion}`,
+    `  source version: ${status.sourceVersion ?? "unknown"}`,
+    `  installed version: ${status.installedVersion ?? "not installed"}`,
+    `  marketplace registered: ${status.marketplaceRegistered ? "yes" : "no"}`,
+    `  up to date: ${status.upToDate ? "yes" : "no"}`,
+  ]);
+  printSection("paths", [
+    `  managed plugin dir: ${status.managedPluginDir}`,
+    `  marketplace file: ${status.marketplaceFile}`,
+  ]);
+  if (!status.codexAvailable) {
+    printSection("next", [
+      "  Codex CLI was not detected on this machine.",
+      "  The plugin source and marketplace manifest were synced locally.",
+      "  Install Codex, then rerun: tellymcp codex-plugin install",
+    ]);
+  }
+}
+
 async function runRuntime(args: string[]): Promise<void> {
   const { envPath, parsed } = loadCliEnv(args);
   if (parsed.TELLYMCP_SESSION_ID) {
@@ -1098,6 +1175,7 @@ async function runServeStdio(args: string[]): Promise<void> {
 async function main(argv: string[]): Promise<void> {
   const [rawCommand, firstArg, secondArg] = argv;
   const command: CliCommand = rawCommand === "init" || rawCommand === "run" || rawCommand === "serve-stdio" || rawCommand === "help" || rawCommand === "mcp" || rawCommand === "doctor" || rawCommand === "browser" || rawCommand === "system-prune"
+    || rawCommand === "codex-plugin"
     ? rawCommand
     : "help";
 
@@ -1123,6 +1201,11 @@ async function main(argv: string[]): Promise<void> {
 
   if (command === "browser") {
     runBrowserCommand(argv.slice(1));
+    return;
+  }
+
+  if (command === "codex-plugin") {
+    runCodexPluginCommand(argv.slice(1));
     return;
   }
 

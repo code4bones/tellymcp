@@ -41,6 +41,21 @@ const envSchema = z.object({
     .int()
     .positive()
     .default(300),
+  TELEGRAM_WEBHOOK_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
+  TELEGRAM_WEBHOOK_PATH: z.string().min(1).default("/telegram/webhook"),
+  TELEGRAM_WEBHOOK_PUBLIC_URL: optionalUrlString,
+  TELEGRAM_WEBHOOK_SECRET: optionalNonEmptyString,
+  TELEGRAM_WEBHOOK_TRACE: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
+  TELEGRAM_WEBHOOK_DROP_PENDING_UPDATES: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
   DEBUG_LANGUAGE: z.preprocess(
     emptyStringToUndefined,
     z.enum(["en", "ru"]).optional(),
@@ -225,6 +240,14 @@ export type AppConfig = {
     maxQuestionChars: number;
     maxMessageChars: number;
     menuPayloadTtlSeconds: number;
+    webhook: {
+      enabled: boolean;
+      path: string;
+      publicUrl?: string;
+      secret?: string;
+      trace: boolean;
+      dropPendingUpdates: boolean;
+    };
     proxy?: {
       type: "http" | "socks5";
       url: string;
@@ -358,6 +381,19 @@ export function loadConfig(): AppConfig {
     );
   }
 
+  if (parsed.TELEGRAM_WEBHOOK_ENABLED) {
+    if (!parsed.TELEGRAM_WEBHOOK_PUBLIC_URL?.trim()) {
+      throw new Error(
+        "TELEGRAM_WEBHOOK_ENABLED=true requires TELEGRAM_WEBHOOK_PUBLIC_URL.",
+      );
+    }
+    if (!parsed.TELEGRAM_WEBHOOK_SECRET?.trim()) {
+      throw new Error(
+        "TELEGRAM_WEBHOOK_ENABLED=true requires TELEGRAM_WEBHOOK_SECRET.",
+      );
+    }
+  }
+
   const telegramProxy =
     parsed.PROXY_USE === "http"
       ? parsed.HTTP_PROXY
@@ -397,6 +433,18 @@ export function loadConfig(): AppConfig {
       maxQuestionChars: parsed.TELEGRAM_MAX_QUESTION_CHARS,
       maxMessageChars: parsed.TELEGRAM_MAX_MESSAGE_CHARS,
       menuPayloadTtlSeconds: parsed.TELEGRAM_MENU_PAYLOAD_TTL_SECONDS,
+      webhook: {
+        enabled: parsed.TELEGRAM_WEBHOOK_ENABLED,
+        path: parsed.TELEGRAM_WEBHOOK_PATH,
+        ...(parsed.TELEGRAM_WEBHOOK_PUBLIC_URL
+          ? { publicUrl: parsed.TELEGRAM_WEBHOOK_PUBLIC_URL }
+          : {}),
+        ...(parsed.TELEGRAM_WEBHOOK_SECRET
+          ? { secret: parsed.TELEGRAM_WEBHOOK_SECRET }
+          : {}),
+        trace: parsed.TELEGRAM_WEBHOOK_TRACE,
+        dropPendingUpdates: parsed.TELEGRAM_WEBHOOK_DROP_PENDING_UPDATES,
+      },
       ...(telegramProxy ? { proxy: telegramProxy } : {}),
     },
     redis: {

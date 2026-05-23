@@ -8,6 +8,7 @@ import type { Socket } from "node:net";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { Update } from "grammy/types";
 import ws from "ws";
 
 import type { AppRuntime } from "./bootstrap/runtime";
@@ -246,6 +247,14 @@ function normalizeBasePath(value: string): string {
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 
+function readWebhookSecretHeader(req: IncomingMessage): string | undefined {
+  const value = req.headers["x-telegram-bot-api-secret-token"];
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+  return value;
+}
+
 function isRelayTmuxUnavailableMessage(error: unknown): boolean {
   const text = error instanceof Error ? error.message : String(error);
   return text.includes("tmux is unavailable");
@@ -288,6 +297,9 @@ export function createMcpHttpHandler(
   const publicLiveWsPath =
     rootPrefix === "/" ? "/gateway/live/ws" : `${rootPrefix}/gateway/live/ws`;
   const webAppLivePrefix = `${webAppBasePath}/live/`;
+  const telegramWebhookPath =
+    runtime.config.telegram.webhook.path.replace(/\/+$/u, "") ||
+    "/telegram/webhook";
 
   const closeSessionEntry = async (entry: SessionEntry): Promise<void> => {
     await entry.close();
@@ -574,6 +586,59 @@ export function createMcpHttpHandler(
         service: "tellymcp",
         transport: "streamable-http",
       });
+      return;
+    }
+
+    if (
+      runtime.config.telegram.webhook.enabled &&
+      requestUrl.pathname === telegramWebhookPath
+    ) {
+      if (method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return;
+      }
+
+      const expectedSecret = runtime.config.telegram.webhook.secret?.trim();
+      const receivedSecret = readWebhookSecretHeader(req)?.trim();
+      if (!expectedSecret || receivedSecret !== expectedSecret) {
+        writeText(res, 401, "Unauthorized");
+        return;
+      }
+
+      const body = await readJsonBody(req);
+      if (!body || typeof body !== "object") {
+        writeText(res, 400, "Telegram update body is required");
+        return;
+      }
+
+      if (runtime.config.telegram.webhook.trace) {
+        runtime.logger.warn("Telegram webhook update received", {
+          path: requestUrl.pathname,
+          body,
+        });
+      } else {
+        runtime.logger.info("Telegram webhook update received", {
+          path: requestUrl.pathname,
+          method,
+        });
+      }
+
+      try {
+        await runtime.telegramTransport.handleWebhookUpdate(body as Update);
+        writeText(res, 200, "OK");
+      } catch (error) {
+        runtime.logger.error("Telegram webhook update handling failed", {
+          error:
+            error instanceof Error
+              ? (error.stack ?? error.message)
+              : String(error),
+        });
+        writeText(
+          res,
+          500,
+          error instanceof Error ? error.message : "Webhook handling failed",
+        );
+      }
       return;
     }
 

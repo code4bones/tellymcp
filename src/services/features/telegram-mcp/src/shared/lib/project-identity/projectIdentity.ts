@@ -41,11 +41,48 @@ export type ResolvedSessionDefaults = {
   sessionLabelDerived: boolean;
 };
 
+export function resolveSessionDefaultsForCwd(input: SessionDefaultsInput & {
+  fallbackCwd?: string | undefined;
+  logger?: Logger;
+}): ResolvedSessionDefaults {
+  const inputCwd = resolveInputCwd(input.cwd);
+  const resolvedCwd = inputCwd || resolveInputCwd(input.fallbackCwd) || process.cwd();
+  const titleBase = basename(resolvedCwd) || "Project";
+  const explicitSessionId = input.session_id?.trim();
+  const explicitSessionLabel = input.session_label?.trim();
+  const sessionMarker =
+    explicitSessionId || explicitSessionLabel
+      ? null
+      : readSessionMarkerState(resolvedCwd, input.logger);
+  const derivedSessionId =
+    sessionMarker?.localSessionId ||
+    `${slugify(titleBase) || "session"}-${shortHash(resolvedCwd)}`;
+  const derivedSessionLabel = sessionMarker?.sessionLabel || titleBase;
+
+  if (!sessionMarker && !explicitSessionId && !explicitSessionLabel) {
+    writeSessionMarkerState({
+      cwd: resolvedCwd,
+      localSessionId: explicitSessionId || derivedSessionId,
+      sessionLabel: explicitSessionLabel || derivedSessionLabel,
+      ...(input.logger ? { logger: input.logger } : {}),
+    });
+  }
+
+  return {
+    sessionId: explicitSessionId || derivedSessionId,
+    sessionLabel: explicitSessionLabel || derivedSessionLabel,
+    cwd: resolvedCwd,
+    sessionIdDerived: !explicitSessionId,
+    sessionLabelDerived: !explicitSessionLabel,
+  };
+}
+
 type SessionMarkerShape = {
   version?: unknown;
   local_session_id?: unknown;
   session_label?: unknown;
   cwd?: unknown;
+  env_file?: unknown;
   created_at?: unknown;
   updated_at?: unknown;
 };
@@ -128,6 +165,13 @@ export type TellySessionRuntimeState = {
   lastSeenToolsHash?: string | undefined;
   lastNotifiedToolsHash?: string | undefined;
   updatedAt?: string | undefined;
+};
+
+export type SessionMarkerState = {
+  localSessionId: string;
+  sessionLabel?: string | undefined;
+  cwd?: string | undefined;
+  envFile?: string | undefined;
 };
 
 export function readTellySessionRuntimeState(
@@ -243,6 +287,104 @@ export function writeTellySessionRuntimeState(input: {
   }
 }
 
+export function readSessionMarkerState(
+  inputCwd: string,
+  logger?: Logger,
+): SessionMarkerState | null {
+  const resolvedCwd = resolve(inputCwd);
+  const markerPath = join(resolvedCwd, SESSION_MARKER_FILE_NAME);
+  if (!existsSync(markerPath)) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(
+      readFileSync(markerPath, "utf8"),
+    ) as SessionMarkerShape;
+    const localSessionId =
+      typeof parsed.local_session_id === "string"
+        ? parsed.local_session_id.trim()
+        : "";
+    if (!localSessionId) {
+      return null;
+    }
+
+    return {
+      localSessionId,
+      ...(typeof parsed.session_label === "string" &&
+      parsed.session_label.trim()
+        ? { sessionLabel: parsed.session_label.trim() }
+        : {}),
+      ...(typeof parsed.cwd === "string" && parsed.cwd.trim()
+        ? { cwd: parsed.cwd.trim() }
+        : {}),
+      ...(typeof parsed.env_file === "string" && parsed.env_file.trim()
+        ? { envFile: parsed.env_file.trim() }
+        : {}),
+    };
+  } catch (error) {
+    logger?.warn("Failed to read .mcpsession.json, ignoring marker", {
+      cwd: resolvedCwd,
+      markerPath,
+      error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+    });
+    return null;
+  }
+}
+
+export function writeSessionMarkerState(input: {
+  cwd: string;
+  localSessionId: string;
+  sessionLabel?: string | undefined;
+  envFile?: string | undefined;
+  logger?: Logger;
+}): void {
+  const resolvedCwd = resolve(input.cwd);
+  if (!existsSync(resolvedCwd)) {
+    input.logger?.debug("Skipping .mcpsession.json write because cwd does not exist locally", {
+      cwd: resolvedCwd,
+      sessionId: input.localSessionId,
+    });
+    return;
+  }
+
+  const markerPath = join(resolvedCwd, SESSION_MARKER_FILE_NAME);
+  const now = new Date().toISOString();
+  const current = readSessionMarkerState(resolvedCwd, input.logger);
+
+  try {
+    writeFileSync(
+      markerPath,
+      `${JSON.stringify(
+        {
+          version: 1,
+          local_session_id: input.localSessionId,
+          ...(input.sessionLabel ? { session_label: input.sessionLabel } : {}),
+          cwd: resolvedCwd,
+          ...(typeof input.envFile === "string" && input.envFile.trim()
+            ? { env_file: input.envFile.trim() }
+            : current?.envFile
+              ? { env_file: current.envFile }
+              : {}),
+          created_at: now,
+          updated_at: now,
+          ...(current ? { first_seen_local_session_id: current.localSessionId } : {}),
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+  } catch (error) {
+    input.logger?.warn("Failed to write .mcpsession.json", {
+      cwd: resolvedCwd,
+      markerPath,
+      sessionId: input.localSessionId,
+      error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+    });
+  }
+}
+
 export class ProjectIdentityResolver {
   private readonly identity: ProjectIdentity;
 
@@ -271,43 +413,21 @@ export class ProjectIdentityResolver {
   public resolveSessionDefaults(
     input: SessionDefaultsInput,
   ): ResolvedSessionDefaults {
-    const inputCwd = resolveInputCwd(input.cwd);
-    const resolvedCwd = inputCwd || this.identity.cwd;
-    const titleBase = basename(resolvedCwd) || this.identity.resolvedTitle || "Project";
-    const explicitSessionId =
-      input.session_id?.trim() || this.config.project.sessionId?.trim();
-    const explicitSessionLabel =
-      input.session_label?.trim() || this.config.project.sessionLabel?.trim();
-    const sessionMarker =
-      explicitSessionId || explicitSessionLabel
-        ? null
-        : this.readSessionMarker(resolvedCwd);
-    const derivedSessionId =
-      sessionMarker?.localSessionId ||
-      `${slugify(titleBase) || "session"}-${shortHash(resolvedCwd)}`;
-    const derivedSessionLabel = sessionMarker?.sessionLabel || titleBase;
-
-    if (!sessionMarker && !explicitSessionId && !explicitSessionLabel) {
-      this.writeSessionMarker(resolvedCwd, {
-        localSessionId: explicitSessionId || derivedSessionId,
-        sessionLabel: explicitSessionLabel || derivedSessionLabel,
-        cwd: resolvedCwd,
-      });
-    }
-
-    return {
-      sessionId: explicitSessionId || derivedSessionId,
-      sessionLabel: explicitSessionLabel || derivedSessionLabel,
-      cwd: resolvedCwd,
-      sessionIdDerived: !explicitSessionId,
-      sessionLabelDerived: !explicitSessionLabel,
-    };
+    return resolveSessionDefaultsForCwd({
+      ...input,
+      session_id: input.session_id?.trim() || this.config.project.sessionId?.trim(),
+      session_label:
+        input.session_label?.trim() || this.config.project.sessionLabel?.trim(),
+      fallbackCwd: this.identity.cwd,
+      logger: this.logger,
+    });
   }
 
   public persistSessionMarker(input: {
     cwd?: string | undefined;
     sessionId: string;
     sessionLabel?: string | undefined;
+    envFile?: string | undefined;
   }): void {
     const resolvedCwd = resolveInputCwd(input.cwd) || this.identity.cwd;
     const current = this.readSessionMarker(resolvedCwd);
@@ -315,6 +435,7 @@ export class ProjectIdentityResolver {
       localSessionId: input.sessionId,
       sessionLabel: input.sessionLabel || current?.sessionLabel,
       cwd: resolvedCwd,
+      envFile: input.envFile || current?.envFile,
     });
   }
 
@@ -378,88 +499,22 @@ export class ProjectIdentityResolver {
     };
   }
 
-  private readSessionMarker(
-    cwd: string,
-  ): { localSessionId: string; sessionLabel?: string; cwd?: string } | null {
-    const markerPath = join(cwd, SESSION_MARKER_FILE_NAME);
-    if (!existsSync(markerPath)) {
-      return null;
-    }
-
-    try {
-      const parsed = JSON.parse(
-        readFileSync(markerPath, "utf8"),
-      ) as SessionMarkerShape;
-      const localSessionId =
-        typeof parsed.local_session_id === "string"
-          ? parsed.local_session_id.trim()
-          : "";
-      if (!localSessionId) {
-        return null;
-      }
-
-      return {
-        localSessionId,
-        ...(typeof parsed.session_label === "string" &&
-        parsed.session_label.trim()
-          ? { sessionLabel: parsed.session_label.trim() }
-          : {}),
-        ...(typeof parsed.cwd === "string" && parsed.cwd.trim()
-          ? { cwd: parsed.cwd.trim() }
-          : {}),
-      };
-    } catch (error) {
-      this.logger.warn("Failed to read .mcpsession.json, ignoring marker", {
-        cwd,
-        markerPath,
-        error: error instanceof Error ? (error.stack ?? error.message) : String(error),
-      });
-      return null;
-    }
+  private readSessionMarker(cwd: string): SessionMarkerState | null {
+    return readSessionMarkerState(cwd, this.logger);
   }
 
   private writeSessionMarker(inputCwd: string, input: {
     localSessionId: string;
     sessionLabel?: string | undefined;
     cwd: string;
+    envFile?: string | undefined;
   }): void {
-    if (!existsSync(inputCwd)) {
-      this.logger.debug("Skipping .mcpsession.json write because cwd does not exist locally", {
-        cwd: inputCwd,
-        sessionId: input.localSessionId,
-      });
-      return;
-    }
-
-    const markerPath = join(inputCwd, SESSION_MARKER_FILE_NAME);
-    const now = new Date().toISOString();
-    const current = this.readSessionMarker(inputCwd);
-
-    try {
-      writeFileSync(
-        markerPath,
-        `${JSON.stringify(
-          {
-            version: 1,
-            local_session_id: input.localSessionId,
-            ...(input.sessionLabel ? { session_label: input.sessionLabel } : {}),
-            cwd: input.cwd,
-            created_at: now,
-            updated_at: now,
-            ...(current ? { first_seen_local_session_id: current.localSessionId } : {}),
-          },
-          null,
-          2,
-        )}\n`,
-        "utf8",
-      );
-    } catch (error) {
-      this.logger.warn("Failed to write .mcpsession.json", {
-        cwd: inputCwd,
-        markerPath,
-        sessionId: input.localSessionId,
-        error: error instanceof Error ? (error.stack ?? error.message) : String(error),
-      });
-    }
+    writeSessionMarkerState({
+      cwd: inputCwd,
+      localSessionId: input.localSessionId,
+      sessionLabel: input.sessionLabel,
+      envFile: input.envFile,
+      logger: this.logger,
+    });
   }
 }

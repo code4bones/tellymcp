@@ -14,6 +14,11 @@ import {
 } from "./codexPluginInstaller";
 import { getTellyMcpPackageVersion } from "./services/features/telegram-mcp/src/shared/lib/version/versionHandshake";
 import {
+  readSessionMarkerState,
+  resolveSessionDefaultsForCwd,
+  writeSessionMarkerState,
+} from "./services/features/telegram-mcp/src/shared/lib/project-identity/projectIdentity";
+import {
   isForegroundPtyClientMode,
   runForegroundPtyRuntime,
 } from "./services/features/telegram-mcp/src/features/foreground-terminal/model/foregroundTerminalRuntime";
@@ -132,6 +137,7 @@ function printHelp(): void {
     "  tellymcp run [--env <file>]",
     "  tellymcp run --env=<file>",
     "  tellymcp run --env .env-client -s backendDev",
+    "  tellymcp run              # if .mcpsession.json already stores env_file + local_session_id",
     "  tellymcp serve-stdio --env .env-client -s backendDev",
     "  tellymcp doctor [--env <file>]",
     "  tellymcp system-prune [--env <file>] --yes",
@@ -147,6 +153,7 @@ function printHelp(): void {
     "  tellymcp run",
     "  tellymcp run --env .env.client",
     "  tellymcp run --env .env-client -s backendDev",
+    "  tellymcp run              # reuses .mcpsession.json in the current workspace",
     "  tellymcp serve-stdio --env .env-client -s backendDev",
     "  tellymcp doctor --env .env.client",
     "  tellymcp system-prune --env .env.gateway --yes",
@@ -175,10 +182,79 @@ type LoadedCliEnv = {
   parsed: Record<string, string>;
 };
 
+function resolveMarkerEnvPath(rawPath: string, cwd: string): string {
+  return path.isAbsolute(rawPath) ? rawPath : path.resolve(cwd, rawPath);
+}
+
+function formatMarkerEnvPath(envPath: string, cwd: string): string {
+  const resolvedCwd = path.resolve(cwd);
+  const resolvedEnvPath = path.resolve(envPath);
+  const relativePath = path.relative(resolvedCwd, resolvedEnvPath);
+  return relativePath && !relativePath.startsWith("..") && !path.isAbsolute(relativePath)
+    ? relativePath
+    : resolvedEnvPath;
+}
+
+function getSessionMarkerForCwd(cwd: string) {
+  return readSessionMarkerState(cwd);
+}
+
+function resolveCliSessionDefaults(input: {
+  envPath: string;
+  sessionId?: string | undefined;
+  sessionLabel?: string | undefined;
+}) {
+  return resolveSessionDefaultsForCwd({
+    cwd: process.cwd(),
+    ...(input.sessionId?.trim() ? { session_id: input.sessionId.trim() } : {}),
+    ...(input.sessionLabel?.trim()
+      ? { session_label: input.sessionLabel.trim() }
+      : {}),
+  });
+}
+
+function persistCliSessionMarker(input: {
+  cwd: string;
+  envPath: string;
+  sessionId?: string | undefined;
+  sessionLabel?: string | undefined;
+}): void {
+  const current = getSessionMarkerForCwd(input.cwd);
+  const resolved =
+    resolveCliSessionDefaults({
+      envPath: input.envPath,
+      sessionId: input.sessionId,
+      sessionLabel: input.sessionLabel,
+    }) ?? null;
+  const localSessionId =
+    input.sessionId?.trim() || current?.localSessionId || resolved?.sessionId;
+  if (!localSessionId) {
+    return;
+  }
+
+  writeSessionMarkerState({
+    cwd: input.cwd,
+    localSessionId,
+    ...(input.sessionLabel?.trim()
+      ? { sessionLabel: input.sessionLabel.trim() }
+      : current?.sessionLabel
+        ? { sessionLabel: current.sessionLabel }
+        : resolved?.sessionLabel
+          ? { sessionLabel: resolved.sessionLabel }
+        : {}),
+    envFile: formatMarkerEnvPath(input.envPath, input.cwd),
+  });
+}
+
 function loadCliEnv(args: string[]): LoadedCliEnv {
   const envPath = resolveRunEnvPath(args);
-  const sessionOverride =
+  const marker = getSessionMarkerForCwd(process.cwd());
+  const explicitSessionOverride =
     readFlagValue(args, "-s") ?? readFlagValue(args, "--session");
+  const sessionOverride = explicitSessionOverride ?? marker?.localSessionId ?? null;
+  const sessionLabelOverride = explicitSessionOverride
+    ? explicitSessionOverride
+    : marker?.sessionLabel ?? sessionOverride ?? null;
   if (!existsSync(envPath)) {
     fail(`Missing env file: ${envPath}`);
   }
@@ -197,7 +273,7 @@ function loadCliEnv(args: string[]): LoadedCliEnv {
       ...(sessionOverride
         ? {
             TELLYMCP_SESSION_ID: sessionOverride,
-            TELLYMCP_SESSION_LABEL: sessionOverride,
+            TELLYMCP_SESSION_LABEL: sessionLabelOverride || sessionOverride,
           }
         : {}),
     },
@@ -365,6 +441,7 @@ function initWorkspace(mode: InitMode, directoryArg?: string): void {
 
 function resolveRunEnvPath(args: string[]): string {
   const [firstArg, secondArg] = args;
+  const marker = getSessionMarkerForCwd(process.cwd());
 
   if (firstArg?.startsWith("--env=")) {
     const value = firstArg.slice("--env=".length).trim();
@@ -379,6 +456,10 @@ function resolveRunEnvPath(args: string[]): string {
       fail("Expected a file path after --env");
     }
     return path.resolve(process.cwd(), secondArg);
+  }
+
+  if (marker?.envFile?.trim()) {
+    return resolveMarkerEnvPath(marker.envFile.trim(), process.cwd());
   }
 
   return path.resolve(process.cwd(), ".env");
@@ -1082,6 +1163,12 @@ async function runRuntime(args: string[]): Promise<void> {
   if (parsed.TELLYMCP_SESSION_LABEL) {
     process.env.TELLYMCP_SESSION_LABEL = parsed.TELLYMCP_SESSION_LABEL;
   }
+  persistCliSessionMarker({
+    cwd: process.cwd(),
+    envPath,
+    sessionId: parsed.TELLYMCP_SESSION_ID,
+    sessionLabel: parsed.TELLYMCP_SESSION_LABEL,
+  });
 
   if (isForegroundPtyClientMode(parsed)) {
     await runForegroundPtyRuntime({
@@ -1165,6 +1252,12 @@ async function runServeStdio(args: string[]): Promise<void> {
   if (parsed.TELLYMCP_SESSION_LABEL) {
     process.env.TELLYMCP_SESSION_LABEL = parsed.TELLYMCP_SESSION_LABEL;
   }
+  persistCliSessionMarker({
+    cwd: process.cwd(),
+    envPath,
+    sessionId: parsed.TELLYMCP_SESSION_ID,
+    sessionLabel: parsed.TELLYMCP_SESSION_LABEL,
+  });
 
   await runStdioMcpServer({
     envPath,

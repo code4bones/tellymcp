@@ -38,7 +38,7 @@ tellymcp codex-plugin install
 
 Стартовая точка:
 
-- [.env.example.gateway](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.gateway)
+- [.env.example.gateway](../.env.example.gateway)
 
 Минимально нужные параметры gateway:
 
@@ -61,7 +61,7 @@ DISTRIBUTED_MODE=gateway
 
 Стартовая точка:
 
-- [.env.example.client](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.client)
+- [.env.example.client](../.env.example.client)
 
 Минимально нужные параметры agent:
 

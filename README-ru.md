@@ -120,7 +120,7 @@ tellymcp init gateway
 
 Или возьми sample:
 
-- [.env.example.gateway](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.gateway)
+- [.env.example.gateway](./.env.example.gateway)
 
 Минимально важные значения:
 
@@ -152,7 +152,7 @@ tellymcp init client
 
 Или используй sample:
 
-- [.env.example.client](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.client)
+- [.env.example.client](./.env.example.client)
 
 Минимально важные значения:
 
@@ -299,14 +299,14 @@ tellymcp browser install
 
 Канонические стартовые точки:
 
-- [.env.example.gateway](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.gateway)
-- [.env.example.client](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.client)
+- [.env.example.gateway](./.env.example.gateway)
+- [.env.example.client](./.env.example.client)
 
 Bundled templates:
 
-- [config/templates/env.gateway.template](/home/code4bones/Devs/coding/mcp/telegram_mcp/config/templates/env.gateway.template)
-- [config/templates/env.client.template](/home/code4bones/Devs/coding/mcp/telegram_mcp/config/templates/env.client.template)
-- [config/templates/env.both.template](/home/code4bones/Devs/coding/mcp/telegram_mcp/config/templates/env.both.template)
+- [config/templates/env.gateway.template](./config/templates/env.gateway.template)
+- [config/templates/env.client.template](./config/templates/env.client.template)
+- [config/templates/env.both.template](./config/templates/env.both.template)
 
 Samples уже вычищены под текущий runtime:
 
@@ -331,11 +331,11 @@ tellymcp system-prune --env .env --yes
 
 ## Карта документации
 
-- [README.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/README.md)
-- [STANDALONE.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/STANDALONE.md)
-- [STANDALONE-ru.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/STANDALONE-ru.md)
-- [TOOLS.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/TOOLS.md)
-- [screenshots/README.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/screenshots/README.md)
+- [README.md](./README.md)
+- [STANDALONE.md](./docs/STANDALONE.md)
+- [STANDALONE-ru.md](./docs/STANDALONE-ru.md)
+- [TOOLS.md](./TOOLS.md)
+- [screenshots/README.md](./screenshots/README.md)
 
 ## Статус
 

@@ -1135,7 +1135,7 @@ Distributed mode scaffold:
   - `Delete`
 - `History` sends a markdown export of the last 5 Collab events for the current active console
 
-Current remaining operational gaps are tracked in [docs/TODO.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/docs/TODO.md).
+Current remaining operational gaps are tracked in [docs/TODO.md](./docs/TODO.md).
 
 ## `ask_user_telegram`
 

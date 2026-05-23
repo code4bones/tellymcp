@@ -38,7 +38,7 @@ Optional:
 
 Start from:
 
-- [.env.example.gateway](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.gateway)
+- [.env.example.gateway](../.env.example.gateway)
 
 Minimum gateway settings:
 
@@ -61,7 +61,7 @@ DISTRIBUTED_MODE=gateway
 
 Start from:
 
-- [.env.example.client](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.client)
+- [.env.example.client](../.env.example.client)
 
 Minimum client settings:
 

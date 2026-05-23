@@ -120,7 +120,7 @@ tellymcp init gateway
 
 Or copy the sample from this package:
 
-- [.env.example.gateway](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.gateway)
+- [.env.example.gateway](./.env.example.gateway)
 
 Required gateway values:
 
@@ -152,7 +152,7 @@ tellymcp init client
 
 Or copy:
 
-- [.env.example.client](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.client)
+- [.env.example.client](./.env.example.client)
 
 Required client values:
 
@@ -299,14 +299,14 @@ Expected agent behavior:
 
 Use the shipped samples as the canonical starting point:
 
-- [.env.example.gateway](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.gateway)
-- [.env.example.client](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.client)
+- [.env.example.gateway](./.env.example.gateway)
+- [.env.example.client](./.env.example.client)
 
 Bundled init templates:
 
-- [config/templates/env.gateway.template](/home/code4bones/Devs/coding/mcp/telegram_mcp/config/templates/env.gateway.template)
-- [config/templates/env.client.template](/home/code4bones/Devs/coding/mcp/telegram_mcp/config/templates/env.client.template)
-- [config/templates/env.both.template](/home/code4bones/Devs/coding/mcp/telegram_mcp/config/templates/env.both.template)
+- [config/templates/env.gateway.template](./config/templates/env.gateway.template)
+- [config/templates/env.client.template](./config/templates/env.client.template)
+- [config/templates/env.both.template](./config/templates/env.both.template)
 
 The samples were cleaned to match the current runtime:
 
@@ -331,11 +331,11 @@ tellymcp system-prune --env .env --yes
 
 ## Documentation Map
 
-- [README-ru.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/README-ru.md)
-- [STANDALONE.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/STANDALONE.md)
-- [STANDALONE-ru.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/STANDALONE-ru.md)
-- [TOOLS.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/TOOLS.md)
-- [screenshots/README.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/screenshots/README.md)
+- [README-ru.md](./README-ru.md)
+- [STANDALONE.md](./docs/STANDALONE.md)
+- [STANDALONE-ru.md](./docs/STANDALONE-ru.md)
+- [TOOLS.md](./TOOLS.md)
+- [screenshots/README.md](./screenshots/README.md)
 
 ## Status
 

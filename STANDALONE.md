@@ -1,5 +1,7 @@
 # Standalone Deployment
 
+[eng](./STANDALONE.md) [рус](./STANDALONE-ru.md)
+
 This guide describes the current standalone deployment model for `@deadragdoll/tellymcp`.
 
 The recommended topology is:

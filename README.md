@@ -1,5 +1,7 @@
 # TellyMCP
 
+[eng](./README.md) [рус](./README-ru.md)
+
 `@deadragdoll/tellymcp` is a Telegram control plane for MCP-connected coding agents.
 
 The current model is gateway-first:

@@ -1,5 +1,7 @@
 # Standalone Deployment
 
+[eng](./STANDALONE.md) [рус](./STANDALONE-ru.md)
+
 Этот файл описывает текущую standalone-модель для `@deadragdoll/tellymcp`.
 
 Рекомендуемая топология:

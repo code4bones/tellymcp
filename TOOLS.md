@@ -10,7 +10,7 @@ Gateway/client runtime compatibility:
 - `TOOLS.md` sync tells the agent to refresh instructions.
 - `ws hello/hello_ack` checks `package_version`, `protocol_version`, and `capabilities`.
 - If protocol major versions differ, gateway transport is blocked until the older side is upgraded.
-- If you receive a system inbox message about gateway/client version mismatch, treat it as operational priority before continuing collaboration or live-relay work.
+- If you receive a system notice or structured record about gateway/client version mismatch, treat it as operational priority before continuing collaboration or live-relay work.
 
 This MCP server currently exposes the following tools.
 
@@ -140,7 +140,7 @@ Recommended use:
 
 - setup/debug only
 - use this while diagnosing state or inspecting saved metadata
-- do not call this in the normal inbox-processing path unless you are diagnosing state
+- do not call this in the normal processing path unless you are diagnosing state
 
 Input:
 
@@ -372,7 +372,7 @@ Purpose:
 - Write a note file into the partner workspace under `.mcp-xchange/shares/`.
 - Create a structured xchange record in the partner sqlite store.
 - Optionally copy listed artifacts from the current workspace into the partner `.mcp-xchange/shares/files/<share_id>/`.
-- Create an inbox/xchange wake-up for the partner agent through the normal gateway delivery path.
+- Create a structured xchange wake-up for the partner agent through the normal gateway delivery path.
 
 Input:
 
@@ -404,6 +404,7 @@ Output:
 - `xchange_record_id`
 - `copied_artifacts`
 - `inbox_message_id`
+  Legacy compatibility field name for delivery bookkeeping.
 - `requires_reply`
 
 Required agent practice:
@@ -576,7 +577,7 @@ How the receiving agent must react:
   - `проверь xchange records`
   - `telegram_message`
   - `partner_note`
-  then do not start with an inbox-specific tool
+  then do not start with a legacy inbox-specific tool
 - instead:
   1. call `list_xchange_records`
   2. identify the newest relevant record by category:

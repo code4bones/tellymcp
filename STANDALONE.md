@@ -1,274 +1,164 @@
-# TellyMCP Standalone Guide
+# Standalone Deployment
 
-[English](STANDALONE.md) | [Русский](STANDALONE-ru.md)
+This guide describes the current standalone deployment model for `@deadragdoll/tellymcp`.
 
-This guide explains the simplest TellyMCP setup:
+The recommended topology is:
 
-- one machine
-- one Telegram bot
-- no shared gateway
-- no Postgres
-- no RabbitMQ
+- one gateway node
+- one or more agent nodes
+- one shared Telegram bot on the gateway
 
-This is the best way to start.
-
-## What you need
-
-Before installation, make sure you have:
-
-1. Node.js 24+
-2. `tmux`
-3. Redis
-4. a Telegram bot token from BotFather
-5. optional for `browser_*` tools: Playwright Chromium browser binaries
-
-Why these matter:
-
-- Node.js runs the service
-- `tmux` enables Live View, nudges, and direct Telegram-side interaction
-- Redis stores session state, inbox, pairing state, and menu state
-- Telegram bot token connects your bot to Telegram
-
-## Step 1. Install prerequisites
-
-Ubuntu / Debian example:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y tmux redis-server
-node -v
-tmux -V
-redis-cli ping
-```
-
-Expected:
-
-- Node version is `24.x` or newer
-- `tmux -V` prints a version
-- `redis-cli ping` returns `PONG`
-
-If you plan to use browser automation tools later, also run:
-
-```bash
-tellymcp browser install
-```
-
-## Step 2. Create a Telegram bot
-
-In Telegram:
-
-1. Open BotFather
-2. Run `/newbot`
-3. Choose a bot name
-4. Choose a bot username
-5. Save the token
-
-You will need:
-
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_BOT_USERNAME`
-
-## Step 3. Install TellyMCP
+## 1. Install
 
 ```bash
 npm install -g @deadragdoll/tellymcp
 ```
 
-Check that the CLI works:
+Optional:
 
 ```bash
-tellymcp help
+tellymcp browser install
+tellymcp codex-plugin install
 ```
 
-## Step 4. Start a tmux session for the agent
+## 2. Infrastructure
 
-This part is important.
+Required for gateway:
 
-Run the agent inside `tmux`, not in a plain shell, if you want the full experience.
-
-Create a session:
-
-```bash
-tmux new -s backend
-```
-
-Good session names:
-
-- `backend`
-- `frontend`
-- `review`
-- `ops`
-
-Why the session name matters:
-
-- it helps identify the agent in practice
-- it improves diagnostics
-- it makes Telegram and Live View easier to understand
-
-If you later detach:
-
-```bash
-tmux detach
-```
-
-and return:
-
-```bash
-tmux attach -t backend
-```
-
-## Step 5. Create the standalone config
-
-Inside the workspace where you want to run TellyMCP:
-
-```bash
-tellymcp init client
-```
-
-This creates a local `.env`.
-
-## Step 6. Fill `.env`
-
-At minimum, set:
-
-```env
-TELEGRAM_BOT_TOKEN=...
-TELEGRAM_BOT_USERNAME=@your_bot
-REDIS_HOST=127.0.0.1
-REDIS_PORT=6379
-REDIS_DB=1
-MCP_HTTP_HOST=127.0.0.1
-MCP_HTTP_PORT=8787
-MCP_HTTP_PATH=/mcp
-MCP_HTTP_BEARER_TOKEN=choose-a-secret-token
-DISTRIBUTED_MODE=client
-WEBAPP_ENABLED=true
-```
-
-If your tmux server uses a non-default socket:
-
-```env
-TMUX_SOCKET_PATH=/tmp/tmux-1000/default
-```
-
-## Step 7. Validate the setup
-
-```bash
-tellymcp doctor --env .env
-```
-
-In standalone `client` mode it should verify:
-
-- `tmux`
-- `.env`
 - Redis
-- local MCP bind
-- Playwright Chromium when browser tools are enabled
+- PostgreSQL
 
-## Step 8. Run the service
+Optional:
+
+- RabbitMQ
+
+## 3. Gateway Env
+
+Start from:
+
+- [.env.example.gateway](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.gateway)
+
+Minimum gateway settings:
+
+```env
+TELEGRAM_BOT_TOKEN=
+REDIS_HOST=127.0.0.1
+DB_HOST=127.0.0.1
+DB_USER=
+DB_PASSWORD=
+DB_NAME=
+GATEWAY_PUBLIC_URL=https://your-domain.example/api/gateway
+GATEWAY_WS_URL=wss://your-domain.example/api/gateway/ws
+GATEWAY_TOKEN=change_me_gateway_token
+ROOT_PREFIX=/api
+PORT=8080
+DISTRIBUTED_MODE=gateway
+```
+
+## 4. Agent Env
+
+Start from:
+
+- [.env.example.client](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.client)
+
+Minimum client settings:
+
+```env
+DISTRIBUTED_MODE=client
+GATEWAY_PUBLIC_URL=https://your-domain.example/api/gateway
+GATEWAY_WS_URL=wss://your-domain.example/api/gateway/ws
+GATEWAY_TOKEN=change_me_gateway_token
+GATEWAY_USER_UUID=put_owner_uuid_here
+TERMINAL_TRANSPORT=pty
+```
+
+For the first run, also set:
+
+```env
+TELLYMCP_SESSION_ID=NEW
+TELLYMCP_SESSION_LABEL=NEW
+```
+
+## 5. Run
+
+Gateway:
 
 ```bash
 tellymcp run --env .env
 ```
 
-Standalone MCP endpoint is normally:
-
-- `http://127.0.0.1:8787/mcp`
-
-## Step 9. Add MCP to your agent
-
-To get a ready-to-paste config snippet:
+Agent:
 
 ```bash
-tellymcp mcp --help
+tellymcp run --env .env -s NEW
 ```
 
-Typical local MCP config target:
+After `.mcpsession.json` is created in the workspace, later runs can usually use:
 
-- `http://127.0.0.1:8787/mcp`
+```bash
+tellymcp run
+```
 
-If you use bearer auth, configure your agent with the same token from `.env`.
+## 6. Webhook
 
-## Step 10. Pair the agent with Telegram
+Gateway supports polling and webhook.
 
-Once MCP is connected, tell the agent something like:
+Webhook env:
 
-- `pair with Telegram`
-- `link to Telegram`
-- `connect this session to Telegram`
-- `create a Telegram pairing code`
+```env
+TELEGRAM_WEBHOOK_ENABLED=true
+TELEGRAM_WEBHOOK_PATH=/telegram/webhook
+TELEGRAM_WEBHOOK_PUBLIC_URL=https://your-domain.example/api/telegram/webhook
+TELEGRAM_WEBHOOK_SECRET=change_me_webhook_secret
+```
 
-Expected flow:
+If nginx already proxies `location /api/ { ... }` to the standalone listener, that block also covers:
 
-1. the agent calls `create_session_pair_code`
-2. it gives you a short code
-3. you send `/start <code>` or `/link <code>` to the bot
-4. after success, open `/menu`
+- `/api/telegram/webhook`
+- `/api/gateway`
+- `/api/webapp`
+- `/api/healthz`
 
-If the agent is running inside `tmux`, it should pass:
+## 7. MCP
 
-- `cwd`
-- tmux session name
-- tmux window/pane attributes
+Local client-mode MCP:
 
-This lets Live View and tmux nudges work immediately.
+```text
+http://127.0.0.1:8787/mcp
+```
 
-## Step 11. What you get after pairing
+Stdio mode:
 
-After pairing, Telegram can be used for:
+```bash
+tellymcp serve-stdio --env .env -s NEW
+```
 
-- inbox messages
-- clarifying questions
-- local partner collaboration
-- session switching
-- storage inspection
-- Live View
+## 8. Health Checks
 
-The agent can:
+```bash
+tellymcp doctor --env .env
+```
 
-- call `ask_user_telegram`
-- read unsolicited inbox messages
-- send notes and files
-- receive tmux nudges when new work arrives
+Destructive cleanup:
 
-## What works without tmux
+```bash
+tellymcp system-prune --env .env --yes
+```
 
-TellyMCP can still run without `tmux`, but this is a reduced mode.
+## 9. Operational Notes
 
-You lose:
+- the gateway bot is the user-facing control plane
+- consoles are discovered from the gateway live registry
+- cross-console tasks use xchange records and `partner_note`
+- human Telegram replies use `notify_telegram`
+- browser screenshot replies to humans should use `browser_screenshot(send_to_telegram=true)`
+- file results between consoles should use `send_partner_file`
 
-- Live View
-- tmux nudges
-- direct Telegram Mini App controls
+## 10. Legacy Concepts To Avoid
 
-Use this only if you accept a passive workflow.
+Do not build new setups around:
 
-## Troubleshooting
-
-If `doctor` fails:
-
-- verify Redis is running
-- verify `tmux` is installed
-- verify the bot token is correct
-- verify your bearer token matches the MCP client config
-
-If pairing works but Live View does not:
-
-- make sure the agent is really inside `tmux`
-- make sure the tmux session has a stable name
-- if needed, set `TMUX_SOCKET_PATH`
-
-If the agent cannot connect to MCP:
-
-- confirm `tellymcp run --env .env` is running
-- confirm the endpoint is `http://127.0.0.1:8787/mcp`
-- confirm the bearer token matches
-
-## Next step
-
-After standalone is working, the next upgrade path is:
-
-- `gateway`
-- or `both`
-
-Use that only when you need cross-machine collaboration.
+- pairing codes
+- inbox polling APIs
+- `Local` linked-session menus
+- old session-link workflows

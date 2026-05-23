@@ -1,236 +1,136 @@
 # TellyMCP
 
-[English](README.md) | [Русский](README-ru.md) | [Standalone Guide](STANDALONE.md) | [Standalone RU](STANDALONE-ru.md) | [Screenshots](screenshots/README.md) | [Gallery](screenshots/GALLERY.md) | [Release Notes](VERSION.md)
+`@deadragdoll/tellymcp` — Telegram control plane для MCP-подключённых coding agents.
 
-[![npm version](https://img.shields.io/npm/v/%40deadragdoll%2Ftellymcp)](https://www.npmjs.com/package/@deadragdoll/tellymcp)
-[![npm downloads](https://img.shields.io/npm/dm/%40deadragdoll%2Ftellymcp)](https://www.npmjs.com/package/@deadragdoll/tellymcp)
-[![node >= 24](https://img.shields.io/badge/node-%3E%3D24-339933)](https://nodejs.org/)
-[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+Текущая модель — gateway-first:
 
-TellyMCP — это self-hosted Telegram control plane для coding agents.
+- один gateway держит Telegram-бота, web app, проекты и live registry консолей
+- один или несколько agent-процессов подключаются к этому gateway
+- каждая запущенная консоль агента — отдельный routable target
+- пользователь работает через gateway-бота, а не через pairing отдельных сессий
 
-Он привязывает реальные agent-сессии к Telegram, делает их доступными с телефона и даёт им работать вместе между локальными и удалёнными машинами.
+## Что умеет
 
-Он не завязан на одного вендора или один coding assistant. Если агент умеет работать с MCP server, он может использовать TellyMCP.
+- даёт MCP tools для human-in-the-loop через Telegram
+- позволяет одной консоли агента ставить задачу другой консоли
+- хранит structured xchange records в `.mcp-xchange`
+- поддерживает browser automation через Playwright
+- отдаёт Telegram Mini App / Live View с gateway
+- поддерживает polling и webhook на gateway
+- поставляет встроенный Codex plugin со skills под типовые workflow
 
-## Зачем он нужен
+## Текущая модель
 
-Coding agents полезны ровно до того момента, пока они не остаются одни в терминале:
+Схема:
 
-- им нужно уточнение, пока тебя нет за компьютером
-- им нужен approval перед рискованным действием
-- им нужно передать скриншот, файл или note между сессиями
-- им нужно быстро подключить человека или другого агента, не ломая общий workflow
+```text
+Telegram user
+    |
+Telegram bot + WebApp
+    |
+Gateway
+    |
+    +-- Agent console A
+    +-- Agent console B
+    +-- Agent console C
+```
 
-TellyMCP даёт каждой сессии мобильную панель управления и collaboration layer:
+Следствия:
 
-- `Live` tmux view и лёгкое управление из Telegram
-- session-scoped inbox и уведомления
-- workspace-aware handoff для файлов и note
-- локальную и удалённую коллаборацию между сессиями
-- поддержку mixed agent setups, если они умеют говорить по MCP
+- обычный flow больше не использует pairing
+- `/menu` в gateway-боте показывает live-консоли напрямую
+- межсессионная маршрутизация идёт по canonical `session_id = client_uuid:local_session_id`
+- несвязанные задачи читаются через structured xchange records, а не через старые inbox APIs
 
-## Ключевые идеи продукта
+## Основные поверхности
 
-- `Live` tmux view и управление внутри Telegram Mini App
-- `Collab`-сценарии для локальных и удалённых agent-сессий
-- `.mcp-xchange` как workspace-level handoff шина для note, файлов и скриншотов
-- MCP-native pairing сессий и session-scoped tools
-- optional gateway mode для multi-machine и multi-bot проектов
+Для человека:
 
-## Human-in-the-loop — это только один слой системы
+- `telegram_message`
+- `notify_telegram`
+- `browser_screenshot(send_to_telegram=true)`
 
-Telegram HITL здесь тоже есть, но он не исчерпывает продукт:
+Для agent-to-agent:
 
-- задавать человеку уточняющие вопросы через Telegram
-- получать несвязанные входящие сообщения позже через inbox
-- уведомлять человека о прогрессе, blockers и approvals
+- `partner_note`
+- `send_partner_note`
+- `send_partner_file`
+- `list_gateway_sessions`
 
-## Что отличает TellyMCP от простого Telegram bot bridge
+Для браузера:
 
-- он завязан на сессии, а не только на чат
-- он понимает локальные и удалённые collaboration targets
-- у него есть live terminal surface, а не только обмен сообщениями
-- он передаёт файлы через workspace-aware exchange paths, а не просто через ad hoc upload
-- он может работать как standalone node или как gateway-backed control plane
+- `browser_open`
+- `browser_click`
+- `browser_fill`
+- `browser_press`
+- `browser_wait_for`
+- `browser_screenshot`
 
-## Типовые сценарии
+Синхронизация инструкций:
 
-- держать долгоживущего агента доступным с телефона
-- запускать рядом разных агентов, если каждый умеет подключаться по MCP
-- подруливать tmux-сессией без ноутбука
-- маршрутизировать работу между `frontend`, `backend`, `review` и другими локальными сессиями
-- работать с удалёнными сессиями через gateway-backed project
-- передавать note, скриншоты и реальные файлы через `.mcp-xchange`
-- проверять локальный веб-интерфейс через `browser_*` tools и отправлять результат обратно в Telegram
+- `refresh_tools_markdown`
+- `.tellysession.json` хранит последний известный hash
 
-## Группы инструментов
+## Требования
 
-- pairing и session context
-- Telegram ask/notify/inbox
-- `Live` tmux control
-- browser inspection и screenshots
-- xchange records, partner notes и partner files
-- tools sync и version checks
-
-Важно для `Share`:
-
-- текущая сессия должна выполнить работу сама
-- target-сессии отправляется только результат
-- исходное поручение не должно пересылаться дальше как новая задача
-
-Полный список MCP tools лучше держать ниже по README и в самом MCP server, а не на первом экране.
-
-## Prerequisites
-
-- Node.js 24+
-- `tmux`
+- Node.js `>= 24`
 - Redis
-- Telegram bot token от BotFather
-- для `gateway` / `both`: Postgres
-- опционально для durable fanout на шлюзе: RabbitMQ
+- PostgreSQL для gateway mode
+- опционально RabbitMQ для durable gateway fanout
+- Playwright browser binaries, если нужны browser tools
+- `tmux`, если нужен tmux transport
 
-## `tmux` настоятельно рекомендуется
+Если нужен встроенный terminal backend:
 
-TellyMCP лучше всего работает, когда сам агент запущен внутри `tmux`.
-
-Без `tmux` сервис всё равно может работать, но полноценный интерактивный режим будет неполным:
-
-- не будет `Live View`
-- не будет tmux `nudge`
-- не будет прямого управления tmux из Telegram Mini App
-
-Типичный старт:
-
-```bash
-tmux new -s backend
+```env
+TERMINAL_TRANSPORT=pty
 ```
 
-Позже можно просто подключиться:
-
-```bash
-tmux attach -t backend
-```
-
-Почему имя tmux-сессии важно:
-
-- по нему проще различать агентов
-- оно участвует в tmux-related UI и диагностике
-- с ним проще понимать, какую сессию ты открываешь в Telegram и `Live`
-
-Лучше использовать короткие осмысленные имена:
-
-- `backend`
-- `frontend`
-- `review`
-- `ops`
-
-Если агентов несколько, лучше запускать каждого в своей tmux-сессии или pane и привязывать отдельно.
-
-Если tmux pane пересоздан и его `pane_id` изменился, TellyMCP теперь пытается автоматически восстановить актуальный target по сохранённым tmux session/window/pane hints.
-
-Если авто-восстановление не удалось, в Telegram придёт operational warning, а не только запись в backend log.
-
-## Быстрый старт
-
-### 1. Standalone client без шлюза
-
-Это самый простой режим:
-
-- без shared gateway
-- без Postgres
-- без RabbitMQ
-
-Установка:
+## Установка
 
 ```bash
 npm install -g @deadragdoll/tellymcp
 ```
 
-Создай клиентский конфиг:
+Если нужны browser tools:
 
 ```bash
-tellymcp init client
+tellymcp browser install
 ```
 
-В `.env` заполни минимум:
-
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_BOT_USERNAME`
-- `REDIS_HOST`
-- `MCP_HTTP_BEARER_TOKEN`
-
-Проверь конфиг:
+Если используешь Codex:
 
 ```bash
-tellymcp doctor --env .env
+tellymcp codex-plugin install
 ```
 
-Запусти сервис:
+## Быстрый старт
+
+### 1. Gateway
+
+Создай workspace и env:
 
 ```bash
-tellymcp run --env .env
-```
-
-Локальный MCP endpoint в `client`-режиме:
-
-- `http://127.0.0.1:8787/mcp`
-
-Чтобы получить готовый JSON snippet для агента:
-
-```bash
-tellymcp mcp --help
-```
-
-### 2. Gateway или combined `both`
-
-Используй этот режим, если нужен:
-
-- `Collab` между машинами
-- проекты между разными ботами
-- gateway-relayed Live View
-- persistent gateway-side состояние по проектам и доставке
-
-Создай конфиг:
-
-```bash
+mkdir -p ~/telly-gateway
+cd ~/telly-gateway
 tellymcp init gateway
 ```
 
-или
+Или возьми sample:
 
-```bash
-tellymcp init both
-```
+- [.env.example.gateway](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.gateway)
 
-В `.env` настроить:
+Минимально важные значения:
 
-- `DISTRIBUTED_MODE=gateway|both`
-- `PORT`
-- `ROOT_PREFIX=/api`
 - `TELEGRAM_BOT_TOKEN`
-- `REDIS_*`
-- `DB_*`
-- `WEBAPP_PUBLIC_URL`
+- `REDIS_HOST`
+- `DB_HOST`
+- `DB_USER`
+- `DB_PASSWORD`
+- `DB_NAME`
 - `GATEWAY_PUBLIC_URL`
 - `GATEWAY_WS_URL`
-- при необходимости `RMQ_*`
-
-Ожидаемый публичный ingress:
-
-- `/api/mcp`
-- `/api/webapp`
-- `/api/gateway`
-- `/api/healthz`
-
-Пример nginx-конфига:
-- [docs/tellymcp.gw.conf](docs/tellymcp.gw.conf)
-
-Проверка:
-
-```bash
-tellymcp doctor --env .env
-```
+- `GATEWAY_TOKEN`
 
 Запуск:
 
@@ -238,339 +138,210 @@ tellymcp doctor --env .env
 tellymcp run --env .env
 ```
 
-Типовой публичный MCP endpoint:
+### 2. Agent
 
-- `https://your-host.example/api/mcp`
-
-## Mini App / Live
-
-Если `WEBAPP_ENABLED=true`, в меню сессии появляется `🖥 Live`.
-
-Mini App:
-
-- обслуживается этим же Node service по `WEBAPP_BASE_PATH`
-- в `client`-режиме тоже может открываться через общий gateway domain
-- показывает видимую область tmux pane и отправляет ограниченный набор control actions
-- валидирует Telegram `initData` на сервере
-- умеет открываться в режимах:
-  - `default`
-  - `expand`
-  - `fullscreen` с fallback на `expand`
-- после успешного bootstrap удаляет временное launcher-сообщение
-- автоматически восстанавливается после короткого рестарта шлюза:
-  - краткий `502/503` переживается обычным polling
-  - если in-process WebApp session на шлюзе была потеряна и приходит `401/403`, Mini App сама делает повторный bootstrap
-  - в типовом restart-case переоткрывать `Live` не нужно
-
-## Docker: только для инфраструктуры или для `gateway`-only
-
-Docker больше не является основным способом запуска TellyMCP, но один container path поддерживается:
-
-- запуск только `gateway`-ноды в контейнере
-
-Это вариант именно для чистого control-plane узла:
-
-- без локальных agent sessions
-- без локального `tmux`
-- не для `client`
-- не для `both`
-
-Плюс `docker-compose.yml` по-прежнему может поднимать локальную инфраструктуру:
-
-- `redis` для всех режимов
-- `postgres` для `gateway` / `both`
-- `rabbitmq` только если нужен durable fanout на шлюзе
-
-Только Redis, для `standalone` или `client`:
+Для каждой консоли лучше отдельный workspace:
 
 ```bash
-docker compose up -d redis
+mkdir -p ~/agent-a
+cd ~/agent-a
+tellymcp init client
 ```
 
-Redis + Postgres, для `gateway` или `both`:
+Или используй sample:
 
-```bash
-docker compose --profile gateway up -d
-```
+- [.env.example.client](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.client)
 
-Добавить RabbitMQ при необходимости:
+Минимально важные значения:
 
-```bash
-docker compose --profile gateway --profile rmq up -d
-```
-
-Полный gateway stack в Docker:
-
-1. Скопировать пример:
-
-```bash
-cp .env.example.gateway .env-gateway
-```
-
-2. Отредактировать `.env-gateway` и задать минимум:
-
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_BOT_USERNAME`
-- при желании `ADMIN_TOKEN`, если gateway-бот должен требовать `/auth <token>` перед доступом к меню
-- `WEBAPP_PUBLIC_URL`
 - `GATEWAY_PUBLIC_URL`
 - `GATEWAY_WS_URL`
-- `MCP_HTTP_BEARER_TOKEN`
+- `GATEWAY_TOKEN`
+- `GATEWAY_USER_UUID`, если консоль должна быть видна конкретному владельцу в gateway-боте
 
-3. Запустить:
+Рекомендуется:
 
-```bash
-docker compose up -d
-```
+- `TERMINAL_TRANSPORT=pty` для простого host setup
+- на первом запуске явно задать `TELLYMCP_SESSION_ID` и `TELLYMCP_SESSION_LABEL`
 
-Это поднимет:
-
-- `redis`
-- `postgres`
-- `tellymcp-gateway`
-
-Контейнер gateway ставит опубликованный пакет `@deadragdoll/tellymcp` напрямую.
-Локальные TypeScript-исходники внутри Docker больше не собираются.
-Смонтированный файл `.env-gateway` является источником истины для конфигурации приложения внутри контейнера.
-Если в build context лежит локальный архив `deadragdoll-tellymcp-*.tgz`, Docker поставит его вместо загрузки пакета из npm.
-При `LOG_FILE_ENABLED=true` JSONL-логи пишутся в смонтированную на хост папку `./.tellymcp/`.
-
-Внутри Docker compose сам переопределяет:
-
-- `MCP_HTTP_HOST=0.0.0.0`
-- `REDIS_HOST=redis`
-- `DB_HOST=postgres`
-
-Ожидаемые endpoint'ы:
-
-- `http://127.0.0.1:8080/api/healthz`
-- `http://127.0.0.1:8080/api/mcp`
-- `http://127.0.0.1:8080/api/webapp`
-- `http://127.0.0.1:8080/api/gateway`
-
-Пример nginx-конфига:
-- [docs/tellymcp.gw.conf](docs/tellymcp.gw.conf)
-
-### Деплой по тэгу через GitLab runner
-
-Если на хосте шлюза уже установлен локальный `gitlab-runner`, можно деплоить по тэгу через приложенный `.gitlab-ci.yml`.
-
-Ожидаемая схема:
-
-- runner умеет выполнять `docker`
-- пользователь runner-а умеет выполнять `docker compose`
-- `GATEWAY_ENV_FILE` задан как GitLab CI/CD variable
-- этот файл уже существует на сервере, например `/opt/tellymcp/.env-gateway`
-- опционально `LOG_HOST_DIR` указывает на постоянную директорию логов на хосте
-
-Структура pipeline:
-
-1. `build:package`
-2. `deploy:gateway`
-
-Что происходит на тэге вида `0.0.10` или `v0.0.10`:
-
-- `build:package` запускается внутри `node:24-bookworm-slim` через `docker run`
-- там выполняются `yarn install`, `yarn lint`, `yarn test`, `npm pack`
-- GitLab сохраняет `deadragdoll-tellymcp-*.tgz` как artifact
-- `deploy:gateway` получает этот artifact
-- deploy job экспортирует `TELLYMCP_VERSION` из `package.json`
-- deploy job подставляет `GATEWAY_ENV_FILE` в compose
-- `docker compose build` видит локальный `.tgz` и ставит его внутри `Dockerfile.gateway`
-- `docker compose up -d --force-recreate` перезапускает стек шлюза
-
-Такой deploy path не требует `node`, `yarn` или `npm` на хосте runner-а.
-На сервере нужны только:
-
-- `docker compose`
-- доступ к workspace, который создаёт GitLab CI
-- внешний `.env-gateway`, заданный через `GATEWAY_ENV_FILE`
-
-Сама установка пакета происходит уже внутри Docker через [Dockerfile.gateway](Dockerfile.gateway).
-
-Основные файлы:
-
-- [.gitlab-ci.yml](.gitlab-ci.yml)
-- [scripts/deploy-gateway.sh](scripts/deploy-gateway.sh)
-
-Остановить всё:
+Первый запуск:
 
 ```bash
-docker compose down
+tellymcp run --env .env -s NEW
 ```
 
-Сам TellyMCP при этом запускается напрямую на хосте:
+После первого запуска `.mcpsession.json` хранит:
+
+- `local_session_id`
+- `session_label`
+- `env_file`
+
+Поэтому дальше в том же каталоге обычно достаточно:
 
 ```bash
-tellymcp run --env .env
+tellymcp run
 ```
 
-Для `client` и `both` по-прежнему рекомендуется именно хостовый запуск.
+## Webhook
 
-## Как начать работу с ботом изнутри агента
+Gateway умеет работать через Telegram webhook.
 
-После подключения MCP можно просто написать агенту обычной фразой, что нужно привязаться к Telegram.
+Если nginx уже проксирует весь `/api/` на standalone HTTP listener gateway, отдельный `location` для webhook не обязателен. Route такой:
 
-Типовые фразы, которые агент должен понимать:
+- `/api/telegram/webhook`
 
-- `привяжись к Telegram`
-- `подключись к Telegram`
-- `зарегистрируй эту сессию в Telegram`
-- `свяжи эту сессию с ботом`
-- `создай код привязки к Telegram`
-- `дай код для pairing с Telegram`
+Нужные env:
 
-Ожидаемый flow:
+```env
+TELEGRAM_WEBHOOK_ENABLED=true
+TELEGRAM_WEBHOOK_PATH=/telegram/webhook
+TELEGRAM_WEBHOOK_PUBLIC_URL=https://your-domain.example/api/telegram/webhook
+TELEGRAM_WEBHOOK_SECRET=change_me_webhook_secret
+```
 
-1. Агент вызывает `create_session_pair_code`.
-2. Возвращается короткий код и, если возможно, deep link.
-3. Ты открываешь Telegram и отправляешь боту `/start <code>` или `/link <code>`.
-4. После успешной привязки можно открыть `/menu`.
+Когда webhook mode включён:
 
-Если хочешь написать совсем явно, используй так:
+- gateway вызывает `setWebhook(...)` на старте
+- polling не запускается
+- секрет проверяется через `x-telegram-bot-api-secret-token`
+
+## MCP
+
+### Local HTTP
+
+В client mode локальный MCP endpoint обычно:
 
 ```text
-Привяжись к Telegram и дай мне код для pairing.
+http://127.0.0.1:8787/mcp
 ```
 
-Если агент работает внутри `tmux`, ему желательно передать `cwd` и tmux-атрибуты уже на этапе pairing, чтобы `Live` и `nudge` заработали сразу.
-
-## Telegram setup
-
-1. Открой BotFather.
-2. Создай бота через `/newbot`.
-3. Сохрани токен.
-4. Укажи `TELEGRAM_BOT_USERNAME`, если хочешь deep-link подсказки для pairing.
-
-## MCP helper
-
-TellyMCP сам не прописывает себя в конфиг агента.
-
-Команда:
+Helper:
 
 ```bash
-tellymcp mcp --help
+tellymcp mcp --url http://127.0.0.1:8787/mcp
 ```
 
-печатает готовые snippets для:
+### Stdio
 
-- локального standalone клиента
-- общего gateway endpoint
-- варианта с bearer token
-
-## Doctor
-
-`doctor` mode-aware.
-
-В `client` режиме проверяет:
-
-- `tmux`
-- `.env`
-- Redis
-- локальный MCP bind
-- внешний `gateway healthz`, если задан `GATEWAY_PUBLIC_URL`
-- `GATEWAY_WS_URL`
-- `WEBAPP_PUBLIC_URL`
-
-В `gateway` / `both` режиме проверяет:
-
-- `tmux`
-- `.env`
-- Redis
-- локальный `healthz`
-- публичный `healthz`
-- публичный `ws`
-- публичный `webapp`
-- Postgres
-- RabbitMQ, если настроен
-
-## Ключевые переменные
-
-Общие:
-
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_BOT_USERNAME`
-- `REDIS_HOST`
-- `REDIS_PORT`
-- `REDIS_DB`
-- `MODE=queue|reject`
-- `PAIR_CODE_TTL_SECONDS`
-- `MCP_HTTP_HOST`
-- `MCP_HTTP_PORT`
-- `MCP_HTTP_PATH`
-- `MCP_HTTP_BEARER_TOKEN`
-- `TMUX_SOCKET_PATH`
-- `TMUX_NUDGE_ENABLED`
-- `TMUX_NUDGE_DEBOUNCE_SECONDS`
-- `TMUX_NUDGE_COOLDOWN_SECONDS`
-- `WEBAPP_ENABLED`
-- `WEBAPP_BASE_PATH`
-- `WEBAPP_LAUNCH_MODE=default|expand|fullscreen`
-- `MCP_XCHANGE_DIR`
-- `PROXY_USE=http|socks5`
-- `HTTP_PROXY`
-- `SOCKS5_PROXY`
-- `LOG_LEVEL`
-- `LOG_FILE_ENABLED`
-- `LOG_FILE_PATH`
-
-Только client:
-
-- `DISTRIBUTED_MODE=client`
-- `GATEWAY_PUBLIC_URL`
-- `GATEWAY_WS_URL`
-- `GATEWAY_WS_PATH`
-- `GATEWAY_AUTH_TOKEN`
-
-Gateway / both:
-
-- `DISTRIBUTED_MODE=gateway|both`
-- `PORT`
-- `ROOT_PREFIX=/api`
-- `DB_HOST`
-- `DB_PORT`
-- `DB_USER`
-- `DB_PASSWORD`
-- `DB_NAME`
-- `RMQ_HOST`
-- `RMQ_PORT`
-- `RMQ_USER`
-- `RMQ_PASSWORD`
-- `RMQ_VHOST`
-- `RMQ_EXCHANGE`
-
-Готовые шаблоны:
-
-- `.env.example.client`
-- `.env.example.gateway`
-- `tellymcp init client|gateway|both`
-
-## Что умеет
-
-Базовый поток такой:
-
-1. Агент создаёт или обновляет session context.
-2. Агент вызывает `create_session_pair_code`.
-3. Человек делает `/start <code>` или `/link <code>` в Telegram.
-4. После pairing бот открывает меню сессий, inbox, storage, local/collab и live view.
-5. Агент вызывает `ask_user_telegram` для связанной `session_id`.
-6. Ответ пользователя возвращается как MCP tool output.
-7. Несвязанные входящие Telegram-сообщения остаются в inbox этой сессии.
-8. Файлы и note попадают в `.mcp-xchange`.
-
-## Полезные команды
+Для Codex и похожих агентов:
 
 ```bash
-tellymcp help
+tellymcp serve-stdio --env .env -s NEW
+```
+
+После инициализации `.mcpsession.json`:
+
+```bash
+tellymcp serve-stdio
+```
+
+## Codex Plugin
+
+Пакет включает локальный Codex plugin со skills для:
+
+- ответов человеку в Telegram
+- `partner_note`
+- browser screenshot задач
+- artifact-return flow
+
+Команды:
+
+```bash
+tellymcp codex-plugin status
+tellymcp codex-plugin install
+```
+
+Installer:
+
+- копирует bundled plugin в managed local Codex path
+- обновляет personal marketplace manifest
+- ставит или обновляет plugin, если найден Codex CLI
+
+## Browser Workflow
+
+Browser tools используют Playwright Chromium.
+
+Предпочтительный путь:
+
+1. `browser_open`
+2. `browser_screenshot`
+3. дальше либо:
+   - `send_to_telegram=true` для ответа человеку
+   - `send_partner_file` для возврата артефакта другой консоли
+
+Если browser runtime не установлен:
+
+```bash
+tellymcp browser install
+```
+
+Не подменяй browser workflow ad hoc shell-командами с Playwright, кроме случаев, когда ты отлаживаешь сам browser runtime.
+
+## Collaboration
+
+Проекты:
+
+- live presence консолей идёт из gateway live registry
+- membership проекта хранится отдельно от live presence
+- один client может иметь несколько live консолей одновременно
+- console participation в проекте хранится отдельно
+
+Ожидаемое поведение агента:
+
+- target резолвится через `list_gateway_sessions`
+- входящая работа читается через `list_xchange_records` и `get_xchange_record`
+- реальные файлы возвращаются через `send_partner_file`
+- `mark_xchange_record_read` вызывается только после успешного outbound reply
+
+## Файлы конфигурации
+
+Канонические стартовые точки:
+
+- [.env.example.gateway](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.gateway)
+- [.env.example.client](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.client)
+
+Bundled templates:
+
+- [config/templates/env.gateway.template](/home/code4bones/Devs/coding/mcp/telegram_mcp/config/templates/env.gateway.template)
+- [config/templates/env.client.template](/home/code4bones/Devs/coding/mcp/telegram_mcp/config/templates/env.client.template)
+- [config/templates/env.both.template](/home/code4bones/Devs/coding/mcp/telegram_mcp/config/templates/env.both.template)
+
+Samples уже вычищены под текущий runtime:
+
+- убраны старые inbox-only настройки
+- убраны obsolete pairing-oriented тексты
+- убраны неиспользуемые секреты вроде `SESSION_SECRET`
+- убран неиспользуемый `APP_NAME`
+
+## Операционные команды
+
+Проверка окружения:
+
+```bash
 tellymcp doctor --env .env
-tellymcp mcp --help
-tellymcp run --env .env
 ```
 
-## Для разработки
+Разрушительная очистка local+gateway state:
 
-См.:
+```bash
+tellymcp system-prune --env .env --yes
+```
 
-- [README.md](README.md)
-- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
-- [TOOLS.md](TOOLS.md)
+## Карта документации
+
+- [README.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/README.md)
+- [STANDALONE.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/STANDALONE.md)
+- [STANDALONE-ru.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/STANDALONE-ru.md)
+- [TOOLS.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/TOOLS.md)
+- [screenshots/README.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/screenshots/README.md)
+
+## Статус
+
+Этот README описывает текущую gateway-first модель.
+
+Legacy concepts, которые не стоит использовать в новых setup:
+
+- pairing codes
+- session inbox APIs
+- `Local` partner menu
+- linked-session flows вне `partner_note` / project collaboration

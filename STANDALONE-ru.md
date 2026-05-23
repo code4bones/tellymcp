@@ -1,274 +1,164 @@
-# TellyMCP Standalone Guide
+# Standalone Deployment
 
-[English](STANDALONE.md) | [Русский](STANDALONE-ru.md)
+Этот файл описывает текущую standalone-модель для `@deadragdoll/tellymcp`.
 
-Это пошаговая инструкция для самого простого сценария TellyMCP:
+Рекомендуемая топология:
 
-- одна машина
-- один Telegram-бот
-- без shared gateway
-- без Postgres
-- без RabbitMQ
+- один gateway node
+- одна или несколько agent nodes
+- один общий Telegram-бот на gateway
 
-Именно с этого режима лучше начинать.
-
-## Что понадобится
-
-Перед установкой нужны:
-
-1. Node.js 24+
-2. `tmux`
-3. Redis
-4. Telegram bot token из BotFather
-5. опционально для `browser_*` tools: Playwright Chromium browser binaries
-
-Зачем это нужно:
-
-- Node.js запускает сервис
-- `tmux` нужен для Live View, `nudge` и полноценной интерактивной работы
-- Redis хранит состояние сессий, inbox, pairing и меню
-- Telegram bot token связывает сервис с Telegram
-
-## Шаг 1. Установить зависимости
-
-Пример для Ubuntu / Debian:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y tmux redis-server
-node -v
-tmux -V
-redis-cli ping
-```
-
-Ожидаемый результат:
-
-- Node версии `24.x` или новее
-- `tmux -V` показывает версию
-- `redis-cli ping` возвращает `PONG`
-
-Если планируешь использовать browser automation tools, один раз выполни ещё:
-
-```bash
-tellymcp browser install
-```
-
-## Шаг 2. Создать Telegram-бота
-
-В Telegram:
-
-1. Открой BotFather
-2. Выполни `/newbot`
-3. Выбери имя бота
-4. Выбери username бота
-5. Сохрани токен
-
-Тебе понадобятся:
-
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_BOT_USERNAME`
-
-## Шаг 3. Установить TellyMCP
+## 1. Установка
 
 ```bash
 npm install -g @deadragdoll/tellymcp
 ```
 
-Проверка CLI:
+Опционально:
 
 ```bash
-tellymcp help
+tellymcp browser install
+tellymcp codex-plugin install
 ```
 
-## Шаг 4. Запустить агента в tmux
+## 2. Инфраструктура
 
-Это важный момент.
+Для gateway обязательно:
 
-Для полноценной работы агент лучше запускать внутри `tmux`, а не в обычной shell-сессии.
-
-Создать tmux-сессию:
-
-```bash
-tmux new -s backend
-```
-
-Хорошие имена:
-
-- `backend`
-- `frontend`
-- `review`
-- `ops`
-
-Почему имя tmux-сессии важно:
-
-- по нему проще различать агентов
-- оно улучшает диагностику
-- в Telegram и Live View проще понимать, какая сессия открыта
-
-Если нужно выйти:
-
-```bash
-tmux detach
-```
-
-И вернуться:
-
-```bash
-tmux attach -t backend
-```
-
-## Шаг 5. Создать standalone-конфиг
-
-В рабочей директории:
-
-```bash
-tellymcp init client
-```
-
-Команда создаст локальный `.env`.
-
-## Шаг 6. Заполнить `.env`
-
-Минимум:
-
-```env
-TELEGRAM_BOT_TOKEN=...
-TELEGRAM_BOT_USERNAME=@your_bot
-REDIS_HOST=127.0.0.1
-REDIS_PORT=6379
-REDIS_DB=1
-MCP_HTTP_HOST=127.0.0.1
-MCP_HTTP_PORT=8787
-MCP_HTTP_PATH=/mcp
-MCP_HTTP_BEARER_TOKEN=choose-a-secret-token
-DISTRIBUTED_MODE=client
-WEBAPP_ENABLED=true
-```
-
-Если tmux использует нестандартный socket:
-
-```env
-TMUX_SOCKET_PATH=/tmp/tmux-1000/default
-```
-
-## Шаг 7. Проверить конфиг
-
-```bash
-tellymcp doctor --env .env
-```
-
-В standalone `client` режиме он должен проверить:
-
-- `tmux`
-- `.env`
 - Redis
-- локальный MCP bind
-- Playwright Chromium, если browser tools включены
+- PostgreSQL
 
-## Шаг 8. Запустить сервис
+Опционально:
+
+- RabbitMQ
+
+## 3. Gateway Env
+
+Стартовая точка:
+
+- [.env.example.gateway](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.gateway)
+
+Минимально нужные параметры gateway:
+
+```env
+TELEGRAM_BOT_TOKEN=
+REDIS_HOST=127.0.0.1
+DB_HOST=127.0.0.1
+DB_USER=
+DB_PASSWORD=
+DB_NAME=
+GATEWAY_PUBLIC_URL=https://your-domain.example/api/gateway
+GATEWAY_WS_URL=wss://your-domain.example/api/gateway/ws
+GATEWAY_TOKEN=change_me_gateway_token
+ROOT_PREFIX=/api
+PORT=8080
+DISTRIBUTED_MODE=gateway
+```
+
+## 4. Agent Env
+
+Стартовая точка:
+
+- [.env.example.client](/home/code4bones/Devs/coding/mcp/telegram_mcp/.env.example.client)
+
+Минимально нужные параметры agent:
+
+```env
+DISTRIBUTED_MODE=client
+GATEWAY_PUBLIC_URL=https://your-domain.example/api/gateway
+GATEWAY_WS_URL=wss://your-domain.example/api/gateway/ws
+GATEWAY_TOKEN=change_me_gateway_token
+GATEWAY_USER_UUID=put_owner_uuid_here
+TERMINAL_TRANSPORT=pty
+```
+
+Для первого запуска также желательно задать:
+
+```env
+TELLYMCP_SESSION_ID=NEW
+TELLYMCP_SESSION_LABEL=NEW
+```
+
+## 5. Запуск
+
+Gateway:
 
 ```bash
 tellymcp run --env .env
 ```
 
-Обычный standalone MCP endpoint:
-
-- `http://127.0.0.1:8787/mcp`
-
-## Шаг 9. Подключить MCP к агенту
-
-Чтобы получить готовый snippet:
+Agent:
 
 ```bash
-tellymcp mcp --help
+tellymcp run --env .env -s NEW
 ```
 
-Типичный локальный endpoint:
+После того как в workspace появится `.mcpsession.json`, дальше обычно достаточно:
 
-- `http://127.0.0.1:8787/mcp`
+```bash
+tellymcp run
+```
 
-Если используешь bearer auth, агент должен подключаться с тем же токеном, что и в `.env`.
+## 6. Webhook
 
-## Шаг 10. Привязать агента к Telegram
+Gateway поддерживает polling и webhook.
 
-После подключения MCP можно просто написать агенту:
+Нужные env:
 
-- `привяжись к Telegram`
-- `подключись к Telegram`
-- `свяжи эту сессию с Telegram`
-- `создай код привязки к Telegram`
+```env
+TELEGRAM_WEBHOOK_ENABLED=true
+TELEGRAM_WEBHOOK_PATH=/telegram/webhook
+TELEGRAM_WEBHOOK_PUBLIC_URL=https://your-domain.example/api/telegram/webhook
+TELEGRAM_WEBHOOK_SECRET=change_me_webhook_secret
+```
 
-Ожидаемый flow:
+Если nginx уже проксирует `location /api/ { ... }` на standalone listener, этот же блок покроет:
 
-1. агент вызывает `create_session_pair_code`
-2. отдаёт короткий код
-3. ты отправляешь боту `/start <code>` или `/link <code>`
-4. после успеха открываешь `/menu`
+- `/api/telegram/webhook`
+- `/api/gateway`
+- `/api/webapp`
+- `/api/healthz`
 
-Если агент работает внутри `tmux`, ему желательно передать:
+## 7. MCP
 
-- `cwd`
-- имя tmux-сессии
-- tmux window/pane атрибуты
+Локальный client-mode MCP endpoint:
 
-Тогда `Live` и `nudge` заработают сразу.
+```text
+http://127.0.0.1:8787/mcp
+```
 
-## Шаг 11. Что будет после pairing
+Stdio-режим:
 
-После привязки Telegram можно использовать для:
+```bash
+tellymcp serve-stdio --env .env -s NEW
+```
 
-- inbox
-- вопросов к человеку
-- local partner collaboration
-- переключения сессий
-- просмотра storage
-- Live View
+## 8. Проверки
 
-Агент сможет:
+```bash
+tellymcp doctor --env .env
+```
 
-- вызывать `ask_user_telegram`
-- читать несвязанные входящие сообщения
-- отправлять note и файлы
-- получать tmux `nudge`, когда появляется новая работа
+Разрушительная очистка:
 
-## Что работает без tmux
+```bash
+tellymcp system-prune --env .env --yes
+```
 
-TellyMCP можно запустить и без `tmux`, но это урезанный режим.
+## 9. Операционные заметки
 
-Не будет:
+- gateway-бот — это основной user-facing control plane
+- консоли видны из gateway live registry
+- межсессионные задачи идут через xchange records и `partner_note`
+- ответы человеку в Telegram идут через `notify_telegram`
+- browser screenshot для человека лучше отправлять через `browser_screenshot(send_to_telegram=true)`
+- файлы между консолями лучше отправлять через `send_partner_file`
 
-- Live View
-- tmux `nudge`
-- прямого управления из Telegram Mini App
+## 10. Чего не делать в новых setup
 
-Такой режим стоит использовать только если тебя устраивает пассивная работа.
+Не строй новые setup вокруг:
 
-## Troubleshooting
-
-Если `doctor` ругается:
-
-- проверь, что Redis запущен
-- проверь, что установлен `tmux`
-- проверь правильность bot token
-- проверь, что bearer token совпадает с MCP-конфигом агента
-
-Если pairing работает, а Live View нет:
-
-- убедись, что агент действительно запущен внутри `tmux`
-- убедись, что у tmux-сессии есть стабильное имя
-- при необходимости задай `TMUX_SOCKET_PATH`
-
-Если агент не может подключиться к MCP:
-
-- проверь, что `tellymcp run --env .env` действительно запущен
-- проверь endpoint `http://127.0.0.1:8787/mcp`
-- проверь bearer token
-
-## Следующий шаг
-
-Когда standalone уже работает, дальше можно переходить к:
-
-- `gateway`
-- или `both`
-
-Это нужно только если нужен `Collab` между машинами.
+- pairing codes
+- inbox polling APIs
+- `Local` linked-session меню
+- старых session-link workflow

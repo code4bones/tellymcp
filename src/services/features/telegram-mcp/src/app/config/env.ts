@@ -151,13 +151,13 @@ const envSchema = z.object({
     .string()
     .min(1)
     .default(
-      "не inbox: получи newest partner_note через list_xchange_records/get_xchange_record, выполни задачу в текущей консоли и обязательно отправь результат через send_partner_note или send_partner_file; только потом mark_xchange_record_read",
+      "получи newest partner_note через list_xchange_records/get_xchange_record, выполни задачу в текущей консоли и обязательно отправь результат через send_partner_note или send_partner_file; только потом mark_xchange_record_read",
     ),
   TMUX_PARTNER_REPLY_NUDGE_MESSAGE: z
     .string()
     .min(1)
     .default(
-      "не inbox: получи newest partner_note через list_xchange_records/get_xchange_record; если newest note имеет kind=reply или не требует ответа, просто обработай результат и не отправляй новый send_partner_note/send_partner_file без явного нового запроса; только потом mark_xchange_record_read",
+      "получи newest partner_note через list_xchange_records/get_xchange_record; если newest note имеет kind=reply или не требует ответа, просто обработай результат и не отправляй новый send_partner_note/send_partner_file без явного нового запроса; только потом mark_xchange_record_read",
     ),
   TMUX_CAPTURE_MODE: z.enum(["visible", "lines"]).default("visible"),
   TMUX_CAPTURE_LINES: z.coerce.number().int().positive().default(300),

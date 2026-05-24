@@ -102,8 +102,6 @@ export class TransportMenuFingerprints {
         return `${locale}:no-principal`;
       }
 
-      const activeSessionId =
-        await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
       const sessionIds = (
         await this.host.bindingStore.listBoundSessionIdsForPrincipal(principal)
       ).sort();
@@ -120,7 +118,7 @@ export class TransportMenuFingerprints {
         }
       }
 
-      return `${locale}:${activeSessionId ?? "none"}:${selectedOwnerLabel}:${sessionIds.join(",")}`;
+      return `${locale}:${selectedOwnerLabel}:${sessionIds.join(",")}`;
     } catch (error) {
       this.host.logger.warn("Failed to build Telegram sessions menu fingerprint", {
         chatId: ctx.chat?.id,

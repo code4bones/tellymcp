@@ -63,8 +63,7 @@ export function formatSessionMenuLabel(input: {
   active: boolean;
 }): string {
   const base = input.sessionLabel ?? input.sessionId;
-  const activePrefix = input.active ? "✅ " : "📁 ";
-  return `${activePrefix}${base}`;
+  return `📁 ${base}`;
 }
 
 export function buildInboxText(

@@ -118,6 +118,37 @@ export interface TransportMenuFactoriesHost {
 export class TransportMenuFactories {
   public constructor(private readonly host: TransportMenuFactoriesHost) {}
 
+  private async createActiveSessionGroupPayloadForContext(
+    ctx: TelegramMenuContext,
+  ): Promise<string> {
+    const principal = this.host.getPrincipalFromContext(ctx);
+    if (!principal) {
+      return "back-to-sessions";
+    }
+
+    const activeSessionId =
+      await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
+    if (!activeSessionId) {
+      return "back-to-sessions";
+    }
+
+    const session = await this.host.sessionStore.getSession(activeSessionId);
+    const display = splitSessionDisplayLabel({
+      sessionId: activeSessionId,
+      ...(session?.label ? { sessionLabel: session.label } : {}),
+    });
+    const ownerKey =
+      parseLiveRelaySessionId(activeSessionId)?.clientUuid ??
+      display.ownerLabel ??
+      activeSessionId;
+    const ownerLabel =
+      display.ownerLabel ??
+      display.shortLabel ??
+      activeSessionId;
+
+    return await this.host.createSessionGroupMenuPayload(ownerLabel, ownerKey);
+  }
+
   public createMainMenu(): Menu<TelegramMenuContext> {
     return new Menu<TelegramMenuContext>("telegram-main-menu", {
       fingerprint: async (ctx) => this.host.buildMainMenuFingerprint(ctx),
@@ -171,7 +202,11 @@ export class TransportMenuFactories {
       )
       .row()
       .text(
-        async (ctx) => this.host.tForContext(ctx, "menu:main.buttons.back"),
+        {
+          text: async (ctx) => this.host.tForContext(ctx, "menu:main.buttons.back"),
+          payload: async (ctx) =>
+            await this.createActiveSessionGroupPayloadForContext(ctx),
+        },
         async (ctx) => {
           await ctx.answerCallbackQuery({
             text: await this.host.tForContext(
@@ -597,8 +632,6 @@ export class TransportMenuFactories {
             return range;
           }
 
-          const activeSessionId =
-            await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
           const sessionIds = (
             await this.host.bindingStore.listBoundSessionIdsForPrincipal(principal)
           ).sort();
@@ -648,7 +681,7 @@ export class TransportMenuFactories {
               sessionId,
               ...(display.shortLabel ? { sessionLabel: display.shortLabel } : {}),
               ...(display.ownerLabel ? { ownerLabel: display.ownerLabel } : {}),
-              active: sessionId === activeSessionId,
+              active: false,
               sortKey: `${display.shortLabel}\u0000${sessionId}`,
             });
             groupedSessions.set(groupKey, items);

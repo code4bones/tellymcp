@@ -1,4 +1,5 @@
 import type { AppConfig } from "../../../app/config/env";
+import type { TelegramXchangeFileMeta } from "../../../entities/inbox/model/types";
 import type {
   GetXchangeRecordInput,
   GetXchangeRecordOutput,
@@ -10,6 +11,7 @@ import type {
 import type {
   MaintenanceStore,
   SessionStore,
+  TelegramXchangeFileMetaStore,
 } from "../../../shared/api/storage/contract";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
@@ -32,6 +34,7 @@ export class XchangeService {
     private readonly config: AppConfig,
     private readonly sessionStore: SessionStore,
     private readonly maintenanceStore: MaintenanceStore,
+    private readonly xchangeFileMetaStore: TelegramXchangeFileMetaStore,
     private readonly logger: Logger,
     private readonly projectIdentityResolver: ProjectIdentityResolver,
     private readonly remoteConsoleInvoker?: RemoteConsoleInvoker,
@@ -167,6 +170,67 @@ export class XchangeService {
       session_id: sessionId,
       record_id: input.record_id,
       updated,
+    };
+  }
+
+  public async listFileMetas(input: {
+    session_id?: string;
+    source?: TelegramXchangeFileMeta["source"];
+  }): Promise<{
+    session_id: string;
+    metas: TelegramXchangeFileMeta[];
+  }> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const sessionId = await this.normalizeSessionIdForAccess(resolved.sessionId);
+    const metas = await this.xchangeFileMetaStore.listXchangeFileMetas(sessionId);
+    const filtered = input.source
+      ? metas.filter((meta) => meta.source === input.source)
+      : metas;
+
+    filtered.sort((left, right) => right.filePath.localeCompare(left.filePath));
+    return {
+      session_id: sessionId,
+      metas: filtered,
+    };
+  }
+
+  public async getFileMeta(input: {
+    session_id?: string;
+    file_path: string;
+  }): Promise<{
+    session_id: string;
+    file_path: string;
+    meta: TelegramXchangeFileMeta | null;
+  }> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const sessionId = await this.normalizeSessionIdForAccess(resolved.sessionId);
+    return {
+      session_id: sessionId,
+      file_path: input.file_path,
+      meta: await this.xchangeFileMetaStore.getXchangeFileMeta(
+        sessionId,
+        input.file_path,
+      ),
+    };
+  }
+
+  public async deleteFileMeta(input: {
+    session_id?: string;
+    file_path: string;
+  }): Promise<{
+    session_id: string;
+    file_path: string;
+    deleted: boolean;
+  }> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const sessionId = await this.normalizeSessionIdForAccess(resolved.sessionId);
+    return {
+      session_id: sessionId,
+      file_path: input.file_path,
+      deleted: await this.xchangeFileMetaStore.deleteXchangeFileMeta(
+        sessionId,
+        input.file_path,
+      ),
     };
   }
 

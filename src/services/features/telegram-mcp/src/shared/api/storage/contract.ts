@@ -53,6 +53,9 @@ export interface SessionBindingStore {
   getActiveSessionIdForTelegramUser(
     telegramUserId: number,
   ): Promise<string | null>;
+  clearActiveSessionIdForPrincipal(
+    principal: TelegramPrincipal,
+  ): Promise<void>;
   setActiveSessionIdForPrincipal(
     principal: TelegramPrincipal,
     sessionId: string,

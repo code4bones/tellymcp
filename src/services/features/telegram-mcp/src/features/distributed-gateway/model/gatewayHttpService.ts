@@ -173,6 +173,11 @@ function slugifyGatewayFilenamePart(value: string): string {
     .replace(/^-|-$/gu, "");
 }
 
+type ResolvedConnectedConsoleTarget = {
+  clientUuid: string;
+  localSessionId: string;
+};
+
 export class GatewayHttpService {
   public constructor(
     private readonly config: AppConfig,
@@ -369,6 +374,43 @@ export class GatewayHttpService {
       }
     }
     return fallback;
+  }
+
+  private async resolveConnectedConsoleTarget(
+    sessionId: string,
+  ): Promise<ResolvedConnectedConsoleTarget> {
+    const relayTarget = parseLiveRelaySessionId(sessionId);
+    if (relayTarget) {
+      return {
+        clientUuid: relayTarget.clientUuid,
+        localSessionId: relayTarget.localSessionId,
+      };
+    }
+
+    const trimmedSessionId = sessionId.trim();
+    if (!trimmedSessionId) {
+      throw new Error("relay or canonical session_id is required");
+    }
+
+    const resolved = await this.callBroker<{
+      client_uuid: string;
+      local_session_id: string;
+    } | null>(
+      "telegramMcp.gatewaySocket.resolveConnectedSessionTarget",
+      { sessionId: trimmedSessionId },
+      { meta: { internal_call: true } },
+    );
+
+    if (!resolved) {
+      throw new Error(
+        `Could not resolve live console target for session_id '${trimmedSessionId}'.`,
+      );
+    }
+
+    return {
+      clientUuid: resolved.client_uuid,
+      localSessionId: resolved.local_session_id,
+    };
   }
 
   private async readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -659,6 +701,129 @@ export class GatewayHttpService {
         return true;
       } catch (error) {
         console.error("Gateway live approval request failed", {
+          error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+        });
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/storage/list") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const sessionId =
+          typeof body.session_id === "string" ? body.session_id.trim() : "";
+        const source =
+          typeof body.source === "string" ? body.source.trim() : "";
+        const target = await this.resolveConnectedConsoleTarget(sessionId);
+        const output = await this.callBroker<unknown>(
+          "telegramMcp.gatewaySocket.requestClientAction",
+          {
+            clientUuid: target.clientUuid,
+            actionName: "telegramMcp.xchange.listFileMetasRemote",
+            params: {
+              session_id: target.localSessionId,
+              ...(source ? { source } : {}),
+            },
+          },
+          { meta: { internal_call: true } },
+        );
+        if (isBackendErrorLike(output)) {
+          throw new Error(this.extractActionErrorMessage(output, "Storage list failed"));
+        }
+        writeJson(res, 200, output);
+        return true;
+      } catch (error) {
+        console.error("Gateway storage list request failed", {
+          error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+        });
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/storage/meta") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const sessionId =
+          typeof body.session_id === "string" ? body.session_id.trim() : "";
+        const filePath =
+          typeof body.file_path === "string" ? body.file_path.trim() : "";
+        const target = await this.resolveConnectedConsoleTarget(sessionId);
+        const output = await this.callBroker<unknown>(
+          "telegramMcp.gatewaySocket.requestClientAction",
+          {
+            clientUuid: target.clientUuid,
+            actionName: "telegramMcp.xchange.getFileMetaRemote",
+            params: {
+              session_id: target.localSessionId,
+              file_path: filePath,
+            },
+          },
+          { meta: { internal_call: true } },
+        );
+        if (isBackendErrorLike(output)) {
+          throw new Error(this.extractActionErrorMessage(output, "Storage meta fetch failed"));
+        }
+        writeJson(res, 200, output);
+        return true;
+      } catch (error) {
+        console.error("Gateway storage meta request failed", {
+          error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+        });
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/storage/delete-meta") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const sessionId =
+          typeof body.session_id === "string" ? body.session_id.trim() : "";
+        const filePath =
+          typeof body.file_path === "string" ? body.file_path.trim() : "";
+        const target = await this.resolveConnectedConsoleTarget(sessionId);
+        const output = await this.callBroker<unknown>(
+          "telegramMcp.gatewaySocket.requestClientAction",
+          {
+            clientUuid: target.clientUuid,
+            actionName: "telegramMcp.xchange.deleteFileMetaRemote",
+            params: {
+              session_id: target.localSessionId,
+              file_path: filePath,
+            },
+          },
+          { meta: { internal_call: true } },
+        );
+        if (isBackendErrorLike(output)) {
+          throw new Error(this.extractActionErrorMessage(output, "Storage meta delete failed"));
+        }
+        writeJson(res, 200, output);
+        return true;
+      } catch (error) {
+        console.error("Gateway storage delete-meta request failed", {
           error: error instanceof Error ? (error.stack ?? error.message) : String(error),
         });
         writeJson(res, 400, {
@@ -1012,6 +1177,50 @@ export class GatewayHttpService {
           body,
           { meta: { internal_call: true } },
         );
+        writeJson(res, 200, output);
+      } catch (error) {
+        writeText(
+          res,
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      return true;
+    }
+
+    if (pathname === "/gateway/transport/send-file") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const sessionId =
+          typeof body.session_id === "string" ? body.session_id.trim() : "";
+        const filePath =
+          typeof body.file_path === "string" ? body.file_path.trim() : "";
+        const caption =
+          typeof body.caption === "string" && body.caption.trim()
+            ? body.caption.trim()
+            : undefined;
+        const target = await this.resolveConnectedConsoleTarget(sessionId);
+        const output = await this.callBroker<unknown>(
+          "telegramMcp.gatewaySocket.requestClientAction",
+          {
+            clientUuid: target.clientUuid,
+            actionName: "telegramMcp.notify.sendDocumentRemote",
+            params: {
+              session_id: target.localSessionId,
+              file_path: filePath,
+              ...(caption ? { caption } : {}),
+            },
+          },
+          { meta: { internal_call: true } },
+        );
+        if (isBackendErrorLike(output)) {
+          throw new Error(this.extractActionErrorMessage(output, "Storage file send failed"));
+        }
         writeJson(res, 200, output);
       } catch (error) {
         writeText(

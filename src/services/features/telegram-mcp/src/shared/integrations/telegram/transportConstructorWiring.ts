@@ -220,6 +220,7 @@ export function buildTransportConstructorWiring(
     config: host.config,
     sessionStore: host.sessionStore,
     xchangeFileMetaStore: host.xchangeFileMetaStore,
+    callGatewayJson: (path, payload) => host.callGatewayJson(path, payload),
   });
   const outputActions = new TransportOutputActions({
     config: host.config,
@@ -690,6 +691,7 @@ export function buildTransportConstructorWiring(
       host.sendDocumentToChat(chatId, filePath, caption),
     maybeNotifyToolsMismatchForSession: (sessionId) =>
       host.maybeNotifyToolsMismatchForSession(sessionId),
+    callGatewayJson: (path, payload) => host.callGatewayJson(path, payload),
   });
 
   const requestFlow: TransportRequestFlow = new TransportRequestFlow({

@@ -85,6 +85,10 @@ export interface TransportMenuCallbacksHost {
   ): Promise<{ session: SessionContext | null; filePath: string }>;
   sendDocumentToChat(chatId: number, filePath: string, caption: string): Promise<{ messageId: number }>;
   maybeNotifyToolsMismatchForSession(sessionId: string): Promise<void>;
+  callGatewayJson<T>(
+    endpointPath: string,
+    body?: Record<string, unknown>,
+  ): Promise<T>;
 }
 
 export class TransportMenuCallbacks {
@@ -93,7 +97,7 @@ export class TransportMenuCallbacks {
   public async handleScreenshotOpen(ctx: TelegramMenuContext, payloadKey: string | null): Promise<void> {
     const payload = await this.requireFileEntryPayload(ctx, payloadKey, "Screenshot");
     if (!payload) return;
-    const meta = await this.host.xchangeFileMetaStore.getXchangeFileMeta(payload.sessionId, payload.filePath);
+    const meta = await this.getXchangeFileMeta(payload.sessionId, payload.filePath);
     await ctx.answerCallbackQuery({ text: "Screenshot opened." });
     await this.host.editText(
       ctx,
@@ -111,6 +115,16 @@ export class TransportMenuCallbacks {
       await ctx.answerCallbackQuery({ text: "Telegram chat is unavailable.", show_alert: true });
       return;
     }
+    if (this.isRelaySessionId(payload.sessionId)) {
+      await this.host.callGatewayJson("/transport/send-file", {
+        session_id: payload.sessionId,
+        file_path: payload.filePath,
+        caption: `Screenshot: ${path.basename(payload.filePath)}`,
+      });
+      await ctx.answerCallbackQuery({ text: "Screenshot sent." });
+      await this.host.showScreenshotsMenu(ctx, "Screenshot sent to Telegram.");
+      return;
+    }
     const ensured = await this.host.ensureStoredXchangeFile(payload.sessionId, payload.filePath, "browser-screenshot");
     await this.host.sendDocumentToChat(chatId, ensured.filePath, `Screenshot: ${path.basename(ensured.filePath)}`);
     await ctx.answerCallbackQuery({ text: "Screenshot sent." });
@@ -120,7 +134,18 @@ export class TransportMenuCallbacks {
   public async handleScreenshotDelete(ctx: TelegramMenuContext, payloadKey: string | null): Promise<void> {
     const payload = await this.requireFileEntryPayload(ctx, payloadKey, "Screenshot");
     if (!payload) return;
-    const meta = await this.host.xchangeFileMetaStore.getXchangeFileMeta(payload.sessionId, payload.filePath);
+    const meta = await this.getXchangeFileMeta(payload.sessionId, payload.filePath);
+    if (this.isRelaySessionId(payload.sessionId)) {
+      await this.deleteXchangeFileMeta(payload.sessionId, payload.filePath);
+      await ctx.answerCallbackQuery({
+        text: meta ? "Screenshot deleted." : "Screenshot already absent.",
+      });
+      await this.host.showScreenshotsMenu(
+        ctx,
+        meta ? "Screenshot deleted." : "Screenshot was already removed.",
+      );
+      return;
+    }
     await this.host.objectStore.deleteStoredFile({
       ...(meta?.storageRef ? { storageRef: meta.storageRef } : {}),
       ...(typeof meta?.vfsNodeId === "number" ? { vfsNodeId: meta.vfsNodeId } : {}),
@@ -138,7 +163,7 @@ export class TransportMenuCallbacks {
   public async handleStorageOpen(ctx: TelegramMenuContext, payloadKey: string | null): Promise<void> {
     const payload = await this.requireFileEntryPayload(ctx, payloadKey, "Storage");
     if (!payload) return;
-    const meta = await this.host.xchangeFileMetaStore.getXchangeFileMeta(payload.sessionId, payload.filePath);
+    const meta = await this.getXchangeFileMeta(payload.sessionId, payload.filePath);
     await ctx.answerCallbackQuery({ text: "Storage entry opened." });
     await this.host.editText(
       ctx,
@@ -156,7 +181,17 @@ export class TransportMenuCallbacks {
       await ctx.answerCallbackQuery({ text: "Telegram chat is unavailable.", show_alert: true });
       return;
     }
-    const meta = await this.host.xchangeFileMetaStore.getXchangeFileMeta(payload.sessionId, payload.filePath);
+    const meta = await this.getXchangeFileMeta(payload.sessionId, payload.filePath);
+    if (this.isRelaySessionId(payload.sessionId)) {
+      await this.host.callGatewayJson("/transport/send-file", {
+        session_id: payload.sessionId,
+        file_path: payload.filePath,
+        caption: `Storage: ${this.host.formatFilePreviewLabel(payload.filePath, meta)}`,
+      });
+      await ctx.answerCallbackQuery({ text: "Storage file sent." });
+      await this.host.showStorageMenu(ctx, "Storage file sent to Telegram.");
+      return;
+    }
     let ensured: { session: SessionContext | null; filePath: string };
     try {
       ensured = await this.host.ensureStoredXchangeFile(
@@ -187,7 +222,15 @@ export class TransportMenuCallbacks {
   public async handleStorageDelete(ctx: TelegramMenuContext, payloadKey: string | null): Promise<void> {
     const payload = await this.requireFileEntryPayload(ctx, payloadKey, "Storage");
     if (!payload) return;
-    const meta = await this.host.xchangeFileMetaStore.getXchangeFileMeta(payload.sessionId, payload.filePath);
+    const meta = await this.getXchangeFileMeta(payload.sessionId, payload.filePath);
+    if (this.isRelaySessionId(payload.sessionId)) {
+      await this.deleteXchangeFileMeta(payload.sessionId, payload.filePath);
+      await ctx.answerCallbackQuery({
+        text: "Storage metadata deleted.",
+      });
+      await this.host.showStorageMenu(ctx, "Stale storage metadata deleted.");
+      return;
+    }
     await this.host.objectStore.deleteStoredFile({
       ...(meta?.storageRef ? { storageRef: meta.storageRef } : {}),
       ...(typeof meta?.vfsNodeId === "number" ? { vfsNodeId: meta.vfsNodeId } : {}),
@@ -299,16 +342,54 @@ export class TransportMenuCallbacks {
 
     const localSession = await this.host.sessionStore.getSession(relay.localSessionId);
     if (!localSession) {
-      await ctx.answerCallbackQuery({
-        text: `Workspace session '${relay.localSessionId}' is not registered for relay console '${sessionId}'.`,
-        show_alert: true,
-      });
-      return null;
+      return { sessionId, filePath };
     }
 
     return {
       sessionId: relay.localSessionId,
       filePath,
     };
+  }
+
+  private isRelaySessionId(sessionId: string): boolean {
+    return Boolean(parseLiveRelaySessionId(sessionId));
+  }
+
+  private async getXchangeFileMeta(
+    sessionId: string,
+    filePath: string,
+  ): Promise<TelegramXchangeFileMeta | null> {
+    if (this.isRelaySessionId(sessionId)) {
+      const output = await this.host.callGatewayJson<{
+        meta?: TelegramXchangeFileMeta | null;
+      }>("/storage/meta", {
+        session_id: sessionId,
+        file_path: filePath,
+      });
+      return output.meta ?? null;
+    }
+
+    return this.host.xchangeFileMetaStore.getXchangeFileMeta(sessionId, filePath);
+  }
+
+  private async deleteXchangeFileMeta(
+    sessionId: string,
+    filePath: string,
+  ): Promise<boolean> {
+    if (this.isRelaySessionId(sessionId)) {
+      const output = await this.host.callGatewayJson<{ deleted?: boolean }>(
+        "/storage/delete-meta",
+        {
+          session_id: sessionId,
+          file_path: filePath,
+        },
+      );
+      return output.deleted === true;
+    }
+
+    return this.host.xchangeFileMetaStore.deleteXchangeFileMeta(
+      sessionId,
+      filePath,
+    );
   }
 }

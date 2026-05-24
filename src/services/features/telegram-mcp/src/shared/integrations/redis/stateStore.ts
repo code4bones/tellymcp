@@ -326,6 +326,12 @@ export class RedisStateStore
     return null;
   }
 
+  public async clearActiveSessionIdForPrincipal(
+    principal: TelegramPrincipal,
+  ): Promise<void> {
+    await this.redis.del(principalActiveSessionKey(principal));
+  }
+
   public async setActiveSessionIdForPrincipal(
     principal: TelegramPrincipal,
     sessionId: string,

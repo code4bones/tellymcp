@@ -4,7 +4,6 @@ import { join } from "node:path";
 
 import type { Logger } from "../../lib/logger/logger";
 import type { SupportedLocale } from "../../i18n";
-import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
 import { getTellyMcpPackageRoot, getTellyMcpPackageVersion } from "../../lib/version/versionHandshake";
 import type {
   CurrentAttachmentTargetRecord,
@@ -27,29 +26,6 @@ import {
   readMenuPayloadKey,
   renderMarkdownChunk,
 } from "./transportUtils";
-
-function splitSessionDisplayLabel(input: {
-  sessionId: string;
-  sessionLabel?: string;
-}): {
-  shortLabel: string;
-  ownerLabel: string | null;
-} {
-  const label = (input.sessionLabel?.trim() || input.sessionId.trim() || "session").trim();
-  const separator = " · ";
-  const separatorIndex = label.indexOf(separator);
-  if (separatorIndex <= 0) {
-    return {
-      shortLabel: label,
-      ownerLabel: null,
-    };
-  }
-
-  return {
-    shortLabel: label.slice(0, separatorIndex).trim() || label,
-    ownerLabel: label.slice(separatorIndex + separator.length).trim() || null,
-  };
-}
 
 type Principal = { telegramChatId: number; telegramUserId: number };
 
@@ -113,6 +89,7 @@ export interface TransportMenuStateHost {
   };
   bindingStore: {
     getActiveSessionIdForPrincipal(principal: Principal): Promise<string | null>;
+    clearActiveSessionIdForPrincipal(principal: Principal): Promise<void>;
     listBoundSessionIdsForPrincipal(principal: Principal): Promise<string[]>;
   };
   listActiveSessionScreenshots(sessionId: string): Promise<string[]>;
@@ -278,6 +255,10 @@ export class TransportMenuState {
     introText?: string,
   ): Promise<void> {
     this.host.setCurrentAttachmentTargetForContext(ctx, null);
+    const principal = this.host.getPrincipalFromContext(ctx);
+    if (principal) {
+      await this.host.bindingStore.clearActiveSessionIdForPrincipal(principal);
+    }
     try {
       const text = await this.buildSessionsMenuText(ctx);
       const intro = introText ? escapeHtml(introText) : null;
@@ -314,8 +295,6 @@ export class TransportMenuState {
       return this.host.t(locale, "common:errors.no_telegram_identity");
     }
 
-    const activeSessionId =
-      await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
     const sessionIds = (
       await this.host.bindingStore.listBoundSessionIdsForPrincipal(principal)
     ).sort();
@@ -370,18 +349,8 @@ export class TransportMenuState {
       lines.push("");
     }
 
-    if (activeSessionId) {
-      const activeSession = await this.host.sessionStore.getSession(activeSessionId);
-      lines.push(
-        this.host.t(locale, "menu:sessions.screen.current_active", {
-          sessionName: escapeHtml(activeSession?.label ?? activeSessionId),
-        }),
-      );
-      lines.push("");
-    }
-
     const currentPayloadKey = readMenuPayloadKey(ctx);
-    let selectedOwnerLabel: string | null = null;
+    let selectedOwnerTitle: string | null = null;
     if (currentPayloadKey) {
       const payload = await this.host.getMenuPayloadByKey(currentPayloadKey);
       if (
@@ -389,70 +358,16 @@ export class TransportMenuState {
         (payload.kind === "session-group" || payload.kind === "active-session") &&
         typeof payload.ownerKey === "string"
       ) {
-        selectedOwnerLabel = payload.ownerKey;
+        selectedOwnerTitle =
+          typeof payload.ownerLabel === "string" && payload.ownerLabel.trim()
+            ? payload.ownerLabel.trim()
+            : null;
       }
     }
 
-    const groupedSessions = new Map<string, { ownerLabel: string | null; labels: string[] }>();
-    for (const sessionId of sessionIds) {
-      const session = await this.host.sessionStore.getSession(sessionId);
-      const display = splitSessionDisplayLabel({
-        sessionId,
-        ...(session?.label ? { sessionLabel: session.label } : {}),
-      });
-      const groupKey =
-        parseLiveRelaySessionId(sessionId)?.clientUuid ??
-        display.ownerLabel ??
-        sessionId;
-      const currentGroup = groupedSessions.get(groupKey) ?? {
-        ownerLabel: display.ownerLabel,
-        labels: [],
-      };
-      currentGroup.labels.push(display.shortLabel);
-      if (!currentGroup.ownerLabel && display.ownerLabel) {
-        currentGroup.ownerLabel = display.ownerLabel;
-      }
-      groupedSessions.set(groupKey, currentGroup);
+    if (selectedOwnerTitle) {
+      lines[0] = escapeHtml(selectedOwnerTitle);
     }
-
-    if (groupedSessions.size > 0) {
-      lines.push(this.host.t(locale, "menu:sessions.screen.choose_session"));
-      for (const [groupKey, group] of [...groupedSessions.entries()].sort(
-        (left, right) => {
-          const leftKey = left[0] || "\uffff";
-          const rightKey = right[0] || "\uffff";
-          return leftKey.localeCompare(rightKey);
-        },
-      )) {
-        if (selectedOwnerLabel !== null && groupKey !== selectedOwnerLabel) {
-          continue;
-        }
-        const renderedLabels = group.labels.sort((left, right) =>
-          left.localeCompare(right),
-        );
-        if (selectedOwnerLabel !== null) {
-          if (group.ownerLabel) {
-            lines.push(`• ${escapeHtml(group.ownerLabel)}`);
-            lines.push("");
-          }
-          for (const label of renderedLabels) {
-            lines.push(`• ${escapeHtml(label)}`);
-          }
-          break;
-        }
-        if (group.ownerLabel) {
-          lines.push(
-            `• ${escapeHtml(group.ownerLabel)}: ${escapeHtml(renderedLabels.join(", "))}`,
-          );
-        } else {
-          lines.push(`• ${escapeHtml(renderedLabels.join(", "))}`);
-        }
-      }
-      lines.push("");
-    }
-
-    lines.push(`<i>${escapeHtml(await this.host.getTerminalStatusLine(locale))}</i>`);
-    lines.push("");
     return lines.join("\n");
   }
 

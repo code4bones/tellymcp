@@ -11,39 +11,63 @@ export interface TransportXchangeStateHost {
   config: AppConfig;
   sessionStore: SessionStore;
   xchangeFileMetaStore: TelegramXchangeFileMetaStore;
+  callGatewayJson<T>(
+    endpointPath: string,
+    body?: Record<string, unknown>,
+  ): Promise<T>;
 }
 
 export class TransportXchangeState {
   public constructor(private readonly host: TransportXchangeStateHost) {}
 
-  private async normalizeSessionIdForFilesystem(sessionId: string): Promise<string> {
+  private async resolveSessionStorageAccess(sessionId: string): Promise<{
+    sessionId: string;
+    mode: "filesystem" | "meta" | "relay";
+  }> {
     const trimmed = sessionId.trim();
     if (!trimmed) {
-      return trimmed;
+      return { sessionId: trimmed, mode: "meta" };
+    }
+
+    const relay = parseLiveRelaySessionId(trimmed);
+    if (relay?.localSessionId) {
+      const localSession = await this.host.sessionStore.getSession(
+        relay.localSessionId,
+      );
+      if (localSession?.cwd?.trim()) {
+        return { sessionId: relay.localSessionId, mode: "filesystem" };
+      }
+
+      return { sessionId: trimmed, mode: "relay" };
     }
 
     const direct = await this.host.sessionStore.getSession(trimmed);
     if (direct?.cwd?.trim()) {
-      return trimmed;
+      return { sessionId: trimmed, mode: "filesystem" };
     }
 
-    const relay = parseLiveRelaySessionId(trimmed);
-    if (!relay?.localSessionId) {
-      return trimmed;
-    }
-
-    const localSession = await this.host.sessionStore.getSession(relay.localSessionId);
-    return localSession?.cwd?.trim() ? relay.localSessionId : trimmed;
+    return { sessionId: trimmed, mode: "meta" };
   }
 
   public async listActiveSessionFiles(sessionId: string): Promise<string[]> {
-    const storageSessionId = await this.normalizeSessionIdForFilesystem(sessionId);
-    const files = await this.listSessionFilesystemXchangeFiles(storageSessionId);
-    const metas = await this.listReconciledSessionXchangeMetas(storageSessionId, files);
+    const access = await this.resolveSessionStorageAccess(sessionId);
+    const metas =
+      access.mode === "filesystem"
+        ? await this.listReconciledSessionXchangeMetas(
+            access.sessionId,
+            await this.listSessionFilesystemXchangeFiles(access.sessionId),
+          )
+        : access.mode === "relay"
+          ? await this.listRelaySessionXchangeFileMetas(
+              access.sessionId,
+              "telegram-upload",
+            )
+        : await this.host.xchangeFileMetaStore.listXchangeFileMetas(
+            access.sessionId,
+          );
     const uploadFiles = metas
       .filter((meta) => meta.source === "telegram-upload")
-      .map((meta) => meta.filePath)
-      .filter((filePath) => files.includes(filePath));
+      .map((meta) => meta.filePath);
 
     return uploadFiles.sort((left, right) => right.localeCompare(left));
   }
@@ -54,9 +78,30 @@ export class TransportXchangeState {
       meta: TelegramXchangeFileMeta | null;
     }>
   > {
-    const storageSessionId = await this.normalizeSessionIdForFilesystem(sessionId);
-    const filePaths = await this.listSessionFilesystemXchangeFiles(storageSessionId);
-    const metas = await this.listReconciledSessionXchangeMetas(storageSessionId, filePaths);
+    const access = await this.resolveSessionStorageAccess(sessionId);
+    if (access.mode === "relay") {
+      const metas = await this.listRelaySessionXchangeFileMetas(access.sessionId);
+      return metas.map((meta) => ({
+        filePath: meta.filePath,
+        meta,
+      }));
+    }
+
+    if (access.mode === "meta") {
+      const metas = await this.host.xchangeFileMetaStore.listXchangeFileMetas(
+        access.sessionId,
+      );
+      return metas.map((meta) => ({
+        filePath: meta.filePath,
+        meta,
+      }));
+    }
+
+    const filePaths = await this.listSessionFilesystemXchangeFiles(access.sessionId);
+    const metas = await this.listReconciledSessionXchangeMetas(
+      access.sessionId,
+      filePaths,
+    );
     const metaByPath = new Map(metas.map((meta) => [meta.filePath, meta] as const));
     return filePaths.map((filePath) => ({
       filePath,
@@ -65,13 +110,24 @@ export class TransportXchangeState {
   }
 
   public async listActiveSessionScreenshots(sessionId: string): Promise<string[]> {
-    const storageSessionId = await this.normalizeSessionIdForFilesystem(sessionId);
-    const files = await this.listSessionFilesystemXchangeFiles(storageSessionId);
-    const metas = await this.listReconciledSessionXchangeMetas(storageSessionId, files);
+    const access = await this.resolveSessionStorageAccess(sessionId);
+    const metas =
+      access.mode === "filesystem"
+        ? await this.listReconciledSessionXchangeMetas(
+            access.sessionId,
+            await this.listSessionFilesystemXchangeFiles(access.sessionId),
+          )
+        : access.mode === "relay"
+          ? await this.listRelaySessionXchangeFileMetas(
+              access.sessionId,
+              "browser-screenshot",
+            )
+        : await this.host.xchangeFileMetaStore.listXchangeFileMetas(
+            access.sessionId,
+          );
     const screenshots = metas
       .filter((meta) => meta.source === "browser-screenshot")
-      .map((meta) => meta.filePath)
-      .filter((filePath) => files.includes(filePath));
+      .map((meta) => meta.filePath);
 
     return screenshots.sort((left, right) => right.localeCompare(left));
   }
@@ -113,5 +169,20 @@ export class TransportXchangeState {
     }
 
     return metas.filter((meta) => existingSet.has(meta.filePath));
+  }
+
+  private async listRelaySessionXchangeFileMetas(
+    sessionId: string,
+    source?: TelegramXchangeFileMeta["source"],
+  ): Promise<TelegramXchangeFileMeta[]> {
+    const output = await this.host.callGatewayJson<{
+      session_id: string;
+      metas?: TelegramXchangeFileMeta[];
+    }>("/storage/list", {
+      session_id: sessionId,
+      ...(source ? { source } : {}),
+    });
+
+    return Array.isArray(output.metas) ? output.metas : [];
   }
 }

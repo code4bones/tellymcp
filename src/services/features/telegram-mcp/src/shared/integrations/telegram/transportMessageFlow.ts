@@ -430,12 +430,8 @@ export class TransportMessageFlow {
     }
 
     const principal = { telegramChatId: chatId, telegramUserId: fromUserId };
-    let sessionId =
+    const sessionId =
       await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
-    if (!sessionId && this.host.isAdminBotProfile()) {
-      const synced = await this.host.ensureGatewayScopeConsolesBound({ principal, ctx });
-      sessionId = synced.activeSessionId;
-    }
     if (!sessionId) {
       this.host.logger.debug(
         "Telegram message ignored because no active session is linked for principal",
@@ -600,12 +596,8 @@ export class TransportMessageFlow {
 
     const principal = { telegramChatId: chatId, telegramUserId: fromUserId };
     const principalKey = buildPrincipalKey(principal);
-    let sessionId =
+    const sessionId =
       await this.host.bindingStore.getActiveSessionIdForPrincipal(principal);
-    if (!sessionId && this.host.isAdminBotProfile()) {
-      const synced = await this.host.ensureGatewayScopeConsolesBound({ principal, ctx });
-      sessionId = synced.activeSessionId;
-    }
     if (!sessionId) {
       await this.host.replyText(
         ctx,

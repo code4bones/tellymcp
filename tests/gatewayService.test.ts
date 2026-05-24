@@ -52,11 +52,14 @@ type GatewayServiceHarness = {
 };
 
 type QueryBuilder = {
+  join: (...args: unknown[]) => QueryBuilder;
   leftJoin: (...args: unknown[]) => QueryBuilder;
+  modify: (callback: (query: QueryBuilder) => void) => QueryBuilder;
   where: (...args: unknown[]) => QueryBuilder;
   whereRaw: (...args: unknown[]) => QueryBuilder;
   select: (...args: unknown[]) => QueryBuilder;
   orderBy: (...args: unknown[]) => QueryBuilder;
+  orderByRaw: (...args: unknown[]) => QueryBuilder;
   first: () => Promise<QueryRow | undefined>;
   insert: (payload: QueryRow) => Promise<void>;
 };
@@ -64,12 +67,18 @@ type QueryBuilder = {
 const methods = GatewayService.methods as unknown as GatewayServiceMethods;
 
 function createQueryBuilder(state: QueryState, tableName: string): QueryBuilder {
-  return {
-    leftJoin: () => createQueryBuilder(state, tableName),
-    where: () => createQueryBuilder(state, tableName),
-    whereRaw: () => createQueryBuilder(state, tableName),
-    select: () => createQueryBuilder(state, tableName),
-    orderBy: () => createQueryBuilder(state, tableName),
+  const builder: QueryBuilder = {
+    join: () => builder,
+    leftJoin: () => builder,
+    modify: (callback) => {
+      callback(builder);
+      return builder;
+    },
+    where: () => builder,
+    whereRaw: () => builder,
+    select: () => builder,
+    orderBy: () => builder,
+    orderByRaw: () => builder,
     async first() {
       const index = state.firstIndexes[tableName] ?? 0;
       const row = state.rowsByTable[tableName]?.[index];
@@ -80,6 +89,7 @@ function createQueryBuilder(state: QueryState, tableName: string): QueryBuilder 
       state.inserts.push({ tableName, payload });
     },
   };
+  return builder;
 }
 
 function createHarness(rowsByTable: Record<string, QueryRow[]>): GatewayServiceHarness {
@@ -110,7 +120,7 @@ function createHarness(rowsByTable: Record<string, QueryRow[]>): GatewayServiceH
 describe("gateway service sendPartnerNoteRecord", () => {
   it("creates queued message, delivery, and deduplicated artifact paths", async () => {
     const harness = createHarness({
-      "gateway_sessions as s": [
+      "gateway_project_consoles as pc": [
         {
           session_uuid: "target-session-uuid",
           project_uuid: "project-1",
@@ -121,10 +131,14 @@ describe("gateway service sendPartnerNoteRecord", () => {
           target_actor_label: "Петр Олесов",
         },
       ],
+      gateway_project_consoles: [
+        {
+          gateway_session_uuid: "source-session-uuid",
+        },
+      ],
       gateway_sessions: [
         {
           session_uuid: "source-session-uuid",
-          project_uuid: "project-1",
           client_uuid: "source-client-uuid",
           local_session_id: "left-local",
           label: "leftDev",
@@ -211,7 +225,7 @@ describe("gateway service sendPartnerNoteRecord", () => {
 
   it("rejects target sessions outside the requested project", async () => {
     const harness = createHarness({
-      "gateway_sessions as s": [
+      "gateway_project_consoles as pc": [
         {
           session_uuid: "target-session-uuid",
           project_uuid: "project-2",

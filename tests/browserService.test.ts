@@ -24,11 +24,19 @@ describe("BrowserService", () => {
 
     const service = new BrowserService(
       {
+        distributed: {
+          mode: "gateway",
+        },
         browser: {
           enabled: false,
         },
       } as AppConfig,
-      {} as SessionStore,
+      {
+        getSession: vi.fn<SessionStore["getSession"]>().mockResolvedValue(null),
+      } as unknown as SessionStore,
+      {
+        getGatewayClientUuid: vi.fn(),
+      } as unknown as import("../src/services/features/telegram-mcp/src/shared/api/storage/contract").MaintenanceStore,
       {} as SessionBindingStore,
       {} as TelegramXchangeFileMetaStore,
       {} as MinioExchangeStore,

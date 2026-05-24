@@ -168,22 +168,9 @@ export class RefreshToolsMarkdownService {
       ...(session?.files ? { files: session.files } : {}),
       ...(session?.decisions ? { decisions: session.decisions } : {}),
       ...(session?.risks ? { risks: session.risks } : {}),
-      ...(session?.tmuxSessionName
-        ? { tmuxSessionName: session.tmuxSessionName }
-        : {}),
-      ...(session?.tmuxWindowName
-        ? { tmuxWindowName: session.tmuxWindowName }
-        : {}),
-      ...(typeof session?.tmuxWindowIndex === "number"
-        ? { tmuxWindowIndex: session.tmuxWindowIndex }
-        : {}),
-      ...(session?.tmuxPaneId ? { tmuxPaneId: session.tmuxPaneId } : {}),
-      ...(typeof session?.tmuxPaneIndex === "number"
-        ? { tmuxPaneIndex: session.tmuxPaneIndex }
-        : {}),
-      ...(session?.tmuxTarget ? { tmuxTarget: session.tmuxTarget } : {}),
-      ...(session?.lastTmuxNudgeAt
-        ? { lastTmuxNudgeAt: session.lastTmuxNudgeAt }
+      ...(session?.terminalTarget ? { terminalTarget: session.terminalTarget } : {}),
+      ...(session?.lastTerminalNudgeAt
+        ? { lastTerminalNudgeAt: session.lastTerminalNudgeAt }
         : {}),
       lastSeenToolsHash: currentHash,
       lastNotifiedToolsHash: currentHash,

@@ -49,11 +49,11 @@ export class TerminalInputService {
     }
 
     const session = await this.sessionStore.getSession(sessionId);
-    const terminalTarget = ensureTerminalTargetForSession(this.config.tmux, {
+    const terminalTarget = ensureTerminalTargetForSession(this.config.terminal, {
       sessionId,
       ...(typeof session?.cwd === "string" ? { cwd: session.cwd } : {}),
-      ...(typeof session?.tmuxTarget === "string"
-        ? { target: session.tmuxTarget }
+      ...(typeof session?.terminalTarget === "string"
+        ? { target: session.terminalTarget }
         : {}),
     });
     if (!terminalTarget) {
@@ -65,11 +65,7 @@ export class TerminalInputService {
       throw new Error("text is required");
     }
 
-    if (
-      !session ||
-      session.tmuxTarget !== terminalTarget ||
-      session.tmuxPaneId !== terminalTarget
-    ) {
+    if (!session || session.terminalTarget !== terminalTarget) {
       await this.sessionStore.setSession({
         sessionId,
         ...(typeof session?.label === "string" ? { label: session.label } : {}),
@@ -89,22 +85,9 @@ export class TerminalInputService {
           ? { decisions: session.decisions }
           : {}),
         ...(Array.isArray(session?.risks) ? { risks: session.risks } : {}),
-        tmuxPaneId: terminalTarget,
-        tmuxTarget: terminalTarget,
-        ...(typeof session?.tmuxSessionName === "string"
-          ? { tmuxSessionName: session.tmuxSessionName }
-          : {}),
-        ...(typeof session?.tmuxWindowName === "string"
-          ? { tmuxWindowName: session.tmuxWindowName }
-          : {}),
-        ...(typeof session?.tmuxWindowIndex === "number"
-          ? { tmuxWindowIndex: session.tmuxWindowIndex }
-          : {}),
-        ...(typeof session?.tmuxPaneIndex === "number"
-          ? { tmuxPaneIndex: session.tmuxPaneIndex }
-          : {}),
-        ...(typeof session?.lastTmuxNudgeAt === "string"
-          ? { lastTmuxNudgeAt: session.lastTmuxNudgeAt }
+        terminalTarget: terminalTarget,
+        ...(typeof session?.lastTerminalNudgeAt === "string"
+          ? { lastTerminalNudgeAt: session.lastTerminalNudgeAt }
           : {}),
         ...(typeof session?.lastSeenToolsHash === "string"
           ? { lastSeenToolsHash: session.lastSeenToolsHash }
@@ -125,7 +108,7 @@ export class TerminalInputService {
     });
 
     await sendTerminalLiteralLine(
-      this.config.tmux,
+      this.config.terminal,
       terminalTarget,
       submittedText,
     );

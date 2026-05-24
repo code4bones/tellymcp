@@ -74,7 +74,7 @@ export interface TransportBroadcastHost {
     messageText: string;
     attachments: [];
   }): Promise<void>;
-  scheduleTmuxNudgeForInboxMessage(
+  scheduleTerminalNudgeForInboxMessage(
     sessionId: string,
     session: SessionContext | null,
   ): void;
@@ -320,9 +320,9 @@ export class TransportBroadcastActions {
         });
         storedCount += 1;
         try {
-          this.host.scheduleTmuxNudgeForInboxMessage(sessionId, session);
+          this.host.scheduleTerminalNudgeForInboxMessage(sessionId, session);
         } catch (error) {
-          this.host.logger.error("tmux nudge failed after project broadcast xchange capture", {
+          this.host.logger.error("terminal nudge failed after project broadcast xchange capture", {
             sessionId,
             error: error instanceof Error ? (error.stack ?? error.message) : String(error),
           });
@@ -405,9 +405,9 @@ export class TransportBroadcastActions {
           text: redactSecrets(broadcastText),
         });
         try {
-          this.host.scheduleTmuxNudgeForInboxMessage(sessionId, session);
+          this.host.scheduleTerminalNudgeForInboxMessage(sessionId, session);
         } catch (error) {
-          this.host.logger.error("tmux nudge failed after broadcast xchange capture", {
+          this.host.logger.error("terminal nudge failed after broadcast xchange capture", {
             sessionId,
             error: error instanceof Error ? (error.stack ?? error.message) : String(error),
           });

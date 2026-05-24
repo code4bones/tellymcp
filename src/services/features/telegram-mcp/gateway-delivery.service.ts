@@ -13,7 +13,7 @@ import {
   buildIncomingPartnerTools,
   buildIncomingTelegramMessageTools,
 } from "./src/shared/lib/xchangeRecordHints";
-import { writeXchangeRelativeFile } from "./src/shared/integrations/tmux/client";
+import { writeXchangeRelativeFile } from "./src/shared/integrations/terminal/client";
 import { upsertXchangeRecord } from "./src/shared/integrations/xchange/sqliteRecordStore";
 import type { OutgoingDeliveryNotice } from "./src/shared/api/storage/contract";
 
@@ -308,6 +308,16 @@ function buildNoteContent(input: {
     );
   }
 
+  if (!input.delivery.requires_reply && input.delivery.kind === "reply") {
+    lines.push(
+      "",
+      "# Follow-up",
+      "If this reply completes a task that originally came from a human Telegram request in the receiving session, the receiving session must now deliver the final result to the human.",
+      "Use notify_telegram for text-only results.",
+      "If this reply returned a real artifact or file, use send_file_to_telegram from the receiving session instead of leaving the artifact only in local xchange storage.",
+    );
+  }
+
   if (input.copiedArtifacts.length > 0) {
     lines.push(
       "",
@@ -488,7 +498,7 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
         let localArtifactPath: string;
         if (artifact.content_base64) {
           localArtifactPath = await writeXchangeRelativeFile(
-            runtime.config.tmux,
+            runtime.config.terminal,
             workspaceDir,
             runtime.config.exchange.dir,
             relativePath,
@@ -521,7 +531,7 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
 
       const noteContent = buildNoteContent({ delivery, copiedArtifacts });
       const notePath = await writeXchangeRelativeFile(
-        runtime.config.tmux,
+        runtime.config.terminal,
         workspaceDir,
         runtime.config.exchange.dir,
         delivery.note_relative_path,
@@ -573,7 +583,7 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
             prefersBrowserScreenshot,
           );
       await upsertXchangeRecord(
-        runtime.config.tmux,
+        runtime.config.terminal,
         workspaceDir,
         runtime.config.exchange.dir,
         {
@@ -694,7 +704,7 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
           },
         );
       } catch (error) {
-        runtime.logger.warn("Failed to nudge tmux after gateway delivery", {
+        runtime.logger.warn("Failed to nudge terminal after gateway delivery", {
           deliveryUuid: delivery.delivery_uuid,
           sessionId: targetSession.sessionId,
           error:

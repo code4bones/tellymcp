@@ -54,7 +54,7 @@ export function buildAdminMainMenuText(input: {
 export function buildBufferMenuText(input: {
   title: string;
   activeSessionLine: string;
-  tmuxTargetLine: string;
+  terminalTargetLine: string;
   exportHintLine: string;
   exportModesLine: string;
 }): string {
@@ -62,7 +62,7 @@ export function buildBufferMenuText(input: {
     input.title,
     "",
     input.activeSessionLine,
-    input.tmuxTargetLine,
+    input.terminalTargetLine,
     "",
     input.exportHintLine,
     input.exportModesLine,

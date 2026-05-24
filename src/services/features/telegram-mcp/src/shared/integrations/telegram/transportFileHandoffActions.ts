@@ -10,7 +10,7 @@ import type { SessionContext } from "../../../entities/session/model/types";
 import type { Logger } from "../../lib/logger/logger";
 import { buildLocalHandoffActionDesc, buildLocalHandoffTools } from "../../lib/xchangeRecordHints";
 import { upsertXchangeRecord } from "../xchange/sqliteRecordStore";
-import { readWorkspaceFile, writeXchangeRelativeFile } from "../tmux/client";
+import { readWorkspaceFile, writeXchangeRelativeFile } from "../terminal/client";
 import type { ExchangeFileSource } from "../object-storage/minioExchangeStore";
 import type { PendingFileHandoffRecord, TelegramMenuContext } from "./transportTypes";
 import { buildPrincipalKey, buildLocalHandoffId, buildLocalNoteContent } from "./transportUtils";
@@ -435,14 +435,14 @@ export class TransportFileHandoffActions {
       description: input.description,
     });
     const notePath = await writeXchangeRelativeFile(
-      this.host.config.tmux,
+      this.host.config.terminal,
       workspaceDir,
       this.host.config.exchange.dir,
       relativeNotePath,
       Buffer.from(noteContent, "utf8"),
     );
     await upsertXchangeRecord(
-      this.host.config.tmux,
+      this.host.config.terminal,
       workspaceDir,
       this.host.config.exchange.dir,
       {
@@ -484,7 +484,7 @@ export class TransportFileHandoffActions {
     try {
       await this.host.nudgeSessionInbox(input.sessionId);
     } catch (error) {
-      this.host.logger.warn("tmux nudge failed after local agent handoff", {
+      this.host.logger.warn("terminal nudge failed after local agent handoff", {
         sessionId: input.sessionId,
         handoffId,
         filePath: ensuredFilePath,
@@ -518,7 +518,7 @@ export class TransportFileHandoffActions {
       ...(meta?.storageRef ? { storageRef: meta.storageRef } : {}),
     });
     const fileContent = await readWorkspaceFile(
-      this.host.config.tmux,
+      this.host.config.terminal,
       this.host.objectStore.resolveWorkspaceDir(session),
       localFilePath,
     );

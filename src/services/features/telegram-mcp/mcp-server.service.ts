@@ -51,6 +51,7 @@ import { BrowserWaitForUrlTool } from "./src/features/browser/model/browserWaitF
 import { SendPartnerFileTool } from "./src/features/collaboration/model/sendPartnerFileTool";
 import { ListGatewaySessionsTool } from "./src/features/collaboration/model/listGatewaySessionsTool";
 import { SendPartnerNoteTool } from "./src/features/collaboration/model/sendPartnerNoteTool";
+import { SendFileToTelegramTool } from "./src/features/notify/model/sendFileToTelegramTool";
 import { NotifyTelegramTool } from "./src/features/notify/model/notifyTelegramTool";
 import { ClearSessionContextTool } from "./src/features/session-context/model/clearSessionContextTool";
 import { GetSessionContextTool } from "./src/features/session-context/model/getSessionContextTool";
@@ -132,6 +133,7 @@ const TelegramMcpMcpServerService: ServiceSchema = {
           sessionContextService.getSessionContextService(),
         ),
         new NotifyTelegramTool(notifyService.getNotifyService()),
+        new SendFileToTelegramTool(notifyService.getNotifyService()),
         new AskUserTelegramTool(approvalService.getApprovalOrchestrator()),
         new BrowserOpenTool(browserService.getBrowserService()),
         new BrowserReloadTool(browserService.getBrowserService()),

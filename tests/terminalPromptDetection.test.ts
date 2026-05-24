@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { detectTmuxInteractivePrompt } from "../src/services/features/telegram-mcp/src/shared/lib/tmuxPromptDetection";
+import { detectTerminalInteractivePrompt } from "../src/services/features/telegram-mcp/src/shared/lib/terminalPromptDetection";
 
-describe("tmux prompt detection", () => {
+describe("terminal prompt detection", () => {
   it("detects strong interactive prompts with yes/no markers", () => {
-    const detection = detectTmuxInteractivePrompt(`
+    const detection = detectTerminalInteractivePrompt(`
 Agent wants to continue with risky cleanup.
 Proceed? [y/N]
 `);
@@ -15,7 +15,7 @@ Proceed? [y/N]
   });
 
   it("detects waiting-for-input prompts with enter hints", () => {
-    const detection = detectTmuxInteractivePrompt(`
+    const detection = detectTerminalInteractivePrompt(`
 Setup is almost complete.
 Press Enter to continue
 `);
@@ -25,7 +25,7 @@ Press Enter to continue
   });
 
   it("ignores generic logs without prompt structure", () => {
-    const detection = detectTmuxInteractivePrompt(`
+    const detection = detectTerminalInteractivePrompt(`
 [2026-05-19 15:00:00.000] INFO app started
 stack trace follows
 at bootstrap (/app/index.js:10:4)
@@ -36,7 +36,7 @@ continue reading logs in /tmp/output.log
   });
 
   it("uses balanced mode to pick up softer question flows", () => {
-    const detection = detectTmuxInteractivePrompt(
+    const detection = detectTerminalInteractivePrompt(
       `
 I need your input before I continue.
 Choose one option below
@@ -51,7 +51,7 @@ Choose one option below
   });
 
   it("detects codex action-required tool approval prompts", () => {
-    const detection = detectTmuxInteractivePrompt(`
+    const detection = detectTerminalInteractivePrompt(`
 Field 1/1 (1 required unanswered)
 Allow the leechmcp MCP server to run tool "notify_telegram"?
 
@@ -72,7 +72,7 @@ enter to submit | esc to cancel
   });
 
   it("does not treat a plain user question as an interactive approval prompt", () => {
-    const detection = detectTmuxInteractivePrompt(`
+    const detection = detectTerminalInteractivePrompt(`
 › спроси у leftDev сколько время ?
 `);
 
@@ -80,7 +80,7 @@ enter to submit | esc to cancel
   });
 
   it("detects allow-choice approval screens without relying on the action banner", () => {
-    const detection = detectTmuxInteractivePrompt(`
+    const detection = detectTerminalInteractivePrompt(`
 Field 1/1
 Allow the telegramHuman MCP server to run tool "refresh_tools_markdown"?
 

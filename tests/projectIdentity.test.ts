@@ -35,18 +35,13 @@ describe(".mcpsession session identity", () => {
     }
   });
 
-  it("creates a marker and reuses the same session id across tmux changes", () => {
+  it("creates a marker and reuses the same session id across terminal metadata changes", () => {
     const cwd = mkdtempSync(join(tmpdir(), "telegram-mcp-session-"));
     tempDirs.push(cwd);
     const resolver = makeResolver();
 
     const first = resolver.resolveSessionDefaults({ cwd });
-    const second = resolver.resolveSessionDefaults({
-      cwd,
-      tmux_session_name: "backend",
-      tmux_window_name: "editor",
-      tmux_pane_id: "%7",
-    });
+    const second = resolver.resolveSessionDefaults({ cwd });
 
     expect(first.sessionId).toBe(second.sessionId);
     expect(first.sessionLabel).toBe(second.sessionLabel);

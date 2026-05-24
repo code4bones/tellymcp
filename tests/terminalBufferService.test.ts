@@ -19,7 +19,7 @@ describe("TerminalBufferService", () => {
 
     const service = new TerminalBufferService(
       {
-        tmux: {
+        terminal: {
           captureLines: 200,
         },
       } as AppConfig,

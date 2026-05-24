@@ -18,41 +18,40 @@ export interface TransportTerminalRuntimeHost {
   bindingStore: SessionBindingStore;
   isTelegramEnabled(): boolean;
   terminalActions?: TransportTerminalActions;
-  tmuxActions?: TransportTerminalActions;
-  tmuxNudgeDebounceTimers: Map<string, NodeJS.Timeout>;
+  terminalNudgeDebounceTimers: Map<string, NodeJS.Timeout>;
 }
 
 export class TransportTerminalRuntime {
-  private tmuxPromptScanTimer: NodeJS.Timeout | undefined;
-  private tmuxPromptScanInFlight = false;
+  private terminalPromptScanTimer: NodeJS.Timeout | undefined;
+  private terminalPromptScanInFlight = false;
 
   public constructor(private readonly host: TransportTerminalRuntimeHost) {}
 
   private get actions(): TransportTerminalActions {
-    const actions = this.host.terminalActions ?? this.host.tmuxActions;
+    const actions = this.host.terminalActions;
     if (!actions) {
       throw new Error("TransportTerminalRuntime requires terminal actions");
     }
     return actions;
   }
 
-  public clearTmuxNudgeDebounceTimers(): void {
-    for (const timer of this.host.tmuxNudgeDebounceTimers.values()) {
+  public clearTerminalNudgeDebounceTimers(): void {
+    for (const timer of this.host.terminalNudgeDebounceTimers.values()) {
       clearTimeout(timer);
     }
-    this.host.tmuxNudgeDebounceTimers.clear();
+    this.host.terminalNudgeDebounceTimers.clear();
   }
 
   public startPromptScan(): void {
-    if (!this.host.config.tmux.promptScanEnabled) {
+    if (!this.host.config.terminal.promptScanEnabled) {
       return;
     }
 
-    this.clearTmuxPromptScanTimer();
+    this.clearTerminalPromptScanTimer();
 
-    const intervalMs = this.host.config.tmux.promptScanIntervalSeconds * 1000;
+    const intervalMs = this.host.config.terminal.promptScanIntervalSeconds * 1000;
     const timer = setInterval(() => {
-      void this.runTmuxPromptScanCycle().catch((error) => {
+      void this.runTerminalPromptScanCycle().catch((error) => {
         this.host.logger.warn("terminal prompt scan cycle failed", {
           error:
             error instanceof Error
@@ -62,16 +61,16 @@ export class TransportTerminalRuntime {
       });
     }, intervalMs);
     timer.unref();
-    this.tmuxPromptScanTimer = timer;
+    this.terminalPromptScanTimer = timer;
 
     this.host.logger.info("terminal prompt scan scheduled", {
-      intervalSeconds: this.host.config.tmux.promptScanIntervalSeconds,
-      cooldownSeconds: this.host.config.tmux.promptScanCooldownSeconds,
-      strategy: this.host.config.tmux.promptScanStrategy,
-      minScore: this.host.config.tmux.promptScanMinScore,
+      intervalSeconds: this.host.config.terminal.promptScanIntervalSeconds,
+      cooldownSeconds: this.host.config.terminal.promptScanCooldownSeconds,
+      strategy: this.host.config.terminal.promptScanStrategy,
+      minScore: this.host.config.terminal.promptScanMinScore,
     });
 
-    void this.runTmuxPromptScanCycle().catch((error) => {
+    void this.runTerminalPromptScanCycle().catch((error) => {
       this.host.logger.warn("initial terminal prompt scan failed", {
         error:
           error instanceof Error
@@ -81,22 +80,22 @@ export class TransportTerminalRuntime {
     });
   }
 
-  public clearTmuxPromptScanTimer(): void {
-    if (this.tmuxPromptScanTimer) {
-      clearInterval(this.tmuxPromptScanTimer);
-      this.tmuxPromptScanTimer = undefined;
+  public clearTerminalPromptScanTimer(): void {
+    if (this.terminalPromptScanTimer) {
+      clearInterval(this.terminalPromptScanTimer);
+      this.terminalPromptScanTimer = undefined;
     }
   }
 
-  public scheduleTmuxNudgeForInboxMessage(
+  public scheduleTerminalNudgeForInboxMessage(
     sessionId: string,
     session: Awaited<ReturnType<SessionStore["getSession"]>>,
   ): void {
-    if (!this.host.config.tmux.nudgeEnabled) {
+    if (!this.host.config.terminal.nudgeEnabled) {
       return;
     }
 
-    if (!session?.tmuxTarget) {
+    if (!session?.terminalTarget) {
       this.host.logger.debug(
         "terminal nudge scheduling skipped for inbox message",
         {
@@ -107,13 +106,13 @@ export class TransportTerminalRuntime {
       return;
     }
 
-    const existingTimer = this.host.tmuxNudgeDebounceTimers.get(sessionId);
+    const existingTimer = this.host.terminalNudgeDebounceTimers.get(sessionId);
     if (existingTimer) {
       clearTimeout(existingTimer);
     }
 
     const timer = setTimeout(() => {
-      this.host.tmuxNudgeDebounceTimers.delete(sessionId);
+      this.host.terminalNudgeDebounceTimers.delete(sessionId);
       void this.actions
         .nudgeForInboxMessage(sessionId)
         .catch((error) => {
@@ -129,7 +128,7 @@ export class TransportTerminalRuntime {
             void this.host.sessionStore
               .getSession(sessionId)
               .then((currentSession) => {
-                if (!currentSession?.tmuxTarget) {
+                if (!currentSession?.terminalTarget) {
                   return;
                 }
 
@@ -148,14 +147,14 @@ export class TransportTerminalRuntime {
 
           this.host.logger.error("terminal nudge failed", payload);
         });
-    }, this.host.config.tmux.nudgeDebounceSeconds * 1000);
+    }, this.host.config.terminal.nudgeDebounceSeconds * 1000);
     timer.unref();
-    this.host.tmuxNudgeDebounceTimers.set(sessionId, timer);
+    this.host.terminalNudgeDebounceTimers.set(sessionId, timer);
 
     this.host.logger.info("terminal nudge scheduled for inbox message", {
       sessionId,
-      terminalTarget: session.tmuxTarget,
-      debounceSeconds: this.host.config.tmux.nudgeDebounceSeconds,
+      terminalTarget: session.terminalTarget,
+      debounceSeconds: this.host.config.terminal.nudgeDebounceSeconds,
     });
   }
 
@@ -222,19 +221,19 @@ export class TransportTerminalRuntime {
     }
   }
 
-  private async runTmuxPromptScanCycle(): Promise<void> {
-    if (!this.host.config.tmux.promptScanEnabled || this.tmuxPromptScanInFlight) {
+  private async runTerminalPromptScanCycle(): Promise<void> {
+    if (!this.host.config.terminal.promptScanEnabled || this.terminalPromptScanInFlight) {
       return;
     }
 
-    this.tmuxPromptScanInFlight = true;
+    this.terminalPromptScanInFlight = true;
     try {
       const sessions = await this.host.sessionStore.listSessions();
       for (const session of sessions) {
         await this.actions.scanPromptForSession(session);
       }
     } finally {
-      this.tmuxPromptScanInFlight = false;
+      this.terminalPromptScanInFlight = false;
     }
   }
 }

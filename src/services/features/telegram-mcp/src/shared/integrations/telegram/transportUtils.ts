@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import type { AppConfig } from "../../../app/config/env";
-import { isTmuxUnavailableError } from "../tmux/client";
+import { isTerminalUnavailableError } from "../terminal/client";
 import type {
   AdminClientViewRecord,
   TelegramMenuContext,
@@ -116,13 +116,13 @@ export function buildPrincipalKey(principal: {
   return `${principal.telegramChatId}:${principal.telegramUserId}`;
 }
 
-export function formatTmuxBridgeError(
+export function formatTerminalBridgeError(
   _config: AppConfig,
   error: unknown,
   fallback: string,
 ): string {
-  if (isTmuxUnavailableError(error)) {
-    return "tmux is unavailable right now.";
+  if (isTerminalUnavailableError(error)) {
+    return "Terminal runtime is unavailable right now.";
   }
 
   return fallback;

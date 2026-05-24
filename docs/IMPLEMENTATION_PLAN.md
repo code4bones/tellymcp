@@ -34,11 +34,6 @@ Do not regress these:
 - remove stale pairing/inbox/local-linking instructions
 - keep samples/templates trimmed to actually used env keys
 
-### Terminal Naming Cleanup
-
-- progressively rename user-facing `tmux` wording to `terminal` or `console`
-- keep runtime compatibility while schema and payload names are migrated
-
 ### Browser Reliability
 
 - keep browser routing relay-aware
@@ -53,7 +48,7 @@ Do not regress these:
 
 ### Packaging
 
-- keep `tellymcp run`, `serve-stdio`, `doctor`, `browser install`, and `codex-plugin install` documented and stable
+- keep `tellymcp run`, `doctor`, `browser install`, and `codex-plugin install` documented and stable
 - keep bundled plugin installation idempotent
 
 ## Explicitly Retired Plans

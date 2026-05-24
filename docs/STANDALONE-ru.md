@@ -71,7 +71,6 @@ GATEWAY_PUBLIC_URL=https://your-domain.example/api/gateway
 GATEWAY_WS_URL=wss://your-domain.example/api/gateway/ws
 GATEWAY_TOKEN=change_me_gateway_token
 GATEWAY_USER_UUID=put_owner_uuid_here
-TERMINAL_TRANSPORT=pty
 ```
 
 Для первого запуска также желательно задать:
@@ -129,11 +128,7 @@ TELEGRAM_WEBHOOK_SECRET=change_me_webhook_secret
 http://127.0.0.1:8787/mcp
 ```
 
-Stdio-режим:
-
-```bash
-tellymcp serve-stdio --env .env -s NEW
-```
+Используй MCP HTTP endpoint, который поднимает `tellymcp run`.
 
 ## 8. Проверки
 

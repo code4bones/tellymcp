@@ -5,7 +5,6 @@ Current focus areas after the gateway-first refactor:
 ## Runtime
 
 - verify browser relay stability under repeated gateway-routed actions
-- continue tmux-to-terminal naming cleanup in user-facing strings
 - keep project binding and live console binding paths explicit and observable
 
 ## Docs
@@ -18,7 +17,6 @@ Current focus areas after the gateway-first refactor:
 
 - evaluate whether `Info` and project screens need more concise summaries
 - review current Telegram menu wording after the removal of `Local` and inbox flows
-- review remaining user-facing `tmux` wording
 
 ## Packaging
 

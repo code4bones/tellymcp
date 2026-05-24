@@ -47,7 +47,7 @@ This directory holds the decomposed Telegram transport. `transport.ts` is now th
 
 - `transportMenuFlow.ts`
   Menu/render flow:
-  render helpers, help/live launcher flow, active-session info, tmux buffer send, pending-interaction cleanup.
+  render helpers, help/live launcher flow, active-session info, terminal buffer send, pending-interaction cleanup.
 
 - `transportPayloadState.ts`
   Menu payload persistence and lookup helpers.
@@ -67,9 +67,9 @@ This directory holds the decomposed Telegram transport. `transport.ts` is now th
 
 ## Runtime/Delivery Actions
 
-- `transportTmuxActions.ts`
-  Tmux flow:
-  nudges, prompt scan, cooldown/fingerprint logic, tmux buffer capture helpers.
+- `transportTerminalActions.ts`
+  Terminal flow:
+  nudges, prompt scan, cooldown/fingerprint logic, terminal buffer capture helpers.
 
 - `transportLiveActions.ts`
   Live/WebApp action flow:
@@ -166,17 +166,17 @@ This directory holds the decomposed Telegram transport. `transport.ts` is now th
   Outbound Telegram output path:
   chunked send, message retry, reply/edit helpers.
 
-- `transportTmuxRuntime.ts`
-  Tmux scheduler/runtime loop:
+- `transportTerminalRuntime.ts`
+  Terminal scheduler/runtime loop:
   prompt-scan interval, debounce timers, inbox nudge scheduling, typing action.
 
 - `transportTerminalActions.ts`
   Terminal-oriented interaction flow:
-  nudge, prompt scan, target recovery, and buffer capture via the generic terminal facade shared by `tmux` and built-in `pty`.
+  nudge, prompt scan, target recovery, and buffer capture via the generic terminal facade backed by PTY.
 
 - `transportTerminalRuntime.ts`
   Terminal scheduler/runtime loop:
-  prompt-scan interval, debounce timers, inbox nudge scheduling, typing action, with compatibility shims for legacy `tmux` naming.
+  prompt-scan interval, debounce timers, inbox nudge scheduling, typing action.
 
 ## External Helpers
 

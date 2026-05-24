@@ -47,7 +47,7 @@ export const ruMenu = {
         "Делись с напарником деталями API, изменениями, ошибками и git-контекстом.",
       link_hint:
         "🔗 Свяжи напарника, чтобы координироваться через общие заметки и файлы.",
-      tmux_mode_direct: "🖧 Режим TMUX: direct",
+      terminal_mode_direct: "🖧 Режим терминала: direct",
     },
   },
   sessions: {
@@ -101,11 +101,11 @@ export const ruMenu = {
     screen: {
       title: "📄 Content",
       active_session: "📌 Активная сессия: {{sessionName}}",
-      tmux_target: "🖥 tmux target: {{tmuxTarget}}",
+      terminal_target: "🖥 terminal target: {{terminalTarget}}",
       export_hint:
         "Выбери, сколько истории pane экспортировать в Markdown-файл.",
       export_modes:
-        "Visible отдаёт текущий viewport pane. Full экспортирует всю доступную tmux-историю.",
+        "Visible отдаёт текущий viewport терминала. Full экспортирует всю доступную историю терминала.",
     },
   },
   browser: {
@@ -322,7 +322,7 @@ export const ruMenu = {
     step_choose: "- выбери активную сессию",
     step_inbox: "- обычные Telegram-сообщения попадают в inbox этой сессии",
     step_nudge:
-      "- если настроен tmux target, сервис автоматически будит агента",
+      "- если настроен terminal target, сервис автоматически будит агента",
     step_tools:
       "- затем агент читает batch inbox через MCP tools",
   },
@@ -415,24 +415,24 @@ export const ruMenu = {
       client: "Клиент: {{packageVersion}} / protocol {{protocolVersion}}",
       gateway: "Шлюз: {{packageVersion}} / protocol {{protocolVersion}}",
     },
-    tmux: {
+    terminal: {
       target_invalid_title:
-        "⚠ Автоматический tmux nudge для сессии {{sessionName}} не сработал.",
+        "⚠ Автоматический nudge терминала для сессии {{sessionName}} не сработал.",
       target_invalid_target:
-        "Сохранённый tmux target больше недействителен: {{tmuxTarget}}",
-      target_invalid_action: "Перепривяжи tmux target для этой сессии.",
+        "Сохранённый terminal target больше недействителен: {{terminalTarget}}",
+      target_invalid_action: "Перепривяжи terminal target для этой сессии.",
       unavailable_title:
-        "⚠ Автоматический tmux nudge для сессии {{sessionName}} пропущен.",
-      unavailable_body: "tmux сейчас недоступен на этой машине.",
-      unavailable_target: "tmux target: {{tmuxTarget}}",
+        "⚠ Автоматический nudge терминала для сессии {{sessionName}} пропущен.",
+      unavailable_body: "Терминальный runtime сейчас недоступен на этой машине.",
+      unavailable_target: "terminal target: {{terminalTarget}}",
       unavailable_reason:
-        "Обычно это значит, что tmux session/server не запущен или недоступен по текущему socket path.",
+        "Обычно это значит, что терминальный runtime не запущен или недоступен для текущего target.",
       unavailable_action:
-        "Запусти tmux и агента внутри него, либо обнови/сними tmux target для этой сессии.",
+        "Перезапусти терминальный runtime для этой консоли или обнови/сними terminal target для этой сессии.",
       prompt_detected_title:
         "🛎 Похоже, агент в сессии {{sessionName}} ждёт твой ввод.",
       prompt_detected_score: "Сила срабатывания: {{score}}",
-      prompt_detected_target: "tmux target: {{tmuxTarget}}",
+      prompt_detected_target: "terminal target: {{terminalTarget}}",
       prompt_detected_hint:
         "Открой Live или ответь в терминале, если этот prompt действительно требует тебя.",
       prompt_detected_excerpt: "Последние строки prompt:",
@@ -531,7 +531,7 @@ export const ruMenu = {
       title: "🛠 Tools",
       linked_sessions: "🔗 Привязанных сессий: {{count}}",
       broadcast_help:
-        "Broadcast записывает твоё следующее текстовое сообщение в inbox каждой привязанной сессии и будит все настроенные tmux target.",
+        "Broadcast записывает твоё следующее текстовое сообщение в inbox каждой привязанной сессии и будит все настроенные terminal target.",
       prune_help:
         "Prune all очищает каждый Redis key в этом namespace telegram-mcp.",
     },
@@ -544,10 +544,7 @@ export const ruMenu = {
     inbox_count: "📥 Сообщений в inbox: {{count}}",
     route: "🔗 Telegram route: {{value}}",
     partner: "🤝 Напарник: {{value}}",
-    tmux_target: "🖥 tmux target: {{value}}",
-    tmux_session: "📺 tmux session: {{value}}",
-    tmux_window: "🪟 tmux window: {{value}}",
-    tmux_pane: "🔹 tmux pane: {{value}}",
+    terminal_target: "🖥 terminal target: {{value}}",
     yes: "да",
     no: "нет",
     not_linked: "не связан",
@@ -583,7 +580,7 @@ export const ruMenu = {
     body:
       "Отправь следующее текстовое сообщение, чтобы разослать его всем {{count}} видимым сессиям.",
     hint:
-      "Сообщение будет сохранено в inbox каждой сессии, а сервис разбудит все настроенные tmux target.",
+      "Сообщение будет сохранено в inbox каждой сессии, а сервис разбудит все настроенные terminal target.",
     cancel_hint: "Команды вроде /menu или /help отменят режим broadcast.",
     collab_begin: "Broadcast в {{count}} Collab-сессий.",
     collab_title: "📣 Collab Broadcast",
@@ -708,7 +705,7 @@ export const ruMenu = {
     gateway_relay_inbox_failed:
       "Не удалось отправить сообщение в выбранную gateway-сессию.",
     error_prefix: "Ошибка: {{message}}",
-    tmux_recreated_hint:
+    terminal_recreated_hint:
       "Обычно это значит, что pane/window/session был пересоздан.",
   },
 } as const;

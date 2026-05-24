@@ -26,11 +26,6 @@ export type SessionDefaultsInput = {
   session_id?: string | undefined;
   session_label?: string | undefined;
   cwd?: string | undefined;
-  tmux_session_name?: string | undefined;
-  tmux_window_name?: string | undefined;
-  tmux_window_index?: number | undefined;
-  tmux_pane_id?: string | undefined;
-  tmux_pane_index?: number | undefined;
 };
 
 export type ResolvedSessionDefaults = {

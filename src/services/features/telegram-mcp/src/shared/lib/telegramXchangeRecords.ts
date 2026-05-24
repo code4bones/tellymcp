@@ -54,7 +54,7 @@ export async function writeTelegramMessageXchangeRecord(input: {
     });
 
   await upsertXchangeRecord(
-    input.config.tmux,
+    input.config.terminal,
     workspaceDir,
     input.config.exchange.dir,
     {
@@ -102,7 +102,7 @@ export async function writeLocalTaskXchangeRecord(input: {
   const workspaceDir = resolveWorkspaceDir(input.session, input.sessionId);
 
   await upsertXchangeRecord(
-    input.config.tmux,
+    input.config.terminal,
     workspaceDir,
     input.config.exchange.dir,
     {

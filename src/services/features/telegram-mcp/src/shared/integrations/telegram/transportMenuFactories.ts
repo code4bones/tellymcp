@@ -12,7 +12,7 @@ import type {
 } from "../../../entities/inbox/model/types";
 import type {
   TelegramMenuContext,
-  TmuxCaptureScope,
+  TerminalCaptureScope,
 } from "./transportTypes";
 
 function splitSessionDisplayLabel(input: {
@@ -69,7 +69,7 @@ export interface TransportMenuFactoriesHost {
   showScreenshotsMenu(ctx: TelegramMenuContext): Promise<void>;
   sendActiveSessionBuffer(
     ctx: TelegramMenuContext,
-    input: TmuxCaptureScope,
+    input: TerminalCaptureScope,
   ): Promise<void>;
   showUnpairConfirmMenu(ctx: TelegramMenuContext): Promise<void>;
   showDeveloperMenu(ctx: TelegramMenuContext): Promise<void>;

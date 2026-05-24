@@ -69,8 +69,8 @@ import { TransportMenuCallbacks } from "./transportMenuCallbacks";
 import { TransportPartnerActions } from "./transportPartnerActions";
 import { TransportRequestFlow } from "./transportRequestFlow";
 import { TransportSessionActions } from "./transportSessionActions";
-import { TransportTmuxActions } from "./transportTmuxActions";
-import { TransportTmuxRuntime } from "./transportTmuxRuntime";
+import { TransportTerminalActions } from "./transportTerminalActions";
+import { TransportTerminalRuntime } from "./transportTerminalRuntime";
 import { TransportXchangeState } from "./transportXchangeState";
 import { TransportOutputActions } from "./transportOutputActions";
 import { buildTransportConstructorWiring } from "./transportConstructorWiring";
@@ -96,7 +96,7 @@ export class TelegramTransport implements HumanTransport {
   private readonly pruneConfirmMenu: Menu<TelegramMenuContext>;
   private readonly storageMessageMenu: Menu<TelegramMenuContext>;
   private readonly screenshotMessageMenu: Menu<TelegramMenuContext>;
-  private readonly tmuxActions: TransportTmuxActions;
+  private readonly terminalActions: TransportTerminalActions;
   private readonly liveActions: TransportLiveActions;
   private readonly lifecycleActions: TransportLifecycleActions;
   private readonly attachmentStore: TransportAttachmentStore;
@@ -124,12 +124,12 @@ export class TelegramTransport implements HumanTransport {
   private readonly requestFlow: TransportRequestFlow;
   private readonly sessionActions: TransportSessionActions;
   private readonly outputActions: TransportOutputActions;
-  private readonly tmuxRuntime: TransportTmuxRuntime;
+  private readonly terminalRuntime: TransportTerminalRuntime;
   private readonly xchangeState: TransportXchangeState;
   private readonly waiters = new Map<string, WaiterRecord>();
-  private readonly tmuxNudgeDebounceTimers = new Map<string, NodeJS.Timeout>();
-  private readonly tmuxNudgeFailureNoticeAt = new Map<string, number>();
-  private readonly tmuxPromptNoticeState = new Map<
+  private readonly terminalNudgeDebounceTimers = new Map<string, NodeJS.Timeout>();
+  private readonly terminalNudgeFailureNoticeAt = new Map<string, number>();
+  private readonly terminalPromptNoticeState = new Map<
     string,
     { fingerprint: string; sentAtMs: number }
   >();
@@ -145,8 +145,8 @@ export class TelegramTransport implements HumanTransport {
   private started = false;
   private pollingTask: Promise<void> | undefined;
   private collaborationService?: CollaborationService;
-  private tmuxPromptScanTimer: NodeJS.Timeout | undefined;
-  private tmuxPromptScanInFlight = false;
+  private terminalPromptScanTimer: NodeJS.Timeout | undefined;
+  private terminalPromptScanInFlight = false;
 
   private isTelegramEnabled(): boolean {
     if (this.config.distributed.mode === "client") {
@@ -214,9 +214,9 @@ export class TelegramTransport implements HumanTransport {
       webAppLaunchRegistry: this.webAppLaunchRegistry,
       logger: this.logger,
       waiters: this.waiters,
-      tmuxNudgeDebounceTimers: this.tmuxNudgeDebounceTimers,
-      tmuxNudgeFailureNoticeAt: this.tmuxNudgeFailureNoticeAt,
-      tmuxPromptNoticeState: this.tmuxPromptNoticeState,
+      terminalNudgeDebounceTimers: this.terminalNudgeDebounceTimers,
+      terminalNudgeFailureNoticeAt: this.terminalNudgeFailureNoticeAt,
+      terminalPromptNoticeState: this.terminalPromptNoticeState,
       pendingRenames: this.pendingRenames,
       pendingBroadcasts: this.pendingBroadcasts,
       pendingPartnerNotes: this.pendingPartnerNotes,
@@ -261,7 +261,7 @@ export class TelegramTransport implements HumanTransport {
     this.pruneConfirmMenu = composition.pruneConfirmMenu;
     this.storageMessageMenu = composition.storageMessageMenu;
     this.screenshotMessageMenu = composition.screenshotMessageMenu;
-    this.tmuxActions = composition.tmuxActions;
+    this.terminalActions = composition.terminalActions;
     this.liveActions = composition.liveActions;
     this.lifecycleActions = composition.lifecycleActions;
     this.attachmentStore = composition.attachmentStore;
@@ -289,7 +289,7 @@ export class TelegramTransport implements HumanTransport {
     this.requestFlow = composition.requestFlow;
     this.sessionActions = composition.sessionActions;
     this.outputActions = composition.outputActions;
-    this.tmuxRuntime = composition.tmuxRuntime;
+    this.terminalRuntime = composition.terminalRuntime;
     this.xchangeState = composition.xchangeState;
     this.bot.use(this.getRootMenu());
     this.menuShell.register(this.bot);
@@ -397,7 +397,7 @@ export class TelegramTransport implements HumanTransport {
         },
       );
       this.started = true;
-      this.tmuxRuntime.startPromptScan();
+      this.terminalRuntime.startPromptScan();
       return;
     }
 
@@ -468,7 +468,7 @@ export class TelegramTransport implements HumanTransport {
       });
     }
     this.started = true;
-    this.tmuxRuntime.startPromptScan();
+    this.terminalRuntime.startPromptScan();
     this.logger.info("Telegram transport start returned control to app", {
       isRunning: this.bot.isRunning(),
       isInited: this.bot.isInited(),
@@ -485,8 +485,8 @@ export class TelegramTransport implements HumanTransport {
     }
 
     this.logger.info("Telegram transport stopping");
-    this.tmuxRuntime.clearTmuxNudgeDebounceTimers();
-    this.tmuxRuntime.clearTmuxPromptScanTimer();
+    this.terminalRuntime.clearTerminalNudgeDebounceTimers();
+    this.terminalRuntime.clearTerminalPromptScanTimer();
     if (this.isTelegramEnabled() && !this.config.telegram.webhook.enabled) {
       await this.bot.stop();
     }
@@ -764,11 +764,17 @@ export class TelegramTransport implements HumanTransport {
         "",
         "Задача:",
         parsed.message,
+        "",
+        "Не отправляй результат напрямую в Telegram из этой сессии.",
+        `Верни результат только обратно в сессию ${sourceLabel}.`,
+        `Исходная сессия ${sourceLabel} сама доставит его человеку в Telegram.`,
       ].join("\n");
       const expectedReply = [
         `Подготовь результат для сессии ${sourceLabel}.`,
-        "После подготовки обязательно отправь его обратно через send_partner_note.",
-        "Задача не завершена, пока send_partner_note не отработал успешно.",
+        "Если результатом является реальный файл или артефакт, отправь его обратно через send_partner_file.",
+        "Во всех остальных случаях отправь результат обратно через send_partner_note.",
+        "Не отправляй результат напрямую в Telegram из этой сессии.",
+        "Задача не завершена, пока send_partner_note или send_partner_file не отработал успешно.",
       ].join(" ");
       const output = await (this as unknown as {
         sendPartnerNote: (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -1007,7 +1013,7 @@ export class TelegramTransport implements HumanTransport {
   }
 
   public async nudgeSessionInbox(sessionId: string): Promise<void> {
-    await this.tmuxActions.nudgeForInboxMessage(sessionId);
+    await this.terminalActions.nudgeForInboxMessage(sessionId);
   }
 
   public async nudgeSessionPartnerNote(
@@ -1022,10 +1028,10 @@ export class TelegramTransport implements HumanTransport {
     const useReplyNudge =
       !requiresReply &&
       (kind === "reply" || kind === "handoff");
-    await this.tmuxActions.nudgeForSession(sessionId, {
+    await this.terminalActions.nudgeForSession(sessionId, {
       message: useReplyNudge
-        ? this.config.tmux.partnerReplyNudgeMessage
-        : this.config.tmux.partnerNudgeMessage,
+        ? this.config.terminal.partnerReplyNudgeMessage
+        : this.config.terminal.partnerNudgeMessage,
       reason: "partner_note",
     });
   }

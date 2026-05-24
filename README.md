@@ -80,13 +80,6 @@ Tools sync:
 - PostgreSQL for gateway mode
 - optional RabbitMQ for durable gateway fanout
 - Playwright browser binaries if you use browser tools
-- `tmux` if you want tmux transport
-
-If you prefer the built-in terminal backend, use:
-
-```env
-TERMINAL_TRANSPORT=pty
-```
 
 ## Installation
 
@@ -163,7 +156,7 @@ Required client values:
 
 Recommended:
 
-- `TERMINAL_TRANSPORT=pty` for simple host setups
+- built-in PTY terminal runtime is used by default
 - explicit `TELLYMCP_SESSION_ID` and `TELLYMCP_SESSION_LABEL` for the first run
 
 First run:
@@ -223,19 +216,7 @@ Helper:
 tellymcp mcp --url http://127.0.0.1:8787/mcp
 ```
 
-### Stdio
-
-Useful for Codex and similar agents:
-
-```bash
-tellymcp serve-stdio --env .env -s NEW
-```
-
-After `.mcpsession.json` is initialized:
-
-```bash
-tellymcp serve-stdio
-```
+Use the MCP HTTP endpoint exposed by `tellymcp run` for Codex and similar agents.
 
 ## Codex Plugin
 

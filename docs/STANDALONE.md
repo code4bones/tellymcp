@@ -71,7 +71,6 @@ GATEWAY_PUBLIC_URL=https://your-domain.example/api/gateway
 GATEWAY_WS_URL=wss://your-domain.example/api/gateway/ws
 GATEWAY_TOKEN=change_me_gateway_token
 GATEWAY_USER_UUID=put_owner_uuid_here
-TERMINAL_TRANSPORT=pty
 ```
 
 For the first run, also set:
@@ -129,11 +128,7 @@ Local client-mode MCP:
 http://127.0.0.1:8787/mcp
 ```
 
-Stdio mode:
-
-```bash
-tellymcp serve-stdio --env .env -s NEW
-```
+Use the MCP HTTP endpoint exposed by `tellymcp run`.
 
 ## 8. Health Checks
 

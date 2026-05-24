@@ -58,7 +58,7 @@ export class XchangeService {
     }
     const workspaceDir = await this.resolveWorkspaceDir(sessionId);
     const records = await listXchangeRecords(
-      this.config.tmux,
+      this.config.terminal,
       workspaceDir,
       this.config.exchange.dir,
       sessionId,
@@ -108,7 +108,7 @@ export class XchangeService {
     }
     const workspaceDir = await this.resolveWorkspaceDir(sessionId);
     const record = await getXchangeRecord(
-      this.config.tmux,
+      this.config.terminal,
       workspaceDir,
       this.config.exchange.dir,
       sessionId,
@@ -149,7 +149,7 @@ export class XchangeService {
     }
     const workspaceDir = await this.resolveWorkspaceDir(sessionId);
     const updated = await markXchangeRecordRead(
-      this.config.tmux,
+      this.config.terminal,
       workspaceDir,
       this.config.exchange.dir,
       sessionId,

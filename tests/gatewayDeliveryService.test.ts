@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 vi.mock(
-  "../src/services/features/telegram-mcp/src/shared/integrations/tmux/client",
+  "../src/services/features/telegram-mcp/src/shared/integrations/terminal/client",
   () => ({
     ensureXchangeDir: vi.fn(async () => "/workspace/.mcp-xchange"),
     writeXchangeRelativeFile: vi.fn(),
@@ -16,7 +16,7 @@ vi.mock(
 );
 
 import GatewayDeliveryService from "../src/services/features/telegram-mcp/gateway-delivery.service";
-import { writeXchangeRelativeFile } from "../src/services/features/telegram-mcp/src/shared/integrations/tmux/client";
+import { writeXchangeRelativeFile } from "../src/services/features/telegram-mcp/src/shared/integrations/terminal/client";
 
 type GatewayDelivery = {
   delivery_uuid: string;
@@ -95,7 +95,7 @@ type RuntimeHarness = {
       warn: ReturnType<typeof vi.fn>;
     };
     config: {
-      tmux: Record<string, unknown>;
+      terminal: Record<string, unknown>;
       exchange: {
         dir: string;
       };
@@ -163,7 +163,7 @@ function createRuntimeHarness(): RuntimeHarness {
       warn: vi.fn(),
     },
     config: {
-      tmux: {},
+      terminal: {},
       exchange: {
         dir: ".mcp-xchange",
       },

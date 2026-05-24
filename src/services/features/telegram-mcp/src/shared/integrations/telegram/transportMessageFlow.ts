@@ -89,7 +89,7 @@ export interface TransportMessageFlowHost {
   getMainMenu(): unknown;
   clearWaiter(requestId: string): void;
   callGatewayJson<T>(path: string, payload?: unknown): Promise<T>;
-  scheduleTmuxNudgeForInboxMessage(
+  scheduleTerminalNudgeForInboxMessage(
     sessionId: string,
     session: Awaited<ReturnType<SessionStore["getSession"]>>,
   ): void;
@@ -561,9 +561,9 @@ export class TransportMessageFlow {
     });
 
     try {
-      this.host.scheduleTmuxNudgeForInboxMessage(sessionId, session);
+      this.host.scheduleTerminalNudgeForInboxMessage(sessionId, session);
     } catch (error) {
-      this.host.logger.error("tmux nudge failed after xchange capture", {
+      this.host.logger.error("terminal nudge failed after xchange capture", {
         sessionId,
         error:
           error instanceof Error ? (error.stack ?? error.message) : String(error),

@@ -73,8 +73,8 @@ import { TransportProjectState } from "./transportProjectState";
 import { TransportProjectView } from "./transportProjectView";
 import { TransportRequestFlow } from "./transportRequestFlow";
 import { TransportSessionActions } from "./transportSessionActions";
-import { TransportTmuxActions } from "./transportTmuxActions";
-import { TransportTmuxRuntime } from "./transportTmuxRuntime";
+import { TransportTerminalActions } from "./transportTerminalActions";
+import { TransportTerminalRuntime } from "./transportTerminalRuntime";
 import { TransportXchangeState } from "./transportXchangeState";
 import { extractCallbackSuffix, readMenuPayloadKey } from "./transportUtils";
 
@@ -91,9 +91,9 @@ export interface TransportConstructorWiringHost {
   webAppLaunchRegistry: WebAppLaunchRegistry;
   logger: Logger;
   waiters: Map<string, WaiterRecord>;
-  tmuxNudgeDebounceTimers: Map<string, NodeJS.Timeout>;
-  tmuxNudgeFailureNoticeAt: Map<string, number>;
-  tmuxPromptNoticeState: Map<string, { fingerprint: string; sentAtMs: number }>;
+  terminalNudgeDebounceTimers: Map<string, NodeJS.Timeout>;
+  terminalNudgeFailureNoticeAt: Map<string, number>;
+  terminalPromptNoticeState: Map<string, { fingerprint: string; sentAtMs: number }>;
   pendingRenames: Map<string, PendingRenameRecord>;
   pendingBroadcasts: Map<string, PendingBroadcastRecord>;
   pendingPartnerNotes: Map<string, PendingPartnerNoteRecord>;
@@ -153,7 +153,7 @@ export interface TransportConstructorWiringResult {
   pruneConfirmMenu: Menu<TelegramMenuContext>;
   storageMessageMenu: Menu<TelegramMenuContext>;
   screenshotMessageMenu: Menu<TelegramMenuContext>;
-  tmuxActions: TransportTmuxActions;
+  terminalActions: TransportTerminalActions;
   liveActions: TransportLiveActions;
   lifecycleActions: TransportLifecycleActions;
   attachmentStore: TransportAttachmentStore;
@@ -182,7 +182,7 @@ export interface TransportConstructorWiringResult {
   requestFlow: TransportRequestFlow;
   sessionActions: TransportSessionActions;
   outputActions: TransportOutputActions;
-  tmuxRuntime: TransportTmuxRuntime;
+  terminalRuntime: TransportTerminalRuntime;
   xchangeState: TransportXchangeState;
 }
 
@@ -245,14 +245,14 @@ export function buildTransportConstructorWiring(
       outputActions.sendChatMessage(telegramChatId, text, options, meta),
   });
 
-  const tmuxActions: TransportTmuxActions = new TransportTmuxActions({
+  const terminalActions: TransportTerminalActions = new TransportTerminalActions({
     config: host.config,
     sessionStore: host.sessionStore,
     bindingStore: host.bindingStore,
     logger: host.logger,
-    tmuxNudgeFailureNoticeAt: host.tmuxNudgeFailureNoticeAt,
-    tmuxPromptNoticeState: host.tmuxPromptNoticeState,
-    sendTypingForSession: (sessionId) => tmuxRuntime.sendTypingForSession(sessionId),
+    terminalNudgeFailureNoticeAt: host.terminalNudgeFailureNoticeAt,
+    terminalPromptNoticeState: host.terminalPromptNoticeState,
+    sendTypingForSession: (sessionId) => terminalRuntime.sendTypingForSession(sessionId),
     resolveLocaleForTelegramUserId: (userId) =>
       context.resolveLocaleForTelegramUserId(userId),
     sendNotification: (input) => requestFlow.sendNotification(input),
@@ -260,15 +260,15 @@ export function buildTransportConstructorWiring(
     t: (locale, key, vars) => context.t(locale, key, vars),
   });
 
-  const tmuxRuntime: TransportTmuxRuntime = new TransportTmuxRuntime({
+  const terminalRuntime: TransportTerminalRuntime = new TransportTerminalRuntime({
     config: host.config,
     logger: host.logger,
     bot,
     sessionStore: host.sessionStore,
     bindingStore: host.bindingStore,
     isTelegramEnabled: () => host.config.distributed.mode !== "client" && Boolean(host.config.telegram.botToken?.trim()),
-    tmuxActions,
-    tmuxNudgeDebounceTimers: host.tmuxNudgeDebounceTimers,
+    terminalActions,
+    terminalNudgeDebounceTimers: host.terminalNudgeDebounceTimers,
   });
 
   const menuFingerprints = new TransportMenuFingerprints({
@@ -401,8 +401,8 @@ export function buildTransportConstructorWiring(
     t: (locale, key, vars) => context.t(locale, key, vars),
     resolveLocaleForContext: (ctx) => context.resolveLocaleForContext(ctx),
     getPrincipalFromContext: (ctx) => context.getPrincipalFromContext(ctx),
-    getTmuxStatusLine: async (locale) =>
-      context.t(locale, "menu:main.screen.tmux_mode_direct"),
+    getTerminalStatusLine: async (locale) =>
+      context.t(locale, "menu:main.screen.terminal_mode_direct"),
     setCurrentAttachmentTargetForContext: (ctx, target) =>
       menuFlow.setCurrentAttachmentTargetForContext(ctx, target),
     renderMenuHtmlScreen: (ctx, text, meta, menu) =>
@@ -546,7 +546,7 @@ export function buildTransportConstructorWiring(
     menuState,
     projectView,
     liveActions,
-    tmuxActions,
+    terminalActions,
     pendingRenames: host.pendingRenames,
     pendingBroadcasts: host.pendingBroadcasts,
     pendingPartnerNotes: host.pendingPartnerNotes,
@@ -604,8 +604,8 @@ export function buildTransportConstructorWiring(
     sessionStore: host.sessionStore,
     routeTelegramInboxToRelaySession: (input) =>
       messageFlow.routeTelegramInboxToRelaySession(input),
-    scheduleTmuxNudgeForInboxMessage: (sessionId, session) =>
-      tmuxRuntime.scheduleTmuxNudgeForInboxMessage(sessionId, session),
+    scheduleTerminalNudgeForInboxMessage: (sessionId, session) =>
+      terminalRuntime.scheduleTerminalNudgeForInboxMessage(sessionId, session),
     sendPartnerNote: (input) => gatewayActions.sendPartnerNote(input),
   });
 
@@ -736,7 +736,7 @@ export function buildTransportConstructorWiring(
     showSessionsMenu: (ctx, introText) => menuFlow.showSessionsMenu(ctx, introText),
     clearPendingInteractionsForContext: (ctx) =>
       menuFlow.clearPendingInteractionsForContext(ctx),
-    clearTmuxNudgeDebounceTimers: () => tmuxRuntime.clearTmuxNudgeDebounceTimers(),
+    clearTerminalNudgeDebounceTimers: () => terminalRuntime.clearTerminalNudgeDebounceTimers(),
     callGatewayJson: (path, payload) => host.callGatewayJson(path, payload),
   });
 
@@ -838,8 +838,8 @@ export function buildTransportConstructorWiring(
     clearWaiter: (requestId) => requestFlow.clearWaiter(requestId),
     callGatewayJson: (path, payload) =>
       host.callGatewayJson(path, payload as Record<string, unknown> | undefined),
-    scheduleTmuxNudgeForInboxMessage: (sessionId, session) =>
-      tmuxRuntime.scheduleTmuxNudgeForInboxMessage(sessionId, session),
+    scheduleTerminalNudgeForInboxMessage: (sessionId, session) =>
+      terminalRuntime.scheduleTerminalNudgeForInboxMessage(sessionId, session),
     downloadIncomingAttachments: (session, sessionId, sourceTelegramMessageId, attachments) =>
       attachmentStore.downloadIncomingAttachments(
         session,
@@ -937,7 +937,7 @@ export function buildTransportConstructorWiring(
     pruneConfirmMenu,
     storageMessageMenu,
     screenshotMessageMenu,
-    tmuxActions,
+    terminalActions,
     liveActions,
     lifecycleActions,
     attachmentStore,
@@ -966,7 +966,7 @@ export function buildTransportConstructorWiring(
     requestFlow,
     sessionActions,
     outputActions,
-    tmuxRuntime,
+    terminalRuntime,
     xchangeState,
   };
 }

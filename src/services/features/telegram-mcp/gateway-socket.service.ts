@@ -17,13 +17,13 @@ import {
   validateTelegramWebAppInitData,
 } from "./src/app/webapp/auth";
 import {
-  captureVisibleTmuxPane,
-  captureVisibleTmuxPaneAnsi,
-  getTmuxWindowSize,
-  isTmuxUnavailableError,
-  sendAllowedTmuxAction,
-  sendTmuxLiteralText,
-} from "./src/app/webapp/tmux";
+  captureVisibleTerminal,
+  captureVisibleTerminalAnsi,
+  getTerminalWindowSize,
+  isTerminalUnavailableError,
+  sendAllowedTerminalAction,
+  sendTerminalLiteralText,
+} from "./src/app/webapp/terminal";
 import {
   isStreamableTerminalTarget,
   subscribeForegroundTerminal,
@@ -550,9 +550,9 @@ function normalizeWebSocketUrl(value: string, defaultPath: string): string {
   return url.toString();
 }
 
-function formatTmuxRelayError(error: unknown): string {
-  if (isTmuxUnavailableError(error)) {
-    return "tmux is unavailable";
+function formatTerminalRelayError(error: unknown): string {
+  if (isTerminalUnavailableError(error)) {
+    return "terminal runtime is unavailable";
   }
 
   return error instanceof Error ? error.message : String(error);
@@ -1824,7 +1824,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             result: {
               session_id: sessionId,
               session_label: session?.label ?? null,
-              tmux_target: Boolean(session?.tmuxTarget),
+              terminal_target: Boolean(session?.terminalTarget),
               poll_interval_ms: runtime.config.webapp.pollIntervalMs,
               telegram_user_id: telegramUserId,
             },
@@ -1834,24 +1834,24 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         if (request.request_type === "view") {
           const sessionId = request.local_session_id.trim();
           const session = await runtime.sessionStore.getSession(sessionId);
-          if (!session?.tmuxTarget) {
-            throw new Error("tmux target is not configured for this session");
+          if (!session?.terminalTarget) {
+            throw new Error("terminal target is not configured for this session");
           }
 
-          const terminalSize = await getTmuxWindowSize(
-            runtime.config.tmux,
-            session.tmuxTarget,
+          const terminalSize = await getTerminalWindowSize(
+            runtime.config.terminal,
+            session.terminalTarget,
           );
-          const content = await captureVisibleTmuxPane(
-            runtime.config.tmux,
-            session.tmuxTarget,
-            runtime.config.tmux.captureLines,
+          const content = await captureVisibleTerminal(
+            runtime.config.terminal,
+            session.terminalTarget,
+            runtime.config.terminal.captureLines,
             runtime.config.webapp.visibleScreens,
           );
-          const ansi = await captureVisibleTmuxPaneAnsi(
-            runtime.config.tmux,
-            session.tmuxTarget,
-            runtime.config.tmux.captureLines,
+          const ansi = await captureVisibleTerminalAnsi(
+            runtime.config.terminal,
+            session.terminalTarget,
+            runtime.config.terminal.captureLines,
             runtime.config.webapp.visibleScreens,
           );
           return {
@@ -1887,20 +1887,20 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
           const sessionId = request.local_session_id.trim();
           const session = await runtime.sessionStore.getSession(sessionId);
-          if (!session?.tmuxTarget) {
-            throw new Error("tmux target is not configured for this session");
+          if (!session?.terminalTarget) {
+            throw new Error("terminal target is not configured for this session");
           }
 
           if (action === "text") {
-            await sendTmuxLiteralText(
-              runtime.config.tmux,
-              session.tmuxTarget,
+            await sendTerminalLiteralText(
+              runtime.config.terminal,
+              session.terminalTarget,
               text,
             );
           } else {
-            await sendAllowedTmuxAction(
-              runtime.config.tmux,
-              session.tmuxTarget,
+            await sendAllowedTerminalAction(
+              runtime.config.terminal,
+              session.terminalTarget,
               action as
                 | "up"
                 | "down"
@@ -1933,30 +1933,30 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
           const sessionId = request.local_session_id.trim();
           const session = await runtime.sessionStore.getSession(sessionId);
-          if (!session?.tmuxTarget) {
-            throw new Error("tmux target is not configured for this session");
+          if (!session?.terminalTarget) {
+            throw new Error("terminal target is not configured for this session");
           }
-          if (!isStreamableTerminalTarget(session.tmuxTarget)) {
+          if (!isStreamableTerminalTarget(session.terminalTarget)) {
             throw new Error("Live stream is supported only for PTY-backed terminals");
           }
 
           this.localLiveStreamSubscriptions?.get(streamId)?.();
           this.localLiveStreamSubscriptions?.delete(streamId);
 
-          const terminalSize = await getTmuxWindowSize(
-            runtime.config.tmux,
-            session.tmuxTarget,
+          const terminalSize = await getTerminalWindowSize(
+            runtime.config.terminal,
+            session.terminalTarget,
           );
-          const content = await captureVisibleTmuxPane(
-            runtime.config.tmux,
-            session.tmuxTarget,
-            runtime.config.tmux.captureLines,
+          const content = await captureVisibleTerminal(
+            runtime.config.terminal,
+            session.terminalTarget,
+            runtime.config.terminal.captureLines,
             runtime.config.webapp.visibleScreens,
           );
-          const ansi = await captureVisibleTmuxPaneAnsi(
-            runtime.config.tmux,
-            session.tmuxTarget,
-            runtime.config.tmux.captureLines,
+          const ansi = await captureVisibleTerminalAnsi(
+            runtime.config.terminal,
+            session.terminalTarget,
+            runtime.config.terminal.captureLines,
             runtime.config.webapp.visibleScreens,
           );
 
@@ -1976,7 +1976,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             } satisfies GatewaySocketLiveStreamEvent),
           );
 
-          const unsubscribe = subscribeForegroundTerminal(session.tmuxTarget, {
+          const unsubscribe = subscribeForegroundTerminal(session.terminalTarget, {
             onData: (data) => {
               this.wsClient?.send(
                 JSON.stringify({
@@ -2043,7 +2043,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           type: "live_response",
           request_id: request.request_id,
           ok: false,
-          error: formatTmuxRelayError(error),
+          error: formatTerminalRelayError(error),
         };
       }
     },

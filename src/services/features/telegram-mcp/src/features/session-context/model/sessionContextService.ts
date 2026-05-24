@@ -90,23 +90,10 @@ export class SessionContextService {
         : existing?.risks
           ? { risks: existing.risks }
           : {}),
-      ...(existing?.tmuxSessionName
-        ? { tmuxSessionName: existing.tmuxSessionName }
-        : {}),
-      ...(existing?.tmuxWindowName
-        ? { tmuxWindowName: existing.tmuxWindowName }
-        : {}),
-      ...(typeof existing?.tmuxWindowIndex === "number"
-        ? { tmuxWindowIndex: existing.tmuxWindowIndex }
-        : {}),
-      ...(existing?.tmuxPaneId ? { tmuxPaneId: existing.tmuxPaneId } : {}),
-      ...(typeof existing?.tmuxPaneIndex === "number"
-        ? { tmuxPaneIndex: existing.tmuxPaneIndex }
-        : {}),
-      ...(existing?.tmuxTarget ? { tmuxTarget: existing.tmuxTarget } : {}),
-      ...(existing?.lastTmuxNudgeAt
-        ? { lastTmuxNudgeAt: existing.lastTmuxNudgeAt }
-        : {}),
+      ...(existing?.terminalTarget ? { terminalTarget: existing.terminalTarget } : {}),
+      ...(existing?.lastTerminalNudgeAt
+        ? { lastTerminalNudgeAt: existing.lastTerminalNudgeAt }
+          : {}),
       ...(existing?.lastSeenToolsHash
         ? { lastSeenToolsHash: existing.lastSeenToolsHash }
         : {}),
@@ -171,22 +158,9 @@ export class SessionContextService {
       ...(existing?.files ? { files: existing.files } : {}),
       ...(existing?.decisions ? { decisions: existing.decisions } : {}),
       ...(existing?.risks ? { risks: existing.risks } : {}),
-      ...(existing?.tmuxSessionName
-        ? { tmuxSessionName: existing.tmuxSessionName }
-        : {}),
-      ...(existing?.tmuxWindowName
-        ? { tmuxWindowName: existing.tmuxWindowName }
-        : {}),
-      ...(typeof existing?.tmuxWindowIndex === "number"
-        ? { tmuxWindowIndex: existing.tmuxWindowIndex }
-        : {}),
-      ...(existing?.tmuxPaneId ? { tmuxPaneId: existing.tmuxPaneId } : {}),
-      ...(typeof existing?.tmuxPaneIndex === "number"
-        ? { tmuxPaneIndex: existing.tmuxPaneIndex }
-        : {}),
-      ...(existing?.tmuxTarget ? { tmuxTarget: existing.tmuxTarget } : {}),
-      ...(existing?.lastTmuxNudgeAt
-        ? { lastTmuxNudgeAt: existing.lastTmuxNudgeAt }
+      ...(existing?.terminalTarget ? { terminalTarget: existing.terminalTarget } : {}),
+      ...(existing?.lastTerminalNudgeAt
+        ? { lastTerminalNudgeAt: existing.lastTerminalNudgeAt }
         : {}),
       ...(existing?.lastSeenToolsHash
         ? { lastSeenToolsHash: existing.lastSeenToolsHash }
@@ -239,7 +213,7 @@ export class SessionContextService {
     });
 
     const statusMessage = binding
-      ? session?.tmuxTarget
+      ? session?.terminalTarget
         ? "Gateway console binding is active for this session. A terminal target is configured, so ordinary Telegram messages can wake the agent through terminal nudges."
         : "Gateway console binding is active for this session. No terminal target is configured, so inbox handling requires passive MCP checks."
       : session
@@ -285,28 +259,13 @@ export class SessionContextService {
         : {}),
       ...(session
         ? {
-            tmux: {
-              configured: Boolean(session.tmuxTarget),
-              ...(session.tmuxSessionName
-                ? { tmux_session_name: session.tmuxSessionName }
+            terminal: {
+              configured: Boolean(session.terminalTarget),
+              ...(session.terminalTarget
+                ? { terminal_target: session.terminalTarget }
                 : {}),
-              ...(session.tmuxWindowName
-                ? { tmux_window_name: session.tmuxWindowName }
-                : {}),
-              ...(typeof session.tmuxWindowIndex === "number"
-                ? { tmux_window_index: session.tmuxWindowIndex }
-                : {}),
-              ...(session.tmuxPaneId
-                ? { tmux_pane_id: session.tmuxPaneId }
-                : {}),
-              ...(typeof session.tmuxPaneIndex === "number"
-                ? { tmux_pane_index: session.tmuxPaneIndex }
-                : {}),
-              ...(session.tmuxTarget
-                ? { tmux_target: session.tmuxTarget }
-                : {}),
-              ...(session.lastTmuxNudgeAt
-                ? { last_nudge_at: session.lastTmuxNudgeAt }
+              ...(session.lastTerminalNudgeAt
+                ? { last_nudge_at: session.lastTerminalNudgeAt }
                 : {}),
             },
           }
@@ -327,7 +286,7 @@ export class SessionContextService {
       return remote;
     }
     const existing = await this.sessionStore.getSession(resolved.sessionId);
-    const existingTarget = existing?.tmuxTarget;
+    const existingTarget = existing?.terminalTarget;
     if (existingTarget && isPtyTarget(existingTarget)) {
       stopPtyTarget(existingTarget);
     }

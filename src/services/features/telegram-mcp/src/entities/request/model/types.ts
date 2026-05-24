@@ -36,6 +36,20 @@ export type NotifyTelegramOutput = {
   message_id?: number | undefined;
 };
 
+export type SendFileToTelegramInput = {
+  session_id?: string | undefined;
+  cwd?: string | undefined;
+  file_path: string;
+  caption?: string | undefined;
+};
+
+export type SendFileToTelegramOutput = {
+  session_id: string;
+  file_path: string;
+  sent: boolean;
+  message_id?: number | undefined;
+};
+
 export type RefreshToolsMarkdownInput = {
   session_id?: string | undefined;
   cwd?: string | undefined;

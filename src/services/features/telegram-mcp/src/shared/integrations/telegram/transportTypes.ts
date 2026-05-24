@@ -227,7 +227,7 @@ export type GatewayActorProfile = {
   telegramDisplayName?: string;
 };
 
-export type TmuxCaptureScope =
+export type TerminalCaptureScope =
   | { mode: "visible" }
   | { mode: "lines"; lines: number }
   | { mode: "full" };

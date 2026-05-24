@@ -4,7 +4,7 @@ import type { SessionStore } from "../../../shared/api/storage/contract";
 import { captureTerminalPaneRange, getTerminalWindowHeight } from "../../../shared/integrations/terminal/client";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
-import type { TmuxCaptureScope } from "../../../shared/integrations/telegram/transportTypes";
+import type { TerminalCaptureScope } from "../../../shared/integrations/telegram/transportTypes";
 import { slugifyFilenamePart } from "../../../shared/integrations/telegram/transportUtils";
 
 type RemoteConsoleInvoker = {
@@ -18,7 +18,7 @@ type RemoteConsoleInvoker = {
 export type CaptureTerminalBufferInput = {
   session_id?: string;
   cwd?: string;
-  scope: TmuxCaptureScope;
+  scope: TerminalCaptureScope;
 };
 
 export type CaptureTerminalBufferOutput = {
@@ -27,7 +27,7 @@ export type CaptureTerminalBufferOutput = {
   terminal_target: string;
   filename: string;
   markdown_content: string;
-  capture_mode: TmuxCaptureScope["mode"];
+  capture_mode: TerminalCaptureScope["mode"];
   scope_description: string;
 };
 
@@ -54,14 +54,14 @@ export class TerminalBufferService {
     }
 
     const session = await this.sessionStore.getSession(resolved.sessionId);
-    const target = session?.tmuxTarget?.trim();
+    const target = session?.terminalTarget?.trim();
     if (!target) {
       throw new Error("terminal target is not configured for this session");
     }
 
     const paneStart = await this.resolveCaptureStart(target, input.scope);
     const stdout = await captureTerminalPaneRange(
-      this.config.tmux,
+      this.config.terminal,
       target,
       paneStart,
       false,
@@ -69,8 +69,7 @@ export class TerminalBufferService {
 
     const capturedAt = new Date().toISOString();
     const scopeDescription = this.describeCaptureScope(input.scope);
-    const titleBase =
-      session?.label ?? session?.tmuxWindowName ?? resolved.sessionLabel ?? resolved.sessionId;
+    const titleBase = session?.label ?? resolved.sessionLabel ?? resolved.sessionId;
     const filenameBase = slugifyFilenamePart(titleBase) || "session-buffer";
     const timestamp = capturedAt.replace(/[:.]/g, "-");
     const filename = `${filenameBase}-${timestamp}.md`;
@@ -80,9 +79,6 @@ export class TerminalBufferService {
       `- Session: ${session?.label ?? resolved.sessionLabel ?? resolved.sessionId}`,
       `- Session ID: ${resolved.sessionId}`,
       `- terminal target: ${target}`,
-      ...(session?.tmuxSessionName ? [`- terminal session: ${session.tmuxSessionName}`] : []),
-      ...(session?.tmuxWindowName ? [`- terminal window: ${session.tmuxWindowName}`] : []),
-      ...(session?.tmuxPaneId ? [`- terminal pane: ${session.tmuxPaneId}`] : []),
       `- Capture scope: ${scopeDescription}`,
       `- Captured at: ${capturedAt}`,
       "",
@@ -115,7 +111,7 @@ export class TerminalBufferService {
 
   private async resolveCaptureStart(
     target: string,
-    scope: TmuxCaptureScope,
+    scope: TerminalCaptureScope,
   ): Promise<string> {
     if (scope.mode === "full") {
       return "-";
@@ -123,14 +119,14 @@ export class TerminalBufferService {
     if (scope.mode === "lines") {
       return `-${scope.lines}`;
     }
-    const height = await getTerminalWindowHeight(this.config.tmux, target);
+    const height = await getTerminalWindowHeight(this.config.terminal, target);
     if (typeof height !== "number" || height <= 0) {
-      return `-${this.config.tmux.captureLines}`;
+      return `-${this.config.terminal.captureLines}`;
     }
     return `-${height}`;
   }
 
-  private describeCaptureScope(scope: TmuxCaptureScope): string {
+  private describeCaptureScope(scope: TerminalCaptureScope): string {
     switch (scope.mode) {
       case "visible":
         return "visible pane";

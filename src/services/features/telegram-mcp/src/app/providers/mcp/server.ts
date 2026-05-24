@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { AskUserTelegramTool } from "../../../features/ask-user/model/askUserTelegram";
 import { NotifyTelegramTool } from "../../../features/notify/model/notifyTelegramTool";
+import { SendFileToTelegramTool } from "../../../features/notify/model/sendFileToTelegramTool";
 import { ClearSessionContextTool } from "../../../features/session-context/model/clearSessionContextTool";
 import { GetSessionContextTool } from "../../../features/session-context/model/getSessionContextTool";
 import { RenameSessionTool } from "../../../features/session-context/model/renameSessionTool";
@@ -42,6 +43,7 @@ export function createMcpServer(tools: ToolModule[]): McpServer {
 export type AppToolModules = {
   askUserTelegramTool: AskUserTelegramTool;
   notifyTelegramTool: NotifyTelegramTool;
+  sendFileToTelegramTool: SendFileToTelegramTool;
   setSessionContextTool: SetSessionContextTool;
   renameSessionTool: RenameSessionTool;
   getSessionContextTool: GetSessionContextTool;

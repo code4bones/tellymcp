@@ -156,8 +156,8 @@ Output:
 - `context?`
 - `binding?`
   Legacy field name. If present, this is the current Telegram route metadata for the console.
-- `tmux?`
-  Legacy field name. Read it as terminal runtime metadata for the console.
+- `terminal?`
+  Terminal runtime metadata for the console.
 
 ## `refresh_tools_markdown`
 

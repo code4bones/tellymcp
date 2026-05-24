@@ -24,7 +24,7 @@ import type { MinioExchangeStore } from "../../../shared/integrations/object-sto
 import {
   readWorkspaceFile,
   writeXchangeRelativeFile,
-} from "../../../shared/integrations/tmux/client";
+} from "../../../shared/integrations/terminal/client";
 import { TelegramTransport } from "../../../shared/integrations/telegram/transport";
 import { upsertXchangeRecord } from "../../../shared/integrations/xchange/sqliteRecordStore";
 import type { CollaborationBackend } from "./backend";
@@ -273,7 +273,7 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     });
 
     const notePath = await writeXchangeRelativeFile(
-      this.config.tmux,
+      this.config.terminal,
       targetWorkspaceDir,
       this.config.exchange.dir,
       relativeNotePath,
@@ -294,7 +294,7 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     );
     const targetTools = buildIncomingPartnerTools(input.kind, requiresReply);
     await upsertXchangeRecord(
-      this.config.tmux,
+      this.config.terminal,
       targetWorkspaceDir,
       this.config.exchange.dir,
       {
@@ -339,7 +339,7 @@ export class LocalCollaborationBackend implements CollaborationBackend {
       },
     );
     await upsertXchangeRecord(
-      this.config.tmux,
+      this.config.terminal,
       sourceWorkspaceDir,
       this.config.exchange.dir,
       {
@@ -419,7 +419,7 @@ export class LocalCollaborationBackend implements CollaborationBackend {
         },
       );
     } catch (error) {
-      this.logger.warn("tmux nudge failed after local partner delivery", {
+      this.logger.warn("terminal nudge failed after local partner delivery", {
         sessionId: targetSession.sessionId,
         partnerSessionId: sourceSession.sessionId,
         shareId,
@@ -514,12 +514,12 @@ export class LocalCollaborationBackend implements CollaborationBackend {
           })
         : artifactPath;
       const content = await readWorkspaceFile(
-        this.config.tmux,
+        this.config.terminal,
         sourceWorkspaceDir,
         ensuredArtifactPath,
       );
       const materializedArtifactPath = await writeXchangeRelativeFile(
-        this.config.tmux,
+        this.config.terminal,
         targetWorkspaceDir,
         this.config.exchange.dir,
         relativeArtifactPath,

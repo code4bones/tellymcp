@@ -1364,23 +1364,8 @@ const TelegramMcpGatewayService: ServiceSchema = {
         ...(this.normalizeOptionalText?.(input.cwd)
           ? { cwd: this.normalizeOptionalText?.(input.cwd) }
           : {}),
-        ...(this.normalizeOptionalText?.(input.tmux_session_name)
-          ? { tmux_session_name: this.normalizeOptionalText?.(input.tmux_session_name) }
-          : {}),
-        ...(this.normalizeOptionalText?.(input.tmux_window_name)
-          ? { tmux_window_name: this.normalizeOptionalText?.(input.tmux_window_name) }
-          : {}),
-        ...(Number.isInteger(input.tmux_window_index)
-          ? { tmux_window_index: input.tmux_window_index }
-          : {}),
-        ...(this.normalizeOptionalText?.(input.tmux_pane_id)
-          ? { tmux_pane_id: this.normalizeOptionalText?.(input.tmux_pane_id) }
-          : {}),
-        ...(Number.isInteger(input.tmux_pane_index)
-          ? { tmux_pane_index: input.tmux_pane_index }
-          : {}),
-        ...(this.normalizeOptionalText?.(input.tmux_target)
-          ? { tmux_target: this.normalizeOptionalText?.(input.tmux_target) }
+        ...(this.normalizeOptionalText?.(input.terminal_target)
+          ? { terminal_target: this.normalizeOptionalText?.(input.terminal_target) }
           : {}),
         status: this.normalizeOptionalText?.(input.status) || "active",
         meta: this.db.raw(`?::jsonb`, [

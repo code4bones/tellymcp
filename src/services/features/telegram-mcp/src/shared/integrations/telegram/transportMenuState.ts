@@ -62,7 +62,7 @@ export interface TransportMenuStateHost {
   ): string;
   resolveLocaleForContext(ctx: TelegramMenuContext): Promise<SupportedLocale>;
   getPrincipalFromContext(ctx: TelegramMenuContext): Principal | null;
-  getTmuxStatusLine(locale: SupportedLocale): Promise<string>;
+  getTerminalStatusLine(locale: SupportedLocale): Promise<string>;
   setCurrentAttachmentTargetForContext(
     ctx: TelegramMenuContext,
     target: CurrentAttachmentTargetRecord | null,
@@ -107,7 +107,7 @@ export interface TransportMenuStateHost {
       sessionId: string;
       label?: string | undefined;
       activeProjectName?: string | undefined;
-      tmuxTarget?: string | undefined;
+      terminalTarget?: string | undefined;
       updatedAt?: string | undefined;
     } | null>;
   };
@@ -451,7 +451,7 @@ export class TransportMenuState {
       lines.push("");
     }
 
-    lines.push(`<i>${escapeHtml(await this.host.getTmuxStatusLine(locale))}</i>`);
+    lines.push(`<i>${escapeHtml(await this.host.getTerminalStatusLine(locale))}</i>`);
     lines.push("");
     return lines.join("\n");
   }
@@ -674,8 +674,8 @@ export class TransportMenuState {
       activeSessionLine: this.host.t(locale, "menu:buffer.screen.active_session", {
         sessionName: session?.label ?? activeSessionId,
       }),
-      tmuxTargetLine: this.host.t(locale, "menu:buffer.screen.tmux_target", {
-        tmuxTarget: session?.tmuxTarget ?? "not set",
+      terminalTargetLine: this.host.t(locale, "menu:buffer.screen.terminal_target", {
+        terminalTarget: session?.terminalTarget ?? "not set",
       }),
       exportHintLine: this.host.t(locale, "menu:buffer.screen.export_hint"),
       exportModesLine: this.host.t(locale, "menu:buffer.screen.export_modes"),

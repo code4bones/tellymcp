@@ -26,7 +26,7 @@ export function buildIncomingPartnerActionDesc(
   }
 
   if (kind === "reply") {
-    return "Read the reply, incorporate it into the current task, and only send a follow-up if more information is required.";
+    return "Read the reply and inspect any returned artifacts. If this reply completes a task that originally came from a human telegram_message in this session, you must forward the final result to the human now. Use notify_telegram for text-only results. If the reply returned a real local artifact or file, use send_file_to_telegram to deliver that file to the human Telegram chat. Do not leave the result only in local xchange records. Only after the human-facing delivery succeeds, or after you have incorporated the reply into a non-human internal task, may you call mark_xchange_record_read.";
   }
 
   if (kind === "handoff") {
@@ -58,6 +58,10 @@ export function buildIncomingPartnerTools(
 
   if (kind === "handoff" && !tools.includes("send_partner_file")) {
     tools.push("send_partner_file");
+  }
+
+  if (kind === "reply") {
+    tools.push("notify_telegram", "send_file_to_telegram");
   }
 
   tools.push("mark_xchange_record_read");

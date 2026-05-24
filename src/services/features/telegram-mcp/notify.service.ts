@@ -126,6 +126,28 @@ const TelegramMcpNotifyService: ServiceSchema = {
         });
       },
     },
+    sendDocumentRemote: {
+      params: {
+        $$strict: false,
+        session_id: { type: "string", optional: true },
+        cwd: { type: "string", optional: true },
+        file_path: "string",
+        caption: { type: "string", optional: true },
+      },
+      async handler(this: NotifyServiceCarrier, ctx) {
+        const service = this.getNotifyService!();
+        return service.sendDocument({
+          ...(typeof ctx.params.session_id === "string"
+            ? { session_id: ctx.params.session_id }
+            : {}),
+          ...(typeof ctx.params.cwd === "string" ? { cwd: ctx.params.cwd } : {}),
+          file_path: String(ctx.params.file_path),
+          ...(typeof ctx.params.caption === "string"
+            ? { caption: ctx.params.caption }
+            : {}),
+        });
+      },
+    },
   },
 
   created(this: NotifyServiceCarrier) {

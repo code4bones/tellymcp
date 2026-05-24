@@ -13,7 +13,7 @@ import type {
 } from "../../../shared/api/storage/contract";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
-import { readWorkspaceFile } from "../../../shared/integrations/tmux/client";
+import { readWorkspaceFile } from "../../../shared/integrations/terminal/client";
 import { CollaborationService } from "./collaborationService";
 
 type RemoteConsoleInvoker = {
@@ -107,7 +107,7 @@ export class SendPartnerFileService {
       input.file_path,
     );
     const fileContent = await readWorkspaceFile(
-      this.config.tmux,
+      this.config.terminal,
       workspaceDir,
       relativeFilePath,
     );

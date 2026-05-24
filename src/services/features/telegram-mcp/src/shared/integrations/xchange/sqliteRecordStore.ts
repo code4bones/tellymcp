@@ -7,8 +7,8 @@ import type {
   XchangeRecordDirection,
   XchangeRecordStatus,
 } from "../../../entities/xchange/model/types";
-import { ensureXchangeDir } from "../tmux/client";
-import type { TmuxRuntimeConfig } from "../tmux/client";
+import { ensureXchangeDir } from "../terminal/client";
+import type { TerminalRuntimeConfig } from "../terminal/client";
 
 type JsonAttachment = XchangeRecord["attachments"];
 type JsonStringArray = string[];
@@ -109,7 +109,7 @@ function toRecord(row: RowRecord): XchangeRecord {
 }
 
 async function resolveDbPath(
-  config: TmuxRuntimeConfig,
+  config: TerminalRuntimeConfig,
   workspaceDir: string,
   exchangeDirName: string,
 ): Promise<string> {
@@ -162,7 +162,7 @@ function applySchema(db: DatabaseSync): void {
 }
 
 async function withDatabase<T>(
-  config: TmuxRuntimeConfig,
+  config: TerminalRuntimeConfig,
   workspaceDir: string,
   exchangeDirName: string,
   callback: (db: DatabaseSync) => T,
@@ -179,7 +179,7 @@ async function withDatabase<T>(
 }
 
 export async function upsertXchangeRecord(
-  config: TmuxRuntimeConfig,
+  config: TerminalRuntimeConfig,
   workspaceDir: string,
   exchangeDirName: string,
   record: XchangeRecord,
@@ -238,7 +238,7 @@ export async function upsertXchangeRecord(
 }
 
 export async function listXchangeRecords(
-  config: TmuxRuntimeConfig,
+  config: TerminalRuntimeConfig,
   workspaceDir: string,
   exchangeDirName: string,
   sessionId: string,
@@ -277,7 +277,7 @@ export async function listXchangeRecords(
 }
 
 export async function getXchangeRecord(
-  config: TmuxRuntimeConfig,
+  config: TerminalRuntimeConfig,
   workspaceDir: string,
   exchangeDirName: string,
   sessionId: string,
@@ -295,7 +295,7 @@ export async function getXchangeRecord(
 }
 
 export async function markXchangeRecordRead(
-  config: TmuxRuntimeConfig,
+  config: TerminalRuntimeConfig,
   workspaceDir: string,
   exchangeDirName: string,
   sessionId: string,

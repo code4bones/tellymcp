@@ -44,6 +44,20 @@ export const notifyTelegramOutputSchema = z.object({
   message_id: z.number().int().positive().optional(),
 });
 
+export const sendFileToTelegramInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  cwd: z.string().trim().min(1).optional(),
+  file_path: z.string().trim().min(1),
+  caption: z.string().trim().min(1).optional(),
+});
+
+export const sendFileToTelegramOutputSchema = z.object({
+  session_id: z.string(),
+  file_path: z.string(),
+  sent: z.boolean(),
+  message_id: z.number().int().positive().optional(),
+});
+
 export const listGatewaySessionsInputSchema = z.object({
   client_uuid: z.string().trim().min(1).optional(),
   connected_only: z.boolean().optional(),
@@ -143,15 +157,10 @@ export const getSessionContextOutputSchema = z.object({
       linked_at: z.string(),
     })
     .optional(),
-  tmux: z
+  terminal: z
     .object({
       configured: z.boolean(),
-      tmux_session_name: z.string().optional(),
-      tmux_window_name: z.string().optional(),
-      tmux_window_index: z.number().optional(),
-      tmux_pane_id: z.string().optional(),
-      tmux_pane_index: z.number().optional(),
-      tmux_target: z.string().optional(),
+      terminal_target: z.string().optional(),
       last_nudge_at: z.string().optional(),
     })
     .optional(),

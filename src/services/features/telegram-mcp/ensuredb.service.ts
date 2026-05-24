@@ -233,12 +233,7 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
           table.text("local_session_id").notNullable();
           table.text("label");
           table.text("cwd");
-          table.text("tmux_session_name");
-          table.text("tmux_window_name");
-          table.integer("tmux_window_index");
-          table.text("tmux_pane_id");
-          table.integer("tmux_pane_index");
-          table.text("tmux_target");
+          table.text("terminal_target");
           table.text("status").notNullable().defaultTo("active");
           table.jsonb("meta").notNullable().defaultTo(this.db.raw(`'{}'::jsonb`));
           table

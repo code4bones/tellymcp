@@ -47,7 +47,7 @@ export const enMenu = {
         "Share API details, what's new, errors, and git changes with your teammate.",
       link_hint:
         "🔗 Link a partner session to coordinate through shared notes and files.",
-      tmux_mode_direct: "🖧 TMUX mode: direct",
+      terminal_mode_direct: "🖧 Terminal mode: direct",
     },
   },
   sessions: {
@@ -99,11 +99,11 @@ export const enMenu = {
     screen: {
       title: "📄 Content",
       active_session: "📌 Active session: {{sessionName}}",
-      tmux_target: "🖥 tmux target: {{tmuxTarget}}",
+      terminal_target: "🖥 terminal target: {{terminalTarget}}",
       export_hint:
         "Choose how much pane history to export as a Markdown file.",
       export_modes:
-        "Visible is the current pane viewport. Full exports the whole available tmux history.",
+        "Visible is the current terminal viewport. Full exports the whole available terminal history.",
     },
   },
   browser: {
@@ -317,7 +317,7 @@ export const enMenu = {
     step_choose: "- choose the active session",
     step_inbox: "- ordinary Telegram messages go to that session inbox",
     step_nudge:
-      "- if a tmux target is configured, the service nudges the agent automatically",
+      "- if a terminal target is configured, the service nudges the agent automatically",
     step_tools:
       "- the agent then reads the inbox batch through MCP tools",
   },
@@ -410,23 +410,23 @@ export const enMenu = {
       client: "Client: {{packageVersion}} / protocol {{protocolVersion}}",
       gateway: "Gateway: {{packageVersion}} / protocol {{protocolVersion}}",
     },
-    tmux: {
+    terminal: {
       target_invalid_title:
-        "⚠ Automatic tmux nudge failed for session {{sessionName}}.",
-      target_invalid_target: "Saved tmux target is no longer valid: {{tmuxTarget}}",
-      target_invalid_action: "Rebind the tmux target for this session.",
+        "⚠ Automatic terminal nudge failed for session {{sessionName}}.",
+      target_invalid_target: "Saved terminal target is no longer valid: {{terminalTarget}}",
+      target_invalid_action: "Rebind the terminal target for this session.",
       unavailable_title:
-        "⚠ Automatic tmux nudge was skipped for session {{sessionName}}.",
-      unavailable_body: "tmux is unavailable on this machine right now.",
-      unavailable_target: "tmux target: {{tmuxTarget}}",
+        "⚠ Automatic terminal nudge was skipped for session {{sessionName}}.",
+      unavailable_body: "Terminal runtime is unavailable on this machine right now.",
+      unavailable_target: "terminal target: {{terminalTarget}}",
       unavailable_reason:
-        "This usually means the tmux session/server is not running or is unreachable via the current socket path.",
+        "This usually means the terminal runtime is not running or is unreachable for the current target.",
       unavailable_action:
-        "Start tmux and the agent inside it, or update/remove the tmux target for this session.",
+        "Restart the terminal runtime for this console, or update/remove the terminal target for this session.",
       prompt_detected_title:
         "🛎 The agent in session {{sessionName}} may be waiting for your input.",
       prompt_detected_score: "Detection score: {{score}}",
-      prompt_detected_target: "tmux target: {{tmuxTarget}}",
+      prompt_detected_target: "terminal target: {{terminalTarget}}",
       prompt_detected_hint:
         "Open Live or answer in the terminal if this prompt really needs you.",
       prompt_detected_excerpt: "Recent prompt lines:",
@@ -523,7 +523,7 @@ export const enMenu = {
       title: "🛠 Tools",
       linked_sessions: "🗂 Visible sessions: {{count}}",
       broadcast_help:
-        "Broadcast writes your next text message into every linked session inbox and nudges every configured tmux target.",
+        "Broadcast writes your next text message into every linked session inbox and nudges every configured terminal target.",
       prune_help:
         "Prune all clears every Redis key under this Telegram MCP namespace.",
     },
@@ -536,10 +536,7 @@ export const enMenu = {
     inbox_count: "📥 Inbox count: {{count}}",
     route: "🔗 Telegram route: {{value}}",
     partner: "🤝 Partner: {{value}}",
-    tmux_target: "🖥 tmux target: {{value}}",
-    tmux_session: "📺 tmux session: {{value}}",
-    tmux_window: "🪟 tmux window: {{value}}",
-    tmux_pane: "🔹 tmux pane: {{value}}",
+    terminal_target: "🖥 terminal target: {{value}}",
     yes: "yes",
     no: "no",
     not_linked: "not linked",
@@ -575,7 +572,7 @@ export const enMenu = {
     body:
       "Send the next text message to broadcast it to all {{count}} visible sessions.",
     hint:
-      "The message will be stored in every session inbox and the service will nudge every configured tmux target.",
+      "The message will be stored in every session inbox and the service will nudge every configured terminal target.",
     cancel_hint: "Commands like /menu or /help cancel broadcast mode.",
     collab_begin: "Broadcast to {{count}} collab sessions.",
     collab_title: "📣 Collab Broadcast",
@@ -700,7 +697,7 @@ export const enMenu = {
     gateway_relay_inbox_failed:
       "Failed to route the message to the selected gateway session.",
     error_prefix: "Error: {{message}}",
-    tmux_recreated_hint:
+    terminal_recreated_hint:
       "This usually means the pane/window/session was recreated.",
   },
 } as const;

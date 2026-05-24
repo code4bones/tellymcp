@@ -78,7 +78,7 @@ function parseCanonicalGatewaySessionId(
 type LiveRelayBootstrapResult = {
   session_id: string;
   session_label: string | null;
-  tmux_target: boolean;
+  terminal_target: boolean;
   poll_interval_ms: number;
   telegram_user_id: number;
 };
@@ -155,7 +155,7 @@ function normalizeLiveRelayBootstrapResult(
     session_id: sessionId,
     session_label:
       typeof record.session_label === "string" ? record.session_label : null,
-    tmux_target: record.tmux_target === true,
+    terminal_target: record.terminal_target === true,
     poll_interval_ms:
       typeof record.poll_interval_ms === "number" && record.poll_interval_ms > 0
         ? record.poll_interval_ms

@@ -30,13 +30,13 @@ import {
   subscribeForegroundTerminal,
 } from "../shared/integrations/terminal/client";
 import {
-  captureVisibleTmuxPane,
-  captureVisibleTmuxPaneAnsi,
-  getTmuxWindowSize,
-  isTmuxUnavailableError,
-  sendAllowedTmuxAction,
-  sendTmuxLiteralText,
-} from "./webapp/tmux";
+  captureVisibleTerminal,
+  captureVisibleTerminalAnsi,
+  getTerminalWindowSize,
+  isTerminalUnavailableError,
+  sendAllowedTerminalAction,
+  sendTerminalLiteralText,
+} from "./webapp/terminal";
 
 type SessionEntry = {
   server: McpServer;
@@ -59,9 +59,9 @@ export type McpHttpHandler = {
   close: () => Promise<void>;
 };
 
-function formatTmuxHttpError(error: unknown, fallback: string): string {
-  if (isTmuxUnavailableError(error)) {
-    return "tmux is unavailable";
+function formatTerminalHttpError(error: unknown, fallback: string): string {
+  if (isTerminalUnavailableError(error)) {
+    return "terminal runtime is unavailable";
   }
 
   return fallback;
@@ -255,9 +255,9 @@ function readWebhookSecretHeader(req: IncomingMessage): string | undefined {
   return value;
 }
 
-function isRelayTmuxUnavailableMessage(error: unknown): boolean {
+function isRelayTerminalUnavailableMessage(error: unknown): boolean {
   const text = error instanceof Error ? error.message : String(error);
-  return text.includes("tmux is unavailable");
+  return text.includes("terminal runtime is unavailable");
 }
 
 export function createMcpHttpHandler(
@@ -326,7 +326,7 @@ export function createMcpHttpHandler(
     }
 
     const session = await runtime.sessionStore.getSession(webAppSession.sessionId);
-    if (!session?.tmuxTarget) {
+    if (!session?.terminalTarget) {
       return null;
     }
 
@@ -411,8 +411,8 @@ export function createMcpHttpHandler(
               return;
             }
 
-            if (resolved.session?.tmuxTarget && isStreamableTerminalTarget(resolved.session.tmuxTarget)) {
-              sendForegroundTerminalInput(resolved.session.tmuxTarget, data);
+            if (resolved.session?.terminalTarget && isStreamableTerminalTarget(resolved.session.terminalTarget)) {
+              sendForegroundTerminalInput(resolved.session.terminalTarget, data);
             }
             return;
           }
@@ -446,10 +446,10 @@ export function createMcpHttpHandler(
               return;
             }
 
-            if (resolved.session?.tmuxTarget) {
-              await sendAllowedTmuxAction(
-                runtime.config.tmux,
-                resolved.session.tmuxTarget,
+            if (resolved.session?.terminalTarget) {
+              await sendAllowedTerminalAction(
+                runtime.config.terminal,
+                resolved.session.terminalTarget,
                 action as
                   | "up"
                   | "down"
@@ -472,9 +472,9 @@ export function createMcpHttpHandler(
             if (!Number.isFinite(cols) || !Number.isFinite(rows)) {
               return;
             }
-            if (resolved.session?.tmuxTarget && isStreamableTerminalTarget(resolved.session.tmuxTarget)) {
+            if (resolved.session?.terminalTarget && isStreamableTerminalTarget(resolved.session.terminalTarget)) {
               resizeForegroundTerminal(
-                resolved.session.tmuxTarget,
+                resolved.session.terminalTarget,
                 Math.max(20, Math.min(400, Math.round(cols))),
                 Math.max(5, Math.min(200, Math.round(rows))),
               );
@@ -510,27 +510,27 @@ export function createMcpHttpHandler(
       }
 
       if (
-        !resolved.session?.tmuxTarget ||
-        !isStreamableTerminalTarget(resolved.session.tmuxTarget)
+        !resolved.session?.terminalTarget ||
+        !isStreamableTerminalTarget(resolved.session.terminalTarget)
       ) {
         socket.close(1011, "Local live stream is not supported for this terminal");
         return;
       }
 
-      const terminalSize = await getTmuxWindowSize(
-        runtime.config.tmux,
-        resolved.session.tmuxTarget,
+      const terminalSize = await getTerminalWindowSize(
+        runtime.config.terminal,
+        resolved.session.terminalTarget,
       );
-      const content = await captureVisibleTmuxPane(
-        runtime.config.tmux,
-        resolved.session.tmuxTarget,
-        runtime.config.tmux.captureLines,
+      const content = await captureVisibleTerminal(
+        runtime.config.terminal,
+        resolved.session.terminalTarget,
+        runtime.config.terminal.captureLines,
         runtime.config.webapp.visibleScreens,
       );
-      const ansi = await captureVisibleTmuxPaneAnsi(
-        runtime.config.tmux,
-        resolved.session.tmuxTarget,
-        runtime.config.tmux.captureLines,
+      const ansi = await captureVisibleTerminalAnsi(
+        runtime.config.terminal,
+        resolved.session.terminalTarget,
+        runtime.config.terminal.captureLines,
         runtime.config.webapp.visibleScreens,
       );
       sendJson({
@@ -543,7 +543,7 @@ export function createMcpHttpHandler(
         ...(terminalSize ? terminalSize : {}),
       });
 
-      localUnsubscribe = subscribeForegroundTerminal(resolved.session.tmuxTarget, {
+      localUnsubscribe = subscribeForegroundTerminal(resolved.session.terminalTarget, {
         onData: (data) => {
           sendJson({
             type: "data",
@@ -811,7 +811,7 @@ export function createMcpHttpHandler(
               token: record.token,
               session_id: relayBootstrap.session_id,
               session_label: relayBootstrap.session_label,
-              tmux_target: relayBootstrap.tmux_target,
+              terminal_target: relayBootstrap.terminal_target,
               poll_interval_ms: relayBootstrap.poll_interval_ms,
               expires_at: new Date(record.expiresAtMs).toISOString(),
             });
@@ -935,7 +935,7 @@ export function createMcpHttpHandler(
           runtime.logger.info("Telegram WebApp session bootstrapped", {
             sessionId,
             telegramUserId: validated.user.id,
-            hasTmuxTarget: Boolean(session?.tmuxTarget),
+            hasTerminalTarget: Boolean(session?.terminalTarget),
           });
           runtime.webAppLaunchRegistry.deleteByUserId(validated.user.id);
 
@@ -943,7 +943,7 @@ export function createMcpHttpHandler(
             token: record.token,
             session_id: sessionId,
             session_label: session?.label ?? null,
-            tmux_target: Boolean(session?.tmuxTarget),
+            terminal_target: Boolean(session?.terminalTarget),
             poll_interval_ms: runtime.config.webapp.pollIntervalMs,
             expires_at: new Date(record.expiresAtMs).toISOString(),
           });
@@ -1030,8 +1030,8 @@ export function createMcpHttpHandler(
             });
             writeText(
               res,
-              isRelayTmuxUnavailableMessage(error) ? 503 : 500,
-              error instanceof Error ? error.message : "Failed to capture relay tmux pane",
+              isRelayTerminalUnavailableMessage(error) ? 503 : 500,
+              error instanceof Error ? error.message : "Failed to capture relay terminal buffer",
             );
           }
           return;
@@ -1051,26 +1051,26 @@ export function createMcpHttpHandler(
         const session = await runtime.sessionStore.getSession(
           webAppSession.sessionId,
         );
-        if (!session?.tmuxTarget) {
-          writeText(res, 409, "tmux target is not configured for this session");
+        if (!session?.terminalTarget) {
+          writeText(res, 409, "terminal target is not configured for this session");
           return;
         }
 
         try {
-          const terminalSize = await getTmuxWindowSize(
-            runtime.config.tmux,
-            session.tmuxTarget,
+          const terminalSize = await getTerminalWindowSize(
+            runtime.config.terminal,
+            session.terminalTarget,
           );
-          const content = await captureVisibleTmuxPane(
-            runtime.config.tmux,
-            session.tmuxTarget,
-            runtime.config.tmux.captureLines,
+          const content = await captureVisibleTerminal(
+            runtime.config.terminal,
+            session.terminalTarget,
+            runtime.config.terminal.captureLines,
             runtime.config.webapp.visibleScreens,
           );
-          const ansi = await captureVisibleTmuxPaneAnsi(
-            runtime.config.tmux,
-            session.tmuxTarget,
-            runtime.config.tmux.captureLines,
+          const ansi = await captureVisibleTerminalAnsi(
+            runtime.config.terminal,
+            session.terminalTarget,
+            runtime.config.terminal.captureLines,
             runtime.config.webapp.visibleScreens,
           );
           writeJson(res, 200, {
@@ -1091,8 +1091,8 @@ export function createMcpHttpHandler(
           });
           writeText(
             res,
-            isTmuxUnavailableError(error) ? 503 : 500,
-            formatTmuxHttpError(error, "Failed to capture visible tmux pane"),
+            isTerminalUnavailableError(error) ? 503 : 500,
+            formatTerminalHttpError(error, "Failed to capture visible terminal buffer"),
           );
         }
         return;
@@ -1177,8 +1177,8 @@ export function createMcpHttpHandler(
             });
             writeText(
               res,
-              isRelayTmuxUnavailableMessage(error) ? 503 : 500,
-              error instanceof Error ? error.message : "Failed to send relay tmux action",
+              isRelayTerminalUnavailableMessage(error) ? 503 : 500,
+              error instanceof Error ? error.message : "Failed to send relay terminal action",
             );
           }
           return;
@@ -1198,22 +1198,22 @@ export function createMcpHttpHandler(
         const session = await runtime.sessionStore.getSession(
           webAppSession.sessionId,
         );
-        if (!session?.tmuxTarget) {
-          writeText(res, 409, "tmux target is not configured for this session");
+        if (!session?.terminalTarget) {
+          writeText(res, 409, "terminal target is not configured for this session");
           return;
         }
 
         try {
           if (action === "text") {
-            await sendTmuxLiteralText(
-              runtime.config.tmux,
-              session.tmuxTarget,
+            await sendTerminalLiteralText(
+              runtime.config.terminal,
+              session.terminalTarget,
               text,
             );
           } else {
-            await sendAllowedTmuxAction(
-              runtime.config.tmux,
-              session.tmuxTarget,
+            await sendAllowedTerminalAction(
+              runtime.config.terminal,
+              session.terminalTarget,
               action as
                 | "up"
                 | "down"
@@ -1226,7 +1226,7 @@ export function createMcpHttpHandler(
             );
           }
           webAppSessions.touchAction(webAppSession.token, nowMs);
-          runtime.logger.info("Telegram WebApp action sent to tmux", {
+          runtime.logger.info("Telegram WebApp action sent to terminal", {
             sessionId: webAppSession.sessionId,
             telegramUserId: webAppSession.telegramUserId,
             action,
@@ -1247,8 +1247,8 @@ export function createMcpHttpHandler(
           });
           writeText(
             res,
-            isTmuxUnavailableError(error) ? 503 : 500,
-            formatTmuxHttpError(error, "Failed to send tmux action"),
+            isTerminalUnavailableError(error) ? 503 : 500,
+            formatTerminalHttpError(error, "Failed to send terminal action"),
           );
         }
         return;
@@ -1296,20 +1296,9 @@ export function createMcpHttpHandler(
                     linked_at: binding.linkedAt,
                   }
                 : null,
-              tmux: {
-                tmux_session_name: session.tmuxSessionName ?? null,
-                tmux_window_name: session.tmuxWindowName ?? null,
-                tmux_window_index:
-                  typeof session.tmuxWindowIndex === "number"
-                    ? session.tmuxWindowIndex
-                    : null,
-                tmux_pane_id: session.tmuxPaneId ?? null,
-                tmux_pane_index:
-                  typeof session.tmuxPaneIndex === "number"
-                    ? session.tmuxPaneIndex
-                    : null,
-                tmux_target: session.tmuxTarget ?? null,
-                last_nudge_at: session.lastTmuxNudgeAt ?? null,
+              terminal: {
+                terminal_target: session.terminalTarget ?? null,
+                last_nudge_at: session.lastTerminalNudgeAt ?? null,
               },
             };
           }),

@@ -17,8 +17,7 @@ import { GatewayHttpService } from "../../features/distributed-gateway/model/gat
 import { ensureGatewayClientUuid } from "../../features/distributed-client/model/gatewayClientAccess";
 import {
   ensureTerminalTargetForSession,
-  getConfiguredTerminalShellDisplayName,
-} from "../../shared/integrations/tmux/client";
+} from "../../shared/integrations/terminal/client";
 import { stopAllPtyTargets } from "../../shared/integrations/terminal/ptyRegistry";
 import type {
   MaintenanceStore,
@@ -105,11 +104,10 @@ export async function createAppRuntime(input: {
       pollIntervalMs: config.webapp.pollIntervalMs,
       actionCooldownMs: config.webapp.actionCooldownMs,
     },
-    tmux: {
-      transport: config.tmux.transport,
-      nudgeEnabled: config.tmux.nudgeEnabled,
-      nudgeDebounceSeconds: config.tmux.nudgeDebounceSeconds,
-      nudgeCooldownSeconds: config.tmux.nudgeCooldownSeconds,
+    terminal: {
+      nudgeEnabled: config.terminal.nudgeEnabled,
+      nudgeDebounceSeconds: config.terminal.nudgeDebounceSeconds,
+      nudgeCooldownSeconds: config.terminal.nudgeCooldownSeconds,
     },
     telegram: {
       webhookEnabled: config.telegram.webhook.enabled,
@@ -133,7 +131,7 @@ export async function createAppRuntime(input: {
   const objectStore = new MinioExchangeStore(
     input.callBroker,
     stateStore,
-    config.tmux,
+    config.terminal,
     config.exchange.dir,
     config.mcp.vfsScope,
     logger,
@@ -142,7 +140,7 @@ export async function createAppRuntime(input: {
     config.distributed.gatewayAuthToken,
   );
 
-  if (config.distributed.mode === "client" && config.tmux.transport === "pty") {
+  if (config.distributed.mode === "client") {
     const resolvedSession = projectIdentityResolver.resolveSessionDefaults({
       cwd: process.cwd(),
     });
@@ -152,11 +150,11 @@ export async function createAppRuntime(input: {
       resolvedSession.sessionId,
       logger,
     );
-    const terminalTarget = ensureTerminalTargetForSession(config.tmux, {
+    const terminalTarget = ensureTerminalTargetForSession(config.terminal, {
       sessionId: resolvedSession.sessionId,
       cwd: resolvedSession.cwd,
-      ...(typeof existingSession?.tmuxTarget === "string"
-        ? { target: existingSession.tmuxTarget }
+      ...(typeof existingSession?.terminalTarget === "string"
+        ? { target: existingSession.terminalTarget }
         : {}),
     });
 
@@ -193,18 +191,9 @@ export async function createAppRuntime(input: {
       ...(Array.isArray(existingSession?.risks)
         ? { risks: existingSession.risks }
         : {}),
-      tmuxSessionName: "pty",
-      tmuxWindowName: getConfiguredTerminalShellDisplayName(config.tmux),
-      tmuxPaneId: terminalTarget,
-      tmuxTarget: terminalTarget,
-      ...(typeof existingSession?.tmuxWindowIndex === "number"
-        ? { tmuxWindowIndex: existingSession.tmuxWindowIndex }
-        : {}),
-      ...(typeof existingSession?.tmuxPaneIndex === "number"
-        ? { tmuxPaneIndex: existingSession.tmuxPaneIndex }
-        : {}),
-      ...(typeof existingSession?.lastTmuxNudgeAt === "string"
-        ? { lastTmuxNudgeAt: existingSession.lastTmuxNudgeAt }
+      terminalTarget: terminalTarget,
+      ...(typeof existingSession?.lastTerminalNudgeAt === "string"
+        ? { lastTerminalNudgeAt: existingSession.lastTerminalNudgeAt }
         : {}),
       ...(typeof existingSession?.lastSeenToolsHash === "string"
         ? { lastSeenToolsHash: existingSession.lastSeenToolsHash }
@@ -260,23 +249,21 @@ export async function createAppRuntime(input: {
     });
   }
 
-  if (config.tmux.transport === "pty") {
-    const sessions = await sessionStore.listSessions();
-    let recoveredCount = 0;
-    for (const session of sessions) {
-      if (!session.tmuxTarget?.startsWith("pty:")) {
-        continue;
-      }
-
-      ensureTerminalTargetForSession(config.tmux, {
-        sessionId: session.sessionId,
-        ...(session.cwd ? { cwd: session.cwd } : {}),
-        target: session.tmuxTarget,
-      });
-      recoveredCount += 1;
+  const sessions = await sessionStore.listSessions();
+  let recoveredCount = 0;
+  for (const session of sessions) {
+    if (!session.terminalTarget?.startsWith("pty:")) {
+      continue;
     }
-    logger.info("PTY terminal sessions recovered", { recoveredCount });
+
+    ensureTerminalTargetForSession(config.terminal, {
+      sessionId: session.sessionId,
+      ...(session.cwd ? { cwd: session.cwd } : {}),
+      target: session.terminalTarget,
+    });
+    recoveredCount += 1;
   }
+  logger.info("PTY terminal sessions recovered", { recoveredCount });
 
   const telegramTransport = new TelegramTransport(
     config,

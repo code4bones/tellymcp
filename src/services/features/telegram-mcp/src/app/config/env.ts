@@ -129,56 +129,54 @@ const envSchema = z.object({
   WEBAPP_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
   WEBAPP_ACTION_COOLDOWN_MS: z.coerce.number().int().nonnegative().default(150),
   MCP_XCHANGE_DIR: z.string().min(1).default(".mcp-xchange"),
-  TERMINAL_TRANSPORT: z.enum(["tmux", "pty"]).default("tmux"),
   TERMINAL_SHELL: z.string().min(1).default(process.env.SHELL || "bash"),
   TERMINAL_COLS: z.coerce.number().int().positive().default(120),
   TERMINAL_ROWS: z.coerce.number().int().positive().default(40),
   TERMINAL_SCROLLBACK_LINES: z.coerce.number().int().positive().default(4000),
-  TMUX_NUDGE_ENABLED: z
+  TERMINAL_NUDGE_ENABLED: z
     .string()
     .optional()
     .transform((value) => value !== "false"),
-  TMUX_SOCKET_PATH: optionalNonEmptyString,
-  TMUX_NUDGE_DEBOUNCE_SECONDS: z.coerce.number().int().positive().default(10),
-  TMUX_NUDGE_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(30),
-  TMUX_NUDGE_MESSAGE: z
+  TERMINAL_NUDGE_DEBOUNCE_SECONDS: z.coerce.number().int().positive().default(10),
+  TERMINAL_NUDGE_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(30),
+  TERMINAL_NUDGE_MESSAGE: z
     .string()
     .min(1)
     .default(
       "получи newest telegram_message через list_xchange_records/get_xchange_record, выполни запрос и ответь человеку через notify_telegram; не останавливайся на анализе",
     ),
-  TMUX_PARTNER_NUDGE_MESSAGE: z
+  TERMINAL_PARTNER_NUDGE_MESSAGE: z
     .string()
     .min(1)
     .default(
       "получи newest partner_note через list_xchange_records/get_xchange_record, выполни задачу в текущей консоли и обязательно отправь результат через send_partner_note или send_partner_file; только потом mark_xchange_record_read",
     ),
-  TMUX_PARTNER_REPLY_NUDGE_MESSAGE: z
+  TERMINAL_PARTNER_REPLY_NUDGE_MESSAGE: z
     .string()
     .min(1)
     .default(
-      "получи newest partner_note через list_xchange_records/get_xchange_record; если newest note имеет kind=reply или не требует ответа, просто обработай результат и не отправляй новый send_partner_note/send_partner_file без явного нового запроса; только потом mark_xchange_record_read",
+      "получи newest partner_note через list_xchange_records/get_xchange_record; если newest note имеет kind=reply или не требует ответа, не отправляй новый send_partner_note/send_partner_file без явного нового запроса. Если этот reply завершает задачу от человека, сразу отправь финальный результат в Telegram через notify_telegram или send_file_to_telegram; только потом mark_xchange_record_read",
     ),
-  TMUX_CAPTURE_MODE: z.enum(["visible", "lines"]).default("visible"),
-  TMUX_CAPTURE_LINES: z.coerce.number().int().positive().default(300),
-  TMUX_PROMPT_SCAN_ENABLED: z
+  TERMINAL_CAPTURE_MODE: z.enum(["visible", "lines"]).default("visible"),
+  TERMINAL_CAPTURE_LINES: z.coerce.number().int().positive().default(300),
+  TERMINAL_PROMPT_SCAN_ENABLED: z
     .string()
     .optional()
     .transform((value) => value === "true"),
-  TMUX_PROMPT_SCAN_INTERVAL_SECONDS: z.coerce
+  TERMINAL_PROMPT_SCAN_INTERVAL_SECONDS: z.coerce
     .number()
     .int()
     .positive()
     .default(15),
-  TMUX_PROMPT_SCAN_COOLDOWN_SECONDS: z.coerce
+  TERMINAL_PROMPT_SCAN_COOLDOWN_SECONDS: z.coerce
     .number()
     .int()
     .positive()
     .default(120),
-  TMUX_PROMPT_SCAN_STRATEGY: z
+  TERMINAL_PROMPT_SCAN_STRATEGY: z
     .enum(["strict", "balanced"])
     .default("strict"),
-  TMUX_PROMPT_SCAN_MIN_SCORE: z.coerce.number().int().positive().default(5),
+  TERMINAL_PROMPT_SCAN_MIN_SCORE: z.coerce.number().int().positive().default(5),
   BROWSER_ENABLED: z
     .string()
     .optional()
@@ -309,14 +307,12 @@ export type AppConfig = {
   exchange: {
     dir: string;
   };
-  tmux: {
-    transport: "tmux" | "pty";
+  terminal: {
     shell: string;
     cols: number;
     rows: number;
     scrollbackLines: number;
     nudgeEnabled: boolean;
-    socketPath?: string;
     nudgeDebounceSeconds: number;
     nudgeCooldownSeconds: number;
     nudgeMessage: string;
@@ -531,26 +527,24 @@ export function loadConfig(): AppConfig {
     exchange: {
       dir: parsed.MCP_XCHANGE_DIR,
     },
-    tmux: {
-      transport: parsed.TERMINAL_TRANSPORT,
+    terminal: {
       shell: parsed.TERMINAL_SHELL,
       cols: parsed.TERMINAL_COLS,
       rows: parsed.TERMINAL_ROWS,
       scrollbackLines: parsed.TERMINAL_SCROLLBACK_LINES,
-      nudgeEnabled: parsed.TMUX_NUDGE_ENABLED,
-      ...(parsed.TMUX_SOCKET_PATH ? { socketPath: parsed.TMUX_SOCKET_PATH } : {}),
-      nudgeDebounceSeconds: parsed.TMUX_NUDGE_DEBOUNCE_SECONDS,
-      nudgeCooldownSeconds: parsed.TMUX_NUDGE_COOLDOWN_SECONDS,
-      nudgeMessage: parsed.TMUX_NUDGE_MESSAGE,
-      partnerNudgeMessage: parsed.TMUX_PARTNER_NUDGE_MESSAGE,
-      partnerReplyNudgeMessage: parsed.TMUX_PARTNER_REPLY_NUDGE_MESSAGE,
-      captureMode: parsed.TMUX_CAPTURE_MODE,
-      captureLines: parsed.TMUX_CAPTURE_LINES,
-      promptScanEnabled: parsed.TMUX_PROMPT_SCAN_ENABLED,
-      promptScanIntervalSeconds: parsed.TMUX_PROMPT_SCAN_INTERVAL_SECONDS,
-      promptScanCooldownSeconds: parsed.TMUX_PROMPT_SCAN_COOLDOWN_SECONDS,
-      promptScanStrategy: parsed.TMUX_PROMPT_SCAN_STRATEGY,
-      promptScanMinScore: parsed.TMUX_PROMPT_SCAN_MIN_SCORE,
+      nudgeEnabled: parsed.TERMINAL_NUDGE_ENABLED,
+      nudgeDebounceSeconds: parsed.TERMINAL_NUDGE_DEBOUNCE_SECONDS,
+      nudgeCooldownSeconds: parsed.TERMINAL_NUDGE_COOLDOWN_SECONDS,
+      nudgeMessage: parsed.TERMINAL_NUDGE_MESSAGE,
+      partnerNudgeMessage: parsed.TERMINAL_PARTNER_NUDGE_MESSAGE,
+      partnerReplyNudgeMessage: parsed.TERMINAL_PARTNER_REPLY_NUDGE_MESSAGE,
+      captureMode: parsed.TERMINAL_CAPTURE_MODE,
+      captureLines: parsed.TERMINAL_CAPTURE_LINES,
+      promptScanEnabled: parsed.TERMINAL_PROMPT_SCAN_ENABLED,
+      promptScanIntervalSeconds: parsed.TERMINAL_PROMPT_SCAN_INTERVAL_SECONDS,
+      promptScanCooldownSeconds: parsed.TERMINAL_PROMPT_SCAN_COOLDOWN_SECONDS,
+      promptScanStrategy: parsed.TERMINAL_PROMPT_SCAN_STRATEGY,
+      promptScanMinScore: parsed.TERMINAL_PROMPT_SCAN_MIN_SCORE,
     },
     browser: {
       enabled: parsed.BROWSER_ENABLED,

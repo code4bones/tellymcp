@@ -16,12 +16,12 @@ import type {
 import type { HumanTransportNotification } from "../../api/transport/contract";
 import type { Logger } from "../../lib/logger/logger";
 import {
-  detectTmuxInteractivePrompt,
-  type TmuxPromptDetection,
-} from "../../lib/tmuxPromptDetection";
+  detectTerminalInteractivePrompt,
+  type TerminalPromptDetection,
+} from "../../lib/terminalPromptDetection";
 import { type SupportedLocale } from "../../i18n";
 import { slugifyFilenamePart, shouldNudge } from "./transportUtils";
-import type { GatewayActorProfile, TmuxCaptureScope } from "./transportTypes";
+import type { GatewayActorProfile, TerminalCaptureScope } from "./transportTypes";
 
 const TERMINAL_NUDGE_FAILURE_NOTICE_COOLDOWN_MS = 5 * 60 * 1000;
 const TERMINAL_PROMPT_SCAN_MATCHED_LINES_LIMIT = 6;
@@ -34,8 +34,8 @@ export interface TransportTerminalHost {
   sessionStore: SessionStore;
   bindingStore: SessionBindingStore;
   logger: Logger;
-  tmuxNudgeFailureNoticeAt: Map<string, number>;
-  tmuxPromptNoticeState: Map<string, { fingerprint: string; sentAtMs: number }>;
+  terminalNudgeFailureNoticeAt: Map<string, number>;
+  terminalPromptNoticeState: Map<string, { fingerprint: string; sentAtMs: number }>;
   sendTypingForSession(sessionId: string): Promise<void>;
   resolveLocaleForTelegramUserId(userId: number): Promise<SupportedLocale>;
   sendNotification(
@@ -59,15 +59,11 @@ export class TransportTerminalActions {
     sessionId: string,
     session: NonNullable<Awaited<ReturnType<SessionStore["getSession"]>>>,
   ): Promise<string | null> {
-    if (this.host.config.tmux.transport !== "pty") {
-      return session.tmuxTarget ?? null;
-    }
-
-    const ensuredTarget = ensureTerminalTargetForSession(this.host.config.tmux, {
+    const ensuredTarget = ensureTerminalTargetForSession(this.host.config.terminal, {
       sessionId,
       ...(typeof session.cwd === "string" ? { cwd: session.cwd } : {}),
-      ...(typeof session.tmuxTarget === "string"
-        ? { target: session.tmuxTarget }
+      ...(typeof session.terminalTarget === "string"
+        ? { target: session.terminalTarget }
         : {}),
     });
 
@@ -75,20 +71,19 @@ export class TransportTerminalActions {
       return null;
     }
 
-    if (ensuredTarget === session.tmuxTarget && ensuredTarget === session.tmuxPaneId) {
+    if (ensuredTarget === session.terminalTarget) {
       return ensuredTarget;
     }
 
     await this.host.sessionStore.setSession({
       ...session,
-      tmuxTarget: ensuredTarget,
-      tmuxPaneId: ensuredTarget,
+      terminalTarget: ensuredTarget,
       updatedAt: new Date().toISOString(),
     });
 
     this.host.logger.info("PTY terminal target normalized", {
       sessionId,
-      previousTerminalTarget: session.tmuxTarget,
+      previousTerminalTarget: session.terminalTarget,
       normalizedTerminalTarget: ensuredTarget,
     });
 
@@ -97,7 +92,7 @@ export class TransportTerminalActions {
 
   public async nudgeForInboxMessage(sessionId: string): Promise<void> {
     await this.nudgeForSession(sessionId, {
-      message: this.host.config.tmux.nudgeMessage,
+      message: this.host.config.terminal.nudgeMessage,
       reason: "human_message",
     });
   }
@@ -109,12 +104,12 @@ export class TransportTerminalActions {
       reason: "human_message" | "partner_note";
     },
   ): Promise<void> {
-    if (!this.host.config.tmux.nudgeEnabled) {
+    if (!this.host.config.terminal.nudgeEnabled) {
       return;
     }
 
     const session = await this.host.sessionStore.getSession(sessionId);
-    if (!session?.tmuxTarget) {
+    if (!session?.terminalTarget) {
       this.host.logger.debug("terminal nudge skipped", {
         sessionId,
         nudgeReason: input.reason,
@@ -124,16 +119,12 @@ export class TransportTerminalActions {
     }
 
     let normalizedSession = session;
-    if (
-      this.host.config.tmux.transport === "pty" &&
-      !session.tmuxTarget.startsWith("pty:")
-    ) {
+    if (!session.terminalTarget.startsWith("pty:")) {
       const normalizedTarget = await this.ensurePtyTargetForSession(sessionId, session);
       if (normalizedTarget) {
         normalizedSession = {
           ...session,
-          tmuxTarget: normalizedTarget,
-          tmuxPaneId: normalizedTarget,
+          terminalTarget: normalizedTarget,
         };
       }
     }
@@ -141,23 +132,23 @@ export class TransportTerminalActions {
     const nowMs = Date.now();
     if (
       !shouldNudge(
-        session.lastTmuxNudgeAt,
-        this.host.config.tmux.nudgeCooldownSeconds,
+        session.lastTerminalNudgeAt,
+        this.host.config.terminal.nudgeCooldownSeconds,
         nowMs,
       )
     ) {
       this.host.logger.debug("terminal nudge skipped because of cooldown", {
         sessionId,
         reason: input.reason,
-        terminalTarget: normalizedSession.tmuxTarget,
-        lastTmuxNudgeAt: normalizedSession.lastTmuxNudgeAt,
+        terminalTarget: normalizedSession.terminalTarget,
+        lastTerminalNudgeAt: normalizedSession.lastTerminalNudgeAt,
       });
       return;
     }
 
     await this.host.sendTypingForSession(sessionId);
 
-    let terminalTarget = normalizedSession.tmuxTarget ?? null;
+    let terminalTarget = normalizedSession.terminalTarget ?? null;
     if (!terminalTarget) {
       this.host.logger.debug("terminal nudge skipped", {
         sessionId,
@@ -167,17 +158,17 @@ export class TransportTerminalActions {
       return;
     }
     try {
-      await sendTerminalLiteralLine(this.host.config.tmux, terminalTarget, input.message);
+      await sendTerminalLiteralLine(this.host.config.terminal, terminalTarget, input.message);
     } catch (error) {
       if (isTerminalTargetInvalidError(error) || isTerminalUnavailableError(error)) {
-        const recoveredTarget =
-          this.host.config.tmux.transport === "pty"
-            ? await this.ensurePtyTargetForSession(sessionId, normalizedSession)
-            : await this.tryRecoverTarget(sessionId, normalizedSession);
+        const recoveredTarget = await this.ensurePtyTargetForSession(
+          sessionId,
+          normalizedSession,
+        );
         if (recoveredTarget) {
           terminalTarget = recoveredTarget;
           await sendTerminalLiteralLine(
-            this.host.config.tmux,
+            this.host.config.terminal,
             recoveredTarget,
             input.message,
           );
@@ -190,26 +181,20 @@ export class TransportTerminalActions {
       }
     }
 
-    const lastTmuxNudgeAt = new Date(nowMs).toISOString();
+    const lastTerminalNudgeAt = new Date(nowMs).toISOString();
     await this.host.sessionStore.setSession({
       ...normalizedSession,
-      tmuxTarget: terminalTarget,
-      ...(terminalTarget.startsWith("%") || terminalTarget.startsWith("pty:")
-        ? { tmuxPaneId: terminalTarget }
-        : normalizedSession.tmuxPaneId
-          ? { tmuxPaneId: normalizedSession.tmuxPaneId }
-          : {}),
-      lastTmuxNudgeAt,
+      terminalTarget: terminalTarget,
+      lastTerminalNudgeAt,
     });
-    this.host.tmuxNudgeFailureNoticeAt.delete(sessionId);
+    this.host.terminalNudgeFailureNoticeAt.delete(sessionId);
 
     this.host.logger.info("terminal nudge sent", {
       sessionId,
       reason: input.reason,
       message: input.message,
-      tmuxSessionName: normalizedSession.tmuxSessionName,
       terminalTarget,
-      lastTmuxNudgeAt,
+      lastTerminalNudgeAt,
     });
   }
 
@@ -217,34 +202,24 @@ export class TransportTerminalActions {
     sessionId: string,
     session: NonNullable<Awaited<ReturnType<SessionStore["getSession"]>>>,
   ): Promise<string | null> {
-    const recoveredTarget = await resolveTerminalTargetFromHint(this.host.config.tmux, {
-      tmuxSessionName: session.tmuxSessionName,
-      tmuxWindowName: session.tmuxWindowName,
-      tmuxWindowIndex: session.tmuxWindowIndex,
-      tmuxPaneId: session.tmuxPaneId,
-      tmuxPaneIndex: session.tmuxPaneIndex,
-      tmuxTarget: session.tmuxTarget,
+    const recoveredTarget = await resolveTerminalTargetFromHint(this.host.config.terminal, {
+      terminalTarget: session.terminalTarget,
     });
 
-    if (!recoveredTarget || recoveredTarget === session.tmuxTarget) {
+    if (!recoveredTarget || recoveredTarget === session.terminalTarget) {
       return recoveredTarget;
     }
 
     await this.host.sessionStore.setSession({
       ...session,
-      tmuxTarget: recoveredTarget,
-      tmuxPaneId: recoveredTarget,
+      terminalTarget: recoveredTarget,
       updatedAt: new Date().toISOString(),
     });
 
     this.host.logger.warn("terminal target auto-recovered", {
       sessionId,
-      previousTerminalTarget: session.tmuxTarget,
+      previousTerminalTarget: session.terminalTarget,
       recoveredTerminalTarget: recoveredTarget,
-      tmuxSessionName: session.tmuxSessionName,
-      tmuxWindowName: session.tmuxWindowName,
-      tmuxWindowIndex: session.tmuxWindowIndex,
-      tmuxPaneIndex: session.tmuxPaneIndex,
     });
 
     return recoveredTarget;
@@ -260,17 +235,17 @@ export class TransportTerminalActions {
       return;
     }
     const nowMs = Date.now();
-    const lastNoticeAt = this.host.tmuxNudgeFailureNoticeAt.get(sessionId);
+    const lastNoticeAt = this.host.terminalNudgeFailureNoticeAt.get(sessionId);
     if (
       lastNoticeAt &&
       nowMs - lastNoticeAt < TERMINAL_NUDGE_FAILURE_NOTICE_COOLDOWN_MS
     ) {
       return;
     }
-    this.host.tmuxNudgeFailureNoticeAt.set(sessionId, nowMs);
+    this.host.terminalNudgeFailureNoticeAt.set(sessionId, nowMs);
 
     const sessionLabel = session.label ?? sessionId;
-    const tmuxTarget = session.tmuxTarget ?? "unknown";
+    const terminalTarget = session.terminalTarget ?? "unknown";
     const errorMessage = error instanceof Error ? error.message : String(error);
     const locale = await this.host.resolveLocaleForTelegramUserId(
       binding.telegramUserId,
@@ -285,17 +260,17 @@ export class TransportTerminalActions {
           telegramUserId: binding.telegramUserId,
         },
         message: [
-          this.host.t(locale, "menu:notices.tmux.target_invalid_title", {
+          this.host.t(locale, "menu:notices.terminal.target_invalid_title", {
             sessionName: sessionLabel,
           }),
-          this.host.t(locale, "menu:notices.tmux.target_invalid_target", {
-            tmuxTarget,
+          this.host.t(locale, "menu:notices.terminal.target_invalid_target", {
+            terminalTarget,
           }),
           this.host.t(locale, "menu:system.error_prefix", {
             message: errorMessage,
           }),
-          this.host.t(locale, "menu:system.tmux_recreated_hint"),
-          this.host.t(locale, "menu:notices.tmux.target_invalid_action"),
+          this.host.t(locale, "menu:system.terminal_recreated_hint"),
+          this.host.t(locale, "menu:notices.terminal.target_invalid_action"),
         ].join("\n"),
       });
     } catch (notifyError) {
@@ -303,7 +278,7 @@ export class TransportTerminalActions {
         "Failed to deliver terminal target failure notification",
         {
           sessionId,
-          tmuxTarget,
+          terminalTarget,
           telegramChatId: binding.telegramChatId,
           telegramUserId: binding.telegramUserId,
           notifyError:
@@ -325,17 +300,17 @@ export class TransportTerminalActions {
       return;
     }
     const nowMs = Date.now();
-    const lastNoticeAt = this.host.tmuxNudgeFailureNoticeAt.get(sessionId);
+    const lastNoticeAt = this.host.terminalNudgeFailureNoticeAt.get(sessionId);
     if (
       lastNoticeAt &&
       nowMs - lastNoticeAt < TERMINAL_NUDGE_FAILURE_NOTICE_COOLDOWN_MS
     ) {
       return;
     }
-    this.host.tmuxNudgeFailureNoticeAt.set(sessionId, nowMs);
+    this.host.terminalNudgeFailureNoticeAt.set(sessionId, nowMs);
 
     const sessionLabel = session.label ?? sessionId;
-    const tmuxTarget = session.tmuxTarget ?? "unknown";
+    const terminalTarget = session.terminalTarget ?? "unknown";
     const errorMessage = error instanceof Error ? error.message : String(error);
     const locale = await this.host.resolveLocaleForTelegramUserId(
       binding.telegramUserId,
@@ -350,24 +325,24 @@ export class TransportTerminalActions {
           telegramUserId: binding.telegramUserId,
         },
         message: [
-          this.host.t(locale, "menu:notices.tmux.unavailable_title", {
+          this.host.t(locale, "menu:notices.terminal.unavailable_title", {
             sessionName: sessionLabel,
           }),
-          this.host.t(locale, "menu:notices.tmux.unavailable_body"),
-          this.host.t(locale, "menu:notices.tmux.unavailable_target", {
-            tmuxTarget,
+          this.host.t(locale, "menu:notices.terminal.unavailable_body"),
+          this.host.t(locale, "menu:notices.terminal.unavailable_target", {
+            terminalTarget,
           }),
           this.host.t(locale, "menu:system.error_prefix", {
             message: errorMessage,
           }),
-          this.host.t(locale, "menu:notices.tmux.unavailable_reason"),
-          this.host.t(locale, "menu:notices.tmux.unavailable_action"),
+          this.host.t(locale, "menu:notices.terminal.unavailable_reason"),
+          this.host.t(locale, "menu:notices.terminal.unavailable_action"),
         ].join("\n"),
       });
     } catch (notifyError) {
       this.host.logger.warn("Failed to deliver terminal unavailable notification", {
         sessionId,
-        tmuxTarget,
+        terminalTarget,
         telegramChatId: binding.telegramChatId,
         telegramUserId: binding.telegramUserId,
         notifyError:
@@ -379,18 +354,18 @@ export class TransportTerminalActions {
   }
 
   public async scanPromptForSession(session: SessionRecord): Promise<void> {
-    if (!session.tmuxTarget) {
-      this.host.tmuxPromptNoticeState.delete(session.sessionId);
+    if (!session.terminalTarget) {
+      this.host.terminalPromptNoticeState.delete(session.sessionId);
       return;
     }
 
     const binding = await this.host.bindingStore.getBinding(session.sessionId);
     if (!binding) {
-      this.host.tmuxPromptNoticeState.delete(session.sessionId);
+      this.host.terminalPromptNoticeState.delete(session.sessionId);
       return;
     }
 
-    let terminalTarget = session.tmuxTarget;
+    let terminalTarget = session.terminalTarget;
     let capture: string;
 
     try {
@@ -424,10 +399,7 @@ export class TransportTerminalActions {
         terminalTarget = recoveredTarget;
         capture = await this.capturePromptBuffer({
           ...session,
-          tmuxTarget: recoveredTarget,
-          tmuxPaneId: recoveredTarget.startsWith("%") || recoveredTarget.startsWith("pty:")
-            ? recoveredTarget
-            : session.tmuxPaneId,
+          terminalTarget: recoveredTarget,
         });
       } else {
         this.host.logger.warn("terminal prompt scan capture failed", {
@@ -442,19 +414,19 @@ export class TransportTerminalActions {
       }
     }
 
-    const detection = detectTmuxInteractivePrompt(capture, {
-      strategy: this.host.config.tmux.promptScanStrategy,
-      minScore: this.host.config.tmux.promptScanMinScore,
+    const detection = detectTerminalInteractivePrompt(capture, {
+      strategy: this.host.config.terminal.promptScanStrategy,
+      minScore: this.host.config.terminal.promptScanMinScore,
     });
 
     if (!detection) {
       this.host.logger.debug("terminal prompt scan found no interactive prompt", {
         sessionId: session.sessionId,
         terminalTarget,
-        strategy: this.host.config.tmux.promptScanStrategy,
-        minScore: this.host.config.tmux.promptScanMinScore,
+        strategy: this.host.config.terminal.promptScanStrategy,
+        minScore: this.host.config.terminal.promptScanMinScore,
       });
-      this.host.tmuxPromptNoticeState.delete(session.sessionId);
+      this.host.terminalPromptNoticeState.delete(session.sessionId);
       return;
     }
 
@@ -467,36 +439,35 @@ export class TransportTerminalActions {
 
   public async capturePromptBuffer(session: {
     sessionId: string;
-    tmuxTarget?: string | undefined;
-    tmuxPaneId?: string | undefined;
+    terminalTarget?: string | undefined;
   }): Promise<string> {
-    const target = session.tmuxTarget;
+    const target = session.terminalTarget;
     if (!target) {
       throw new Error("terminal target is not configured");
     }
-    if (this.host.config.tmux.captureMode === "visible") {
+    if (this.host.config.terminal.captureMode === "visible") {
       return captureVisibleTerminal(
-        this.host.config.tmux,
+        this.host.config.terminal,
         target,
-        this.host.config.tmux.captureLines,
+        this.host.config.terminal.captureLines,
         this.host.config.webapp.visibleScreens,
       );
     }
     return captureTerminalPaneRange(
-      this.host.config.tmux,
+      this.host.config.terminal,
       target,
-      `-${this.host.config.tmux.captureLines}`,
+      `-${this.host.config.terminal.captureLines}`,
       false,
     );
   }
 
   public shouldSendPromptNotice(
     sessionId: string,
-    detection: TmuxPromptDetection,
+    detection: TerminalPromptDetection,
   ): boolean {
-    const existing = this.host.tmuxPromptNoticeState.get(sessionId);
+    const existing = this.host.terminalPromptNoticeState.get(sessionId);
     const nowMs = Date.now();
-    const cooldownMs = this.host.config.tmux.promptScanCooldownSeconds * 1000;
+    const cooldownMs = this.host.config.terminal.promptScanCooldownSeconds * 1000;
     if (
       existing &&
       existing.fingerprint === detection.fingerprint &&
@@ -509,12 +480,12 @@ export class TransportTerminalActions {
           fingerprint: detection.fingerprint,
           score: detection.score,
           reasons: detection.reasons,
-          cooldownSeconds: this.host.config.tmux.promptScanCooldownSeconds,
+          cooldownSeconds: this.host.config.terminal.promptScanCooldownSeconds,
         },
       );
       return false;
     }
-    this.host.tmuxPromptNoticeState.set(sessionId, {
+    this.host.terminalPromptNoticeState.set(sessionId, {
       fingerprint: detection.fingerprint,
       sentAtMs: nowMs,
     });
@@ -524,7 +495,7 @@ export class TransportTerminalActions {
   public async notifyPromptDetected(
     session: SessionRecord,
     binding: BindingRecord,
-    detection: TmuxPromptDetection,
+    detection: TerminalPromptDetection,
     terminalTarget: string,
   ): Promise<void> {
     if (!binding) {
@@ -546,17 +517,17 @@ export class TransportTerminalActions {
         telegramUserId: binding.telegramUserId,
       },
       message: [
-        this.host.t(locale, "menu:notices.tmux.prompt_detected_title", {
+        this.host.t(locale, "menu:notices.terminal.prompt_detected_title", {
           sessionName: sessionLabel,
         }),
-        this.host.t(locale, "menu:notices.tmux.prompt_detected_score", {
+        this.host.t(locale, "menu:notices.terminal.prompt_detected_score", {
           score: detection.score,
         }),
-        this.host.t(locale, "menu:notices.tmux.prompt_detected_target", {
-          tmuxTarget: terminalTarget,
+        this.host.t(locale, "menu:notices.terminal.prompt_detected_target", {
+          terminalTarget: terminalTarget,
         }),
-        this.host.t(locale, "menu:notices.tmux.prompt_detected_hint"),
-        this.host.t(locale, "menu:notices.tmux.prompt_detected_excerpt"),
+        this.host.t(locale, "menu:notices.terminal.prompt_detected_hint"),
+        this.host.t(locale, "menu:notices.terminal.prompt_detected_excerpt"),
         excerpt,
       ].join("\n"),
     });
@@ -588,8 +559,8 @@ export class TransportTerminalActions {
       sessionId: session.sessionId,
       terminalTarget,
       score: detection.score,
-      strategy: this.host.config.tmux.promptScanStrategy,
-      minScore: this.host.config.tmux.promptScanMinScore,
+      strategy: this.host.config.terminal.promptScanStrategy,
+      minScore: this.host.config.terminal.promptScanMinScore,
       reasons: detection.reasons,
       fingerprint: detection.fingerprint,
       matchedLines: detection.matchedLines,
@@ -601,25 +572,22 @@ export class TransportTerminalActions {
     session: {
       sessionId: string;
       label?: string | undefined;
-      tmuxTarget?: string | undefined;
-      tmuxSessionName?: string | undefined;
-      tmuxWindowName?: string | undefined;
-      tmuxPaneId?: string | undefined;
+      terminalTarget?: string | undefined;
     },
-    scope: TmuxCaptureScope,
+    scope: TerminalCaptureScope,
   ): Promise<{
     filename: string;
     buffer: Buffer;
-    captureMode: TmuxCaptureScope["mode"];
+    captureMode: TerminalCaptureScope["mode"];
     scopeDescription: string;
   }> {
-    const target = session.tmuxTarget;
+    const target = session.terminalTarget;
     if (!target) {
       throw new Error("terminal target is not configured");
     }
     const paneStart = await this.resolveCaptureStart(target, scope);
     const stdout = await captureTerminalPaneRange(
-      this.host.config.tmux,
+      this.host.config.terminal,
       target,
       paneStart,
       false,
@@ -627,7 +595,7 @@ export class TransportTerminalActions {
 
     const capturedAt = new Date().toISOString();
     const scopeDescription = this.describeCaptureScope(scope);
-    const titleBase = session.label ?? session.tmuxWindowName ?? session.sessionId;
+    const titleBase = session.label ?? session.sessionId;
     const filenameBase = slugifyFilenamePart(titleBase) || "session-buffer";
     const timestamp = capturedAt.replace(/[:.]/g, "-");
     const filename = `${filenameBase}-${timestamp}.md`;
@@ -637,9 +605,6 @@ export class TransportTerminalActions {
       `- Session: ${session.label ?? session.sessionId}`,
       `- Session ID: ${session.sessionId}`,
       `- terminal target: ${target}`,
-      ...(session.tmuxSessionName ? [`- terminal session: ${session.tmuxSessionName}`] : []),
-      ...(session.tmuxWindowName ? [`- terminal window: ${session.tmuxWindowName}`] : []),
-      ...(session.tmuxPaneId ? [`- terminal pane: ${session.tmuxPaneId}`] : []),
       `- Capture scope: ${scopeDescription}`,
       `- Captured at: ${capturedAt}`,
       "",
@@ -659,7 +624,7 @@ export class TransportTerminalActions {
 
   public async resolveCaptureStart(
     target: string,
-    scope: TmuxCaptureScope,
+    scope: TerminalCaptureScope,
   ): Promise<string> {
     if (scope.mode === "full") {
       return "-";
@@ -667,14 +632,14 @@ export class TransportTerminalActions {
     if (scope.mode === "lines") {
       return `-${scope.lines}`;
     }
-    const height = await getTerminalWindowHeight(this.host.config.tmux, target);
+    const height = await getTerminalWindowHeight(this.host.config.terminal, target);
     if (typeof height !== "number" || height <= 0) {
-      return `-${this.host.config.tmux.captureLines}`;
+      return `-${this.host.config.terminal.captureLines}`;
     }
     return `-${height}`;
   }
 
-  public describeCaptureScope(scope: TmuxCaptureScope): string {
+  public describeCaptureScope(scope: TerminalCaptureScope): string {
     switch (scope.mode) {
       case "visible":
         return "visible pane";

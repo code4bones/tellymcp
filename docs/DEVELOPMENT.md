@@ -47,7 +47,6 @@ Key runtime entrypoints:
 
 - `runtime.ts`
 - `foregroundTerminalRuntime.ts`
-- `runStdioMcpServer.ts`
 - `browserService.ts`
 - `xchangeService.ts`
 
@@ -137,14 +136,7 @@ Inter-console screenshot delivery:
 
 ## Terminal Model
 
-Terminal integration is still named `tmux` in parts of the codebase, but the real meaning is terminal runtime metadata.
-
-Supported transports:
-
-- `tmux`
-- `pty`
-
-The current codebase still contains `tmux*` names in runtime/session metadata. Treat that as technical naming debt, not as a separate product model.
+The runtime uses a built-in PTY-backed terminal layer.
 
 ## Webhook Model
 

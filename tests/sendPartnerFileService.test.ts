@@ -49,7 +49,7 @@ describe("SendPartnerFileService", () => {
       .fn<CollaborationService["sendPartnerNote"]>()
       .mockResolvedValue(createOutput());
     const service = new SendPartnerFileService(
-      { tmux: {} } as AppConfig,
+      { terminal: {} } as AppConfig,
       {
         getSession: vi.fn<SessionStore["getSession"]>().mockResolvedValue({
           sessionId: "left-session",
@@ -110,7 +110,7 @@ describe("SendPartnerFileService", () => {
     tempDirs.push(workspaceDir);
 
     const service = new SendPartnerFileService(
-      { tmux: {} } as AppConfig,
+      { terminal: {} } as AppConfig,
       {
         getSession: vi.fn<SessionStore["getSession"]>().mockResolvedValue({
           sessionId: "left-session",

@@ -9,13 +9,8 @@ export type SessionContext = {
   files?: string[] | undefined;
   decisions?: string[] | undefined;
   risks?: string[] | undefined;
-  tmuxSessionName?: string | undefined;
-  tmuxWindowName?: string | undefined;
-  tmuxWindowIndex?: number | undefined;
-  tmuxPaneId?: string | undefined;
-  tmuxPaneIndex?: number | undefined;
-  tmuxTarget?: string | undefined;
-  lastTmuxNudgeAt?: string | undefined;
+  terminalTarget?: string | undefined;
+  lastTerminalNudgeAt?: string | undefined;
   lastSeenToolsHash?: string | undefined;
   lastNotifiedToolsHash?: string | undefined;
   updatedAt: string;
@@ -77,14 +72,9 @@ export type GetSessionContextOutput = {
     telegram_username?: string | undefined;
     linked_at: string;
   };
-  tmux?: {
+  terminal?: {
     configured: boolean;
-    tmux_session_name?: string | undefined;
-    tmux_window_name?: string | undefined;
-    tmux_window_index?: number | undefined;
-    tmux_pane_id?: string | undefined;
-    tmux_pane_index?: number | undefined;
-    tmux_target?: string | undefined;
+    terminal_target?: string | undefined;
     last_nudge_at?: string | undefined;
   };
 };

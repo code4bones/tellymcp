@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 
-export type TmuxPromptScanStrategy = "strict" | "balanced";
+export type TerminalPromptScanStrategy = "strict" | "balanced";
 
-export type TmuxPromptDetection = {
+export type TerminalPromptDetection = {
   score: number;
   fingerprint: string;
   excerpt: string;
@@ -11,7 +11,7 @@ export type TmuxPromptDetection = {
 };
 
 type DetectionOptions = {
-  strategy?: TmuxPromptScanStrategy;
+  strategy?: TerminalPromptScanStrategy;
   minScore?: number;
   maxLines?: number;
 };
@@ -137,7 +137,7 @@ function scoreStrongLine(line: string): ScoreContribution[] {
 
 function scoreMediumLine(
   line: string,
-  strategy: TmuxPromptScanStrategy,
+  strategy: TerminalPromptScanStrategy,
 ): ScoreContribution[] {
   const contributions: ScoreContribution[] = [];
 
@@ -169,7 +169,7 @@ function isStrongReason(reason: string): boolean {
 
 function detectGroupedSignals(
   candidateLines: string[],
-  strategy: TmuxPromptScanStrategy,
+  strategy: TerminalPromptScanStrategy,
 ): DetectionSignal[] {
   const signals: DetectionSignal[] = [];
   const hasPrimaryAllowChoice = candidateLines.some((line) =>
@@ -208,10 +208,10 @@ function collectCandidateLines(rawText: string, maxLines: number): string[] {
   return normalized.slice(-Math.max(1, maxLines));
 }
 
-export function detectTmuxInteractivePrompt(
+export function detectTerminalInteractivePrompt(
   rawText: string,
   options: DetectionOptions = {},
-): TmuxPromptDetection | null {
+): TerminalPromptDetection | null {
   const strategy = options.strategy ?? "strict";
   const minScore = options.minScore ?? (strategy === "balanced" ? 4 : 5);
   const candidateLines = collectCandidateLines(rawText, options.maxLines ?? 40);

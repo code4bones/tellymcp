@@ -1,16 +1,16 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  captureTmuxPaneRange,
-  captureVisibleTmuxPane,
+  captureTerminalPaneRange,
+  captureVisibleTerminal,
   ensureTerminalTargetForSession,
-  sendAllowedTmuxAction,
-  sendTmuxLiteralText,
-  type TmuxRuntimeConfig,
-} from "@src/services/features/telegram-mcp/src/shared/integrations/tmux/client";
+  sendAllowedTerminalAction,
+  sendTerminalLiteralText,
+  type TerminalRuntimeConfig,
+} from "@src/services/features/telegram-mcp/src/shared/integrations/terminal/client";
 import { stopAllPtyTargets } from "@src/services/features/telegram-mcp/src/shared/integrations/terminal/ptyRegistry";
 
-const PTY_CONFIG: TmuxRuntimeConfig = {
+const PTY_CONFIG: TerminalRuntimeConfig = {
   transport: "pty",
   shell: "/bin/cat",
   cols: 80,
@@ -18,7 +18,7 @@ const PTY_CONFIG: TmuxRuntimeConfig = {
   scrollbackLines: 200,
 };
 
-const PTY_SHELL_CONFIG: TmuxRuntimeConfig = {
+const PTY_SHELL_CONFIG: TerminalRuntimeConfig = {
   transport: "pty",
   shell: "/bin/sh",
   cols: 80,
@@ -55,11 +55,11 @@ describe("pty terminal transport", () => {
 
     expect(target).toBe("pty:backend");
 
-    await sendTmuxLiteralText(PTY_CONFIG, target, "hello from pty");
-    await sendAllowedTmuxAction(PTY_CONFIG, target, "enter");
+    await sendTerminalLiteralText(PTY_CONFIG, target, "hello from pty");
+    await sendAllowedTerminalAction(PTY_CONFIG, target, "enter");
 
     await waitFor(async () => {
-      const snapshot = await captureTmuxPaneRange(
+      const snapshot = await captureTerminalPaneRange(
         PTY_CONFIG,
         target,
         "-20",
@@ -68,7 +68,7 @@ describe("pty terminal transport", () => {
       return snapshot.includes("hello from pty");
     });
 
-    const visible = await captureVisibleTmuxPane(PTY_CONFIG, target, 20, 1);
+    const visible = await captureVisibleTerminal(PTY_CONFIG, target, 20, 1);
     expect(visible).toContain("hello from pty");
   });
 
@@ -78,18 +78,18 @@ describe("pty terminal transport", () => {
       cwd: process.cwd(),
     });
 
-    await sendTmuxLiteralText(PTY_SHELL_CONFIG, target, "stty -echo");
-    await sendAllowedTmuxAction(PTY_SHELL_CONFIG, target, "enter");
+    await sendTerminalLiteralText(PTY_SHELL_CONFIG, target, "stty -echo");
+    await sendAllowedTerminalAction(PTY_SHELL_CONFIG, target, "enter");
 
-    await sendTmuxLiteralText(
+    await sendTerminalLiteralText(
       PTY_SHELL_CONFIG,
       target,
       "printf '\\033[Kfoo\\rbar\\033[27;3H\\033]0;title\\007\\n'",
     );
-    await sendAllowedTmuxAction(PTY_SHELL_CONFIG, target, "enter");
+    await sendAllowedTerminalAction(PTY_SHELL_CONFIG, target, "enter");
 
     await waitFor(async () => {
-      const snapshot = await captureVisibleTmuxPane(
+      const snapshot = await captureVisibleTerminal(
         PTY_SHELL_CONFIG,
         target,
         20,
@@ -98,7 +98,7 @@ describe("pty terminal transport", () => {
       return snapshot.includes("bar");
     });
 
-    const visible = await captureVisibleTmuxPane(
+    const visible = await captureVisibleTerminal(
       PTY_SHELL_CONFIG,
       target,
       20,

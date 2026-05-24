@@ -30,7 +30,7 @@ export interface TransportSessionActionsHost {
   ): Promise<{ message_id: number } | void>;
   showSessionsMenu(ctx: TelegramMenuContext, introText?: string): Promise<void>;
   clearPendingInteractionsForContext(ctx: TelegramMenuContext): void;
-  clearTmuxNudgeDebounceTimers(): void;
+  clearTerminalNudgeDebounceTimers(): void;
   callGatewayJson<T>(path: string, payload?: Record<string, unknown>): Promise<T>;
 }
 
@@ -141,7 +141,7 @@ export class TransportSessionActions {
     }
     const result = await this.host.maintenanceStore.pruneAll();
     this.host.clearPendingInteractionsForContext(ctx);
-    this.host.clearTmuxNudgeDebounceTimers();
+    this.host.clearTerminalNudgeDebounceTimers();
     await this.host.showSessionsMenu(
       ctx,
       `Prune complete. Deleted ${result.deletedKeys} Redis keys.${prunedGateway ? " Gateway DB cleared." : ""}`,
@@ -180,22 +180,9 @@ export class TransportSessionActions {
       ...(session?.files ? { files: session.files } : {}),
       ...(session?.decisions ? { decisions: session.decisions } : {}),
       ...(session?.risks ? { risks: session.risks } : {}),
-      ...(session?.tmuxSessionName
-        ? { tmuxSessionName: session.tmuxSessionName }
-        : {}),
-      ...(session?.tmuxWindowName
-        ? { tmuxWindowName: session.tmuxWindowName }
-        : {}),
-      ...(typeof session?.tmuxWindowIndex === "number"
-        ? { tmuxWindowIndex: session.tmuxWindowIndex }
-        : {}),
-      ...(session?.tmuxPaneId ? { tmuxPaneId: session.tmuxPaneId } : {}),
-      ...(typeof session?.tmuxPaneIndex === "number"
-        ? { tmuxPaneIndex: session.tmuxPaneIndex }
-        : {}),
-      ...(session?.tmuxTarget ? { tmuxTarget: session.tmuxTarget } : {}),
-      ...(session?.lastTmuxNudgeAt
-        ? { lastTmuxNudgeAt: session.lastTmuxNudgeAt }
+      ...(session?.terminalTarget ? { terminalTarget: session.terminalTarget } : {}),
+      ...(session?.lastTerminalNudgeAt
+        ? { lastTerminalNudgeAt: session.lastTerminalNudgeAt }
         : {}),
       updatedAt,
     });

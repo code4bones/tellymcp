@@ -5,7 +5,7 @@ import type {
   SessionStore,
   TelegramXchangeFileMetaStore,
 } from "../../api/storage/contract";
-import { listXchangeFiles } from "../tmux/client";
+import { listXchangeFiles } from "../terminal/client";
 
 export interface TransportXchangeStateHost {
   config: AppConfig;
@@ -85,7 +85,7 @@ export class TransportXchangeState {
       );
     }
     const files = await listXchangeFiles(
-      this.host.config.tmux,
+      this.host.config.terminal,
       resolvedWorkspaceDir,
       this.host.config.exchange.dir,
     );

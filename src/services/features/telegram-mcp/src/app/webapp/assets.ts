@@ -331,7 +331,7 @@ function shouldRecoverWebAppSession(error) {
   );
 }
 
-function applyTmuxAvailability(hasTarget) {
+function applyTerminalAvailability(hasTarget) {
   elements.interrupt.disabled = !hasTarget;
   elements.type.disabled = !hasTarget;
   elements.esc.disabled = !hasTarget;
@@ -905,9 +905,9 @@ function applyBootstrapPayload(bootstrapPayload) {
     bootstrapPayload.session_label || bootstrapPayload.session_id;
   elements.session.hidden = false;
 
-  const hasTmuxTarget = Boolean(bootstrapPayload.tmux_target);
-  applyTmuxAvailability(hasTmuxTarget);
-  setStatus(hasTmuxTarget ? "Live" : "No tmux target", !hasTmuxTarget);
+  const hasTerminalTarget = Boolean(bootstrapPayload.terminal_target);
+  applyTerminalAvailability(hasTerminalTarget);
+  setStatus(hasTerminalTarget ? "Live" : "No terminal target", !hasTerminalTarget);
 }
 
 async function recoverWebAppSession() {
@@ -1121,13 +1121,13 @@ async function connectLiveSocket() {
 function confirmInterrupt() {
   return new Promise((resolve) => {
     if (tg && typeof tg.showConfirm === "function") {
-      tg.showConfirm("Send Ctrl+C to the tmux session? This can stop the running agent.", (ok) => {
+      tg.showConfirm("Send Ctrl+C to the terminal session? This can stop the running agent.", (ok) => {
         resolve(Boolean(ok));
       });
       return;
     }
 
-    resolve(window.confirm("Send Ctrl+C to the tmux session? This can stop the running agent."));
+    resolve(window.confirm("Send Ctrl+C to the terminal session? This can stop the running agent."));
   });
 }
 
@@ -1175,7 +1175,7 @@ function bindUi() {
   });
 
   elements.type.addEventListener("click", () => {
-    const value = window.prompt("Send text to tmux without Enter:", "");
+    const value = window.prompt("Send text to terminal without Enter:", "");
     if (value === null || value.length === 0) {
       return;
     }
@@ -1288,7 +1288,7 @@ ${XTERM_WEBAPP_CSS}</style>
         <span class="toolbar-spacer" aria-hidden="true"></span>
         <button class="btn compact danger" data-role="interrupt" type="button">Ctrl+C</button>
       </div>
-      <div class="terminal" data-role="terminal">Waiting for tmux buffer…</div>
+      <div class="terminal" data-role="terminal">Waiting for terminal buffer…</div>
       <div class="statusbar">
         <div class="status-left">
           <span data-role="status">Loading… - Live View</span>

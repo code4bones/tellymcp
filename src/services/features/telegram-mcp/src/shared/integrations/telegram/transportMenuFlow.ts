@@ -14,7 +14,7 @@ import type {
   TelegramEditMessageOptions,
   TelegramMenuContext,
   TelegramSendMessageOptions,
-  TmuxCaptureScope,
+  TerminalCaptureScope,
 } from "./transportTypes";
 import type {
   SessionBindingStore,
@@ -23,12 +23,12 @@ import type {
 import type { SupportedLocale } from "../../i18n";
 import type { Logger } from "../../lib/logger/logger";
 import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
-import { buildPrincipalKey, formatTmuxBridgeError } from "./transportUtils";
-import { isTmuxUnavailableError } from "../tmux/client";
+import { buildPrincipalKey, formatTerminalBridgeError } from "./transportUtils";
+import { isTerminalUnavailableError } from "../terminal/client";
 import type { TransportLiveActions } from "./transportLiveActions";
 import type { TransportMenuState } from "./transportMenuState";
 import type { TransportProjectView } from "./transportProjectView";
-import type { TransportTmuxActions } from "./transportTmuxActions";
+import type { TransportTerminalActions } from "./transportTerminalActions";
 
 export interface TransportMenuFlowHost {
   config: AppConfig;
@@ -38,7 +38,7 @@ export interface TransportMenuFlowHost {
   menuState: TransportMenuState;
   projectView: TransportProjectView;
   liveActions: TransportLiveActions;
-  tmuxActions: TransportTmuxActions;
+  terminalActions: TransportTerminalActions;
   pendingRenames: Map<string, PendingRenameRecord>;
   pendingBroadcasts: Map<string, PendingBroadcastRecord>;
   pendingPartnerNotes: Map<string, PendingPartnerNoteRecord>;
@@ -84,11 +84,11 @@ export interface TransportMenuFlowHost {
   ): Promise<void>;
   captureRelaySessionBuffer(
     sessionId: string,
-    scope: TmuxCaptureScope,
+    scope: TerminalCaptureScope,
   ): Promise<{
     filename: string;
     markdown_content: string;
-    capture_mode: TmuxCaptureScope["mode"];
+    capture_mode: TerminalCaptureScope["mode"];
     scope_description: string;
     terminal_target: string;
   }>;
@@ -360,7 +360,7 @@ export class TransportMenuFlow {
 
   public async sendActiveSessionBuffer(
     ctx: TelegramMenuContext,
-    scope: TmuxCaptureScope,
+    scope: TerminalCaptureScope,
   ): Promise<void> {
     const locale = await this.host.resolveLocaleForContext(ctx);
     const principal = this.host.getPrincipalFromContext(ctx);
@@ -384,7 +384,7 @@ export class TransportMenuFlow {
 
     const relayTarget = parseLiveRelaySessionId(sessionId);
     const session = await this.host.sessionStore.getSession(sessionId);
-    if (!relayTarget && !session?.tmuxTarget) {
+    if (!relayTarget && !session?.terminalTarget) {
       await ctx.answerCallbackQuery({
         text: "terminal target is not configured for this session.",
         show_alert: true,
@@ -393,13 +393,13 @@ export class TransportMenuFlow {
     }
 
     await ctx.answerCallbackQuery({
-      text: `Capturing ${this.host.tmuxActions.describeCaptureScope(scope)}...`,
+      text: `Capturing ${this.host.terminalActions.describeCaptureScope(scope)}...`,
     });
 
     try {
       const capture = relayTarget
         ? await this.host.captureRelaySessionBuffer(sessionId, scope)
-        : await this.host.tmuxActions.captureBuffer(session!, scope);
+        : await this.host.terminalActions.captureBuffer(session!, scope);
       const relayMarkdownContent =
         relayTarget && "markdown_content" in capture
           ? capture.markdown_content
@@ -445,7 +445,7 @@ export class TransportMenuFlow {
       this.host.logger.info("Telegram terminal buffer sent", {
         sessionId,
         terminalTarget:
-          "terminal_target" in capture ? capture.terminal_target : session?.tmuxTarget,
+          "terminal_target" in capture ? capture.terminal_target : session?.terminalTarget,
         filename: capture.filename,
         bytes:
           "buffer" in capture
@@ -461,19 +461,19 @@ export class TransportMenuFlow {
     } catch (error) {
       const payload = {
         sessionId,
-        terminalTarget: session?.tmuxTarget,
+        terminalTarget: session?.terminalTarget,
         error:
           error instanceof Error ? (error.stack ?? error.message) : String(error),
       };
 
-      if (isTmuxUnavailableError(error)) {
+      if (isTerminalUnavailableError(error)) {
         this.host.logger.warn(
           "terminal buffer capture skipped because terminal is unavailable",
           payload,
         );
         await this.host.replyText(
           ctx,
-          formatTmuxBridgeError(
+          formatTerminalBridgeError(
             this.host.config,
             error,
             "Unable to capture the terminal buffer right now.",
@@ -486,7 +486,7 @@ export class TransportMenuFlow {
       this.host.logger.error("terminal buffer capture failed", payload);
       await this.host.replyText(
         ctx,
-        formatTmuxBridgeError(
+        formatTerminalBridgeError(
           this.host.config,
           error,
           "Failed to capture the terminal buffer for this session.",

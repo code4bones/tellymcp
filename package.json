@@ -44,7 +44,6 @@
     "dev:gw:telegram": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_EXPERIMENTAL_RESOLVER=1 NODE_OPTIONS=--openssl-legacy-provider ts-node ./node_modules/moleculer/bin/moleculer-runner.js src/services/features/telegram-mcp --config src/moleculer.config.ts --envfile ./.env-dev --hot --mask \"**/*.service.ts\"",
     "dev:client": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_EXPERIMENTAL_RESOLVER=1 NODE_OPTIONS=--openssl-legacy-provider ts-node ./node_modules/moleculer/bin/moleculer-runner.js src/services --config src/moleculer.config.ts --envfile ./.env-client --hot --mask \"**/*.service.ts\"",
     "dev:sh": "TELLYMCP_SOURCE_RUNTIME=true tsx src/cli.ts run --env ./.env-client",
-    "dev:mcp:stdio": "TELLYMCP_SOURCE_RUNTIME=true tsx src/cli.ts serve-stdio --env ./.env-client",
     "dev": "yarn dev:gw",
     "dev:watch": "yarn dev:gw",
     "dev:service": "yarn dev:gw",

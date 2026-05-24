@@ -1,7 +1,6 @@
 import {
   captureVisibleTerminal,
   ensureTerminalTargetForSession,
-  getConfiguredTerminalShellDisplayName,
   resizeForegroundTerminal,
   sendForegroundTerminalInput,
   stopAllForegroundTerminals,
@@ -20,10 +19,7 @@ export type ForegroundRuntimeHandle = {
 };
 
 export function isForegroundPtyClientMode(parsed: Record<string, string>): boolean {
-  return (
-    (parsed.DISTRIBUTED_MODE || "client").trim() === "client" &&
-    (parsed.TERMINAL_TRANSPORT || "tmux").trim() === "pty"
-  );
+  return (parsed.DISTRIBUTED_MODE || "client").trim() === "client";
 }
 
 type RunForegroundPtyRuntimeInput = {
@@ -59,11 +55,11 @@ async function ensureForegroundPtySession(
     cwd: process.cwd(),
   });
   const existing = await runtime.sessionStore.getSession(resolved.sessionId);
-  const target = ensureTerminalTargetForSession(runtime.config.tmux, {
+  const target = ensureTerminalTargetForSession(runtime.config.terminal, {
     sessionId: resolved.sessionId,
     cwd: resolved.cwd,
-    ...(typeof existing?.tmuxTarget === "string"
-      ? { target: existing.tmuxTarget }
+    ...(typeof existing?.terminalTarget === "string"
+      ? { target: existing.terminalTarget }
       : {}),
   });
 
@@ -72,8 +68,6 @@ async function ensureForegroundPtySession(
   }
 
   const updatedAt = new Date().toISOString();
-  const shellDisplayName = getConfiguredTerminalShellDisplayName(runtime.config.tmux);
-
   await runtime.sessionStore.setSession({
     sessionId: resolved.sessionId,
     ...(typeof existing?.label === "string"
@@ -93,18 +87,9 @@ async function ensureForegroundPtySession(
       ? { decisions: existing.decisions }
       : {}),
     ...(Array.isArray(existing?.risks) ? { risks: existing.risks } : {}),
-    tmuxSessionName: "pty",
-    tmuxWindowName: shellDisplayName,
-    tmuxPaneId: target,
-    tmuxTarget: target,
-    ...(typeof existing?.tmuxWindowIndex === "number"
-      ? { tmuxWindowIndex: existing.tmuxWindowIndex }
-      : {}),
-    ...(typeof existing?.tmuxPaneIndex === "number"
-      ? { tmuxPaneIndex: existing.tmuxPaneIndex }
-      : {}),
-    ...(typeof existing?.lastTmuxNudgeAt === "string"
-      ? { lastTmuxNudgeAt: existing.lastTmuxNudgeAt }
+    terminalTarget: target,
+    ...(typeof existing?.lastTerminalNudgeAt === "string"
+      ? { lastTerminalNudgeAt: existing.lastTerminalNudgeAt }
       : {}),
     ...(typeof existing?.lastSeenToolsHash === "string"
       ? { lastSeenToolsHash: existing.lastSeenToolsHash }
@@ -139,7 +124,7 @@ async function attachCurrentTerminalToPty(
 
   resize();
 
-  const snapshot = await captureVisibleTerminal(runtime.config.tmux, target, 80, 1);
+  const snapshot = await captureVisibleTerminal(runtime.config.terminal, target, 80, 1);
   if (snapshot.trim().length > 0) {
     stdout.write(`${snapshot}${snapshot.endsWith("\n") ? "" : "\n"}`);
   }
@@ -229,7 +214,7 @@ export async function runForegroundPtyRuntime(
 ): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error(
-      "Foreground PTY mode requires an interactive TTY. Run this command in a real terminal or switch TERMINAL_TRANSPORT=tmux.",
+      "Foreground PTY mode requires an interactive TTY. Run this command in a real terminal.",
     );
   }
 

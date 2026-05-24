@@ -39,6 +39,23 @@ function computeContentHash(content: string): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
+function normalizeClientLocalSessionId(
+  mode: AppConfig["distributed"]["mode"],
+  value: string | undefined,
+): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed || mode !== "client") {
+    return trimmed || undefined;
+  }
+
+  const separatorIndex = trimmed.indexOf(":");
+  if (separatorIndex <= 0 || separatorIndex === trimmed.length - 1) {
+    return trimmed;
+  }
+
+  return trimmed.slice(separatorIndex + 1).trim() || trimmed;
+}
+
 function normalizeRemoteRefreshOutput(
   value: unknown,
 ): RefreshToolsMarkdownOutput | null {
@@ -65,9 +82,16 @@ export class RefreshToolsMarkdownService {
   public async refresh(
     input: RefreshToolsMarkdownInput = {},
   ): Promise<RefreshToolsMarkdownOutput> {
-    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const normalizedSessionId = normalizeClientLocalSessionId(
+      this.config.distributed.mode,
+      input.session_id,
+    );
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults({
+      ...input,
+      ...(normalizedSessionId ? { session_id: normalizedSessionId } : {}),
+    });
     const explicitCwd = input.cwd?.trim() ? resolve(input.cwd.trim()) : null;
-    const requestedSessionId = input.session_id?.trim() ?? "";
+    const requestedSessionId = normalizedSessionId ?? "";
     const knownHash = input.known_hash?.trim() || null;
     const remoteLookupRequested =
       Boolean(this.remoteConsoleInvoker) &&

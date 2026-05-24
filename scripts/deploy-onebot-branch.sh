@@ -22,3 +22,6 @@ npm install -g "${PACKAGE_ARCHIVE}"
 
 echo "Installed version:"
 tellymcp help | sed -n '1,2p'
+
+echo "Restarting existing PM2 instance 0"
+pm2 restart 0

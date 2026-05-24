@@ -71,7 +71,7 @@ Gateway
 Синхронизация инструкций:
 
 - `refresh_tools_markdown`
-- `.tellysession.json` хранит последний известный hash
+- `.mcpsession.json` хранит startup identity и последний известный tools hash
 
 ## Требования
 

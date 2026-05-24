@@ -78,21 +78,14 @@ type SessionMarkerShape = {
   session_label?: unknown;
   cwd?: unknown;
   env_file?: unknown;
-  created_at?: unknown;
-  updated_at?: unknown;
-};
-
-type TellySessionStateShape = {
-  version?: unknown;
-  local_session_id?: unknown;
-  cwd?: unknown;
   last_seen_tools_hash?: unknown;
   last_notified_tools_hash?: unknown;
+  created_at?: unknown;
   updated_at?: unknown;
+  first_seen_local_session_id?: unknown;
 };
 
 const SESSION_MARKER_FILE_NAME = ".mcpsession.json";
-const TELLY_SESSION_STATE_FILE_NAME = ".tellysession.json";
 
 function slugify(input: string): string {
   return input
@@ -154,133 +147,15 @@ function resolveInputCwd(value: string | undefined): string | undefined {
   return trimmed ? resolve(trimmed) : undefined;
 }
 
-export type TellySessionRuntimeState = {
-  localSessionId: string;
-  cwd?: string | undefined;
-  lastSeenToolsHash?: string | undefined;
-  lastNotifiedToolsHash?: string | undefined;
-  updatedAt?: string | undefined;
-};
-
 export type SessionMarkerState = {
   localSessionId: string;
   sessionLabel?: string | undefined;
   cwd?: string | undefined;
   envFile?: string | undefined;
-};
-
-export function readTellySessionRuntimeState(
-  inputCwd: string,
-  expectedSessionId?: string,
-  logger?: Logger,
-): TellySessionRuntimeState | null {
-  const resolvedCwd = resolve(inputCwd);
-  const statePath = join(resolvedCwd, TELLY_SESSION_STATE_FILE_NAME);
-  if (!existsSync(statePath)) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(
-      readFileSync(statePath, "utf8"),
-    ) as TellySessionStateShape;
-    const localSessionId =
-      typeof parsed.local_session_id === "string"
-        ? parsed.local_session_id.trim()
-        : "";
-    if (!localSessionId) {
-      return null;
-    }
-    if (expectedSessionId?.trim() && localSessionId !== expectedSessionId.trim()) {
-      return null;
-    }
-
-    return {
-      localSessionId,
-      ...(typeof parsed.cwd === "string" && parsed.cwd.trim()
-        ? { cwd: parsed.cwd.trim() }
-        : {}),
-      ...(typeof parsed.last_seen_tools_hash === "string" &&
-      parsed.last_seen_tools_hash.trim()
-        ? { lastSeenToolsHash: parsed.last_seen_tools_hash.trim() }
-        : {}),
-      ...(typeof parsed.last_notified_tools_hash === "string" &&
-      parsed.last_notified_tools_hash.trim()
-        ? { lastNotifiedToolsHash: parsed.last_notified_tools_hash.trim() }
-        : {}),
-      ...(typeof parsed.updated_at === "string" && parsed.updated_at.trim()
-        ? { updatedAt: parsed.updated_at.trim() }
-        : {}),
-    };
-  } catch (error) {
-    logger?.warn("Failed to read .tellysession.json, ignoring state", {
-      cwd: resolvedCwd,
-      statePath,
-      error: error instanceof Error ? (error.stack ?? error.message) : String(error),
-    });
-    return null;
-  }
-}
-
-export function writeTellySessionRuntimeState(input: {
-  cwd: string;
-  sessionId: string;
   lastSeenToolsHash?: string | undefined;
   lastNotifiedToolsHash?: string | undefined;
-  logger?: Logger;
-}): void {
-  const resolvedCwd = resolve(input.cwd);
-  if (!existsSync(resolvedCwd)) {
-    input.logger?.debug("Skipping .tellysession.json write because cwd does not exist locally", {
-      cwd: resolvedCwd,
-      sessionId: input.sessionId,
-    });
-    return;
-  }
-
-  const current = readTellySessionRuntimeState(
-    resolvedCwd,
-    input.sessionId,
-    input.logger,
-  );
-  const statePath = join(resolvedCwd, TELLY_SESSION_STATE_FILE_NAME);
-  const now = new Date().toISOString();
-
-  try {
-    writeFileSync(
-      statePath,
-      `${JSON.stringify(
-        {
-          version: 1,
-          local_session_id: input.sessionId,
-          cwd: resolvedCwd,
-          ...(typeof input.lastSeenToolsHash === "string" && input.lastSeenToolsHash.trim()
-            ? { last_seen_tools_hash: input.lastSeenToolsHash.trim() }
-            : current?.lastSeenToolsHash
-              ? { last_seen_tools_hash: current.lastSeenToolsHash }
-              : {}),
-          ...(typeof input.lastNotifiedToolsHash === "string" &&
-          input.lastNotifiedToolsHash.trim()
-            ? { last_notified_tools_hash: input.lastNotifiedToolsHash.trim() }
-            : current?.lastNotifiedToolsHash
-              ? { last_notified_tools_hash: current.lastNotifiedToolsHash }
-              : {}),
-          updated_at: now,
-        },
-        null,
-        2,
-      )}\n`,
-      "utf8",
-    );
-  } catch (error) {
-    input.logger?.warn("Failed to write .tellysession.json", {
-      cwd: resolvedCwd,
-      statePath,
-      sessionId: input.sessionId,
-      error: error instanceof Error ? (error.stack ?? error.message) : String(error),
-    });
-  }
-}
+  updatedAt?: string | undefined;
+};
 
 export function readSessionMarkerState(
   inputCwd: string,
@@ -316,6 +191,17 @@ export function readSessionMarkerState(
       ...(typeof parsed.env_file === "string" && parsed.env_file.trim()
         ? { envFile: parsed.env_file.trim() }
         : {}),
+      ...(typeof parsed.last_seen_tools_hash === "string" &&
+      parsed.last_seen_tools_hash.trim()
+        ? { lastSeenToolsHash: parsed.last_seen_tools_hash.trim() }
+        : {}),
+      ...(typeof parsed.last_notified_tools_hash === "string" &&
+      parsed.last_notified_tools_hash.trim()
+        ? { lastNotifiedToolsHash: parsed.last_notified_tools_hash.trim() }
+        : {}),
+      ...(typeof parsed.updated_at === "string" && parsed.updated_at.trim()
+        ? { updatedAt: parsed.updated_at.trim() }
+        : {}),
     };
   } catch (error) {
     logger?.warn("Failed to read .mcpsession.json, ignoring marker", {
@@ -332,6 +218,8 @@ export function writeSessionMarkerState(input: {
   localSessionId: string;
   sessionLabel?: string | undefined;
   envFile?: string | undefined;
+  lastSeenToolsHash?: string | undefined;
+  lastNotifiedToolsHash?: string | undefined;
   logger?: Logger;
 }): void {
   const resolvedCwd = resolve(input.cwd);
@@ -344,6 +232,7 @@ export function writeSessionMarkerState(input: {
   }
 
   const markerPath = join(resolvedCwd, SESSION_MARKER_FILE_NAME);
+  const legacyTellyStatePath = join(resolvedCwd, ".tellysession.json");
   const now = new Date().toISOString();
   const current = readSessionMarkerState(resolvedCwd, input.logger);
 
@@ -361,6 +250,17 @@ export function writeSessionMarkerState(input: {
             : current?.envFile
               ? { env_file: current.envFile }
               : {}),
+          ...(typeof input.lastSeenToolsHash === "string" && input.lastSeenToolsHash.trim()
+            ? { last_seen_tools_hash: input.lastSeenToolsHash.trim() }
+            : current?.lastSeenToolsHash
+              ? { last_seen_tools_hash: current.lastSeenToolsHash }
+              : {}),
+          ...(typeof input.lastNotifiedToolsHash === "string" &&
+          input.lastNotifiedToolsHash.trim()
+            ? { last_notified_tools_hash: input.lastNotifiedToolsHash.trim() }
+            : current?.lastNotifiedToolsHash
+              ? { last_notified_tools_hash: current.lastNotifiedToolsHash }
+              : {}),
           created_at: now,
           updated_at: now,
           ...(current ? { first_seen_local_session_id: current.localSessionId } : {}),
@@ -370,6 +270,9 @@ export function writeSessionMarkerState(input: {
       )}\n`,
       "utf8",
     );
+    if (existsSync(legacyTellyStatePath)) {
+      rmSync(legacyTellyStatePath, { force: true });
+    }
   } catch (error) {
     input.logger?.warn("Failed to write .mcpsession.json", {
       cwd: resolvedCwd,

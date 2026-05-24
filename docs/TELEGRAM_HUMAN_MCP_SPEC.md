@@ -76,8 +76,8 @@ Do not route by:
 Workspace markers:
 
 - `.mcpsession.json`
-  - startup identity and env file
-- `.tellysession.json`
+  - startup identity
+  - env file
   - tools hash state
 
 These files support plain:

@@ -7,7 +7,7 @@ import {
 import { createLogger, type Logger } from "../../shared/lib/logger/logger";
 import {
   ProjectIdentityResolver,
-  readTellySessionRuntimeState,
+  readSessionMarkerState,
 } from "../../shared/lib/project-identity/projectIdentity";
 import { RedisStateStore } from "../../shared/integrations/redis/stateStore";
 import { ProcessLocalSessionStore } from "../../shared/integrations/memory/processLocalSessionStore";
@@ -145,9 +145,8 @@ export async function createAppRuntime(input: {
       cwd: process.cwd(),
     });
     const existingSession = await stateStore.getSession(resolvedSession.sessionId);
-    const persistedToolsState = readTellySessionRuntimeState(
+    const persistedToolsState = readSessionMarkerState(
       resolvedSession.cwd,
-      resolvedSession.sessionId,
       logger,
     );
     const terminalTarget = ensureTerminalTargetForSession(config.terminal, {

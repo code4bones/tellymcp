@@ -12,7 +12,7 @@ import type { SessionStore } from "../../../shared/api/storage/contract";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import {
   ProjectIdentityResolver,
-  writeTellySessionRuntimeState,
+  writeSessionMarkerState,
 } from "../../../shared/lib/project-identity/projectIdentity";
 import { getTellyMcpPackageRoot } from "../../../shared/lib/version/versionHandshake";
 
@@ -177,9 +177,9 @@ export class RefreshToolsMarkdownService {
       updatedAt: new Date().toISOString(),
     });
     if (workspaceDir) {
-      writeTellySessionRuntimeState({
+      writeSessionMarkerState({
         cwd: workspaceDir,
-        sessionId: resolved.sessionId,
+        localSessionId: resolved.sessionId,
         lastSeenToolsHash: currentHash,
         lastNotifiedToolsHash: currentHash,
         logger: this.logger,

@@ -5,7 +5,7 @@ import { buildLiveRelaySessionId } from "../../../app/webapp/relay";
 import type { AppConfig } from "../../../app/config/env";
 import type { SessionBindingStore, SessionStore } from "../../api/storage/contract";
 import type { Logger } from "../../lib/logger/logger";
-import { writeTellySessionRuntimeState } from "../../lib/project-identity/projectIdentity";
+import { writeSessionMarkerState } from "../../lib/project-identity/projectIdentity";
 import { writeLocalTaskXchangeRecord } from "../../lib/telegramXchangeRecords";
 import type { SupportedLocale } from "../../i18n";
 import type { LiveApprovalEventPayload, SendMessageMeta, TelegramSendMessageOptions } from "./transportTypes";
@@ -132,9 +132,9 @@ export class TransportEventActions {
       updatedAt: new Date().toISOString(),
     });
     if (session.cwd?.trim()) {
-      writeTellySessionRuntimeState({
+      writeSessionMarkerState({
         cwd: session.cwd,
-        sessionId: session.sessionId,
+        localSessionId: session.sessionId,
         lastSeenToolsHash: session.lastSeenToolsHash,
         lastNotifiedToolsHash: input.gateway_tools_hash,
         logger: this.host.logger,

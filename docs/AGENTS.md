@@ -119,7 +119,7 @@ For client workspaces:
   - `local_session_id`
   - `session_label`
   - `env_file`
-- `.tellysession.json` stores per-console tools hash state
+  - tools hash state
 
 If the workspace already has `.mcpsession.json`, plain:
 

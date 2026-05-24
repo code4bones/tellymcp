@@ -71,7 +71,7 @@ Browser:
 Tools sync:
 
 - `refresh_tools_markdown`
-- `.tellysession.json` keeps the last known tools hash
+- `.mcpsession.json` keeps startup identity and the last known tools hashes
 
 ## Requirements
 

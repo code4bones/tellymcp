@@ -58,7 +58,6 @@ Key runtime entrypoints:
   - local session identity
   - session label
   - env file path
-- `.tellysession.json`
   - last seen tools hash
   - last notified tools hash
 - `.mcp-xchange/`

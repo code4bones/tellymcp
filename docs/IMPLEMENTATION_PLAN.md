@@ -24,7 +24,7 @@ Do not regress these:
 4. `partner_note` work must not fall back to legacy inbox semantics
 5. browser screenshot tasks should prefer browser tools over shell Playwright
 6. `.mcpsession.json` is the workspace-level startup marker
-7. `.tellysession.json` is the per-console tools-state marker
+7. `.mcpsession.json` also stores per-console tools hash state
 
 ## Active Roadmap
 

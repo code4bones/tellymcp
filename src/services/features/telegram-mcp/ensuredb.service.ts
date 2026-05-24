@@ -137,6 +137,37 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
           });
       }
 
+      if (!(await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_sessions"))) {
+        await this.db.schema.withSchema(MCP_SCHEMA).createTable("gateway_sessions", (table) => {
+          table.uuid("session_uuid").primary();
+          table.uuid("client_uuid").notNullable();
+          table.text("local_session_id").notNullable();
+          table.text("label");
+          table.text("cwd");
+          table.text("terminal_target");
+          table.text("status").notNullable().defaultTo("active");
+          table.jsonb("meta").notNullable().defaultTo(this.db.raw(`'{}'::jsonb`));
+          table
+            .timestamp("created_at", { useTz: true })
+            .notNullable()
+            .defaultTo(this.db.fn.now());
+          table
+            .timestamp("updated_at", { useTz: true })
+            .notNullable()
+            .defaultTo(this.db.fn.now());
+          table
+            .foreign("client_uuid")
+            .references("client_uuid")
+            .inTable(`${MCP_SCHEMA}.gateway_clients`)
+            .onDelete("CASCADE");
+          table.unique(
+            ["client_uuid", "local_session_id"],
+            "gateway_sessions_client_local_unique",
+          );
+          table.index(["client_uuid"], "gateway_sessions_client_idx");
+        });
+      }
+
       if (!(await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_project_consoles"))) {
         await this.db.schema
           .withSchema(MCP_SCHEMA)
@@ -224,37 +255,6 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
             table.index(["client_uuid"], "gateway_live_consoles_client_idx");
             table.index(["gateway_user_uuid"], "gateway_live_consoles_owner_idx");
           });
-      }
-
-      if (!(await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_sessions"))) {
-        await this.db.schema.withSchema(MCP_SCHEMA).createTable("gateway_sessions", (table) => {
-          table.uuid("session_uuid").primary();
-          table.uuid("client_uuid").notNullable();
-          table.text("local_session_id").notNullable();
-          table.text("label");
-          table.text("cwd");
-          table.text("terminal_target");
-          table.text("status").notNullable().defaultTo("active");
-          table.jsonb("meta").notNullable().defaultTo(this.db.raw(`'{}'::jsonb`));
-          table
-            .timestamp("created_at", { useTz: true })
-            .notNullable()
-            .defaultTo(this.db.fn.now());
-          table
-            .timestamp("updated_at", { useTz: true })
-            .notNullable()
-            .defaultTo(this.db.fn.now());
-          table
-            .foreign("client_uuid")
-            .references("client_uuid")
-            .inTable(`${MCP_SCHEMA}.gateway_clients`)
-            .onDelete("CASCADE");
-          table.unique(
-            ["client_uuid", "local_session_id"],
-            "gateway_sessions_client_local_unique",
-          );
-          table.index(["client_uuid"], "gateway_sessions_client_idx");
-        });
       }
 
       if (

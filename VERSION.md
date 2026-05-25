@@ -100,8 +100,8 @@ For detailed engineering history, refactors, and internal development notes, see
   - `tellymcp doctor`
   - `tellymcp mcp --help`
 - Standalone and public installation guides:
-  - [STANDALONE.md](STANDALONE.md)
-  - [STANDALONE-ru.md](STANDALONE-ru.md)
+  - [STANDALONE.md](docs/STANDALONE.md)
+  - [STANDALONE-ru.md](docs/STANDALONE-ru.md)
 - Browser runtime helper:
   - `tellymcp browser install`
 - Public README set for GitHub and npm:

@@ -1,6 +1,17 @@
+<div align="center">
+
 # Standalone Deployment
 
-[eng](./STANDALONE.md) [рус](./STANDALONE-ru.md)
+**Deploy TellyMCP as one gateway and one or more agent nodes**
+
+[English](./STANDALONE.md) · [Русский](./STANDALONE-ru.md) · [Main README](../README.md) · [README RU](../README-ru.md)
+
+[![npm version](https://img.shields.io/npm/v/@deadragdoll/tellymcp.svg)](https://www.npmjs.com/package/@deadragdoll/tellymcp)
+[![node](https://img.shields.io/badge/node-%3E%3D24-339933.svg)](https://nodejs.org/)
+[![gateway mode](https://img.shields.io/badge/deploy-gateway%20%2B%20agents-1f6feb.svg)](../README.md#current-runtime-model)
+[![telegram webhook](https://img.shields.io/badge/telegram-webhook%20ready-26A5E4.svg)](../README.md#webhook-mode)
+
+</div>
 
 This guide describes the current standalone deployment model for `@deadragdoll/tellymcp`.
 

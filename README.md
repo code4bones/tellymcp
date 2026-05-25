@@ -1,6 +1,18 @@
+<div align="center">
+
 # TellyMCP
 
-[eng](./README.md) [рус](./README-ru.md)
+**Telegram control plane for MCP-connected coding agents**
+
+[English](./README.md) · [Русский](./README-ru.md) · [Standalone](./docs/STANDALONE.md) · [Standalone RU](./docs/STANDALONE-ru.md)
+
+[![npm version](https://img.shields.io/npm/v/@deadragdoll/tellymcp.svg)](https://www.npmjs.com/package/@deadragdoll/tellymcp)
+[![node](https://img.shields.io/badge/node-%3E%3D24-339933.svg)](https://nodejs.org/)
+[![license](https://img.shields.io/npm/l/@deadragdoll/tellymcp.svg)](./LICENSE)
+[![gateway--first](https://img.shields.io/badge/runtime-gateway--first-1f6feb.svg)](./README.md#current-runtime-model)
+[![telegram webhook](https://img.shields.io/badge/telegram-webhook%20%7C%20polling-26A5E4.svg)](./README.md#webhook-mode)
+
+</div>
 
 `@deadragdoll/tellymcp` is a Telegram control plane for MCP-connected coding agents.
 

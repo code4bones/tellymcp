@@ -1,4 +1,3 @@
-import fetch from "node-fetch";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { SocksProxyAgent } from "socks-proxy-agent";
 
@@ -6,6 +5,12 @@ import type { AppConfig } from "../../../app/config/env";
 import type { Logger } from "../../lib/logger/logger";
 
 type FetchAgent = HttpsProxyAgent<string> | SocksProxyAgent;
+type TelegramBaseFetchConfig = Omit<
+  NonNullable<Parameters<typeof fetch>[1]>,
+  "method" | "headers" | "body"
+> & {
+  agent?: FetchAgent;
+};
 
 function maskProxyUrl(rawUrl: string): string {
   try {
@@ -22,10 +27,10 @@ function maskProxyUrl(rawUrl: string): string {
   }
 }
 
-export function createTelegramFetch(
+export function createTelegramBaseFetchConfig(
   config: AppConfig,
   logger: Logger,
-): typeof globalThis.fetch {
+): TelegramBaseFetchConfig {
   const agent: FetchAgent | undefined = config.telegram.proxy
     ? config.telegram.proxy.type === "http"
       ? new HttpsProxyAgent(config.telegram.proxy.url)
@@ -40,19 +45,17 @@ export function createTelegramFetch(
   } else {
     logger.debug("Telegram proxy disabled");
   }
+  return agent ? { agent } : {};
+}
 
-  const proxiedFetch = async (...args: Parameters<typeof globalThis.fetch>) => {
-    const [input, init] = args;
-    const requestInit = {
-      ...(init ? (init as Record<string, unknown>) : {}),
-      ...(agent ? { agent } : {}),
-    };
-
-    return fetch(
-      input as string | URL,
-      requestInit as import("node-fetch").RequestInit,
-    ) as unknown as Response;
-  };
-
-  return proxiedFetch as typeof globalThis.fetch;
+export function createTelegramFetch(
+  config: AppConfig,
+  logger: Logger,
+): typeof globalThis.fetch {
+  const baseFetchConfig = createTelegramBaseFetchConfig(config, logger);
+  return async (input, init) =>
+    globalThis.fetch(input, {
+      ...baseFetchConfig,
+      ...(init ?? {}),
+    });
 }

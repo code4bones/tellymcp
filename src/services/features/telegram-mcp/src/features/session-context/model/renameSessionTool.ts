@@ -27,7 +27,7 @@ export class RenameSessionTool implements ToolModule {
       {
         title: "Rename Session",
         description:
-          "Rename only the human-readable session label. Use this when the user wants a clearer session name; it does not change session_id, pairing, tmux target, or saved context.",
+          "Rename only the human-readable console label. Use this when the user wants a clearer console name; it does not change session_id or saved context.",
         inputSchema: renameSessionInputSchema,
         outputSchema: renameSessionOutputSchema,
       },

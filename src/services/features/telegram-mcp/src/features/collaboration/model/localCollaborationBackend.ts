@@ -6,15 +6,12 @@ import type {
   SendPartnerNoteInput,
   SendPartnerNoteOutput,
 } from "../../../entities/collaboration/model/types";
-import type { TelegramInboxMessage } from "../../../entities/inbox/model/types";
 import type { SessionContext } from "../../../entities/session/model/types";
 import type {
   SessionBindingStore,
   SessionStore,
-  TelegramInboxStore,
   TelegramXchangeFileMetaStore,
 } from "../../../shared/api/storage/contract";
-import { createInboxMessageId } from "../../../shared/lib/ids/ids";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import type { ResolvedSessionDefaults } from "../../../shared/lib/project-identity/projectIdentity";
 import {
@@ -27,7 +24,7 @@ import type { MinioExchangeStore } from "../../../shared/integrations/object-sto
 import {
   readWorkspaceFile,
   writeXchangeRelativeFile,
-} from "../../../shared/integrations/tmux/client";
+} from "../../../shared/integrations/terminal/client";
 import { TelegramTransport } from "../../../shared/integrations/telegram/transport";
 import { upsertXchangeRecord } from "../../../shared/integrations/xchange/sqliteRecordStore";
 import type { CollaborationBackend } from "./backend";
@@ -119,49 +116,6 @@ function renderYamlArray(values: string[]): string {
   return `\n${values.map((value) => `  - ${JSON.stringify(value)}`).join("\n")}`;
 }
 
-function buildPartnerInboxText(input: {
-  recordId: string;
-  kind: PartnerNoteKind;
-  fromLabel: string;
-  summary: string;
-  notePath: string;
-  actionDesc: string;
-  requiresReply: boolean;
-  copiedArtifacts: string[];
-}): string {
-  const kindTitle =
-    input.kind === "question"
-      ? "Partner question received."
-      : input.kind === "reply"
-        ? "Partner reply received."
-        : input.kind === "request"
-          ? "Partner request received."
-          : input.kind === "handoff"
-            ? "Partner handoff received."
-            : "Partner update received.";
-
-  return [
-    kindTitle,
-    `From: ${input.fromLabel}`,
-    `Summary: ${input.summary}`,
-    `Xchange record: ${input.recordId}`,
-    "",
-    "Immediate action: call get_xchange_record for this record and follow its action_desc.",
-    `Action: ${input.actionDesc}`,
-    `Note: ${input.notePath}`,
-    ...(input.copiedArtifacts.length > 0
-      ? ["", "Artifacts:", ...input.copiedArtifacts.map((item) => `- ${item}`)]
-      : []),
-    ...(input.requiresReply
-      ? [
-          "",
-          "Reply through send_partner_note after you finish the requested work.",
-          "The task is not complete until send_partner_note succeeds.",
-        ]
-      : []),
-  ].join("\n");
-}
-
 function buildNoteContent(input: {
   shareId: string;
   kind: PartnerNoteKind;
@@ -204,8 +158,10 @@ function buildNoteContent(input: {
       "",
       "# Action Required",
       "You must send a reply via send_partner_note.",
+      "Do not stop after reading, listing files, or explaining what you found.",
       "Your task is not complete until send_partner_note succeeds.",
       "Do not stop after local analysis or a chat explanation.",
+      "Only after send_partner_note succeeds may you mark the record as read or say the work is done.",
       "Use the current partner route for the reply.",
       "Only after the tool succeeds may you say that the reply was sent.",
       "",
@@ -237,7 +193,6 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     private readonly config: AppConfig,
     private readonly sessionStore: SessionStore,
     private readonly bindingStore: SessionBindingStore,
-    private readonly inboxStore: TelegramInboxStore,
     private readonly xchangeFileMetaStore: TelegramXchangeFileMetaStore,
     private readonly objectStore: MinioExchangeStore,
     private readonly telegramTransport: TelegramTransport,
@@ -251,18 +206,13 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     const sourceSession = await this.sessionStore.getSession(resolved.sessionId);
 
     if (!sourceSession) {
-      throw new Error(
-        `Session ${resolved.sessionId} was not found. Pair the session before collaborating.`,
-      );
+      throw new Error(`Session ${resolved.sessionId} was not found.`);
     }
 
-    const targetSessionId =
-      trimOptional(input.target_session_id) ?? sourceSession.linkedSessionId;
+    const targetSessionId = trimOptional(input.target_session_id);
 
     if (!targetSessionId) {
-      throw new Error(
-        "This session has no linked partner. Link another session in Telegram first.",
-      );
+      throw new Error("target_session_id is required for send_partner_note.");
     }
 
     const targetSession = await this.sessionStore.getSession(targetSessionId);
@@ -276,9 +226,7 @@ export class LocalCollaborationBackend implements CollaborationBackend {
       targetSession.sessionId,
     );
     if (!targetBinding) {
-      throw new Error(
-        `Linked partner session ${targetSession.sessionId} is not paired with Telegram.`,
-      );
+      throw new Error(`Target session ${targetSession.sessionId} has no active Telegram route.`);
     }
 
     const now = new Date();
@@ -325,7 +273,7 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     });
 
     const notePath = await writeXchangeRelativeFile(
-      this.config.tmux,
+      this.config.terminal,
       targetWorkspaceDir,
       this.config.exchange.dir,
       relativeNotePath,
@@ -346,7 +294,7 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     );
     const targetTools = buildIncomingPartnerTools(input.kind, requiresReply);
     await upsertXchangeRecord(
-      this.config.tmux,
+      this.config.terminal,
       targetWorkspaceDir,
       this.config.exchange.dir,
       {
@@ -391,7 +339,7 @@ export class LocalCollaborationBackend implements CollaborationBackend {
       },
     );
     await upsertXchangeRecord(
-      this.config.tmux,
+      this.config.terminal,
       sourceWorkspaceDir,
       this.config.exchange.dir,
       {
@@ -429,27 +377,6 @@ export class LocalCollaborationBackend implements CollaborationBackend {
       },
     );
 
-    const inboxMessage: TelegramInboxMessage = {
-      id: createInboxMessageId(now),
-      sessionId: targetSession.sessionId,
-      telegramChatId: targetBinding.telegramChatId,
-      telegramUserId: targetBinding.telegramUserId,
-      sourceTelegramMessageId: now.getTime(),
-      text: buildPartnerInboxText({
-        recordId: shareId,
-        kind: input.kind,
-        fromLabel: sourceLabel,
-        summary: input.summary.trim(),
-        notePath,
-        actionDesc: targetActionDesc,
-        requiresReply,
-        copiedArtifacts,
-      }),
-      attachments: [notePath, ...copiedArtifacts],
-      receivedAt: createdAt,
-    };
-
-    await this.inboxStore.createInboxMessage(inboxMessage);
     await this.telegramTransport.sendNotification({
       sessionId: targetSession.sessionId,
       sessionLabel: sourceLabel,
@@ -486,9 +413,13 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     try {
       await this.telegramTransport.nudgeSessionPartnerNote(
         targetSession.sessionId,
+        {
+          kind: input.kind,
+          requiresReply,
+        },
       );
     } catch (error) {
-      this.logger.warn("tmux nudge failed after local partner delivery", {
+      this.logger.warn("terminal nudge failed after local partner delivery", {
         sessionId: targetSession.sessionId,
         partnerSessionId: sourceSession.sessionId,
         shareId,
@@ -517,7 +448,7 @@ export class LocalCollaborationBackend implements CollaborationBackend {
       note_path: notePath,
       xchange_record_id: shareId,
       copied_artifacts: copiedArtifacts,
-      inbox_message_id: inboxMessage.id,
+      inbox_message_id: shareId,
       requires_reply: requiresReply,
     };
   }
@@ -527,8 +458,9 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     if (workspaceDir) {
       return workspaceDir;
     }
-
-    return process.cwd();
+    throw new Error(
+      `Workspace cwd is not registered for console '${session.sessionId}'.`,
+    );
   }
 
   private async copyArtifactsToPartner(
@@ -582,12 +514,12 @@ export class LocalCollaborationBackend implements CollaborationBackend {
           })
         : artifactPath;
       const content = await readWorkspaceFile(
-        this.config.tmux,
+        this.config.terminal,
         sourceWorkspaceDir,
         ensuredArtifactPath,
       );
       const materializedArtifactPath = await writeXchangeRelativeFile(
-        this.config.tmux,
+        this.config.terminal,
         targetWorkspaceDir,
         this.config.exchange.dir,
         relativeArtifactPath,

@@ -8,7 +8,6 @@ import type {
   TelegramPrincipal,
 } from "../../../entities/auth/model/types";
 import type {
-  TelegramInboxMessage,
   TelegramMenuPayloadRecord,
   TelegramXchangeFileMeta,
 } from "../../../entities/inbox/model/types";
@@ -25,7 +24,6 @@ import type {
   SessionBindingStore,
   SessionStore,
   TelegramAdminAuthStore,
-  TelegramInboxStore,
   TelegramUserLocaleStore,
   TelegramXchangeFileMetaStore,
   TelegramMenuPayloadStore,
@@ -61,14 +59,6 @@ function principalActiveSessionKey(principal: TelegramPrincipal): string {
 
 function principalActiveSessionMatchPattern(telegramUserId: number): string {
   return `${KEY_PREFIX}:principal:*:${telegramUserId}:active-session`;
-}
-
-function inboxListKey(sessionId: string): string {
-  return `${KEY_PREFIX}:inbox:${sessionId}`;
-}
-
-function inboxMessageKey(sessionId: string, messageId: string): string {
-  return `${KEY_PREFIX}:inbox-message:${sessionId}:${messageId}`;
 }
 
 function menuPayloadKey(key: string): string {
@@ -125,7 +115,6 @@ export class RedisStateStore
     SessionStore,
     SessionBindingStore,
     PendingRequestStore,
-    TelegramInboxStore,
     TelegramAdminAuthStore,
     TelegramUserLocaleStore,
     TelegramXchangeFileMetaStore,
@@ -178,8 +167,6 @@ export class RedisStateStore
   }
 
   public async clearSession(sessionId: string): Promise<void> {
-    await this.unlinkPartnerSession(sessionId);
-    await this.clearInboxMessages(sessionId);
     await this.clearXchangeFileMetas(sessionId);
     await this.clearProjectMenuViewStates(sessionId);
     await this.clearOutgoingDeliveryNoticesForSession(sessionId);
@@ -296,7 +283,6 @@ export class RedisStateStore
   }
 
   public async clearBinding(sessionId: string): Promise<void> {
-    await this.unlinkPartnerSession(sessionId);
     const existing = await this.getBinding(sessionId);
     await this.redis.del(bindingKey(sessionId));
     if (existing) {
@@ -338,6 +324,12 @@ export class RedisStateStore
     } while (cursor !== "0");
 
     return null;
+  }
+
+  public async clearActiveSessionIdForPrincipal(
+    principal: TelegramPrincipal,
+  ): Promise<void> {
+    await this.redis.del(principalActiveSessionKey(principal));
   }
 
   public async setActiveSessionIdForPrincipal(
@@ -434,57 +426,6 @@ export class RedisStateStore
 
     const raw = await this.redis.get(requestKey(requestId));
     return parseJson<PendingRequestRecord>(raw);
-  }
-
-  public async createInboxMessage(
-    message: TelegramInboxMessage,
-  ): Promise<void> {
-    await this.redis.set(
-      inboxMessageKey(message.sessionId, message.id),
-      JSON.stringify(message),
-    );
-    await this.redis.lpush(inboxListKey(message.sessionId), message.id);
-  }
-
-  public async listInboxMessages(
-    sessionId: string,
-    limit: number,
-  ): Promise<TelegramInboxMessage[]> {
-    const ids = await this.redis.lrange(inboxListKey(sessionId), 0, limit - 1);
-    if (ids.length === 0) {
-      return [];
-    }
-
-    const rows = await this.redis.mget(
-      ...ids.map((messageId) => inboxMessageKey(sessionId, messageId)),
-    );
-
-    return rows
-      .map((row) => parseJson<TelegramInboxMessage>(row))
-      .filter((row): row is TelegramInboxMessage => row !== null);
-  }
-
-  public async countInboxMessages(sessionId: string): Promise<number> {
-    return this.redis.llen(inboxListKey(sessionId));
-  }
-
-  public async getInboxMessage(
-    sessionId: string,
-    messageId: string,
-  ): Promise<TelegramInboxMessage | null> {
-    const raw = await this.redis.get(inboxMessageKey(sessionId, messageId));
-    return parseJson<TelegramInboxMessage>(raw);
-  }
-
-  public async deleteInboxMessage(
-    sessionId: string,
-    messageId: string,
-  ): Promise<boolean> {
-    const deletedCount = await this.redis.del(
-      inboxMessageKey(sessionId, messageId),
-    );
-    await this.redis.lrem(inboxListKey(sessionId), 0, messageId);
-    return deletedCount > 0;
   }
 
   public async createMenuPayload(
@@ -712,56 +653,6 @@ export class RedisStateStore
     }
 
     await this.redis.del(activeKey);
-  }
-
-  private async unlinkPartnerSession(sessionId: string): Promise<void> {
-    const sourceSession = await this.getSession(sessionId);
-    if (!sourceSession?.linkedSessionId) {
-      return;
-    }
-
-    const { linkedSessionId: partnerId } = sourceSession;
-    const { linkedSessionId: _linkedSessionId, ...restSource } = sourceSession;
-    await this.setSession({
-      ...restSource,
-      updatedAt: new Date().toISOString(),
-    });
-
-    const partnerSession = await this.getSession(partnerId);
-    if (!partnerSession || partnerSession.linkedSessionId !== sessionId) {
-      return;
-    }
-
-    const { linkedSessionId: _partnerLinkedSessionId, ...restPartner } =
-      partnerSession;
-    await this.setSession({
-      ...restPartner,
-      updatedAt: new Date().toISOString(),
-    });
-  }
-
-  private async clearInboxMessages(sessionId: string): Promise<void> {
-    const listKey = inboxListKey(sessionId);
-    const messageKeys: string[] = [];
-    let cursor = "0";
-    const pattern = `${KEY_PREFIX}:inbox-message:${sessionId}:*`;
-
-    do {
-      const [nextCursor, keys] = await this.redis.scan(
-        cursor,
-        "MATCH",
-        pattern,
-        "COUNT",
-        200,
-      );
-      cursor = nextCursor;
-      messageKeys.push(...keys);
-    } while (cursor !== "0");
-
-    if (messageKeys.length > 0) {
-      await this.redis.del(...messageKeys);
-    }
-    await this.redis.del(listKey);
   }
 
   private async clearXchangeFileMetas(sessionId: string): Promise<void> {

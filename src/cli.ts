@@ -1,45 +1,47 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import net from "node:net";
 import { parse as parseDotenv } from "dotenv";
+import Redis from "ioredis";
 import pc from "picocolors";
 import WebSocket from "ws";
+import {
+  getCodexPluginStatus,
+  installCodexPlugin,
+} from "./codexPluginInstaller";
 import { getTellyMcpPackageVersion } from "./services/features/telegram-mcp/src/shared/lib/version/versionHandshake";
+import {
+  readSessionMarkerState,
+  resolveSessionDefaultsForCwd,
+  writeSessionMarkerState,
+} from "./services/features/telegram-mcp/src/shared/lib/project-identity/projectIdentity";
+import {
+  isForegroundPtyClientMode,
+  runForegroundPtyRuntime,
+} from "./services/features/telegram-mcp/src/features/foreground-terminal/model/foregroundTerminalRuntime";
 
 type InitMode = "client" | "gateway" | "both";
-type CliCommand = "help" | "init" | "run" | "mcp" | "doctor" | "browser";
+type CliCommand =
+  | "help"
+  | "init"
+  | "run"
+  | "mcp"
+  | "doctor"
+  | "browser"
+  | "codex-plugin"
+  | "system-prune";
 
 const distDir = __dirname;
 const packageRoot = path.resolve(distDir, "..");
 const cliPackageVersion = getTellyMcpPackageVersion(__dirname);
 
-type TmuxStatus =
-  | { found: true; version: string }
-  | { found: false };
-
 type PlaywrightBrowserStatus =
   | { enabled: false }
   | { enabled: true; installed: true; executablePath: string }
   | { enabled: true; installed: false; message: string };
-
-function getTmuxStatus(): TmuxStatus {
-  const result = spawnSync("tmux", ["-V"], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  });
-
-  if (result.status === 0) {
-    return {
-      found: true,
-      version: (result.stdout || "tmux").trim(),
-    };
-  }
-
-  return { found: false };
-}
 
 function printBanner(title: string, subtitle?: string): void {
   process.stdout.write(
@@ -57,18 +59,6 @@ function printSection(title: string, lines: string[]): void {
     process.stdout.write(`${line}\n`);
   }
   process.stdout.write("\n");
-}
-
-function getTmuxInstallHints(): string[] {
-  if (process.platform === "darwin") {
-    return ["brew install tmux"];
-  }
-
-  return [
-    "Ubuntu/Debian: sudo apt install tmux",
-    "Fedora/RHEL:   sudo dnf install tmux",
-    "Arch:          sudo pacman -S tmux",
-  ];
 }
 
 async function getPlaywrightBrowserStatus(
@@ -105,15 +95,18 @@ async function getPlaywrightBrowserStatus(
 }
 
 function printHelp(): void {
-  const tmux = getTmuxStatus();
-
   printBanner("CLI", "Telegram control plane for MCP-connected coding agents");
   printSection("Usage", [
     "  tellymcp init <client|gateway|both> [directory]",
     "  tellymcp run [--env <file>]",
     "  tellymcp run --env=<file>",
+    "  tellymcp run --env .env-client -s backendDev",
+    "  tellymcp run              # if .mcpsession.json already stores env_file + local_session_id",
     "  tellymcp doctor [--env <file>]",
+    "  tellymcp system-prune [--env <file>] --yes",
     "  tellymcp browser install",
+    "  tellymcp codex-plugin install",
+    "  tellymcp codex-plugin status",
     "  tellymcp mcp [--url <url>] [--bearer <token>] [--format claude|legacy]",
     "  tellymcp help",
   ]);
@@ -122,23 +115,122 @@ function printHelp(): void {
     "  tellymcp init gateway ./gateway-node",
     "  tellymcp run",
     "  tellymcp run --env .env.client",
+    "  tellymcp run --env .env-client -s backendDev",
+    "  tellymcp run              # reuses .mcpsession.json in the current workspace",
     "  tellymcp doctor --env .env.client",
+    "  tellymcp system-prune --env .env.gateway --yes",
     "  tellymcp browser install",
+    "  tellymcp codex-plugin install",
+    "  tellymcp codex-plugin status",
     "  tellymcp mcp --help",
   ]);
-  if (tmux.found) {
-    printSection("tmux", [
-      `${pc.green("  OK")} ${tmux.version}`,
-      "  Live view and session nudges are available.",
-    ]);
-  } else {
-    printSection("tmux", [
-      `${pc.yellow("  WARN")} tmux was not found on this system.`,
-      "  TellyMCP will still run, but Live view and nudges will be limited.",
-      "  Install examples:",
-      ...getTmuxInstallHints().map((line) => `    ${line}`),
-    ]);
+  printSection("terminal", [
+    `${pc.green("  OK")} built-in PTY runtime`,
+    "  Live view, session nudges and browser flows use the built-in terminal runtime.",
+  ]);
+}
+
+type LoadedCliEnv = {
+  envPath: string;
+  parsed: Record<string, string>;
+};
+
+function resolveMarkerEnvPath(rawPath: string, cwd: string): string {
+  return path.isAbsolute(rawPath) ? rawPath : path.resolve(cwd, rawPath);
+}
+
+function formatMarkerEnvPath(envPath: string, cwd: string): string {
+  const resolvedCwd = path.resolve(cwd);
+  const resolvedEnvPath = path.resolve(envPath);
+  const relativePath = path.relative(resolvedCwd, resolvedEnvPath);
+  return relativePath && !relativePath.startsWith("..") && !path.isAbsolute(relativePath)
+    ? relativePath
+    : resolvedEnvPath;
+}
+
+function getSessionMarkerForCwd(cwd: string) {
+  return readSessionMarkerState(cwd);
+}
+
+function resolveCliSessionDefaults(input: {
+  envPath: string;
+  sessionId?: string | undefined;
+  sessionLabel?: string | undefined;
+}) {
+  return resolveSessionDefaultsForCwd({
+    cwd: process.cwd(),
+    ...(input.sessionId?.trim() ? { session_id: input.sessionId.trim() } : {}),
+    ...(input.sessionLabel?.trim()
+      ? { session_label: input.sessionLabel.trim() }
+      : {}),
+  });
+}
+
+function persistCliSessionMarker(input: {
+  cwd: string;
+  envPath: string;
+  sessionId?: string | undefined;
+  sessionLabel?: string | undefined;
+}): void {
+  const current = getSessionMarkerForCwd(input.cwd);
+  const resolved =
+    resolveCliSessionDefaults({
+      envPath: input.envPath,
+      sessionId: input.sessionId,
+      sessionLabel: input.sessionLabel,
+    }) ?? null;
+  const localSessionId =
+    input.sessionId?.trim() || current?.localSessionId || resolved?.sessionId;
+  if (!localSessionId) {
+    return;
   }
+
+  writeSessionMarkerState({
+    cwd: input.cwd,
+    localSessionId,
+    ...(input.sessionLabel?.trim()
+      ? { sessionLabel: input.sessionLabel.trim() }
+      : current?.sessionLabel
+        ? { sessionLabel: current.sessionLabel }
+        : resolved?.sessionLabel
+          ? { sessionLabel: resolved.sessionLabel }
+        : {}),
+    envFile: formatMarkerEnvPath(input.envPath, input.cwd),
+  });
+}
+
+function loadCliEnv(args: string[]): LoadedCliEnv {
+  const envPath = resolveRunEnvPath(args);
+  const marker = getSessionMarkerForCwd(process.cwd());
+  const explicitSessionOverride =
+    readFlagValue(args, "-s") ?? readFlagValue(args, "--session");
+  const sessionOverride = explicitSessionOverride ?? marker?.localSessionId ?? null;
+  const sessionLabelOverride = explicitSessionOverride
+    ? explicitSessionOverride
+    : marker?.sessionLabel ?? sessionOverride ?? null;
+  if (!existsSync(envPath)) {
+    fail(`Missing env file: ${envPath}`);
+  }
+
+  const envContent = readFileSync(envPath, "utf8");
+  const fileEnv = parseDotenv(envContent);
+  const runtimeEnvOverrides = Object.fromEntries(
+    Object.entries(process.env).filter(([, value]) => typeof value === "string"),
+  ) as Record<string, string>;
+
+  return {
+    envPath,
+    parsed: {
+      ...fileEnv,
+      ...runtimeEnvOverrides,
+      ...(sessionOverride
+        ? {
+            TELLYMCP_SESSION_ID: sessionOverride,
+            TELLYMCP_SESSION_LABEL: sessionLabelOverride || sessionOverride,
+          }
+        : {}),
+    },
+  };
 }
 
 function printMcpHelp(): void {
@@ -155,10 +247,11 @@ function printMcpHelp(): void {
     "  Copy the printed JSON into your agent's MCP config.",
   ]);
   printSection("What you need", [
-    "  1. tmux must be installed on the machine where tellymcp runs.",
+    "  1. Terminal live view and nudges use the built-in PTY runtime.",
     "  2. Your MCP endpoint depends on mode:",
     "     - client/local: http://127.0.0.1:8787/mcp",
     "     - gateway/both behind nginx: https://your-host.example/api/mcp",
+    "  3. For local and remote agents, use the MCP HTTP endpoint exposed by tellymcp run.",
   ]);
   printSection("Claude / modern streamable-http example", [
     "{",
@@ -213,6 +306,19 @@ function printBrowserHelp(): void {
     "  Installs the bundled Playwright Chromium browser.",
     "  Uses the Playwright dependency shipped with TellyMCP.",
     "  Avoids generic npx warnings about missing local project dependencies.",
+  ]);
+}
+
+function printCodexPluginHelp(): void {
+  printBanner("codex plugin", "Install or inspect the bundled Codex workflow plugin");
+  printSection("Usage", [
+    "  tellymcp codex-plugin install",
+    "  tellymcp codex-plugin status",
+  ]);
+  printSection("What this command does", [
+    "  Copies the bundled telly-workflows plugin from the package into a managed local Codex plugin directory.",
+    "  Ensures the local personal marketplace entry points at that managed plugin source.",
+    "  If the Codex CLI is installed, checks whether the installed plugin version matches the bundled package version and installs or updates it when needed.",
   ]);
 }
 
@@ -278,6 +384,7 @@ function initWorkspace(mode: InitMode, directoryArg?: string): void {
 
 function resolveRunEnvPath(args: string[]): string {
   const [firstArg, secondArg] = args;
+  const marker = getSessionMarkerForCwd(process.cwd());
 
   if (firstArg?.startsWith("--env=")) {
     const value = firstArg.slice("--env=".length).trim();
@@ -292,6 +399,10 @@ function resolveRunEnvPath(args: string[]): string {
       fail("Expected a file path after --env");
     }
     return path.resolve(process.cwd(), secondArg);
+  }
+
+  if (marker?.envFile?.trim()) {
+    return resolveMarkerEnvPath(marker.envFile.trim(), process.cwd());
   }
 
   return path.resolve(process.cwd(), ".env");
@@ -512,42 +623,16 @@ async function checkWebSocketUrl(
 }
 
 async function runDoctor(args: string[]): Promise<void> {
-  const envPath = resolveRunEnvPath(args);
-  const tmux = getTmuxStatus();
+  const { envPath, parsed } = loadCliEnv(args);
 
   printBanner("doctor", "Local installation diagnostics");
 
-  if (tmux.found) {
-    printSection("tmux", [
-      `${pc.green("  OK")} ${tmux.version}`,
-      "  Live view and session nudges should work.",
-    ]);
-  } else {
-    printSection("tmux", [
-      `${pc.yellow("  WARN")} tmux was not found.`,
-      "  TellyMCP will still run, but Live view and nudges will be limited.",
-      "  Install examples:",
-      ...getTmuxInstallHints().map((line) => `    ${line}`),
-    ]);
-  }
+  printSection("terminal", [
+    `${pc.green("  OK")} built-in PTY runtime`,
+    `  shell: ${parsed.TERMINAL_SHELL?.trim() || process.env.SHELL || "bash"}`,
+    `  size:  ${parsed.TERMINAL_COLS?.trim() || "120"}x${parsed.TERMINAL_ROWS?.trim() || "40"}`,
+  ]);
 
-  if (!existsSync(envPath)) {
-    printSection("env", [
-      `${pc.red("  ERROR")} Missing env file: ${envPath}`,
-      "  Run 'tellymcp init client' or pass --env <file>.",
-    ]);
-    return;
-  }
-
-  const envContent = readFileSync(envPath, "utf8");
-  const fileEnv = parseDotenv(envContent);
-  const runtimeEnvOverrides = Object.fromEntries(
-    Object.entries(process.env).filter(([, value]) => typeof value === "string"),
-  ) as Record<string, string>;
-  const parsed = {
-    ...fileEnv,
-    ...runtimeEnvOverrides,
-  };
   const mode = (parsed.DISTRIBUTED_MODE || "client").trim();
   const httpHost = (parsed.MCP_HTTP_HOST || "0.0.0.0").trim();
   const httpPort =
@@ -585,6 +670,10 @@ async function runDoctor(args: string[]): Promise<void> {
   printSection("env", [
     `${pc.green("  OK")} ${envPath}`,
     `  mode: ${mode}`,
+    "  terminal transport: built-in PTY",
+    ...(parsed.TELLYMCP_SESSION_ID
+      ? [`  session override: ${parsed.TELLYMCP_SESSION_ID}`]
+      : []),
     `  bind: http://${httpHost}:${httpPort}`,
     `  mcp:  http://${httpHost}:${httpPort}${mcpUrlPath}`,
     `  web:  http://${httpHost}:${httpPort}${webappUrlPath}`,
@@ -771,6 +860,141 @@ async function runDoctor(args: string[]): Promise<void> {
   }
 }
 
+function hasFlag(args: string[], flagName: string): boolean {
+  return args.includes(flagName);
+}
+
+async function runSystemPrune(args: string[]): Promise<void> {
+  const confirmed = hasFlag(args, "--yes");
+  if (!confirmed) {
+    fail("system-prune is destructive. Re-run with --yes.");
+  }
+
+  const filteredArgs = args.filter((arg) => arg !== "--yes");
+  const { envPath, parsed } = loadCliEnv(filteredArgs);
+  const mode = (parsed.DISTRIBUTED_MODE || "client").trim();
+  const redisHost = (parsed.REDIS_HOST || "127.0.0.1").trim();
+  const redisPort = Number(parsed.REDIS_PORT || 6379);
+  const redisDb = Number(parsed.REDIS_DB || 1);
+  const redisUsername = parsed.REDIS_USERNAME?.trim();
+  const redisPassword = parsed.REDIS_PASSWORD?.trim();
+  const dbHost = parsed.DB_HOST?.trim();
+  const dbPort = Number(parsed.DB_PORT || 5432);
+  const dbUser = parsed.DB_USER?.trim();
+  const dbPassword = parsed.DB_PASSWORD?.trim();
+  const dbName = parsed.DB_NAME?.trim();
+  const dbSchema = (parsed.DB_SCHEME || "mcp").trim();
+  const xchangeDir = path.resolve(process.cwd(), parsed.MCP_XCHANGE_DIR || ".mcp-xchange");
+  const sessionMarkerPath = path.resolve(process.cwd(), ".mcpsession.json");
+  const sqliteDbPath = path.join(xchangeDir, "xchange.sqlite3");
+
+  printBanner("system-prune", "Destroying local and gateway state");
+  printSection("Target", [
+    `  env: ${envPath}`,
+    `  mode: ${mode}`,
+    `  redis: ${redisHost}:${redisPort}/${redisDb}`,
+    ...(dbHost && dbUser && dbName
+      ? [`  postgres: ${dbHost}:${dbPort}/${dbName} schema ${dbSchema}`]
+      : [`  postgres: ${pc.dim("skipped (not configured)")}`]),
+    `  xchange dir: ${xchangeDir}`,
+    `  session marker: ${sessionMarkerPath}`,
+  ]);
+
+  const redis = new Redis({
+    host: redisHost,
+    port: redisPort,
+    db: redisDb,
+    ...(redisUsername ? { username: redisUsername } : {}),
+    ...(redisPassword ? { password: redisPassword } : {}),
+    maxRetriesPerRequest: 1,
+    enableReadyCheck: true,
+  });
+
+  let deletedRedisKeys = 0;
+  try {
+    let cursor = "0";
+    do {
+      const [nextCursor, keys] = await redis.scan(
+        cursor,
+        "MATCH",
+        "telegram-mcp:*",
+        "COUNT",
+        500,
+      );
+      cursor = nextCursor;
+      if (keys.length > 0) {
+        deletedRedisKeys += await redis.del(...keys);
+      }
+    } while (cursor !== "0");
+  } finally {
+    redis.disconnect();
+  }
+
+  let truncatedTables: string[] = [];
+  if (dbHost && dbUser && dbName) {
+    const pgModule = (await import("pg")) as unknown as {
+      Client: new (config: Record<string, unknown>) => {
+        connect(): Promise<void>;
+        query(sql: string): Promise<void>;
+        end(): Promise<void>;
+      };
+    };
+    const { Client: PgClient } = pgModule;
+    const pg = new PgClient({
+      host: dbHost,
+      port: dbPort,
+      user: dbUser,
+      password: dbPassword,
+      database: dbName,
+    });
+
+    try {
+      await pg.connect();
+      truncatedTables = [
+        "gateway_deliveries",
+        "gateway_message_artifacts",
+        "gateway_messages",
+        "gateway_session_links",
+        "gateway_sessions",
+        "gateway_project_members",
+        "gateway_projects",
+        "gateway_clients",
+      ];
+      await pg.query(
+        `TRUNCATE TABLE ${truncatedTables
+          .map((table) => `"${dbSchema}"."${table}"`)
+          .join(", ")} RESTART IDENTITY CASCADE`,
+      );
+    } finally {
+      await pg.end();
+    }
+  }
+
+  let deletedLocalArtifacts = 0;
+  if (existsSync(sqliteDbPath)) {
+    rmSync(sqliteDbPath, { force: true });
+    deletedLocalArtifacts += 1;
+  }
+  if (existsSync(xchangeDir)) {
+    rmSync(xchangeDir, { recursive: true, force: true });
+    deletedLocalArtifacts += 1;
+  }
+  if (existsSync(sessionMarkerPath)) {
+    rmSync(sessionMarkerPath, { force: true });
+    deletedLocalArtifacts += 1;
+  }
+
+  printSection("Result", [
+    `${pc.green("  OK")} redis keys deleted: ${deletedRedisKeys}`,
+    ...(truncatedTables.length > 0
+      ? [
+          `${pc.green("  OK")} postgres tables truncated: ${truncatedTables.join(", ")}`,
+        ]
+      : [`${pc.dim("  SKIP")} postgres tables: not configured`]),
+    `${pc.green("  OK")} local artifacts removed: ${deletedLocalArtifacts}`,
+  ]);
+}
+
 function runBrowserCommand(args: string[]): void {
   const [subcommand] = args;
   if (!subcommand || subcommand === "--help" || subcommand === "-h") {
@@ -803,10 +1027,83 @@ function runBrowserCommand(args: string[]): void {
   });
 }
 
-function runRuntime(args: string[]): void {
-  const envPath = resolveRunEnvPath(args);
-  if (!existsSync(envPath)) {
-    fail(`Missing ${envPath}. Run 'tellymcp init <client|gateway|both>' first or pass --env <file>.`);
+function runCodexPluginCommand(args: string[]): void {
+  const [subcommand] = args;
+  if (!subcommand || subcommand === "--help" || subcommand === "-h") {
+    printCodexPluginHelp();
+    return;
+  }
+
+  if (subcommand !== "install" && subcommand !== "status") {
+    fail("Supported codex-plugin subcommands: install, status");
+  }
+
+  if (subcommand === "status") {
+    const status = getCodexPluginStatus(packageRoot);
+    printBanner("codex plugin status", "Bundled telly-workflows plugin");
+    printSection("plugin", [
+      `  name: ${status.pluginName}`,
+      `  bundled version: ${status.bundledVersion}`,
+      `  source version: ${status.sourceVersion ?? "not synced yet"}`,
+      `  installed version: ${status.installedVersion ?? "not installed"}`,
+      `  codex cli: ${status.codexAvailable ? "detected" : "not detected"}`,
+      `  marketplace registered: ${status.marketplaceRegistered ? "yes" : "no"}`,
+      `  up to date: ${status.upToDate ? "yes" : "no"}`,
+    ]);
+    printSection("paths", [
+      `  bundled: ${status.bundledPluginDir}`,
+      `  managed: ${status.managedPluginDir}`,
+      `  marketplace root: ${status.marketplaceRoot}`,
+      `  marketplace file: ${status.marketplaceFile}`,
+    ]);
+    return;
+  }
+
+  const status = installCodexPlugin(packageRoot);
+  printBanner("codex plugin install", "Bundled telly-workflows plugin");
+  printSection("result", [
+    `  plugin: ${status.pluginName}@${status.marketplaceName}`,
+    `  bundled version: ${status.bundledVersion}`,
+    `  source version: ${status.sourceVersion ?? "unknown"}`,
+    `  installed version: ${status.installedVersion ?? "not installed"}`,
+    `  marketplace registered: ${status.marketplaceRegistered ? "yes" : "no"}`,
+    `  up to date: ${status.upToDate ? "yes" : "no"}`,
+  ]);
+  printSection("paths", [
+    `  managed plugin dir: ${status.managedPluginDir}`,
+    `  marketplace file: ${status.marketplaceFile}`,
+  ]);
+  if (!status.codexAvailable) {
+    printSection("next", [
+      "  Codex CLI was not detected on this machine.",
+      "  The plugin source and marketplace manifest were synced locally.",
+      "  Install Codex, then rerun: tellymcp codex-plugin install",
+    ]);
+  }
+}
+
+async function runRuntime(args: string[]): Promise<void> {
+  const { envPath, parsed } = loadCliEnv(args);
+  if (parsed.TELLYMCP_SESSION_ID) {
+    process.env.TELLYMCP_SESSION_ID = parsed.TELLYMCP_SESSION_ID;
+  }
+  if (parsed.TELLYMCP_SESSION_LABEL) {
+    process.env.TELLYMCP_SESSION_LABEL = parsed.TELLYMCP_SESSION_LABEL;
+  }
+  persistCliSessionMarker({
+    cwd: process.cwd(),
+    envPath,
+    sessionId: parsed.TELLYMCP_SESSION_ID,
+    sessionLabel: parsed.TELLYMCP_SESSION_LABEL,
+  });
+
+  if (isForegroundPtyClientMode(parsed)) {
+    await runForegroundPtyRuntime({
+      envPath,
+      packageRoot,
+      printBanner,
+    });
+    return;
   }
 
   const runnerPath = path.join(
@@ -830,12 +1127,7 @@ function runRuntime(args: string[]): void {
   }
 
   printBanner("run", "Starting packaged runtime");
-  const tmux = getTmuxStatus();
-  if (tmux.found) {
-    process.stdout.write(`${pc.green("tmux detected:")} ${tmux.version}\n`);
-  } else {
-    process.stdout.write(`${pc.yellow("tmux not found.")} Live view and nudges may be limited.\n`);
-  }
+  process.stdout.write(`${pc.green("terminal runtime:")} built-in PTY\n`);
   process.stdout.write(`${pc.cyan("Using env:")} ${envPath}\n\n`);
 
   const child = spawn(
@@ -855,6 +1147,12 @@ function runRuntime(args: string[]): void {
         ...process.env,
         ENV_FILE: envPath,
         TELLYMCP_STANDALONE_HTTP: "true",
+        ...(parsed.TELLYMCP_SESSION_ID
+          ? { TELLYMCP_SESSION_ID: parsed.TELLYMCP_SESSION_ID }
+          : {}),
+        ...(parsed.TELLYMCP_SESSION_LABEL
+          ? { TELLYMCP_SESSION_LABEL: parsed.TELLYMCP_SESSION_LABEL }
+          : {}),
       },
     },
   );
@@ -870,7 +1168,8 @@ function runRuntime(args: string[]): void {
 
 async function main(argv: string[]): Promise<void> {
   const [rawCommand, firstArg, secondArg] = argv;
-  const command: CliCommand = rawCommand === "init" || rawCommand === "run" || rawCommand === "help" || rawCommand === "mcp" || rawCommand === "doctor" || rawCommand === "browser"
+  const command: CliCommand = rawCommand === "init" || rawCommand === "run" || rawCommand === "help" || rawCommand === "mcp" || rawCommand === "doctor" || rawCommand === "browser" || rawCommand === "system-prune"
+    || rawCommand === "codex-plugin"
     ? rawCommand
     : "help";
 
@@ -899,7 +1198,17 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
 
-  runRuntime(argv.slice(1));
+  if (command === "codex-plugin") {
+    runCodexPluginCommand(argv.slice(1));
+    return;
+  }
+
+  if (command === "system-prune") {
+    await runSystemPrune(argv.slice(1));
+    return;
+  }
+
+  await runRuntime(argv.slice(1));
 }
 
 void main(process.argv.slice(2));

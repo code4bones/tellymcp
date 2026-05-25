@@ -26,3 +26,32 @@ deploy:gateway:
       artifacts: true
   script:
     - bash scripts/deploy-gateway.sh
+
+build:onebot:
+  stage: build
+  tags:
+    - france
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "onebot"'
+  script:
+    - yarn install --frozen-lockfile
+    - yarn lint
+    - yarn test
+    - yarn build
+    - npm pack
+  artifacts:
+    expire_in: 1 day
+    paths:
+      - deadragdoll-tellymcp-*.tgz
+
+deploy:onebot:
+  stage: deploy
+  tags:
+    - france
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "onebot"'
+  needs:
+    - job: build:onebot
+      artifacts: true
+  script:
+    - bash scripts/deploy-onebot-branch.sh

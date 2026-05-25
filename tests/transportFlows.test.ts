@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock(
+  "../src/services/features/telegram-mcp/src/shared/integrations/xchange/sqliteRecordStore",
+  () => ({
+    upsertXchangeRecord: vi.fn(),
+  }),
+);
+
 import { TelegramTransport } from "../src/services/features/telegram-mcp/src/shared/integrations/telegram/transport";
+import { upsertXchangeRecord } from "../src/services/features/telegram-mcp/src/shared/integrations/xchange/sqliteRecordStore";
 
 type MockFn = ReturnType<typeof vi.fn>;
 
@@ -14,6 +22,12 @@ type TransportHarness = TelegramTransport & {
   };
   maintenanceStore: {
     setOutgoingDeliveryNotice: MockFn;
+  };
+  config: {
+    terminal: Record<string, unknown>;
+    exchange: {
+      dir: string;
+    };
   };
   getPrincipalFromContext: MockFn;
   getProjectMemberPayloadByKey: MockFn;
@@ -72,6 +86,12 @@ function createTransportHarness(): TransportHarness {
   };
   transport.maintenanceStore = {
     setOutgoingDeliveryNotice: vi.fn(),
+  };
+  transport.config = {
+    terminal: {},
+    exchange: {
+      dir: ".mcp-xchange",
+    },
   };
   transport.getPrincipalFromContext = vi.fn();
   transport.getProjectMemberPayloadByKey = vi.fn();
@@ -231,9 +251,12 @@ describe("TelegramTransport collaboration flows", () => {
 
   it("writes explicit send_partner_file guidance into Share inbox instruction", async () => {
     const transport = createTransportHarness();
+    const mockedUpsertXchangeRecord = vi.mocked(upsertXchangeRecord);
+    mockedUpsertXchangeRecord.mockReset();
     transport.sessionStore.getSession.mockResolvedValue({
       sessionId: "left-session",
       label: "leftDev",
+      cwd: "/workspace/left",
     });
 
     await transport.__enqueuePartnerNoteInstruction({
@@ -248,40 +271,31 @@ describe("TelegramTransport collaboration flows", () => {
       projectUuid: "project-1",
     });
 
-    expect(transport.inboxStore.createInboxMessage).toHaveBeenCalledWith(
+    expect(mockedUpsertXchangeRecord).toHaveBeenCalledTimes(1);
+    expect(mockedUpsertXchangeRecord).toHaveBeenCalledWith(
+      {},
+      "/workspace/left",
+      ".mcp-xchange",
       expect.objectContaining({
-        text: expect.stringContaining(
-          "Не пересылай это как новую задачу в target-сессию.",
+        session_id: "left-session",
+        category: "local_handoff",
+        action_desc: expect.stringContaining(
+          "send the final result to the target console with send_partner_note or send_partner_file",
         ),
       }),
     );
-    expect(transport.inboxStore.createInboxMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: expect.stringContaining(
-          "Сначала выполни работу в текущей сессии сам.",
-        ),
-      }),
+    const record = mockedUpsertXchangeRecord.mock.calls[0]?.[3];
+    expect(record?.body_text).toContain(
+      "Не пересылай это как новую задачу в target-консоль.",
     );
-    expect(transport.inboxStore.createInboxMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: expect.stringContaining(
-          "Через send_partner_note или send_partner_file отправляй только результат, а не исходное поручение.",
-        ),
-      }),
+    expect(record?.body_text).toContain(
+      "Сначала выполни работу в текущей консоли сам.",
     );
-    expect(transport.inboxStore.createInboxMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: expect.stringContaining(
-          "Найди файл в локальном workspace и вызови send_partner_file.",
-        ),
-      }),
+    expect(record?.body_text).toContain(
+      "Через send_partner_note или send_partner_file отправляй только результат, а не исходное поручение.",
     );
-    expect(transport.inboxStore.createInboxMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: expect.stringContaining(
-          "Не заменяй это на plain send_partner_note с упоминанием имени файла.",
-        ),
-      }),
+    expect(record?.body_text).toContain(
+      "Если запрос касается существующего локального файла, вызови send_partner_file.",
     );
     expect(transport.nudgeSessionInbox).toHaveBeenCalledWith("left-session");
   });

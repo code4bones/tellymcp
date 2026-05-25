@@ -6,13 +6,14 @@ import {
   TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
   type TelegramMcpRuntimeServiceInstance,
 } from "./runtime.service";
-import type { TelegramInboxMessage } from "./src/entities/inbox/model/types";
-import { createInboxMessageId } from "./src/shared/lib/ids/ids";
 import {
+  detectIncomingTelegramBrowserScreenshotRequest,
   buildIncomingPartnerActionDesc,
+  buildIncomingTelegramMessageActionDesc,
   buildIncomingPartnerTools,
+  buildIncomingTelegramMessageTools,
 } from "./src/shared/lib/xchangeRecordHints";
-import { writeXchangeRelativeFile } from "./src/shared/integrations/tmux/client";
+import { writeXchangeRelativeFile } from "./src/shared/integrations/terminal/client";
 import { upsertXchangeRecord } from "./src/shared/integrations/xchange/sqliteRecordStore";
 import type { OutgoingDeliveryNotice } from "./src/shared/api/storage/contract";
 
@@ -79,11 +80,80 @@ function renderYamlArray(values: string[]): string {
   return `\n${values.map((value) => `  - ${JSON.stringify(value)}`).join("\n")}`;
 }
 
+function looksLikeFileDeliveryRequest(input: {
+  kind: string;
+  summary: string;
+  message: string;
+  expectedReply?: string;
+}): boolean {
+  if (input.kind !== "request" && input.kind !== "question") {
+    return false;
+  }
+
+  const haystack = [
+    input.summary,
+    input.message,
+    input.expectedReply ?? "",
+  ]
+    .join("\n")
+    .toLowerCase();
+
+  return (
+    /\b(send_partner_file|file delivery path|artifact|artifacts)\b/u.test(haystack) ||
+    /\b(файл|артефакт|артефакты)\b/u.test(haystack) ||
+    /\b[\w.-]+\.(html|txt|md|json|ts|tsx|js|jsx|css|scss|png|jpg|jpeg|webp|pdf|zip)\b/u.test(
+      haystack,
+    )
+  );
+}
+
+function looksLikeBrowserScreenshotRequest(input: {
+  kind: string;
+  summary: string;
+  message: string;
+  expectedReply?: string;
+}): boolean {
+  if (input.kind !== "request" && input.kind !== "question") {
+    return false;
+  }
+
+  const haystack = [
+    input.summary,
+    input.message,
+    input.expectedReply ?? "",
+  ]
+    .join("\n")
+    .toLowerCase();
+
+  return (
+    /\b(browser_open|browser_screenshot|playwright)\b/u.test(haystack) ||
+    /\b(скриншот|screenshot|скрин)\b/u.test(haystack) ||
+    /\bhttps?:\/\/[^\s]+/u.test(haystack)
+  );
+}
+
 function buildNoteContent(input: {
   delivery: GatewayDelivery;
   copiedArtifacts: string[];
 }): string {
   const isDirectRoute = input.delivery.route_mode === "direct";
+  const isTelegramHumanSource = input.delivery.source_client_uuid === "gateway-telegram";
+  const prefersFileDelivery = looksLikeFileDeliveryRequest({
+    kind: input.delivery.kind,
+    summary: input.delivery.summary,
+    message: input.delivery.message,
+    ...(input.delivery.expected_reply
+      ? { expectedReply: input.delivery.expected_reply }
+      : {}),
+  });
+  const prefersBrowserScreenshot = looksLikeBrowserScreenshotRequest({
+    kind: input.delivery.kind,
+    summary: input.delivery.summary,
+    message: input.delivery.message,
+    ...(input.delivery.expected_reply
+      ? { expectedReply: input.delivery.expected_reply }
+      : {}),
+  });
   const lines = ["---"];
   lines.push(`message_uuid: ${JSON.stringify(input.delivery.message_uuid)}`);
   lines.push(`kind: ${JSON.stringify(input.delivery.kind)}`);
@@ -110,7 +180,14 @@ function buildNoteContent(input: {
     lines.push("", "# Expected Reply", input.delivery.expected_reply.trim());
   }
 
-  if (input.delivery.requires_reply) {
+  if (isTelegramHumanSource) {
+    lines.push(
+      "",
+      "# Human Reply Route",
+      "Reply to the human with notify_telegram after you finish the requested work.",
+      "Do not use send_partner_note for a human Telegram reply.",
+    );
+  } else if (input.delivery.requires_reply) {
     lines.push(
       "",
       "# Reply Params",
@@ -128,22 +205,84 @@ function buildNoteContent(input: {
         : []),
       "",
       "# Action Required",
-      "You must send a reply via send_partner_note.",
-      "Your task is not complete until send_partner_note succeeds.",
-      "Do not stop after local analysis or a chat explanation.",
+      ...(prefersFileDelivery
+        ? [
+            "You must send the requested file via send_partner_file.",
+            ...(prefersBrowserScreenshot
+              ? [
+                  "For a webpage screenshot request, first use browser_open and browser_screenshot in this console.",
+                  "Do not replace the browser workflow with a shell Playwright command unless the browser tools actually fail.",
+                ]
+              : []),
+            "Do not paste file contents into send_partner_note.",
+            "Do not stop after reading, listing files, or explaining what you found.",
+            "Your task is not complete until send_partner_file succeeds.",
+            "Do not mark_xchange_record_read before send_partner_file succeeds.",
+          ]
+        : [
+            "You must send a reply via send_partner_note.",
+            "Do not stop after reading, listing files, or explaining what you found.",
+            "Your task is not complete until send_partner_note succeeds.",
+            "Do not mark_xchange_record_read before send_partner_note succeeds.",
+          ]),
+      "Do not stop after local analysis, inspection, or a chat explanation.",
+      "If the request asks you to produce an artifact, actually produce and send the artifact.",
       ...(isDirectRoute
         ? [
-            "Do not rely on linked partner or project-scoped target_session_id.",
+            "Do not rely on implicit partner selection or project-scoped target_session_id.",
             "Pass target_client_uuid and target_local_session_id explicitly.",
           ]
         : [
-            "Do not rely on linked partner.",
+            "Do not rely on implicit partner selection.",
             "Pass target_session_id explicitly.",
           ]),
       "If possible, also pass in_reply_to=message_uuid.",
       "Only after the tool succeeds may you say that the reply was sent.",
       "",
-      "# Reply Tool Call Example",
+      ...(prefersFileDelivery
+        ? [
+            ...(prefersBrowserScreenshot
+              ? [
+                  "# Preferred Browser Workflow Example",
+                  "browser_open(",
+                  "  url=\"https://github.com\",",
+                  "  wait_until=\"networkidle\"",
+                  ")",
+                  "browser_screenshot(",
+                  "  file_name=\"github.com.png\"",
+                  ")",
+                  "",
+                ]
+              : []),
+            "# Preferred Reply Tool Call Example",
+            "send_partner_file(",
+            `  session_id=${JSON.stringify(input.delivery.target_local_session_id)},`,
+            ...(isDirectRoute
+              ? [
+                  ...(input.delivery.source_client_uuid
+                    ? [
+                        `  target_client_uuid=${JSON.stringify(input.delivery.source_client_uuid)},`,
+                      ]
+                    : []),
+                  `  target_local_session_id=${JSON.stringify(input.delivery.source_local_session_id)},`,
+                ]
+              : [
+                  `  target_session_id=${JSON.stringify(input.delivery.source_session_uuid)},`,
+                ]),
+            ...(!isDirectRoute && input.delivery.project_uuid
+              ? [`  project_uuid=${JSON.stringify(input.delivery.project_uuid)},`]
+              : []),
+            `  file_path=${JSON.stringify(
+              prefersBrowserScreenshot ? "github.com.png" : "index.html",
+            )},`,
+            `  in_reply_to=${JSON.stringify(input.delivery.message_uuid)},`,
+            "  summary=\"Передаю запрошенный файл\",",
+            "  message=\"Передаю реальный файл как артефакт\"",
+            ")",
+            "",
+            "# Alternate Reply Tool Call Example",
+          ]
+        : ["# Reply Tool Call Example"]),
       "send_partner_note(",
       `  session_id=${JSON.stringify(input.delivery.target_local_session_id)},`,
       ...(isDirectRoute
@@ -169,6 +308,16 @@ function buildNoteContent(input: {
     );
   }
 
+  if (!input.delivery.requires_reply && input.delivery.kind === "reply") {
+    lines.push(
+      "",
+      "# Follow-up",
+      "If this reply completes a task that originally came from a human Telegram request in the receiving session, the receiving session must now deliver the final result to the human.",
+      "Use notify_telegram for text-only results.",
+      "If this reply returned a real artifact or file, use send_file_to_telegram from the receiving session instead of leaving the artifact only in local xchange storage.",
+    );
+  }
+
   if (input.copiedArtifacts.length > 0) {
     lines.push(
       "",
@@ -178,76 +327,6 @@ function buildNoteContent(input: {
   }
 
   return `${lines.join("\n")}\n`;
-}
-
-function buildPartnerInboxText(input: {
-  delivery: GatewayDelivery;
-  recordId: string;
-  actionDesc: string;
-  notePath: string;
-  copiedArtifacts: string[];
-}): string {
-  const isDirectRoute = input.delivery.route_mode === "direct";
-  const sourceActorLabel =
-    input.delivery.source_actor_label || input.delivery.source_session_label;
-  const kindTitle =
-    input.delivery.kind === "question"
-      ? `Получен вопрос от ${sourceActorLabel}.`
-      : input.delivery.kind === "reply"
-        ? `Получен ответ от ${sourceActorLabel}.`
-        : input.delivery.kind === "request"
-          ? `Получен запрос от ${sourceActorLabel}.`
-          : input.delivery.kind === "handoff"
-            ? `Получен handoff от ${sourceActorLabel}.`
-            : `Получено обновление от ${sourceActorLabel}.`;
-
-  return [
-    kindTitle,
-    ...(input.delivery.project_name
-      ? [`Проект: ${input.delivery.project_name}`]
-      : []),
-    `Сессия: ${input.delivery.source_session_label} -> ${input.delivery.target_session_label}`,
-    `Кратко: ${input.delivery.summary}`,
-    `Xchange record: ${input.recordId}`,
-    "",
-    "Действие: вызови get_xchange_record для этой записи и следуй action_desc.",
-    `Action: ${input.actionDesc}`,
-    `Note: ${input.notePath}`,
-    ...(input.copiedArtifacts.length > 0
-      ? ["", "Файлы:", ...input.copiedArtifacts.map((item) => `- ${item}`)]
-      : []),
-    ...(input.delivery.requires_reply
-      ? [
-          "",
-          `Reply message_uuid: ${input.delivery.message_uuid}`,
-          ...(isDirectRoute
-            ? [
-                ...(input.delivery.source_client_uuid
-                  ? [
-                      `Reply target_client_uuid: ${input.delivery.source_client_uuid}`,
-                    ]
-                  : []),
-                `Reply target_local_session_id: ${input.delivery.source_local_session_id}`,
-              ]
-            : [`Reply target_session_id: ${input.delivery.source_session_uuid}`]),
-          ...(!isDirectRoute && input.delivery.project_uuid
-            ? [`Reply project_uuid: ${input.delivery.project_uuid}`]
-            : []),
-          "Обязательно отправь reply через send_partner_note.",
-          "Задача не завершена, пока send_partner_note не отработал успешно.",
-          "Не останавливайся на локальном объяснении.",
-          ...(isDirectRoute
-            ? [
-                "Не используй linked partner или project-scoped target_session_id для ответа.",
-                "Передай target_client_uuid и target_local_session_id явно в send_partner_note.",
-              ]
-            : [
-                "Не используй linked partner для ответа. Передай эти параметры явно в send_partner_note.",
-              ]),
-          "Только после успешного tool call можно считать ответ отправленным.",
-        ]
-      : []),
-  ].join("\n");
 }
 
 function buildTelegramDeliveryNotification(input: {
@@ -401,14 +480,13 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
         targetSession.sessionId,
       );
       if (!targetBinding) {
-        runtime.logger.warn(
-          "Skipping gateway delivery because target session is not paired with Telegram",
+        runtime.logger.info(
+          "Gateway delivery will be materialized without Telegram route",
           {
             deliveryUuid: delivery.delivery_uuid,
             sessionId: targetSession.sessionId,
           },
         );
-        return;
       }
 
       const workspaceDir = runtime.objectStore.resolveWorkspaceDir(targetSession);
@@ -420,7 +498,7 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
         let localArtifactPath: string;
         if (artifact.content_base64) {
           localArtifactPath = await writeXchangeRelativeFile(
-            runtime.config.tmux,
+            runtime.config.terminal,
             workspaceDir,
             runtime.config.exchange.dir,
             relativePath,
@@ -453,7 +531,7 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
 
       const noteContent = buildNoteContent({ delivery, copiedArtifacts });
       const notePath = await writeXchangeRelativeFile(
-        runtime.config.tmux,
+        runtime.config.terminal,
         workspaceDir,
         runtime.config.exchange.dir,
         delivery.note_relative_path,
@@ -468,28 +546,75 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
         mimeType: "text/markdown",
         sizeBytes: Buffer.byteLength(noteContent, "utf8"),
       });
-      const actionDesc = buildIncomingPartnerActionDesc(
-        delivery.kind as Parameters<typeof buildIncomingPartnerActionDesc>[0],
-        delivery.requires_reply,
-      );
+      const isTelegramHumanSource = delivery.source_client_uuid === "gateway-telegram";
+      const prefersFileDelivery = looksLikeFileDeliveryRequest({
+        kind: delivery.kind,
+        summary: delivery.summary,
+        message: delivery.message,
+        ...(delivery.expected_reply
+          ? { expectedReply: delivery.expected_reply }
+          : {}),
+      });
+      const prefersBrowserScreenshot = looksLikeBrowserScreenshotRequest({
+        kind: delivery.kind,
+        summary: delivery.summary,
+        message: delivery.message,
+        ...(delivery.expected_reply
+          ? { expectedReply: delivery.expected_reply }
+          : {}),
+      });
+      const actionDesc = isTelegramHumanSource
+        ? buildIncomingTelegramMessageActionDesc(
+            delivery.kind as Parameters<typeof buildIncomingTelegramMessageActionDesc>[0],
+            detectIncomingTelegramBrowserScreenshotRequest({
+              kind: delivery.kind as Parameters<
+                typeof buildIncomingTelegramMessageActionDesc
+              >[0],
+              text: delivery.message,
+              ...(delivery.summary.trim()
+                ? { summary: delivery.summary.trim() }
+                : {}),
+            }),
+          )
+        : buildIncomingPartnerActionDesc(
+            delivery.kind as Parameters<typeof buildIncomingPartnerActionDesc>[0],
+            delivery.requires_reply,
+            prefersFileDelivery,
+            prefersBrowserScreenshot,
+          );
       await upsertXchangeRecord(
-        runtime.config.tmux,
+        runtime.config.terminal,
         workspaceDir,
         runtime.config.exchange.dir,
         {
           record_id: delivery.share_id,
           session_id: targetSession.sessionId,
-          category: "partner_note",
+          category: isTelegramHumanSource ? "telegram_message" : "partner_note",
           direction: "incoming",
           status: "new",
           kind: delivery.kind,
           summary: delivery.summary,
           body_text: noteContent,
           action_desc: actionDesc,
-          tools: buildIncomingPartnerTools(
-            delivery.kind as Parameters<typeof buildIncomingPartnerTools>[0],
-            delivery.requires_reply,
-          ),
+          tools: isTelegramHumanSource
+            ? buildIncomingTelegramMessageTools(
+                delivery.kind as Parameters<typeof buildIncomingTelegramMessageTools>[0],
+                detectIncomingTelegramBrowserScreenshotRequest({
+                  kind: delivery.kind as Parameters<
+                    typeof buildIncomingTelegramMessageTools
+                  >[0],
+                  text: delivery.message,
+                  ...(delivery.summary.trim()
+                    ? { summary: delivery.summary.trim() }
+                    : {}),
+                }),
+              )
+            : buildIncomingPartnerTools(
+                delivery.kind as Parameters<typeof buildIncomingPartnerTools>[0],
+                delivery.requires_reply,
+                prefersFileDelivery,
+                prefersBrowserScreenshot,
+              ),
           note_path: notePath,
           note_relative_path: delivery.note_relative_path,
           source_session_id: delivery.source_session_uuid,
@@ -543,55 +668,43 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
         },
       );
 
-      const inboxMessage: TelegramInboxMessage = {
-        id: createInboxMessageId(new Date(delivery.created_at)),
-        sessionId: targetSession.sessionId,
-        telegramChatId: targetBinding.telegramChatId,
-        telegramUserId: targetBinding.telegramUserId,
-        sourceTelegramMessageId: Date.now(),
-        text: buildPartnerInboxText({
-          delivery,
-          recordId: delivery.share_id,
-          actionDesc,
-          notePath,
-          copiedArtifacts,
-        }),
-        attachments: [notePath, ...copiedArtifacts],
-        receivedAt: delivery.created_at,
-      };
-      await runtime.inboxStore.createInboxMessage(inboxMessage);
-
-      try {
-        await runtime.telegramTransport.sendNotification({
-          sessionId: targetSession.sessionId,
-          sessionLabel: delivery.source_session_label,
-          recipient: {
-            telegramChatId: targetBinding.telegramChatId,
-            telegramUserId: targetBinding.telegramUserId,
-          },
-          message: buildTelegramDeliveryNotification({
-            delivery,
-            notePath,
-            copiedArtifacts,
-          }),
-        });
-      } catch (error) {
-        runtime.logger.warn(
-          "Failed to send Telegram notification for gateway delivery",
-          {
-            deliveryUuid: delivery.delivery_uuid,
+      if (targetBinding && !isTelegramHumanSource) {
+        try {
+          await runtime.telegramTransport.sendNotification({
             sessionId: targetSession.sessionId,
-            error:
-              error instanceof Error ? (error.stack ?? error.message) : String(error),
-          },
-        );
+            sessionLabel: delivery.source_session_label,
+            recipient: {
+              telegramChatId: targetBinding.telegramChatId,
+              telegramUserId: targetBinding.telegramUserId,
+            },
+            message: buildTelegramDeliveryNotification({
+              delivery,
+              notePath,
+              copiedArtifacts,
+            }),
+          });
+        } catch (error) {
+          runtime.logger.warn(
+            "Failed to send Telegram notification for gateway delivery",
+            {
+              deliveryUuid: delivery.delivery_uuid,
+              sessionId: targetSession.sessionId,
+              error:
+                error instanceof Error ? (error.stack ?? error.message) : String(error),
+            },
+          );
+        }
       }
       try {
         await runtime.telegramTransport.nudgeSessionPartnerNote(
           targetSession.sessionId,
+          {
+            kind: delivery.kind,
+            requiresReply: delivery.requires_reply,
+          },
         );
       } catch (error) {
-        runtime.logger.warn("Failed to nudge tmux after gateway delivery", {
+        runtime.logger.warn("Failed to nudge terminal after gateway delivery", {
           deliveryUuid: delivery.delivery_uuid,
           sessionId: targetSession.sessionId,
           error:

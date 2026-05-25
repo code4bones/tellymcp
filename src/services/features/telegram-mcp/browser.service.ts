@@ -4,6 +4,24 @@ import {
   TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
   type TelegramMcpRuntimeServiceInstance,
 } from "./runtime.service";
+import { RemoteConsoleActionClient } from "./src/features/distributed-gateway/model/remoteConsoleActionClient";
+import type {
+  BrowserClearLogsInput,
+  BrowserClickInput,
+  BrowserCloseInput,
+  BrowserComputedStyleInput,
+  BrowserConsoleInput,
+  BrowserDomInput,
+  BrowserErrorsInput,
+  BrowserFillInput,
+  BrowserNetworkFailuresInput,
+  BrowserOpenInput,
+  BrowserPressInput,
+  BrowserReloadInput,
+  BrowserScreenshotInput,
+  BrowserWaitForInput,
+  BrowserWaitForUrlInput,
+} from "./src/entities/browser/model/types";
 import { BrowserService } from "./src/features/browser/model/browserService";
 
 export const TELEGRAM_MCP_BROWSER_SERVICE_NAME = "telegramMcp.browser";
@@ -21,6 +39,144 @@ type BrowserServiceCarrier = Service & {
 const TelegramMcpBrowserService: ServiceSchema = {
   name: TELEGRAM_MCP_BROWSER_SERVICE_NAME,
   dependencies: [TELEGRAM_MCP_RUNTIME_SERVICE_NAME],
+
+  actions: {
+    openRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserOpenInput },
+      ) {
+        return this.getBrowserService!().open(ctx.params);
+      },
+    },
+    getConsoleRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserConsoleInput },
+      ) {
+        return this.getBrowserService!().getConsole(ctx.params);
+      },
+    },
+    clickRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserClickInput },
+      ) {
+        return this.getBrowserService!().click(ctx.params);
+      },
+    },
+    fillRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserFillInput },
+      ) {
+        return this.getBrowserService!().fill(ctx.params);
+      },
+    },
+    pressRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserPressInput },
+      ) {
+        return this.getBrowserService!().press(ctx.params);
+      },
+    },
+    reloadRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserReloadInput },
+      ) {
+        return this.getBrowserService!().reload(ctx.params);
+      },
+    },
+    waitForRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserWaitForInput },
+      ) {
+        return this.getBrowserService!().waitFor(ctx.params);
+      },
+    },
+    waitForUrlRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserWaitForUrlInput },
+      ) {
+        return this.getBrowserService!().waitForUrl(ctx.params);
+      },
+    },
+    getErrorsRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserErrorsInput },
+      ) {
+        return this.getBrowserService!().getErrors(ctx.params);
+      },
+    },
+    getNetworkFailuresRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserNetworkFailuresInput },
+      ) {
+        return this.getBrowserService!().getNetworkFailures(ctx.params);
+      },
+    },
+    clearLogsRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserClearLogsInput },
+      ) {
+        return this.getBrowserService!().clearLogs(ctx.params);
+      },
+    },
+    getDomRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserDomInput },
+      ) {
+        return this.getBrowserService!().getDom(ctx.params);
+      },
+    },
+    getComputedStyleRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserComputedStyleInput },
+      ) {
+        return this.getBrowserService!().getComputedStyle(ctx.params);
+      },
+    },
+    screenshotRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserScreenshotInput },
+      ) {
+        return this.getBrowserService!().screenshot(ctx.params);
+      },
+    },
+    closeRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserCloseInput },
+      ) {
+        return this.getBrowserService!().close(ctx.params);
+      },
+    },
+  },
 
   created(this: BrowserServiceCarrier) {
     this.browserService = null;
@@ -54,13 +210,17 @@ const TelegramMcpBrowserService: ServiceSchema = {
     this.logger.info("Starting telegram_mcp browser service");
     this.browserService = new BrowserService(
       runtime.config,
-      runtime.stateStore,
+      runtime.sessionStore,
+      runtime.maintenanceStore,
       runtime.stateStore,
       runtime.stateStore,
       runtime.objectStore,
       runtime.telegramTransport,
       runtime.logger,
       runtime.projectIdentityResolver,
+      new RemoteConsoleActionClient((actionName, params) =>
+        this.broker.call(actionName, params, { meta: { internal_call: true } }),
+      ),
     );
     this.logger.info("telegram_mcp browser service is ready");
   },

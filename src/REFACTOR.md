@@ -21,14 +21,13 @@
    - код живёт в `src/services/features/telegram-mcp/src/{app,entities,features,processes,shared}`
    - `runtime.service.ts` остаётся core runtime service для этой feature
  - Moleculer bootstrap для telegram_mcp подключен:
-   - standalone `stdio` удалён
+  - legacy standalone MCP transport удалён
    - HTTP runtime обслуживается самим `telegram_mcp`
    - в `gateway/both` режиме listener садится на общий `PORT` и `${ROOT_PREFIX}`
    - `${ROOT_PREFIX}/mcp`, `${ROOT_PREFIX}/webapp`, `${ROOT_PREFIX}/healthz`, `${ROOT_PREFIX}/gateway` обслуживаются текущим standalone HTTP слоем
    - текущая сервисная схема:
      - `telegramMcp.runtime` — config, redis, state store, telegram transport, shared runtime dependencies
-     - `telegramMcp.pair` — pair-code and pairing lifecycle
-     - `telegramMcp.sessionContext` — session metadata and tmux target management
+     - `telegramMcp.sessionContext` — session metadata management
      - `telegramMcp.notify` — Telegram notify delivery
      - `telegramMcp.inbox` — inbox read/count/delete service
      - `telegramMcp.approval` — ask-user / human approval orchestration

@@ -77,6 +77,13 @@ type GatewaySocketHarness = {
   wsClient: {
     send: MockFn;
   } | null;
+  connectedClients: Map<
+    { readyState: number; send: MockFn },
+    {
+      client_uuid?: string;
+      session_tools?: Array<{ local_session_id: string }>;
+    }
+  >;
   connectedClientsByUuid: Map<string, { readyState: number; send: MockFn }>;
   getRuntimeOrThrow: () => {
     logger: {
@@ -170,6 +177,7 @@ function createHarness(): GatewaySocketHarness {
     wsClient: {
       send: vi.fn(),
     },
+    connectedClients: new Map(),
     connectedClientsByUuid: new Map(),
     getRuntimeOrThrow: () => runtime,
     isLocalGatewayClientUuid: vi.fn(async () => false),
@@ -530,10 +538,14 @@ describe("gatewaySocket service", () => {
   it("notifies joined members locally and over remote sockets", async () => {
     const harness = createHarness();
     const remoteSend = vi.fn();
-    harness.connectedClientsByUuid.set("remote-client", {
+    const remoteSocket = {
       readyState: 1,
       send: remoteSend,
+    };
+    harness.connectedClients.set(remoteSocket, {
+      client_uuid: "remote-client",
     });
+    harness.connectedClientsByUuid.set("remote-client", remoteSocket);
     harness.isLocalGatewayClientUuid.mockImplementation(
       async (clientUuid: string) => clientUuid === "local-client",
     );
@@ -569,10 +581,14 @@ describe("gatewaySocket service", () => {
   it("notifies left members locally and over remote sockets", async () => {
     const harness = createHarness();
     const remoteSend = vi.fn();
-    harness.connectedClientsByUuid.set("remote-client", {
+    const remoteSocket = {
       readyState: 1,
       send: remoteSend,
+    };
+    harness.connectedClients.set(remoteSocket, {
+      client_uuid: "remote-client",
     });
+    harness.connectedClientsByUuid.set("remote-client", remoteSocket);
     harness.isLocalGatewayClientUuid.mockImplementation(
       async (clientUuid: string) => clientUuid === "local-client",
     );
@@ -608,10 +624,14 @@ describe("gatewaySocket service", () => {
   it("notifies deleted projects locally and over remote sockets", async () => {
     const harness = createHarness();
     const remoteSend = vi.fn();
-    harness.connectedClientsByUuid.set("remote-client", {
+    const remoteSocket = {
       readyState: 1,
       send: remoteSend,
+    };
+    harness.connectedClients.set(remoteSocket, {
+      client_uuid: "remote-client",
     });
+    harness.connectedClientsByUuid.set("remote-client", remoteSocket);
     harness.isLocalGatewayClientUuid.mockImplementation(
       async (clientUuid: string) => clientUuid === "local-client",
     );
@@ -668,10 +688,15 @@ describe("gatewaySocket service", () => {
     const harness = createHarness();
     const remoteSend = vi.fn();
     const delivery = createDelivery();
-    harness.connectedClientsByUuid.set("remote-client", {
+    const socket = {
       readyState: 1,
       send: remoteSend,
+    };
+    harness.connectedClients.set(socket, {
+      client_uuid: "remote-client",
+      session_tools: [{ local_session_id: delivery.target_local_session_id }],
     });
+    harness.connectedClientsByUuid.set("remote-client", socket);
 
     const published = await harness.notifyDeliveryQueued({
       clientUuid: "remote-client",
@@ -726,10 +751,14 @@ describe("gatewaySocket service", () => {
     const harness = createHarness();
     const remoteSend = vi.fn();
     const status = createStatus();
-    harness.connectedClientsByUuid.set("remote-client", {
+    const remoteSocket = {
       readyState: 1,
       send: remoteSend,
+    };
+    harness.connectedClients.set(remoteSocket, {
+      client_uuid: "remote-client",
     });
+    harness.connectedClientsByUuid.set("remote-client", remoteSocket);
 
     const published = await harness.notifyDeliveryStatus({
       clientUuid: "remote-client",
@@ -756,16 +785,9 @@ describe("gatewaySocket service", () => {
     expect(published).toBe(false);
   });
 
-  it("notifies live approval requests locally and over remote sockets", async () => {
+  it("notifies live approval requests through telegram transport", async () => {
     const harness = createHarness();
     const remoteSend = vi.fn();
-    harness.connectedClientsByUuid.set("remote-client", {
-      readyState: 1,
-      send: remoteSend,
-    });
-    harness.isLocalGatewayClientUuid.mockImplementation(
-      async (clientUuid: string) => clientUuid === "local-client",
-    );
 
     await expect(
       harness.notifyLiveApprovalRequest({
@@ -789,29 +811,13 @@ describe("gatewaySocket service", () => {
 
     expect(
       harness.getRuntimeOrThrow().telegramTransport.handleLiveViewApprovalRequestEvent,
-    ).toHaveBeenCalled();
-    expect(remoteSend).toHaveBeenCalledWith(
-      JSON.stringify({
-        type: "live_event",
-        event: "approval_request",
-        payload: {
-          source_session_label: "leftDev",
-          target_session_label: "backend",
-        },
-      }),
-    );
+    ).toHaveBeenCalledTimes(2);
+    expect(remoteSend).not.toHaveBeenCalled();
   });
 
-  it("notifies live approval resolutions locally and over remote sockets", async () => {
+  it("notifies live approval resolutions through telegram transport", async () => {
     const harness = createHarness();
     const remoteSend = vi.fn();
-    harness.connectedClientsByUuid.set("remote-client", {
-      readyState: 1,
-      send: remoteSend,
-    });
-    harness.isLocalGatewayClientUuid.mockImplementation(
-      async (clientUuid: string) => clientUuid === "local-client",
-    );
 
     await expect(
       harness.notifyLiveApprovalResolved({
@@ -842,15 +848,15 @@ describe("gatewaySocket service", () => {
         approved: true,
       }),
     );
-    expect(remoteSend).toHaveBeenCalledWith(
-      JSON.stringify({
-        type: "live_event",
-        event: "approval_denied",
-        payload: {
-          source_session_label: "leftDev",
-          target_session_label: "backend",
-        },
+    expect(
+      harness.getRuntimeOrThrow().telegramTransport.handleLiveViewApprovalResolvedEvent,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        approved: false,
+        source_session_label: "leftDev",
+        target_session_label: "backend",
       }),
     );
+    expect(remoteSend).not.toHaveBeenCalled();
   });
 });

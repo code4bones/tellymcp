@@ -17,6 +17,8 @@ export class GatewayCollaborationBackend implements CollaborationBackend {
     private readonly maintenanceStore: MaintenanceStore,
     private readonly gatewayPublicUrl?: string,
     private readonly gatewayAuthToken?: string,
+    private readonly gatewayToken?: string,
+    private readonly gatewayUserUuid?: string,
     private readonly projectName?: string,
     private readonly botUsername?: string,
   ) {}
@@ -39,6 +41,8 @@ export class GatewayCollaborationBackend implements CollaborationBackend {
       ...(this.gatewayAuthToken
         ? { gatewayAuthToken: this.gatewayAuthToken }
         : {}),
+      ...(this.gatewayToken ? { gatewayToken: this.gatewayToken } : {}),
+      ...(this.gatewayUserUuid ? { gatewayUserUuid: this.gatewayUserUuid } : {}),
       ...(this.projectName ? { projectName: this.projectName } : {}),
       ...(this.botUsername ? { botUsername: this.botUsername } : {}),
     });

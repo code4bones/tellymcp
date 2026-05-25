@@ -7,11 +7,22 @@ import type {
   SendPartnerFileInput,
   SendPartnerNoteOutput,
 } from "../../../entities/collaboration/model/types";
-import type { SessionStore } from "../../../shared/api/storage/contract";
+import type {
+  MaintenanceStore,
+  SessionStore,
+} from "../../../shared/api/storage/contract";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
-import { readWorkspaceFile } from "../../../shared/integrations/tmux/client";
+import { readWorkspaceFile } from "../../../shared/integrations/terminal/client";
 import { CollaborationService } from "./collaborationService";
+
+type RemoteConsoleInvoker = {
+  invokeForRelaySession<T>(
+    sessionId: string,
+    actionName: string,
+    params: Record<string, unknown>,
+  ): Promise<T>;
+};
 
 function resolveWorkspaceDir(input: {
   inputCwd?: string | undefined;
@@ -59,16 +70,33 @@ export class SendPartnerFileService {
   public constructor(
     private readonly config: AppConfig,
     private readonly sessionStore: SessionStore,
+    private readonly maintenanceStore: MaintenanceStore,
     private readonly logger: Logger,
     private readonly projectIdentityResolver: ProjectIdentityResolver,
     private readonly collaborationService: CollaborationService,
+    private readonly remoteConsoleInvoker?: RemoteConsoleInvoker,
   ) {}
 
   public async send(
     input: SendPartnerFileInput,
   ): Promise<SendPartnerNoteOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const session = await this.sessionStore.getSession(resolved.sessionId);
+    const sessionId = await this.normalizeSessionIdForWorkspace(resolved.sessionId);
+    const remote =
+      this.config.distributed.mode !== "client"
+        ? await this.remoteConsoleInvoker?.invokeForRelaySession<SendPartnerNoteOutput>(
+            sessionId,
+            "telegramMcp.collaboration.sendPartnerFileRemote",
+            {
+              ...input,
+              session_id: sessionId,
+            } as Record<string, unknown>,
+          )
+        : null;
+    if (remote) {
+      return remote;
+    }
+    const session = await this.sessionStore.getSession(sessionId);
     const workspaceDir = resolveWorkspaceDir({
       inputCwd: input.cwd,
       sessionCwd: session?.cwd,
@@ -79,7 +107,7 @@ export class SendPartnerFileService {
       input.file_path,
     );
     const fileContent = await readWorkspaceFile(
-      this.config.tmux,
+      this.config.terminal,
       workspaceDir,
       relativeFilePath,
     );
@@ -87,7 +115,7 @@ export class SendPartnerFileService {
     const mimeType = lookupMimeType(originalName) || "application/octet-stream";
 
     const output = await this.collaborationService.sendPartnerNote({
-      session_id: resolved.sessionId,
+      session_id: sessionId,
       ...(input.target_session_id?.trim()
         ? { target_session_id: input.target_session_id.trim() }
         : {}),
@@ -135,5 +163,32 @@ export class SendPartnerFileService {
     });
 
     return output;
+  }
+
+  private async normalizeSessionIdForWorkspace(sessionId: string): Promise<string> {
+    const trimmed = sessionId.trim();
+    if (!trimmed) {
+      return trimmed;
+    }
+
+    const direct = await this.sessionStore.getSession(trimmed);
+    if (direct) {
+      return trimmed;
+    }
+
+    const separatorIndex = trimmed.indexOf(":");
+    if (separatorIndex <= 0) {
+      return trimmed;
+    }
+
+    const localClientUuid = await this.maintenanceStore.getGatewayClientUuid();
+    const clientUuid = trimmed.slice(0, separatorIndex).trim();
+    const localSessionId = trimmed.slice(separatorIndex + 1).trim();
+    if (!localClientUuid || clientUuid !== localClientUuid || !localSessionId) {
+      return trimmed;
+    }
+
+    const localSession = await this.sessionStore.getSession(localSessionId);
+    return localSession ? localSessionId : trimmed;
   }
 }

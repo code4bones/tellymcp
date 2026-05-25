@@ -40,11 +40,15 @@ env.config({ path: process.env.ENV_FILE ?? ".env" });
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
+const configuredTransport = process.env.TRANSPORT?.trim();
+
 const pinoTransport = pino.transport({
 	targets: createPinoTargets({
 		level: process.env.LOG_LEVEL || "info",
+		stderrLevel: process.env.LOG_STDERR_LEVEL || process.env.LOG_LEVEL || "info",
 		fileEnabled: process.env.LOG_FILE_ENABLED === "true",
 		filePath: process.env.LOG_FILE_PATH || ".tellymcp/log.jsonl",
+		fileLevel: process.env.LOG_FILE_LEVEL || process.env.LOG_LEVEL || "info",
 	}),
 });
 
@@ -95,11 +99,10 @@ const brokerConfig: any = {
 	// Available values: trace, debug, info, warn, error, fatal
 	logLevel: process.env.LOG_LEVEL || "info",
 
-	// Define transporter.
-	// More info: https://moleculer.services/docs/0.14/networking.html
-	// Note: During the development, you don't need to define it because all services will be loaded locally.
-	// In production you can set it via `TRANSPORTER=nats://localhost:4222` environment variable.
-	transporter: process.env.TRANSPORT ?? "TCP", // "NATS"
+	// Define transporter only when explicitly requested.
+	// For TellyMCP gateway/client nodes we use our own WS/HTTP control plane,
+	// so Moleculer UDP/TCP discovery is unnecessary and only adds noisy multicast warnings.
+	...(configuredTransport ? { transporter: configuredTransport } : {}),
 
 	// Define a cacher.
 	// More info: https://moleculer.services/docs/0.14/caching.html

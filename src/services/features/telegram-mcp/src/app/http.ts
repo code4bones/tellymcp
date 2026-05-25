@@ -3,10 +3,13 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
+import type { Socket } from "node:net";
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { Update } from "grammy/types";
+import ws from "ws";
 
 import type { AppRuntime } from "./bootstrap/runtime";
 import {
@@ -21,11 +24,19 @@ import {
   renderWebAppHtml,
 } from "./webapp/assets";
 import {
-  captureVisibleTmuxPane,
-  isTmuxUnavailableError,
-  sendAllowedTmuxAction,
-  sendTmuxLiteralText,
-} from "./webapp/tmux";
+  isStreamableTerminalTarget,
+  resizeForegroundTerminal,
+  sendForegroundTerminalInput,
+  subscribeForegroundTerminal,
+} from "../shared/integrations/terminal/client";
+import {
+  captureVisibleTerminal,
+  captureVisibleTerminalAnsi,
+  getTerminalWindowSize,
+  isTerminalUnavailableError,
+  sendAllowedTerminalAction,
+  sendTerminalLiteralText,
+} from "./webapp/terminal";
 
 type SessionEntry = {
   server: McpServer;
@@ -39,15 +50,35 @@ export type McpHttpHandler = {
     res: ServerResponse,
     pathname: string,
   ) => Promise<void>;
+  handleUpgrade: (
+    req: IncomingMessage,
+    socket: Socket,
+    head: Buffer,
+    pathname: string,
+  ) => Promise<boolean>;
   close: () => Promise<void>;
 };
 
-function formatTmuxHttpError(error: unknown, fallback: string): string {
-  if (isTmuxUnavailableError(error)) {
-    return "tmux is unavailable";
+function formatTerminalHttpError(error: unknown, fallback: string): string {
+  if (isTerminalUnavailableError(error)) {
+    return "terminal runtime is unavailable";
   }
 
   return fallback;
+}
+
+function requireTelegramBotToken(
+  runtime: AppRuntime,
+  purpose: string,
+): string {
+  const token = runtime.config.telegram.botToken?.trim();
+  if (!token) {
+    throw new Error(
+      `Telegram bot token is unavailable on this node; cannot ${purpose}.`,
+    );
+  }
+
+  return token;
 }
 
 function isInitializeRequest(body: unknown): boolean {
@@ -216,19 +247,46 @@ function normalizeBasePath(value: string): string {
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 
-function isRelayTmuxUnavailableMessage(error: unknown): boolean {
+function readWebhookSecretHeader(req: IncomingMessage): string | undefined {
+  const value = req.headers["x-telegram-bot-api-secret-token"];
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+  return value;
+}
+
+function isRelayTerminalUnavailableMessage(error: unknown): boolean {
   const text = error instanceof Error ? error.message : String(error);
-  return text.includes("tmux is unavailable");
+  return text.includes("terminal runtime is unavailable");
 }
 
 export function createMcpHttpHandler(
   runtime: AppRuntime,
   input: {
     createMcpServer: () => McpServer;
+    getGatewaySocketService?: () => {
+      openLiveRelayStream?: (params: {
+        clientUuid: string;
+        localSessionId: string;
+        onEvent: (event: {
+          event: "snapshot" | "data" | "exit";
+          payload: Record<string, unknown>;
+        }) => void;
+      }) => Promise<{
+        close: () => Promise<void>;
+      }>;
+      requestLiveRelay?: (params: {
+        clientUuid: string;
+        localSessionId: string;
+        requestType: "action";
+        payload: Record<string, unknown>;
+      }) => Promise<unknown>;
+    } | null;
   },
 ): McpHttpHandler {
   const transports = new Map<string, SessionEntry>();
   const webAppSessions = new WebAppSessionRegistry();
+  const liveWsServer = new WebSocketServer({ noServer: true });
   const webAppBasePath =
     runtime.config.webapp.basePath.replace(/\/+$/u, "") || "/webapp";
   const rootPrefix = normalizeBasePath(process.env.ROOT_PREFIX || "/api");
@@ -236,11 +294,278 @@ export function createMcpHttpHandler(
     rootPrefix === "/"
       ? webAppBasePath
       : `${rootPrefix}${normalizeBasePath(webAppBasePath)}`;
+  const publicLiveWsPath =
+    rootPrefix === "/" ? "/gateway/live/ws" : `${rootPrefix}/gateway/live/ws`;
   const webAppLivePrefix = `${webAppBasePath}/live/`;
+  const telegramWebhookPath =
+    runtime.config.telegram.webhook.path.replace(/\/+$/u, "") ||
+    "/telegram/webhook";
 
   const closeSessionEntry = async (entry: SessionEntry): Promise<void> => {
     await entry.close();
   };
+
+  const resolveAuthorizedWebAppSession = async (token: string) => {
+    const webAppSession = token ? webAppSessions.get(token) : null;
+    if (!webAppSession) {
+      return null;
+    }
+
+    const relayTarget = parseLiveRelaySessionId(webAppSession.sessionId);
+    if (relayTarget) {
+      return {
+        webAppSession,
+        relayTarget,
+        session: null,
+      };
+    }
+
+    const binding = await runtime.bindingStore.getBinding(webAppSession.sessionId);
+    if (!binding || binding.telegramUserId !== webAppSession.telegramUserId) {
+      return null;
+    }
+
+    const session = await runtime.sessionStore.getSession(webAppSession.sessionId);
+    if (!session?.terminalTarget) {
+      return null;
+    }
+
+    return {
+      webAppSession,
+      relayTarget: null,
+      session,
+    };
+  };
+
+  liveWsServer.on("connection", (socket: LiveWebSocket, req: IncomingMessage) => {
+    const requestUrl = new URL(req.url ?? "/", "http://gateway.local");
+    const token = requestUrl.searchParams.get("token")?.trim() ?? "";
+
+    void (async () => {
+      const resolved = await resolveAuthorizedWebAppSession(token);
+      if (!resolved) {
+        socket.close(1008, "Unauthorized");
+        return;
+      }
+
+      let closed = false;
+      let relayStreamClose: (() => Promise<void>) | null = null;
+      let localUnsubscribe: (() => void) | null = null;
+
+      const cleanup = async () => {
+        if (closed) {
+          return;
+        }
+        closed = true;
+        try {
+          localUnsubscribe?.();
+        } catch {
+          // ignore cleanup errors during socket shutdown
+        }
+        localUnsubscribe = null;
+        if (relayStreamClose) {
+          await relayStreamClose().catch(() => undefined);
+          relayStreamClose = null;
+        }
+      };
+
+      const sendJson = (payload: Record<string, unknown>) => {
+        if (socket.readyState === 1) {
+          socket.send(JSON.stringify(payload));
+        }
+      };
+
+      socket.on("close", () => {
+        void cleanup();
+      });
+
+      socket.on("message", (raw: unknown) => {
+        void (async () => {
+          const parsed =
+            raw && typeof raw === "string"
+              ? JSON.parse(raw)
+              : JSON.parse(String(raw)) as Record<string, unknown>;
+          const type =
+            parsed && typeof parsed === "object" && typeof parsed.type === "string"
+              ? parsed.type
+              : "";
+
+          if (type === "input") {
+            const data =
+              typeof parsed.data === "string" ? parsed.data : "";
+            if (!data) {
+              return;
+            }
+
+            if (resolved.relayTarget) {
+              const gatewaySocketService = input.getGatewaySocketService?.();
+              await gatewaySocketService?.requestLiveRelay?.({
+                clientUuid: resolved.relayTarget.clientUuid,
+                localSessionId: resolved.relayTarget.localSessionId,
+                requestType: "action",
+                payload: {
+                  action: "text",
+                  text: data,
+                },
+              });
+              return;
+            }
+
+            if (resolved.session?.terminalTarget && isStreamableTerminalTarget(resolved.session.terminalTarget)) {
+              sendForegroundTerminalInput(resolved.session.terminalTarget, data);
+            }
+            return;
+          }
+
+          if (type === "action") {
+            const action =
+              typeof parsed.action === "string" ? parsed.action : "";
+            if (
+              ![
+                "up",
+                "down",
+                "enter",
+                "slash",
+                "delete",
+                "tab",
+                "escape",
+                "interrupt",
+              ].includes(action)
+            ) {
+              return;
+            }
+
+            if (resolved.relayTarget) {
+              const gatewaySocketService = input.getGatewaySocketService?.();
+              await gatewaySocketService?.requestLiveRelay?.({
+                clientUuid: resolved.relayTarget.clientUuid,
+                localSessionId: resolved.relayTarget.localSessionId,
+                requestType: "action",
+                payload: { action },
+              });
+              return;
+            }
+
+            if (resolved.session?.terminalTarget) {
+              await sendAllowedTerminalAction(
+                runtime.config.terminal,
+                resolved.session.terminalTarget,
+                action as
+                  | "up"
+                  | "down"
+                  | "enter"
+                  | "slash"
+                  | "delete"
+                  | "tab"
+                  | "escape"
+                  | "interrupt",
+              );
+            }
+            return;
+          }
+
+          if (type === "resize") {
+            const cols =
+              typeof parsed.cols === "number" ? parsed.cols : NaN;
+            const rows =
+              typeof parsed.rows === "number" ? parsed.rows : NaN;
+            if (!Number.isFinite(cols) || !Number.isFinite(rows)) {
+              return;
+            }
+            if (resolved.session?.terminalTarget && isStreamableTerminalTarget(resolved.session.terminalTarget)) {
+              resizeForegroundTerminal(
+                resolved.session.terminalTarget,
+                Math.max(20, Math.min(400, Math.round(cols))),
+                Math.max(5, Math.min(200, Math.round(rows))),
+              );
+            }
+          }
+        })().catch((error) => {
+          runtime.logger.warn("Telegram WebApp live WS message handling failed", {
+            error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+          });
+        });
+      });
+
+      if (resolved.relayTarget) {
+        const gatewaySocketService = input.getGatewaySocketService?.();
+        if (!gatewaySocketService?.openLiveRelayStream) {
+          socket.close(1011, "Relay live stream is unavailable");
+          return;
+        }
+
+        const relayStream = await gatewaySocketService.openLiveRelayStream({
+          clientUuid: resolved.relayTarget.clientUuid,
+          localSessionId: resolved.relayTarget.localSessionId,
+          onEvent: (event) => {
+            sendJson({
+              type: event.event,
+              ...event.payload,
+            });
+          },
+        });
+        relayStreamClose = relayStream.close;
+        sendJson({ type: "ready", mode: "stream" });
+        return;
+      }
+
+      if (
+        !resolved.session?.terminalTarget ||
+        !isStreamableTerminalTarget(resolved.session.terminalTarget)
+      ) {
+        socket.close(1011, "Local live stream is not supported for this terminal");
+        return;
+      }
+
+      const terminalSize = await getTerminalWindowSize(
+        runtime.config.terminal,
+        resolved.session.terminalTarget,
+      );
+      const content = await captureVisibleTerminal(
+        runtime.config.terminal,
+        resolved.session.terminalTarget,
+        runtime.config.terminal.captureLines,
+        runtime.config.webapp.visibleScreens,
+      );
+      const ansi = await captureVisibleTerminalAnsi(
+        runtime.config.terminal,
+        resolved.session.terminalTarget,
+        runtime.config.terminal.captureLines,
+        runtime.config.webapp.visibleScreens,
+      );
+      sendJson({
+        type: "snapshot",
+        session_id: resolved.session.sessionId,
+        session_label: resolved.session.label ?? null,
+        captured_at: new Date().toISOString(),
+        content,
+        ansi,
+        ...(terminalSize ? terminalSize : {}),
+      });
+
+      localUnsubscribe = subscribeForegroundTerminal(resolved.session.terminalTarget, {
+        onData: (data) => {
+          sendJson({
+            type: "data",
+            data,
+          });
+        },
+        onExit: (info) => {
+          sendJson({
+            type: "exit",
+            exitCode: typeof info.exitCode === "number" ? info.exitCode : null,
+            signal: typeof info.signal === "number" ? info.signal : null,
+          });
+        },
+      });
+      sendJson({ type: "ready", mode: "stream" });
+    })().catch((error) => {
+      runtime.logger.warn("Telegram WebApp live WS bootstrap failed", {
+        error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+      });
+      socket.close(1011, "Live stream bootstrap failed");
+    });
+  });
 
   const handleRequest = async (
     req: IncomingMessage,
@@ -261,6 +586,59 @@ export function createMcpHttpHandler(
         service: "tellymcp",
         transport: "streamable-http",
       });
+      return;
+    }
+
+    if (
+      runtime.config.telegram.webhook.enabled &&
+      requestUrl.pathname === telegramWebhookPath
+    ) {
+      if (method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return;
+      }
+
+      const expectedSecret = runtime.config.telegram.webhook.secret?.trim();
+      const receivedSecret = readWebhookSecretHeader(req)?.trim();
+      if (!expectedSecret || receivedSecret !== expectedSecret) {
+        writeText(res, 401, "Unauthorized");
+        return;
+      }
+
+      const body = await readJsonBody(req);
+      if (!body || typeof body !== "object") {
+        writeText(res, 400, "Telegram update body is required");
+        return;
+      }
+
+      if (runtime.config.telegram.webhook.trace) {
+        runtime.logger.warn("Telegram webhook update received", {
+          path: requestUrl.pathname,
+          body,
+        });
+      } else {
+        runtime.logger.info("Telegram webhook update received", {
+          path: requestUrl.pathname,
+          method,
+        });
+      }
+
+      try {
+        await runtime.telegramTransport.handleWebhookUpdate(body as Update);
+        writeText(res, 200, "OK");
+      } catch (error) {
+        runtime.logger.error("Telegram webhook update handling failed", {
+          error:
+            error instanceof Error
+              ? (error.stack ?? error.message)
+              : String(error),
+        });
+        writeText(
+          res,
+          500,
+          error instanceof Error ? error.message : "Webhook handling failed",
+        );
+      }
       return;
     }
 
@@ -294,6 +672,7 @@ export function createMcpHttpHandler(
           200,
           renderWebAppHtml({
             basePath: publicWebAppBasePath,
+            liveWsPath: publicLiveWsPath,
             launchMode,
           }),
         );
@@ -385,7 +764,10 @@ export function createMcpHttpHandler(
                 const validated = validateTelegramWebAppInitData(
                   initDataRaw,
                   initDataUnsafe,
-                  runtime.config.telegram.botToken,
+                  requireTelegramBotToken(
+                    runtime,
+                    "validate local Telegram WebApp bootstrap",
+                  ),
                   runtime.config.webapp.initDataTtlSeconds,
                 );
                 trustedTelegramUserId = validated.user.id;
@@ -403,16 +785,22 @@ export function createMcpHttpHandler(
                 ...(trustedTelegramUserId !== null
                   ? { telegramUserId: trustedTelegramUserId }
                   : {}),
-                ...(launchRecord?.allowForeignBinding === true
-                  ? { allowForeignBinding: true }
-                  : {}),
-                ...(relayTarget.sourceClientUuid &&
-                relayTarget.sourceClientUuid !== relayTarget.clientUuid
-                  ? { allowForeignBinding: true }
-                  : {}),
+                // Relay sessions are already gateway-bound to a Telegram principal.
+                // Do not rely on the per-user launch registry here because it can be
+                // overwritten by other menu interactions before the WebApp opens.
+                allowForeignBinding: true,
                 initDataRaw,
                 initDataUnsafe,
               });
+            runtime.logger.info("Telegram WebApp relay bootstrap forwarded", {
+              sessionId,
+              clientUuid: relayTarget.clientUuid,
+              localSessionId: relayTarget.localSessionId,
+              trustedTelegramUserId,
+              hasLaunchRecord: launchRecord !== null,
+              launchRecordAllowForeignBinding:
+                launchRecord?.allowForeignBinding === true,
+            });
             const record = webAppSessions.create(
               sessionId,
               relayBootstrap.telegram_user_id,
@@ -423,7 +811,7 @@ export function createMcpHttpHandler(
               token: record.token,
               session_id: relayBootstrap.session_id,
               session_label: relayBootstrap.session_label,
-              tmux_target: relayBootstrap.tmux_target,
+              terminal_target: relayBootstrap.terminal_target,
               poll_interval_ms: relayBootstrap.poll_interval_ms,
               expires_at: new Date(record.expiresAtMs).toISOString(),
             });
@@ -482,7 +870,10 @@ export function createMcpHttpHandler(
           const validated = validateTelegramWebAppInitData(
             initDataRaw,
             initDataUnsafe,
-            runtime.config.telegram.botToken,
+            requireTelegramBotToken(
+              runtime,
+              "validate Telegram WebApp bootstrap",
+            ),
             runtime.config.webapp.initDataTtlSeconds,
           );
           runtime.logger.info("Telegram WebApp initData validation debug", {
@@ -544,7 +935,7 @@ export function createMcpHttpHandler(
           runtime.logger.info("Telegram WebApp session bootstrapped", {
             sessionId,
             telegramUserId: validated.user.id,
-            hasTmuxTarget: Boolean(session?.tmuxTarget),
+            hasTerminalTarget: Boolean(session?.terminalTarget),
           });
           runtime.webAppLaunchRegistry.deleteByUserId(validated.user.id);
 
@@ -552,7 +943,7 @@ export function createMcpHttpHandler(
             token: record.token,
             session_id: sessionId,
             session_label: session?.label ?? null,
-            tmux_target: Boolean(session?.tmuxTarget),
+            terminal_target: Boolean(session?.terminalTarget),
             poll_interval_ms: runtime.config.webapp.pollIntervalMs,
             expires_at: new Date(record.expiresAtMs).toISOString(),
           });
@@ -639,8 +1030,8 @@ export function createMcpHttpHandler(
             });
             writeText(
               res,
-              isRelayTmuxUnavailableMessage(error) ? 503 : 500,
-              error instanceof Error ? error.message : "Failed to capture relay tmux pane",
+              isRelayTerminalUnavailableMessage(error) ? 503 : 500,
+              error instanceof Error ? error.message : "Failed to capture relay terminal buffer",
             );
           }
           return;
@@ -660,16 +1051,26 @@ export function createMcpHttpHandler(
         const session = await runtime.sessionStore.getSession(
           webAppSession.sessionId,
         );
-        if (!session?.tmuxTarget) {
-          writeText(res, 409, "tmux target is not configured for this session");
+        if (!session?.terminalTarget) {
+          writeText(res, 409, "terminal target is not configured for this session");
           return;
         }
 
         try {
-          const content = await captureVisibleTmuxPane(
-            runtime.config.tmux,
-            session.tmuxTarget,
-            runtime.config.tmux.captureLines,
+          const terminalSize = await getTerminalWindowSize(
+            runtime.config.terminal,
+            session.terminalTarget,
+          );
+          const content = await captureVisibleTerminal(
+            runtime.config.terminal,
+            session.terminalTarget,
+            runtime.config.terminal.captureLines,
+            runtime.config.webapp.visibleScreens,
+          );
+          const ansi = await captureVisibleTerminalAnsi(
+            runtime.config.terminal,
+            session.terminalTarget,
+            runtime.config.terminal.captureLines,
             runtime.config.webapp.visibleScreens,
           );
           writeJson(res, 200, {
@@ -677,6 +1078,8 @@ export function createMcpHttpHandler(
             session_label: session.label ?? null,
             captured_at: new Date().toISOString(),
             content,
+            ansi,
+            ...(terminalSize ? terminalSize : {}),
           });
         } catch (error) {
           runtime.logger.error("Telegram WebApp visible buffer capture failed", {
@@ -688,8 +1091,8 @@ export function createMcpHttpHandler(
           });
           writeText(
             res,
-            isTmuxUnavailableError(error) ? 503 : 500,
-            formatTmuxHttpError(error, "Failed to capture visible tmux pane"),
+            isTerminalUnavailableError(error) ? 503 : 500,
+            formatTerminalHttpError(error, "Failed to capture visible terminal buffer"),
           );
         }
         return;
@@ -774,8 +1177,8 @@ export function createMcpHttpHandler(
             });
             writeText(
               res,
-              isRelayTmuxUnavailableMessage(error) ? 503 : 500,
-              error instanceof Error ? error.message : "Failed to send relay tmux action",
+              isRelayTerminalUnavailableMessage(error) ? 503 : 500,
+              error instanceof Error ? error.message : "Failed to send relay terminal action",
             );
           }
           return;
@@ -795,22 +1198,22 @@ export function createMcpHttpHandler(
         const session = await runtime.sessionStore.getSession(
           webAppSession.sessionId,
         );
-        if (!session?.tmuxTarget) {
-          writeText(res, 409, "tmux target is not configured for this session");
+        if (!session?.terminalTarget) {
+          writeText(res, 409, "terminal target is not configured for this session");
           return;
         }
 
         try {
           if (action === "text") {
-            await sendTmuxLiteralText(
-              runtime.config.tmux,
-              session.tmuxTarget,
+            await sendTerminalLiteralText(
+              runtime.config.terminal,
+              session.terminalTarget,
               text,
             );
           } else {
-            await sendAllowedTmuxAction(
-              runtime.config.tmux,
-              session.tmuxTarget,
+            await sendAllowedTerminalAction(
+              runtime.config.terminal,
+              session.terminalTarget,
               action as
                 | "up"
                 | "down"
@@ -823,7 +1226,7 @@ export function createMcpHttpHandler(
             );
           }
           webAppSessions.touchAction(webAppSession.token, nowMs);
-          runtime.logger.info("Telegram WebApp action sent to tmux", {
+          runtime.logger.info("Telegram WebApp action sent to terminal", {
             sessionId: webAppSession.sessionId,
             telegramUserId: webAppSession.telegramUserId,
             action,
@@ -844,8 +1247,8 @@ export function createMcpHttpHandler(
           });
           writeText(
             res,
-            isTmuxUnavailableError(error) ? 503 : 500,
-            formatTmuxHttpError(error, "Failed to send tmux action"),
+            isTerminalUnavailableError(error) ? 503 : 500,
+            formatTerminalHttpError(error, "Failed to send terminal action"),
           );
         }
         return;
@@ -881,15 +1284,11 @@ export function createMcpHttpHandler(
             const binding = await runtime.bindingStore.getBinding(
               session.sessionId,
             );
-            const inboxCount = await runtime.inboxStore.countInboxMessages(
-              session.sessionId,
-            );
 
             return {
               session_id: session.sessionId,
               session_label: session.label ?? null,
               updated_at: session.updatedAt,
-              inbox_count: inboxCount,
               binding: binding
                 ? {
                     telegram_chat_id: binding.telegramChatId,
@@ -897,20 +1296,9 @@ export function createMcpHttpHandler(
                     linked_at: binding.linkedAt,
                   }
                 : null,
-              tmux: {
-                tmux_session_name: session.tmuxSessionName ?? null,
-                tmux_window_name: session.tmuxWindowName ?? null,
-                tmux_window_index:
-                  typeof session.tmuxWindowIndex === "number"
-                    ? session.tmuxWindowIndex
-                    : null,
-                tmux_pane_id: session.tmuxPaneId ?? null,
-                tmux_pane_index:
-                  typeof session.tmuxPaneIndex === "number"
-                    ? session.tmuxPaneIndex
-                    : null,
-                tmux_target: session.tmuxTarget ?? null,
-                last_nudge_at: session.lastTmuxNudgeAt ?? null,
+              terminal: {
+                terminal_target: session.terminalTarget ?? null,
+                last_nudge_at: session.lastTerminalNudgeAt ?? null,
               },
             };
           }),
@@ -945,14 +1333,37 @@ export function createMcpHttpHandler(
       }
 
       const result = await runtime.maintenanceStore.pruneAll();
+      let gatewayDeleted: Record<string, number> | null = null;
+      if (
+        runtime.config.distributed.mode === "gateway" ||
+        runtime.config.distributed.mode === "both"
+      ) {
+        try {
+          const gatewayResult = await runtime.callBroker<{
+            deleted?: Record<string, number>;
+          }>("telegramMcp.gateway.pruneGatewayState", {}, {
+            meta: { internal_call: true },
+          });
+          gatewayDeleted =
+            gatewayResult?.deleted && typeof gatewayResult.deleted === "object"
+              ? gatewayResult.deleted
+              : null;
+        } catch (error) {
+          runtime.logger.warn("Gateway DB prune failed through HTTP endpoint", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
       runtime.logger.warn("MCP service state pruned through HTTP endpoint", {
         deletedKeys: result.deletedKeys,
+        gatewayDeleted,
         remoteAddress: req.socket.remoteAddress,
       });
 
       writeJson(res, 200, {
         ok: true,
         deleted_keys: result.deletedKeys,
+        ...(gatewayDeleted ? { gateway_deleted: gatewayDeleted } : {}),
       });
       return;
     }
@@ -1158,6 +1569,26 @@ export function createMcpHttpHandler(
 
   let shuttingDown = false;
 
+  const handleUpgrade = async (
+    req: IncomingMessage,
+    socket: Socket,
+    head: Buffer,
+    pathname: string,
+  ): Promise<boolean> => {
+    const normalizedPathname = normalizePrefixedPathname(pathname);
+    if (
+      normalizedPathname !== `${webAppBasePath}/api/live/ws` &&
+      normalizedPathname !== "/gateway/live/ws"
+    ) {
+      return false;
+    }
+
+    liveWsServer.handleUpgrade(req, socket, head, (clientSocket: LiveWebSocket) => {
+      liveWsServer.emit("connection", clientSocket, req);
+    });
+    return true;
+  };
+
   const shutdown = async (): Promise<void> => {
     if (shuttingDown) {
       return;
@@ -1168,10 +1599,50 @@ export function createMcpHttpHandler(
       Array.from(transports.values()).map((entry) => closeSessionEntry(entry)),
     );
     transports.clear();
+    await new Promise<void>((resolve, reject) => {
+      liveWsServer.close((error: unknown) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
   };
 
   return {
     handleRequest,
+    handleUpgrade,
     close: shutdown,
   };
 }
+type LiveWebSocket = {
+  readyState: number;
+  send: (data: string) => void;
+  close: (code?: number, reason?: string) => void;
+  on: (event: "close" | "message", listener: (payload?: unknown) => void) => void;
+};
+
+type LiveWebSocketServer = {
+  on: (
+    event: "connection",
+    listener: (socket: LiveWebSocket, req: IncomingMessage) => void,
+  ) => void;
+  handleUpgrade: (
+    req: IncomingMessage,
+    socket: Socket,
+    head: Buffer,
+    callback: (clientSocket: LiveWebSocket) => void,
+  ) => void;
+  emit: (
+    event: "connection",
+    socket: LiveWebSocket,
+    req: IncomingMessage,
+  ) => void;
+  close: (callback: (error?: unknown) => void) => void;
+};
+
+const wsLib = ws as unknown as {
+  WebSocketServer: new (options: Record<string, unknown>) => LiveWebSocketServer;
+};
+const WebSocketServer = wsLib.WebSocketServer;

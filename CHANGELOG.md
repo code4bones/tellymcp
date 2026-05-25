@@ -74,7 +74,7 @@
   - безопасные packaged templates для `.env`
 
 ### Changed
-- Полностью убран `stdio`-режим. `telegram_mcp` работает только через REST/MCP over HTTP.
+- Полностью убран legacy standalone MCP transport. `telegram_mcp` работает только через REST/MCP over HTTP.
 - Локальный standalone HTTP listener убран; `telegram_mcp` больше не поднимает отдельный сервер вне Moleculer gateway.
 - UI Telegram переосмыслен по двум режимам:
   - `🏠 Local` для локальной разработки и link внутри одного бота
@@ -110,7 +110,7 @@
   - `npm install -g @deadragdoll/tellymcp`
   - `tellymcp init <client|gateway|both>`
   - `tellymcp run`
-- старый `go/node tmux-proxy` path полностью удалён, поддерживается только прямой локальный `tmux`
+- старый `go/node terminal-proxy` path полностью удалён, поддерживается только прямой локальный terminal runtime
 
 ### Fixed
 - Исправлен `Headers have already sent` при работе MCP/WebApp через общий HTTP runtime.

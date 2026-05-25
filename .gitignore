@@ -21,3 +21,4 @@ logs
 .resume
 *.tgz
 dev2.sh
+current

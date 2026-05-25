@@ -4,7 +4,14 @@ import {
   TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
   type TelegramMcpRuntimeServiceInstance,
 } from "./runtime.service";
+import { RemoteConsoleActionClient } from "./src/features/distributed-gateway/model/remoteConsoleActionClient";
 import { SessionContextService } from "./src/features/session-context/model/sessionContextService";
+import type {
+  ClearSessionContextInput,
+  GetSessionContextInput,
+  RenameSessionInput,
+  SetSessionContextInput,
+} from "./src/entities/session/model/types";
 
 export const TELEGRAM_MCP_SESSION_CONTEXT_SERVICE_NAME =
   "telegramMcp.sessionContext";
@@ -22,6 +29,45 @@ type SessionContextServiceCarrier = Service & {
 const TelegramMcpSessionContextService: ServiceSchema = {
   name: TELEGRAM_MCP_SESSION_CONTEXT_SERVICE_NAME,
   dependencies: [TELEGRAM_MCP_RUNTIME_SERVICE_NAME],
+
+  actions: {
+    getContextRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: SessionContextServiceCarrier,
+        ctx: { params: GetSessionContextInput },
+      ) {
+        return this.getSessionContextService!().getContext(ctx.params);
+      },
+    },
+    setContextRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: SessionContextServiceCarrier,
+        ctx: { params: SetSessionContextInput },
+      ) {
+        return this.getSessionContextService!().setContext(ctx.params);
+      },
+    },
+    renameSessionRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: SessionContextServiceCarrier,
+        ctx: { params: RenameSessionInput },
+      ) {
+        return this.getSessionContextService!().renameSession(ctx.params);
+      },
+    },
+    clearContextRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: SessionContextServiceCarrier,
+        ctx: { params: ClearSessionContextInput },
+      ) {
+        return this.getSessionContextService!().clearContext(ctx.params);
+      },
+    },
+  },
 
   created(this: SessionContextServiceCarrier) {
     this.sessionContextService = null;
@@ -58,10 +104,13 @@ const TelegramMcpSessionContextService: ServiceSchema = {
 
     this.logger.info("Starting telegram_mcp session-context service");
     this.sessionContextService = new SessionContextService(
-      runtime.stateStore,
+      runtime.sessionStore,
       runtime.stateStore,
       runtime.logger,
       runtime.projectIdentityResolver,
+      new RemoteConsoleActionClient((actionName, params) =>
+        this.broker.call(actionName, params, { meta: { internal_call: true } }),
+      ),
     );
     this.logger.info("telegram_mcp session-context service is ready");
   },

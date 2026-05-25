@@ -28,7 +28,7 @@ For detailed engineering history, refactors, and internal development notes, see
   - inbox/session flows
   - project/collab flows
   - live approval prompts
-  - tmux and operational bot notices
+  - terminal and operational bot notices
 
 ## 0.0.9
 
@@ -55,8 +55,8 @@ For detailed engineering history, refactors, and internal development notes, see
   - expired in-process WebApp sessions (`401/403`) trigger automatic re-bootstrap
   - reopening the Mini App is no longer required in the normal restart case
 - Runtime MCP metadata now reports the actual package version instead of stale hardcoded version data.
-- Successful tmux nudges no longer overwrite `tmuxPaneId` with non-pane targets such as `backend:0.0`.
-- If tmux itself is unavailable for a paired session with a saved tmux target, Telegram now receives an operational warning instead of leaving the signal only in backend logs.
+- Successful terminal nudges no longer overwrite stale target metadata with non-target values such as `backend:0.0`.
+- If the terminal runtime itself is unavailable for a paired session with a saved terminal target, Telegram now receives an operational warning instead of leaving the signal only in backend logs.
 
 ## 0.0.8
 
@@ -66,8 +66,8 @@ For detailed engineering history, refactors, and internal development notes, see
   - optional JSONL file sink for Alloy or other collectors
   - `LOG_FILE_ENABLED=true`
   - `LOG_FILE_PATH=.tellymcp/log.jsonl`
-- Better tmux recovery behavior:
-  - when a saved pane target becomes stale after tmux recreation, TellyMCP now tries to recover the live pane automatically from stored tmux session/window/pane hints
+- Better terminal target recovery behavior:
+  - when a saved target becomes stale after terminal recreation, TellyMCP now tries to recover the live terminal automatically from stored terminal hints
   - if auto-recovery fails, Telegram sends a clear operational warning instead of leaving the problem only in logs
 - Stronger `Share` execution guidance:
   - the current session must do the work itself
@@ -83,8 +83,8 @@ For detailed engineering history, refactors, and internal development notes, see
   - optional `LogFeed` buffer for UI diagnostics
 
 ### Fixed
-- Stale tmux pane ids like `%1 -> %2` no longer require manual user understanding before the service can try to wake the session again.
-- Broken tmux nudge targets are now visible to the user in Telegram, not only in backend logs.
+- Stale terminal target ids no longer require manual user understanding before the service can try to wake the session again.
+- Broken terminal nudge targets are now visible to the user in Telegram, not only in backend logs.
 - `Share` inbox instructions are now explicit enough to reduce the chance that one agent re-delegates the task back into the collaboration graph.
 - `Live` Mini App now survives a normal gateway restart much better:
   - short `502/503` periods recover through polling
@@ -100,8 +100,8 @@ For detailed engineering history, refactors, and internal development notes, see
   - `tellymcp doctor`
   - `tellymcp mcp --help`
 - Standalone and public installation guides:
-  - [STANDALONE.md](STANDALONE.md)
-  - [STANDALONE-ru.md](STANDALONE-ru.md)
+  - [STANDALONE.md](docs/STANDALONE.md)
+  - [STANDALONE-ru.md](docs/STANDALONE-ru.md)
 - Browser runtime helper:
   - `tellymcp browser install`
 - Public README set for GitHub and npm:
@@ -116,13 +116,13 @@ For detailed engineering history, refactors, and internal development notes, see
   - MCP/WebApp/Gateway endpoints
 - Live text input button:
   - `[txt]`
-  - sends literal text to tmux without pressing `Enter`
+  - sends literal text to the terminal without pressing `Enter`
 
 ### Changed
 - Default installation path is now npm-first:
   - `npm install -g @deadragdoll/tellymcp`
 - Standalone client mode is documented first, before gateway/both deployment.
-- `tmux` is now documented as a strongly recommended prerequisite for the full experience:
+- Built-in PTY terminal control is now documented as the default prerequisite for the full experience:
   - Live View
   - nudges
   - direct terminal control from Telegram
@@ -178,8 +178,8 @@ For detailed engineering history, refactors, and internal development notes, see
 - `TOOLS.md` sync now detects outdated or missing local instructions and asks the session to refresh them.
 
 ### Removed
-- Legacy Go/HTTP tmux proxy path was removed.
-- Direct product path is now local `tmux` only.
+- Legacy Go/HTTP terminal proxy path was removed.
+- Direct product path is now the local built-in terminal runtime only.
 
 ## Next entry template
 

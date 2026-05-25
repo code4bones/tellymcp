@@ -4,8 +4,8 @@ import { access } from "node:fs/promises";
 import type { SessionContext } from "../../../entities/session/model/types";
 import type { SessionBindingStore } from "../../api/storage/contract";
 import type { Logger } from "../../lib/logger/logger";
-import { writeXchangeRelativeFile } from "../tmux/client";
-import type { TmuxRuntimeConfig } from "../tmux/client";
+import { writeXchangeRelativeFile } from "../terminal/client";
+import type { TerminalRuntimeConfig } from "../terminal/client";
 
 export type ExchangeFileSource =
   | "telegram-upload"
@@ -38,17 +38,20 @@ function normalizeRelativePath(relativePath: string): string {
 
 function resolveWorkspaceDir(
   session: SessionContext | null,
-  _tmuxConfig: TmuxRuntimeConfig,
+  _terminalConfig: TerminalRuntimeConfig,
 ): string {
   const workspaceDir = session?.cwd?.trim() || "";
-  return workspaceDir || process.cwd();
+  if (!workspaceDir) {
+    throw new Error("Workspace cwd is not registered for this console.");
+  }
+  return workspaceDir;
 }
 
 export class MinioExchangeStore {
   public constructor(
     _callBroker: BrokerCaller,
     _bindingStore: SessionBindingStore,
-    private readonly tmuxConfig: TmuxRuntimeConfig,
+    private readonly terminalConfig: TerminalRuntimeConfig,
     private readonly exchangeDirName: string,
     _vfsScope: string,
     private readonly logger: Logger,
@@ -58,7 +61,7 @@ export class MinioExchangeStore {
   ) {}
 
   public resolveWorkspaceDir(session: SessionContext | null): string {
-    return resolveWorkspaceDir(session, this.tmuxConfig);
+    return resolveWorkspaceDir(session, this.terminalConfig);
   }
 
   public getTempSessionDir(sessionId: string): string {
@@ -91,7 +94,7 @@ export class MinioExchangeStore {
     const relativePath = normalizeRelativePath(params.relativePath);
     const workspaceDir = this.resolveWorkspaceDir(params.session);
     const filePath = await writeXchangeRelativeFile(
-      this.tmuxConfig,
+      this.terminalConfig,
       workspaceDir,
       this.exchangeDirName,
       relativePath,

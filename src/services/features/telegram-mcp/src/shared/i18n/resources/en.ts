@@ -47,7 +47,7 @@ export const enMenu = {
         "Share API details, what's new, errors, and git changes with your teammate.",
       link_hint:
         "🔗 Link a partner session to coordinate through shared notes and files.",
-      tmux_mode_direct: "🖧 TMUX mode: direct",
+      terminal_mode_direct: "🖧 Terminal mode: direct",
     },
   },
   sessions: {
@@ -56,16 +56,16 @@ export const enMenu = {
       last_worked: "🕘 Last worked: <i>{{sessionName}}</i>",
       updated: "⏱ Updated: <i>{{timestamp}}</i>",
       current_active: "📌 Current active: <b>{{sessionName}}</b>",
-      no_linked_sessions: "No linked sessions found for this Telegram identity.",
+      no_linked_sessions: "No visible sessions found for this Telegram identity.",
     },
     labels: {
-      no_linked_sessions: "🫥 No linked sessions",
+      no_linked_sessions: "🫥 No visible sessions",
       unavailable: "⚠ Sessions unavailable",
       tools: "🛠 Tools",
     },
     actions: {
       no_linked_sessions:
-        "No linked sessions found for this Telegram identity.",
+        "No visible sessions found for this Telegram identity.",
       unavailable: "Sessions menu is temporarily unavailable.",
       refreshed: "Sessions refreshed.",
       open_tools: "Opening tools menu.",
@@ -99,11 +99,11 @@ export const enMenu = {
     screen: {
       title: "📄 Content",
       active_session: "📌 Active session: {{sessionName}}",
-      tmux_target: "🖥 tmux target: {{tmuxTarget}}",
+      terminal_target: "🖥 terminal target: {{terminalTarget}}",
       export_hint:
         "Choose how much pane history to export as a Markdown file.",
       export_modes:
-        "Visible is the current pane viewport. Full exports the whole available tmux history.",
+        "Visible is the current terminal viewport. Full exports the whole available terminal history.",
     },
   },
   browser: {
@@ -169,10 +169,10 @@ export const enMenu = {
       info: "ℹ Info",
       rename: "✏ Rename",
       unpair: "🗑 Unpair",
-      confirm_unpair: "⚠ Confirm unpair",
+      confirm_unpair: "⚠ Confirm route removal",
     },
     actions: {
-      confirm_unpair: "Confirm unpair.",
+      confirm_unpair: "Confirm route removal.",
       back_to_settings: "Back to settings.",
       rename_prompt: "Send the new session title.",
       rename_body:
@@ -182,7 +182,7 @@ export const enMenu = {
       title: "⚙ Settings",
       active_session: "📌 Active session: {{sessionName}}",
       hint:
-        "Open session info, rename it, or unpair it from Telegram.",
+        "Open console info, rename it, or remove its Telegram route.",
     },
   },
   local: {
@@ -201,9 +201,9 @@ export const enMenu = {
       link_status: "🤝 Link: {{linkedSessionName}}",
       link_status_none: "🤝 Link: not configured",
       hint_title: "Local collaboration inside one bot lives here:",
-      hint_body: "session pairing, note exchange, and file handoff without a gateway.",
+      hint_body: "console linking, note exchange, and file handoff without a gateway.",
       unavailable: "Local collaboration is unavailable for this chat.",
-      no_active_session: "No active session is selected. Pair it first via /start.",
+      no_active_session: "No active console is selected. Open /menu and choose one first.",
     },
   },
   link: {
@@ -317,7 +317,7 @@ export const enMenu = {
     step_choose: "- choose the active session",
     step_inbox: "- ordinary Telegram messages go to that session inbox",
     step_nudge:
-      "- if a tmux target is configured, the service nudges the agent automatically",
+      "- if a terminal target is configured, the service nudges the agent automatically",
     step_tools:
       "- the agent then reads the inbox batch through MCP tools",
   },
@@ -397,10 +397,10 @@ export const enMenu = {
       member: "Participant",
     },
     tools: {
-      changed: "Gateway TOOLS.md changed or is missing locally.",
+      changed: "Gateway TOOLS.md changed or the current session hash is unknown.",
       session: "Session: {{sessionName}}",
       action_required:
-        "Action required: call refresh_tools_markdown, then re-read the local TOOLS.md and apply it before continuing work.",
+        "Action required: call refresh_tools_markdown with the current known hash. If changed=true, read and apply the returned content before continuing work.",
     },
     version: {
       reject:
@@ -410,23 +410,23 @@ export const enMenu = {
       client: "Client: {{packageVersion}} / protocol {{protocolVersion}}",
       gateway: "Gateway: {{packageVersion}} / protocol {{protocolVersion}}",
     },
-    tmux: {
+    terminal: {
       target_invalid_title:
-        "⚠ Automatic tmux nudge failed for session {{sessionName}}.",
-      target_invalid_target: "Saved tmux target is no longer valid: {{tmuxTarget}}",
-      target_invalid_action: "Rebind the tmux target for this session.",
+        "⚠ Automatic terminal nudge failed for session {{sessionName}}.",
+      target_invalid_target: "Saved terminal target is no longer valid: {{terminalTarget}}",
+      target_invalid_action: "Rebind the terminal target for this session.",
       unavailable_title:
-        "⚠ Automatic tmux nudge was skipped for session {{sessionName}}.",
-      unavailable_body: "tmux is unavailable on this machine right now.",
-      unavailable_target: "tmux target: {{tmuxTarget}}",
+        "⚠ Automatic terminal nudge was skipped for session {{sessionName}}.",
+      unavailable_body: "Terminal runtime is unavailable on this machine right now.",
+      unavailable_target: "terminal target: {{terminalTarget}}",
       unavailable_reason:
-        "This usually means the tmux session/server is not running or is unreachable via the current socket path.",
+        "This usually means the terminal runtime is not running or is unreachable for the current target.",
       unavailable_action:
-        "Start tmux and the agent inside it, or update/remove the tmux target for this session.",
+        "Restart the terminal runtime for this console, or update/remove the terminal target for this session.",
       prompt_detected_title:
         "🛎 The agent in session {{sessionName}} may be waiting for your input.",
       prompt_detected_score: "Detection score: {{score}}",
-      prompt_detected_target: "tmux target: {{tmuxTarget}}",
+      prompt_detected_target: "terminal target: {{terminalTarget}}",
       prompt_detected_hint:
         "Open Live or answer in the terminal if this prompt really needs you.",
       prompt_detected_excerpt: "Recent prompt lines:",
@@ -506,6 +506,8 @@ export const enMenu = {
       title: "🖥 Client Session",
       session: "Session: <b>{{sessionName}}</b>",
       project: "Project: <b>{{projectName}}</b>",
+      bind: "🔗 Link here",
+      bound: "Session linked: {{sessionName}}",
       back_to_sessions: "⬅ Back to sessions",
     },
     tools: {
@@ -519,9 +521,9 @@ export const enMenu = {
   developer: {
     screen: {
       title: "🛠 Tools",
-      linked_sessions: "🔗 Linked sessions: {{count}}",
+      linked_sessions: "🗂 Visible sessions: {{count}}",
       broadcast_help:
-        "Broadcast writes your next text message into every linked session inbox and nudges every configured tmux target.",
+        "Broadcast writes your next text message into every linked session inbox and nudges every configured terminal target.",
       prune_help:
         "Prune all clears every Redis key under this Telegram MCP namespace.",
     },
@@ -532,32 +534,29 @@ export const enMenu = {
     label: "📌 Label: {{value}}",
     session_id: "🆔 Session ID: {{value}}",
     inbox_count: "📥 Inbox count: {{count}}",
-    paired: "🔗 Paired: {{value}}",
+    route: "🔗 Telegram route: {{value}}",
     partner: "🤝 Partner: {{value}}",
-    tmux_target: "🖥 tmux target: {{value}}",
-    tmux_session: "📺 tmux session: {{value}}",
-    tmux_window: "🪟 tmux window: {{value}}",
-    tmux_pane: "🔹 tmux pane: {{value}}",
+    terminal_target: "🖥 terminal target: {{value}}",
     yes: "yes",
     no: "no",
     not_linked: "not linked",
     not_set: "not set",
   },
   unpair: {
-    title: "⚠ Confirm unpair",
+    title: "⚠ Confirm route removal",
     active_session: "📌 Active session: {{sessionName}}",
-    body_1: "This removes the Telegram binding for the active session.",
+    body_1: "This removes the active Telegram route for the selected console.",
     body_2:
       "Session metadata and inbox records remain in Redis until you delete them separately.",
-    done: "Unpaired: {{sessionName}}",
-    shown: "Session unpaired: {{sessionName}}",
+    done: "Telegram route removed: {{sessionName}}",
+    shown: "Telegram route removed: {{sessionName}}",
   },
   prune: {
     title: "⚠ Confirm prune",
-    linked_sessions: "🔗 Linked sessions visible here: {{count}}",
+    linked_sessions: "🗂 Visible sessions here: {{count}}",
     body_1: "This clears every Redis key under the telegram-mcp namespace.",
     body_2:
-      "Pair codes, bindings, sessions, inbox, menu payloads, and pending requests will all be deleted.",
+      "Bindings, sessions, inbox, menu payloads, and pending requests will all be deleted.",
     done: "Prune complete. Deleted {{count}} Redis keys.",
   },
   history: {
@@ -571,9 +570,9 @@ export const enMenu = {
     begin: "Broadcast to {{count}} sessions.",
     title: "📣 Broadcast",
     body:
-      "Send the next text message to broadcast it to all {{count}} linked sessions.",
+      "Send the next text message to broadcast it to all {{count}} visible sessions.",
     hint:
-      "The message will be stored in every session inbox and the service will nudge every configured tmux target.",
+      "The message will be stored in every session inbox and the service will nudge every configured terminal target.",
     cancel_hint: "Commands like /menu or /help cancel broadcast mode.",
     collab_begin: "Broadcast to {{count}} collab sessions.",
     collab_title: "📣 Collab Broadcast",
@@ -583,14 +582,14 @@ export const enMenu = {
       "Send the next text message to broadcast it to all Collab sessions across bots without duplication.",
     collab_hint:
       "Local sessions receive an inbox message, remote sessions receive a gateway delivery.",
-    no_linked_sessions: "No linked sessions found.",
+    no_linked_sessions: "No visible sessions found.",
     no_collab_targets: "No Collab sessions are available for broadcast.",
     no_projects_first: "Create a project or join an existing one first.",
     mode_not_active: "Broadcast mode is not active.",
     cancelled: "Broadcast cancelled.",
     cancelled_no_sessions:
-      "Broadcast was cancelled because no linked sessions were found.",
-    completed_linked: "Broadcast completed for {{count}} linked sessions.",
+      "Broadcast was cancelled because no visible sessions were found.",
+    completed_linked: "Broadcast completed for {{count}} visible sessions.",
     completed_collab: "Broadcast completed for {{count}} Collab sessions.",
     completed_collab_local: "Local inbox: {{count}}",
     completed_collab_remote: "Remote deliveries: {{count}}",
@@ -693,8 +692,12 @@ export const enMenu = {
   system: {
     sessions_menu_unavailable:
       "Sessions menu is temporarily unavailable. Try /menu again.",
+    gateway_relay_inbox_sent:
+      "Message routed to session {{sessionName}} through the gateway.",
+    gateway_relay_inbox_failed:
+      "Failed to route the message to the selected gateway session.",
     error_prefix: "Error: {{message}}",
-    tmux_recreated_hint:
+    terminal_recreated_hint:
       "This usually means the pane/window/session was recreated.",
   },
 } as const;

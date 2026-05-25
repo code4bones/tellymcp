@@ -1,4 +1,5 @@
 import type { AppConfig } from "../../../app/config/env";
+import type { TelegramXchangeFileMeta } from "../../../entities/inbox/model/types";
 import type {
   GetXchangeRecordInput,
   GetXchangeRecordOutput,
@@ -7,7 +8,11 @@ import type {
   MarkXchangeRecordReadInput,
   MarkXchangeRecordReadOutput,
 } from "../../../entities/xchange/model/types";
-import type { SessionStore } from "../../../shared/api/storage/contract";
+import type {
+  MaintenanceStore,
+  SessionStore,
+  TelegramXchangeFileMetaStore,
+} from "../../../shared/api/storage/contract";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
 import {
@@ -16,24 +21,50 @@ import {
   markXchangeRecordRead,
 } from "../../../shared/integrations/xchange/sqliteRecordStore";
 
+type RemoteConsoleInvoker = {
+  invokeForRelaySession<T>(
+    sessionId: string,
+    actionName: string,
+    params: Record<string, unknown>,
+  ): Promise<T>;
+};
+
 export class XchangeService {
   public constructor(
     private readonly config: AppConfig,
     private readonly sessionStore: SessionStore,
+    private readonly maintenanceStore: MaintenanceStore,
+    private readonly xchangeFileMetaStore: TelegramXchangeFileMetaStore,
     private readonly logger: Logger,
     private readonly projectIdentityResolver: ProjectIdentityResolver,
+    private readonly remoteConsoleInvoker?: RemoteConsoleInvoker,
   ) {}
 
   public async listRecords(
     input: ListXchangeRecordsInput,
   ): Promise<ListXchangeRecordsOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const workspaceDir = await this.resolveWorkspaceDir(resolved.sessionId);
+    const sessionId = await this.normalizeSessionIdForAccess(resolved.sessionId);
+    const remote =
+      this.config.distributed.mode !== "client"
+        ? await this.remoteConsoleInvoker?.invokeForRelaySession<ListXchangeRecordsOutput>(
+            sessionId,
+            "telegramMcp.xchange.listRecordsRemote",
+            {
+              ...input,
+              session_id: sessionId,
+            } as Record<string, unknown>,
+          )
+        : null;
+    if (remote) {
+      return remote;
+    }
+    const workspaceDir = await this.resolveWorkspaceDir(sessionId);
     const records = await listXchangeRecords(
-      this.config.tmux,
+      this.config.terminal,
       workspaceDir,
       this.config.exchange.dir,
-      resolved.sessionId,
+      sessionId,
       {
         ...(input.status ? { status: input.status } : {}),
         ...(input.category ? { category: input.category } : {}),
@@ -43,7 +74,7 @@ export class XchangeService {
     );
 
     this.logger.info("Xchange records listed", {
-      sessionId: resolved.sessionId,
+      sessionId,
       sessionIdDerived: resolved.sessionIdDerived,
       total: records.length,
       status: input.status,
@@ -53,7 +84,7 @@ export class XchangeService {
     });
 
     return {
-      session_id: resolved.sessionId,
+      session_id: sessionId,
       total: records.length,
       records,
     };
@@ -63,24 +94,39 @@ export class XchangeService {
     input: GetXchangeRecordInput,
   ): Promise<GetXchangeRecordOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const workspaceDir = await this.resolveWorkspaceDir(resolved.sessionId);
+    const sessionId = await this.normalizeSessionIdForAccess(resolved.sessionId);
+    const remote =
+      this.config.distributed.mode !== "client"
+        ? await this.remoteConsoleInvoker?.invokeForRelaySession<GetXchangeRecordOutput>(
+            sessionId,
+            "telegramMcp.xchange.getRecordRemote",
+            {
+              ...input,
+              session_id: sessionId,
+            } as Record<string, unknown>,
+          )
+        : null;
+    if (remote) {
+      return remote;
+    }
+    const workspaceDir = await this.resolveWorkspaceDir(sessionId);
     const record = await getXchangeRecord(
-      this.config.tmux,
+      this.config.terminal,
       workspaceDir,
       this.config.exchange.dir,
-      resolved.sessionId,
+      sessionId,
       input.record_id,
     );
 
     this.logger.info("Xchange record fetched", {
-      sessionId: resolved.sessionId,
+      sessionId,
       sessionIdDerived: resolved.sessionIdDerived,
       recordId: input.record_id,
       exists: Boolean(record),
     });
 
     return {
-      session_id: resolved.sessionId,
+      session_id: sessionId,
       record,
     };
   }
@@ -89,32 +135,140 @@ export class XchangeService {
     input: MarkXchangeRecordReadInput,
   ): Promise<MarkXchangeRecordReadOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const workspaceDir = await this.resolveWorkspaceDir(resolved.sessionId);
+    const sessionId = await this.normalizeSessionIdForAccess(resolved.sessionId);
+    const remote =
+      this.config.distributed.mode !== "client"
+        ? await this.remoteConsoleInvoker?.invokeForRelaySession<MarkXchangeRecordReadOutput>(
+            sessionId,
+            "telegramMcp.xchange.markReadRemote",
+            {
+              ...input,
+              session_id: sessionId,
+            } as Record<string, unknown>,
+          )
+        : null;
+    if (remote) {
+      return remote;
+    }
+    const workspaceDir = await this.resolveWorkspaceDir(sessionId);
     const updated = await markXchangeRecordRead(
-      this.config.tmux,
+      this.config.terminal,
       workspaceDir,
       this.config.exchange.dir,
-      resolved.sessionId,
+      sessionId,
       input.record_id,
     );
 
     this.logger.info("Xchange record marked as read", {
-      sessionId: resolved.sessionId,
+      sessionId,
       sessionIdDerived: resolved.sessionIdDerived,
       recordId: input.record_id,
       updated,
     });
 
     return {
-      session_id: resolved.sessionId,
+      session_id: sessionId,
       record_id: input.record_id,
       updated,
     };
   }
 
+  public async listFileMetas(input: {
+    session_id?: string;
+    source?: TelegramXchangeFileMeta["source"];
+  }): Promise<{
+    session_id: string;
+    metas: TelegramXchangeFileMeta[];
+  }> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const sessionId = await this.normalizeSessionIdForAccess(resolved.sessionId);
+    const metas = await this.xchangeFileMetaStore.listXchangeFileMetas(sessionId);
+    const filtered = input.source
+      ? metas.filter((meta) => meta.source === input.source)
+      : metas;
+
+    filtered.sort((left, right) => right.filePath.localeCompare(left.filePath));
+    return {
+      session_id: sessionId,
+      metas: filtered,
+    };
+  }
+
+  public async getFileMeta(input: {
+    session_id?: string;
+    file_path: string;
+  }): Promise<{
+    session_id: string;
+    file_path: string;
+    meta: TelegramXchangeFileMeta | null;
+  }> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const sessionId = await this.normalizeSessionIdForAccess(resolved.sessionId);
+    return {
+      session_id: sessionId,
+      file_path: input.file_path,
+      meta: await this.xchangeFileMetaStore.getXchangeFileMeta(
+        sessionId,
+        input.file_path,
+      ),
+    };
+  }
+
+  public async deleteFileMeta(input: {
+    session_id?: string;
+    file_path: string;
+  }): Promise<{
+    session_id: string;
+    file_path: string;
+    deleted: boolean;
+  }> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const sessionId = await this.normalizeSessionIdForAccess(resolved.sessionId);
+    return {
+      session_id: sessionId,
+      file_path: input.file_path,
+      deleted: await this.xchangeFileMetaStore.deleteXchangeFileMeta(
+        sessionId,
+        input.file_path,
+      ),
+    };
+  }
+
+  private async normalizeSessionIdForAccess(sessionId: string): Promise<string> {
+    const trimmed = sessionId.trim();
+    if (!trimmed) {
+      return trimmed;
+    }
+
+    const direct = await this.sessionStore.getSession(trimmed);
+    if (direct) {
+      return trimmed;
+    }
+
+    const separatorIndex = trimmed.indexOf(":");
+    if (separatorIndex <= 0) {
+      return trimmed;
+    }
+
+    const localClientUuid = await this.maintenanceStore.getGatewayClientUuid();
+    const clientUuid = trimmed.slice(0, separatorIndex).trim();
+    const localSessionId = trimmed.slice(separatorIndex + 1).trim();
+    if (!localClientUuid || clientUuid !== localClientUuid || !localSessionId) {
+      return trimmed;
+    }
+
+    const localSession = await this.sessionStore.getSession(localSessionId);
+    return localSession ? localSessionId : trimmed;
+  }
+
   private async resolveWorkspaceDir(sessionId: string): Promise<string> {
     const session = await this.sessionStore.getSession(sessionId);
     const workspaceDir = session?.cwd?.trim();
-    return workspaceDir || process.cwd();
+    if (!workspaceDir) {
+      throw new Error(
+        `Workspace cwd is not registered for console '${sessionId}'.`,
+      );
+    }
+    return workspaceDir;
   }
 }

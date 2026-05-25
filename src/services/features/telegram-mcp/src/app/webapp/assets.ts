@@ -1,7 +1,20 @@
+import { readFileSync } from "node:fs";
+
 type RenderWebAppHtmlInput = {
   basePath: string;
+  liveWsPath: string;
   launchMode: "default" | "expand" | "fullscreen";
 };
+
+const XTERM_WEBAPP_CSS = readFileSync(
+  require.resolve("@xterm/xterm/css/xterm.css"),
+  "utf8",
+);
+
+const XTERM_WEBAPP_JS = readFileSync(
+  require.resolve("@xterm/xterm/lib/xterm.js"),
+  "utf8",
+);
 
 export const WEBAPP_STYLES_CSS = `
 :root {
@@ -23,9 +36,10 @@ export const WEBAPP_STYLES_CSS = `
 
 html, body {
   margin: 0;
-  min-height: 100%;
+  height: 100%;
   background: linear-gradient(180deg, #121620 0%, #0d1017 100%);
   color: var(--text);
+  overflow: hidden;
 }
 
 body {
@@ -33,15 +47,14 @@ body {
 }
 
 .app {
-  min-height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: 1fr auto auto;
+  overflow: hidden;
 }
 
 .toolbar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: calc(42px + env(safe-area-inset-bottom, 0px));
-  z-index: 30;
+  grid-row: 2;
   display: flex;
   justify-content: flex-start;
   flex-wrap: wrap;
@@ -117,11 +130,7 @@ body {
 }
 
 .statusbar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 25;
+  grid-row: 3;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -174,13 +183,35 @@ body {
 }
 
 .terminal {
+  grid-row: 1;
   margin: 0;
-  padding: 18px 14px calc(122px + env(safe-area-inset-bottom, 0px)) 14px;
-  min-height: 100vh;
-  overflow: auto;
+  min-height: 0;
+  padding: 18px 14px;
+  overflow: hidden;
   white-space: pre-wrap;
   word-break: break-word;
   font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.terminal.xterm-host {
+  position: relative;
+  min-width: 0;
+  padding: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.terminal.xterm-host .xterm {
+  height: 100%;
+  width: max-content;
+  min-width: 100%;
+  padding: 0;
+}
+
+.terminal.xterm-host .xterm-viewport {
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch !important;
 }
 
 .terminal.unwrap {
@@ -204,7 +235,6 @@ body {
 
 @media (max-width: 680px) {
   .toolbar {
-    bottom: calc(46px + env(safe-area-inset-bottom, 0px));
     gap: 6px;
     padding: 8px 10px;
   }
@@ -224,7 +254,11 @@ body {
   }
 
   .terminal {
-    padding: 14px 12px calc(146px + env(safe-area-inset-bottom, 0px)) 12px;
+    padding: 14px 12px;
+  }
+
+  .terminal.xterm-host .xterm {
+    padding: 0;
   }
 }
 `;
@@ -241,6 +275,13 @@ const state = {
   pollIntervalMs: 2000,
   wrapEnabled: true,
   recoverPromise: null,
+  xterm: null,
+  xtermInputBound: false,
+  liveSocket: null,
+  liveSocketConnected: false,
+  lastRenderSignature: null,
+  resizeObserver: null,
+  fittedRows: null,
 };
 
 const elements = {
@@ -272,6 +313,10 @@ function setUpdated(text) {
   elements.updated.textContent = text;
 }
 
+function setLiveModeStatus(mode) {
+  setStatus(mode === "stream" ? "Live (stream)" : "Live (poll)");
+}
+
 function createHttpError(message, status) {
   const error = new Error(message);
   error.status = status;
@@ -286,7 +331,7 @@ function shouldRecoverWebAppSession(error) {
   );
 }
 
-function applyTmuxAvailability(hasTarget) {
+function applyTerminalAvailability(hasTarget) {
   elements.interrupt.disabled = !hasTarget;
   elements.type.disabled = !hasTarget;
   elements.esc.disabled = !hasTarget;
@@ -333,6 +378,187 @@ function toggleWrapMode() {
     window.localStorage.setItem(getWrapPreferenceKey(), next ? "on" : "off");
   } catch (_error) {
   }
+}
+
+function getXtermCtor() {
+  return window.Terminal || window.XtermTerminal || null;
+}
+
+function getTerminalCellHeight(terminal) {
+  const cell =
+    terminal &&
+    terminal._core &&
+    terminal._core._renderService &&
+    terminal._core._renderService.dimensions &&
+    terminal._core._renderService.dimensions.css &&
+    terminal._core._renderService.dimensions.css.cell;
+
+  if (!cell || !cell.height) {
+    return null;
+  }
+
+  return cell.height;
+}
+
+function fitTerminalRows(notifyServer = true) {
+  const terminal = state.xterm;
+  if (!terminal || !elements.terminal) {
+    return;
+  }
+
+  const cellHeight = getTerminalCellHeight(terminal);
+  if (!cellHeight) {
+    return;
+  }
+
+  const nextRows = Math.max(5, Math.floor(elements.terminal.clientHeight / cellHeight));
+  if (!Number.isFinite(nextRows) || nextRows <= 0) {
+    return;
+  }
+
+  if (state.fittedRows === nextRows) {
+    return;
+  }
+
+  state.fittedRows = nextRows;
+  const currentCols =
+    typeof terminal.cols === "number" && terminal.cols > 0 ? terminal.cols : 80;
+  terminal.resize(currentCols, nextRows);
+
+  if (
+    notifyServer &&
+    state.liveSocketConnected &&
+    state.liveSocket &&
+    state.liveSocket.readyState === WebSocket.OPEN
+  ) {
+    state.liveSocket.send(
+      JSON.stringify({ type: "resize", cols: currentCols, rows: nextRows }),
+    );
+  }
+}
+
+function ensureXterm() {
+  if (state.xterm) {
+    return state.xterm;
+  }
+
+  const TerminalCtor = getXtermCtor();
+  if (!TerminalCtor || !elements.terminal) {
+    return null;
+  }
+
+  elements.terminal.classList.add("xterm-host");
+  elements.terminal.textContent = "";
+
+  const terminal = new TerminalCtor({
+    convertEol: true,
+    disableStdin: false,
+    cursorBlink: false,
+    theme: {
+      background: "#0f1115",
+      foreground: "#edf1f7",
+    },
+      fontFamily:
+        'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      fontSize: 13,
+      lineHeight: 1,
+      allowTransparency: true,
+      scrollback: 4000,
+  });
+  terminal.open(elements.terminal);
+  terminal.onData((data) => {
+    if (!state.liveSocketConnected || !state.liveSocket) {
+      return;
+    }
+    if (state.liveSocket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    state.liveSocket.send(JSON.stringify({ type: "input", data }));
+  });
+  elements.terminal.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "mouse") {
+      terminal.focus();
+    }
+  });
+  if (!state.resizeObserver && typeof ResizeObserver !== "undefined") {
+    state.resizeObserver = new ResizeObserver(() => {
+      fitTerminalRows();
+    });
+    state.resizeObserver.observe(elements.terminal);
+  }
+  window.addEventListener("resize", () => {
+    fitTerminalRows();
+  });
+  state.xterm = terminal;
+  window.setTimeout(() => {
+    fitTerminalRows(false);
+  }, 0);
+  return terminal;
+}
+
+function estimateTerminalSizeFromPayload(payload, options = {}) {
+  const text = payload.ansi || payload.content || "";
+  const lines = text.split("\\n");
+  const useViewportRows =
+    options.preferViewportRows === true &&
+    Number.isFinite(payload.rows) &&
+    payload.rows > 0;
+  const rows = useViewportRows
+    ? Math.max(2, Math.min(120, payload.rows))
+    : Math.max(2, Math.min(400, lines.length || payload.rows || 24));
+  const baseCols = Number.isFinite(payload.cols) && payload.cols > 0
+      ? payload.cols
+      : 40;
+  const cols = Math.max(
+    baseCols,
+    Math.min(
+      240,
+      Number.isFinite(payload.cols) && payload.cols > 0
+        ? payload.cols
+        : lines.reduce((max, line) => Math.max(max, line.replace(/\\u001b\\[[0-9;]*m/g, "").length), 0) || 80,
+    ),
+  );
+  return { cols, rows };
+}
+
+function renderTerminalPayload(payload, options = {}) {
+  const signature = JSON.stringify({
+    ansi: payload.ansi || "",
+    content: payload.content || "",
+    cols: payload.cols || null,
+    rows: payload.rows || null,
+    preferViewportRows: options.preferViewportRows === true,
+  });
+  if (state.lastRenderSignature === signature) {
+    return;
+  }
+
+  const terminal = ensureXterm();
+  if (!terminal) {
+    elements.terminal.innerHTML =
+      payload.html || renderAnsiToHtml(payload.content || "");
+    state.lastRenderSignature = signature;
+    return;
+  }
+
+  const size = estimateTerminalSizeFromPayload(payload, options);
+  const previousViewportY = terminal.buffer.active.viewportY;
+  const previousBaseY = terminal.buffer.active.baseY;
+  const wasNearBottom =
+    previousBaseY <= 0 ||
+    previousViewportY >= Math.max(0, previousBaseY - 2);
+  terminal.reset();
+  terminal.resize(size.cols, size.rows);
+  terminal.write(payload.ansi || payload.content || "");
+  if (options.forceScrollBottom === true || wasNearBottom) {
+    terminal.scrollToBottom();
+  } else {
+    terminal.scrollToLine(Math.min(previousViewportY, terminal.buffer.active.baseY));
+  }
+  window.setTimeout(() => {
+    fitTerminalRows(false);
+  }, 0);
+  state.lastRenderSignature = signature;
 }
 
 function formatCapturedAt(value) {
@@ -679,9 +905,9 @@ function applyBootstrapPayload(bootstrapPayload) {
     bootstrapPayload.session_label || bootstrapPayload.session_id;
   elements.session.hidden = false;
 
-  const hasTmuxTarget = Boolean(bootstrapPayload.tmux_target);
-  applyTmuxAvailability(hasTmuxTarget);
-  setStatus(hasTmuxTarget ? "Live" : "No tmux target", !hasTmuxTarget);
+  const hasTerminalTarget = Boolean(bootstrapPayload.terminal_target);
+  applyTerminalAvailability(hasTerminalTarget);
+  setStatus(hasTerminalTarget ? "Live" : "No terminal target", !hasTerminalTarget);
 }
 
 async function recoverWebAppSession() {
@@ -738,21 +964,24 @@ async function sendAction(action) {
   state.actionBusy = true;
   try {
     await withRecoveredSession(async () => {
-      const response = await fetch(config.basePath + "/api/action", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: "Bearer " + state.token,
-        },
-        body: JSON.stringify({ action }),
-      });
+      if (state.liveSocketConnected && state.liveSocket?.readyState === WebSocket.OPEN) {
+        state.liveSocket.send(JSON.stringify({ type: "action", action }));
+      } else {
+        const response = await fetch(config.basePath + "/api/action", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: "Bearer " + state.token,
+          },
+          body: JSON.stringify({ action }),
+        });
 
-      if (!response.ok) {
-        const text = await response.text();
-        throw createHttpError(text || "Failed to send action.", response.status);
+        if (!response.ok) {
+          const text = await response.text();
+          throw createHttpError(text || "Failed to send action.", response.status);
+        }
       }
     });
-    await withRecoveredSession(refreshVisibleBuffer);
   } finally {
     state.actionBusy = false;
   }
@@ -766,47 +995,147 @@ async function sendTextInput(text) {
   state.actionBusy = true;
   try {
     await withRecoveredSession(async () => {
-      const response = await fetch(config.basePath + "/api/action", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: "Bearer " + state.token,
-        },
-        body: JSON.stringify({ action: "text", text }),
-      });
+      if (state.liveSocketConnected && state.liveSocket?.readyState === WebSocket.OPEN) {
+        state.liveSocket.send(JSON.stringify({ type: "input", data: text }));
+      } else {
+        const response = await fetch(config.basePath + "/api/action", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: "Bearer " + state.token,
+          },
+          body: JSON.stringify({ action: "text", text }),
+        });
 
-      if (!response.ok) {
-        const textResponse = await response.text();
-        throw createHttpError(
-          textResponse || "Failed to send text.",
-          response.status,
-        );
+        if (!response.ok) {
+          const textResponse = await response.text();
+          throw createHttpError(
+            textResponse || "Failed to send text.",
+            response.status,
+          );
+        }
       }
     });
     setStatus("Text sent");
-    await withRecoveredSession(refreshVisibleBuffer);
   } finally {
     state.actionBusy = false;
   }
 }
 
+function getLiveWsUrl() {
+  const liveWsPath =
+    typeof config.liveWsPath === "string" && config.liveWsPath.trim()
+      ? config.liveWsPath.trim()
+      : config.basePath + "/api/live/ws";
+  const url = new URL(liveWsPath, window.location.href);
+  if (state.token) {
+    url.searchParams.set("token", state.token);
+  }
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
+}
+
+function closeLiveSocket() {
+  if (!state.liveSocket) {
+    return;
+  }
+  const socket = state.liveSocket;
+  state.liveSocket = null;
+  state.liveSocketConnected = false;
+  try {
+    socket.close();
+  } catch (_error) {
+  }
+}
+
+async function connectLiveSocket() {
+  closeLiveSocket();
+  if (!state.token) {
+    throw new Error("WebApp token is missing");
+  }
+
+  const socket = new WebSocket(getLiveWsUrl());
+  state.liveSocket = socket;
+
+  await new Promise((resolve, reject) => {
+    let settled = false;
+
+    socket.addEventListener("open", () => {
+      state.liveSocketConnected = true;
+      settled = true;
+      stopPolling();
+      resolve();
+    }, { once: true });
+
+    socket.addEventListener("error", () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(new Error("Live stream connection failed"));
+    }, { once: true });
+  });
+
+  socket.addEventListener("message", (event) => {
+    const payload = JSON.parse(String(event.data));
+    if (payload.type === "snapshot") {
+      renderTerminalPayload(payload, {
+        preferViewportRows: true,
+        forceScrollBottom: true,
+      });
+      setUpdated(formatCapturedAt(payload.captured_at));
+      setLiveModeStatus("stream");
+      return;
+    }
+    if (payload.type === "data") {
+      const terminal = ensureXterm();
+      if (terminal && typeof payload.data === "string") {
+        const previousViewportY = terminal.buffer.active.viewportY;
+        const previousBaseY = terminal.buffer.active.baseY;
+        const wasNearBottom =
+          previousBaseY <= 0 ||
+          previousViewportY >= Math.max(0, previousBaseY - 2);
+        terminal.write(payload.data);
+        if (wasNearBottom) {
+          terminal.scrollToBottom();
+        }
+      }
+      return;
+    }
+    if (payload.type === "exit") {
+      setStatus("Terminal exited", true);
+      return;
+    }
+  });
+
+  socket.addEventListener("close", () => {
+    state.liveSocketConnected = false;
+    if (state.liveSocket === socket) {
+      state.liveSocket = null;
+    }
+    setLiveModeStatus("poll");
+    startPolling();
+  });
+}
+
 function confirmInterrupt() {
   return new Promise((resolve) => {
     if (tg && typeof tg.showConfirm === "function") {
-      tg.showConfirm("Send Ctrl+C to the tmux session? This can stop the running agent.", (ok) => {
+      tg.showConfirm("Send Ctrl+C to the terminal session? This can stop the running agent.", (ok) => {
         resolve(Boolean(ok));
       });
       return;
     }
 
-    resolve(window.confirm("Send Ctrl+C to the tmux session? This can stop the running agent."));
+    resolve(window.confirm("Send Ctrl+C to the terminal session? This can stop the running agent."));
   });
 }
 
 async function refreshVisibleBuffer() {
   const payload = await withRecoveredSession(fetchVisibleBuffer);
-  elements.terminal.innerHTML = renderAnsiToHtml(payload.content || "");
+  renderTerminalPayload(payload);
   setUpdated(formatCapturedAt(payload.captured_at));
+  setLiveModeStatus("poll");
 }
 
 function stopPolling() {
@@ -846,7 +1175,7 @@ function bindUi() {
   });
 
   elements.type.addEventListener("click", () => {
-    const value = window.prompt("Send text to tmux without Enter:", "");
+    const value = window.prompt("Send text to terminal without Enter:", "");
     if (value === null || value.length === 0) {
       return;
     }
@@ -915,8 +1244,12 @@ async function main() {
     setStatus("Authorizing Mini App...");
     const bootstrapPayload = await bootstrap();
     applyBootstrapPayload(bootstrapPayload);
-    await refreshVisibleBuffer();
-    startPolling();
+    try {
+      await connectLiveSocket();
+    } catch (_error) {
+      await refreshVisibleBuffer();
+      startPolling();
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setStatus(message, true);
@@ -938,7 +1271,8 @@ export function renderWebAppHtml(input: RenderWebAppHtmlInput): string {
     />
     <title>Telegram MCP Live View</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <link rel="stylesheet" href="${input.basePath}/styles.css" />
+    <style>${WEBAPP_STYLES_CSS}
+${XTERM_WEBAPP_CSS}</style>
   </head>
   <body>
     <div class="app">
@@ -954,7 +1288,7 @@ export function renderWebAppHtml(input: RenderWebAppHtmlInput): string {
         <span class="toolbar-spacer" aria-hidden="true"></span>
         <button class="btn compact danger" data-role="interrupt" type="button">Ctrl+C</button>
       </div>
-      <pre class="terminal" data-role="terminal">Waiting for tmux buffer…</pre>
+      <div class="terminal" data-role="terminal">Waiting for terminal buffer…</div>
       <div class="statusbar">
         <div class="status-left">
           <span data-role="status">Loading… - Live View</span>
@@ -969,8 +1303,12 @@ export function renderWebAppHtml(input: RenderWebAppHtmlInput): string {
     <script>
       window.__TELEGRAM_MCP_WEBAPP__ = ${JSON.stringify({
         basePath: input.basePath,
+        liveWsPath: input.liveWsPath,
         launchMode: input.launchMode,
       })};
+    </script>
+    <script>
+${XTERM_WEBAPP_JS}
     </script>
     <script>
       (() => {

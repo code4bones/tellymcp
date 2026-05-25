@@ -1,12 +1,4 @@
 import type { RiskLevel } from "../../../shared/types/common";
-import type {
-  DeleteTelegramInboxMessageInput,
-  DeleteTelegramInboxMessageOutput,
-  GetTelegramInboxCountInput,
-  GetTelegramInboxCountOutput,
-  GetTelegramInboxInput,
-  GetTelegramInboxOutput,
-} from "../../inbox/model/types";
 
 export type AskUserTelegramInput = {
   question: string;
@@ -44,17 +36,33 @@ export type NotifyTelegramOutput = {
   message_id?: number | undefined;
 };
 
+export type SendFileToTelegramInput = {
+  session_id?: string | undefined;
+  cwd?: string | undefined;
+  file_path: string;
+  caption?: string | undefined;
+};
+
+export type SendFileToTelegramOutput = {
+  session_id: string;
+  file_path: string;
+  sent: boolean;
+  message_id?: number | undefined;
+};
+
 export type RefreshToolsMarkdownInput = {
   session_id?: string | undefined;
   cwd?: string | undefined;
-  save_locally?: boolean | undefined;
+  known_hash?: string | undefined;
 };
 
 export type RefreshToolsMarkdownOutput = {
   source: "gateway" | "local";
-  saved: boolean;
+  session_id?: string | undefined;
+  current_hash: string;
+  changed: boolean;
+  content?: string | undefined;
   bytes: number;
-  path?: string | undefined;
 };
 
 export type SendPartnerFileInput = {
@@ -69,13 +77,6 @@ export type SendPartnerFileInput = {
   expected_reply?: string | undefined;
   requires_reply?: boolean | undefined;
   in_reply_to?: string | undefined;
-};
-
-export type { GetTelegramInboxInput, GetTelegramInboxOutput };
-export type { GetTelegramInboxCountInput, GetTelegramInboxCountOutput };
-export type {
-  DeleteTelegramInboxMessageInput,
-  DeleteTelegramInboxMessageOutput,
 };
 
 export type PendingRequestStatus =

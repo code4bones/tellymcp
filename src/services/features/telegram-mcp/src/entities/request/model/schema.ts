@@ -44,6 +44,20 @@ export const notifyTelegramOutputSchema = z.object({
   message_id: z.number().int().positive().optional(),
 });
 
+export const sendFileToTelegramInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  cwd: z.string().trim().min(1).optional(),
+  file_path: z.string().trim().min(1),
+  caption: z.string().trim().min(1).optional(),
+});
+
+export const sendFileToTelegramOutputSchema = z.object({
+  session_id: z.string(),
+  file_path: z.string(),
+  sent: z.boolean(),
+  message_id: z.number().int().positive().optional(),
+});
+
 export const listGatewaySessionsInputSchema = z.object({
   client_uuid: z.string().trim().min(1).optional(),
   connected_only: z.boolean().optional(),
@@ -74,78 +88,16 @@ export const listGatewaySessionsOutputSchema = z.object({
 export const refreshToolsMarkdownInputSchema = z.object({
   session_id: z.string().trim().min(1).optional(),
   cwd: z.string().trim().min(1).optional(),
-  save_locally: z.boolean().optional(),
+  known_hash: z.string().trim().min(1).optional(),
 });
 
 export const refreshToolsMarkdownOutputSchema = z.object({
   source: z.enum(["gateway", "local"]),
-  saved: z.boolean(),
+  session_id: z.string().trim().min(1).optional(),
+  current_hash: z.string().trim().min(1),
+  changed: z.boolean(),
+  content: z.string().optional(),
   bytes: z.number().int().nonnegative(),
-  path: z.string().optional(),
-});
-
-export const getTelegramInboxInputSchema = z.object({
-  session_id: z.string().trim().min(1).optional(),
-});
-
-export const getTelegramInboxOutputSchema = z.object({
-  session_id: z.string(),
-  total: z.number().int().nonnegative(),
-  has_more: z.boolean(),
-  messages: z.array(
-    z.object({
-      message_id: z.string(),
-      source: z.literal("telegram"),
-      message_kind: z.enum(["human", "system"]),
-      telegram_chat_id: z.number(),
-      telegram_user_id: z.number(),
-      telegram_message_id: z.number().int().nonnegative(),
-      text: z.string(),
-      attachments: z.array(z.string()).optional(),
-      received_at: z.string(),
-    }),
-  ),
-});
-
-export const getTelegramInboxCountInputSchema = z.object({
-  session_id: z.string().trim().min(1).optional(),
-});
-
-export const getTelegramInboxCountOutputSchema = z.object({
-  session_id: z.string(),
-  total: z.number().int().nonnegative(),
-});
-
-export const deleteTelegramInboxMessageInputSchema = z.object({
-  session_id: z.string().trim().min(1).optional(),
-  message_id: z.string().trim().min(1),
-});
-
-export const deleteTelegramInboxMessageOutputSchema = z.object({
-  deleted: z.boolean(),
-  session_id: z.string(),
-  message_id: z.string(),
-});
-
-export const createSessionPairCodeInputSchema = z.object({
-  session_id: z.string().trim().min(1).optional(),
-  session_label: z.string().trim().min(1).optional(),
-  cwd: z.string().trim().min(1).optional(),
-  expires_in_seconds: z.number().int().positive().optional(),
-  tmux_session_name: z.string().trim().min(1).max(200).optional(),
-  tmux_window_name: z.string().trim().min(1).max(200).optional(),
-  tmux_window_index: z.number().int().nonnegative().optional(),
-  tmux_pane_id: z.string().trim().min(1).max(200).optional(),
-  tmux_pane_index: z.number().int().nonnegative().optional(),
-});
-
-export const createSessionPairCodeOutputSchema = z.object({
-  session_id: z.string(),
-  code: z.string(),
-  expires_at: z.string(),
-  status: z.literal("pending"),
-  status_message: z.string(),
-  telegram_link_hint: z.string().optional(),
 });
 
 export const setSessionContextInputSchema = z.object({
@@ -205,15 +157,10 @@ export const getSessionContextOutputSchema = z.object({
       linked_at: z.string(),
     })
     .optional(),
-  tmux: z
+  terminal: z
     .object({
       configured: z.boolean(),
-      tmux_session_name: z.string().optional(),
-      tmux_window_name: z.string().optional(),
-      tmux_window_index: z.number().optional(),
-      tmux_pane_id: z.string().optional(),
-      tmux_pane_index: z.number().optional(),
-      tmux_target: z.string().optional(),
+      terminal_target: z.string().optional(),
       last_nudge_at: z.string().optional(),
     })
     .optional(),
@@ -227,53 +174,6 @@ export const clearSessionContextOutputSchema = z.object({
   cleared: z.boolean(),
   session_id: z.string(),
   cleared_pairing: z.boolean(),
-});
-
-export const clearSessionPairingInputSchema = z.object({
-  session_id: z.string().trim().min(1).optional(),
-});
-
-export const clearSessionPairingOutputSchema = z.object({
-  cleared: z.boolean(),
-  session_id: z.string(),
-});
-
-export const setTmuxTargetInputSchema = z.object({
-  session_id: z.string().trim().min(1).optional(),
-  tmux_session_name: z.string().trim().min(1).max(200).optional(),
-  tmux_window_name: z.string().trim().min(1).max(200).optional(),
-  tmux_window_index: z.number().int().nonnegative().optional(),
-  tmux_pane_id: z.string().trim().min(1).max(200).optional(),
-  tmux_pane_index: z.number().int().nonnegative().optional(),
-  tmux_target: z.string().trim().min(1).max(200),
-});
-
-export const setTmuxTargetOutputSchema = z.object({
-  session_id: z.string(),
-  tmux_target: z.string(),
-  tmux_session_name: z.string().optional(),
-  tmux_window_name: z.string().optional(),
-  tmux_window_index: z.number().optional(),
-  tmux_pane_id: z.string().optional(),
-  tmux_pane_index: z.number().optional(),
-  status_message: z.string(),
-});
-
-export const getTmuxTargetInputSchema = z.object({
-  session_id: z.string().trim().min(1).optional(),
-});
-
-export const getTmuxTargetOutputSchema = z.object({
-  session_id: z.string(),
-  configured: z.boolean(),
-  tmux_target: z.string().optional(),
-  tmux_session_name: z.string().optional(),
-  tmux_window_name: z.string().optional(),
-  tmux_window_index: z.number().optional(),
-  tmux_pane_id: z.string().optional(),
-  tmux_pane_index: z.number().optional(),
-  last_nudge_at: z.string().optional(),
-  status_message: z.string(),
 });
 
 export const browserOpenInputSchema = z.object({
@@ -625,7 +525,7 @@ const xchangeRecordAttachmentSchema = z.object({
 const xchangeRecordSchema = z.object({
   record_id: z.string(),
   session_id: z.string(),
-  category: z.enum(["partner_note", "local_handoff"]),
+  category: z.enum(["partner_note", "local_handoff", "telegram_message"]),
   direction: z.enum(["incoming", "outgoing", "local"]),
   status: z.enum(["new", "read", "archived"]),
   kind: z.string().optional(),
@@ -658,7 +558,7 @@ const xchangeRecordSchema = z.object({
 export const listXchangeRecordsInputSchema = z.object({
   session_id: z.string().trim().min(1).optional(),
   status: z.enum(["new", "read", "archived"]).optional(),
-  category: z.enum(["partner_note", "local_handoff"]).optional(),
+  category: z.enum(["partner_note", "local_handoff", "telegram_message"]).optional(),
   direction: z.enum(["incoming", "outgoing", "local"]).optional(),
   limit: z.number().int().positive().max(200).optional(),
 });

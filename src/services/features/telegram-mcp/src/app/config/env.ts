@@ -4,10 +4,29 @@ import * as z from "zod/v4";
 
 import type { QueueMode } from "../../shared/types/common";
 
+const emptyStringToUndefined = (value: unknown): unknown => {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  return trimmed === "" ? undefined : trimmed;
+};
+
+const optionalNonEmptyString = z.preprocess(
+  emptyStringToUndefined,
+  z.string().min(1).optional(),
+);
+
+const optionalUrlString = z.preprocess(
+  emptyStringToUndefined,
+  z.string().url().optional(),
+);
+
 const envSchema = z.object({
-  TELEGRAM_BOT_TOKEN: z.string().min(1),
-  TELEGRAM_BOT_USERNAME: z.string().min(1).optional(),
-  ADMIN_TOKEN: z.string().min(1).optional(),
+  TELEGRAM_BOT_TOKEN: optionalNonEmptyString,
+  TELEGRAM_BOT_USERNAME: optionalNonEmptyString,
+  ADMIN_TOKEN: optionalNonEmptyString,
   TELEGRAM_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
   TELEGRAM_DEFAULT_TIMEOUT_SECONDS: z.coerce
     .number()
@@ -17,30 +36,44 @@ const envSchema = z.object({
   TELEGRAM_MAX_CONTEXT_CHARS: z.coerce.number().int().positive().default(3000),
   TELEGRAM_MAX_QUESTION_CHARS: z.coerce.number().int().positive().default(1000),
   TELEGRAM_MAX_MESSAGE_CHARS: z.coerce.number().int().positive().default(3900),
-  TELEGRAM_INBOX_BATCH_SIZE: z.coerce
-    .number()
-    .int()
-    .positive()
-    .max(100)
-    .default(20),
   TELEGRAM_MENU_PAYLOAD_TTL_SECONDS: z.coerce
     .number()
     .int()
     .positive()
     .default(300),
-  DEBUG_LANGUAGE: z.enum(["en", "ru"]).optional(),
+  TELEGRAM_WEBHOOK_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
+  TELEGRAM_WEBHOOK_PATH: z.string().min(1).default("/telegram/webhook"),
+  TELEGRAM_WEBHOOK_PUBLIC_URL: optionalUrlString,
+  TELEGRAM_WEBHOOK_SECRET: optionalNonEmptyString,
+  TELEGRAM_WEBHOOK_TRACE: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
+  TELEGRAM_WEBHOOK_DROP_PENDING_UPDATES: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
+  DEBUG_LANGUAGE: z.preprocess(
+    emptyStringToUndefined,
+    z.enum(["en", "ru"]).optional(),
+  ),
   REDIS_HOST: z.string().min(1),
   REDIS_PORT: z.coerce.number().int().positive(),
   REDIS_DB: z.coerce.number().int().nonnegative(),
-  REDIS_USERNAME: z.string().min(1).optional(),
-  REDIS_PASSWORD: z.string().min(1).optional(),
+  REDIS_USERNAME: optionalNonEmptyString,
+  REDIS_PASSWORD: optionalNonEmptyString,
   MODE: z.enum(["queue", "reject"]).default("queue"),
   PAIR_CODE_TTL_SECONDS: z.coerce.number().int().positive().default(600),
-  PROJECT_NAME: z.string().min(1).optional(),
+  PROJECT_NAME: optionalNonEmptyString,
+  TELLYMCP_SESSION_ID: optionalNonEmptyString,
+  TELLYMCP_SESSION_LABEL: optionalNonEmptyString,
   MCP_HTTP_HOST: z.string().min(1).default("127.0.0.1"),
   MCP_HTTP_PORT: z.coerce.number().int().positive().default(8787),
   MCP_HTTP_PATH: z.string().min(1).default("/mcp"),
-  MCP_HTTP_BEARER_TOKEN: z.string().min(1).optional(),
+  MCP_HTTP_BEARER_TOKEN: optionalNonEmptyString,
   MCP_HTTP_ENABLE_DEBUG_ROUTES: z
     .string()
     .optional()
@@ -51,32 +84,34 @@ const envSchema = z.object({
     .transform((value) => value === "true"),
   MCP_VFS_SCOPE: z.string().min(1).default("mcp"),
   DISTRIBUTED_MODE: z.enum(["client", "gateway", "both"]).default("client"),
-  GATEWAY_PUBLIC_URL: z.string().url().optional(),
+  GATEWAY_PUBLIC_URL: optionalUrlString,
   GATEWAY_BIND_HOST: z.string().min(1).default("127.0.0.1"),
   GATEWAY_BIND_PORT: z.coerce.number().int().positive().default(8790),
-  GATEWAY_WS_URL: z.string().url().optional(),
+  GATEWAY_WS_URL: optionalUrlString,
   GATEWAY_WS_PATH: z
     .string()
     .min(1)
     .default(`${(process.env.ROOT_PREFIX || "/api").replace(/\/+$/u, "")}/gateway/ws`),
-  GATEWAY_AUTH_TOKEN: z.string().min(1).optional(),
-  GATEWAY_DATABASE_URL: z.string().min(1).optional(),
-  GATEWAY_S3_ENDPOINT: z.string().min(1).optional(),
-  GATEWAY_S3_BUCKET: z.string().min(1).optional(),
-  GATEWAY_S3_ACCESS_KEY: z.string().min(1).optional(),
-  GATEWAY_S3_SECRET_KEY: z.string().min(1).optional(),
-  RMQ_HOST: z.string().min(1).optional(),
+  GATEWAY_TOKEN: optionalNonEmptyString,
+  GATEWAY_USER_UUID: optionalNonEmptyString,
+  GATEWAY_AUTH_TOKEN: optionalNonEmptyString,
+  GATEWAY_DATABASE_URL: optionalNonEmptyString,
+  GATEWAY_S3_ENDPOINT: optionalNonEmptyString,
+  GATEWAY_S3_BUCKET: optionalNonEmptyString,
+  GATEWAY_S3_ACCESS_KEY: optionalNonEmptyString,
+  GATEWAY_S3_SECRET_KEY: optionalNonEmptyString,
+  RMQ_HOST: optionalNonEmptyString,
   RMQ_PORT: z.coerce.number().int().positive().optional(),
-  RMQ_USER: z.string().min(1).optional(),
-  RMQ_PASSWORD: z.string().min(1).optional(),
-  RMQ_VHOST: z.string().optional(),
+  RMQ_USER: optionalNonEmptyString,
+  RMQ_PASSWORD: optionalNonEmptyString,
+  RMQ_VHOST: z.preprocess(emptyStringToUndefined, z.string().optional()),
   RMQ_EXCHANGE: z.string().min(1).default("telegram_mcp.gateway"),
   WEBAPP_ENABLED: z
     .string()
     .optional()
     .transform((value) => value === "true"),
   WEBAPP_BASE_PATH: z.string().min(1).default("/webapp"),
-  WEBAPP_PUBLIC_URL: z.string().url().optional(),
+  WEBAPP_PUBLIC_URL: optionalUrlString,
   WEBAPP_INITDATA_TTL_SECONDS: z.coerce
     .number()
     .int()
@@ -94,38 +129,54 @@ const envSchema = z.object({
   WEBAPP_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
   WEBAPP_ACTION_COOLDOWN_MS: z.coerce.number().int().nonnegative().default(150),
   MCP_XCHANGE_DIR: z.string().min(1).default(".mcp-xchange"),
-  TMUX_NUDGE_ENABLED: z
+  TERMINAL_SHELL: z.string().min(1).default(process.env.SHELL || "bash"),
+  TERMINAL_COLS: z.coerce.number().int().positive().default(120),
+  TERMINAL_ROWS: z.coerce.number().int().positive().default(40),
+  TERMINAL_SCROLLBACK_LINES: z.coerce.number().int().positive().default(4000),
+  TERMINAL_NUDGE_ENABLED: z
     .string()
     .optional()
     .transform((value) => value !== "false"),
-  TMUX_SOCKET_PATH: z.string().min(1).optional(),
-  TMUX_NUDGE_DEBOUNCE_SECONDS: z.coerce.number().int().positive().default(10),
-  TMUX_NUDGE_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(30),
-  TMUX_NUDGE_MESSAGE: z.string().min(1).default("проверь inbox"),
-  TMUX_PARTNER_NUDGE_MESSAGE: z
+  TERMINAL_NUDGE_DEBOUNCE_SECONDS: z.coerce.number().int().positive().default(10),
+  TERMINAL_NUDGE_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(30),
+  TERMINAL_NUDGE_MESSAGE: z
     .string()
     .min(1)
-    .default("не inbox: проверь xchange records и partner note"),
-  TMUX_CAPTURE_MODE: z.enum(["visible", "lines"]).default("visible"),
-  TMUX_CAPTURE_LINES: z.coerce.number().int().positive().default(300),
-  TMUX_PROMPT_SCAN_ENABLED: z
+    .default(
+      "получи newest telegram_message через list_xchange_records/get_xchange_record, выполни запрос и ответь человеку через notify_telegram; не останавливайся на анализе",
+    ),
+  TERMINAL_PARTNER_NUDGE_MESSAGE: z
+    .string()
+    .min(1)
+    .default(
+      "получи newest partner_note через list_xchange_records/get_xchange_record, выполни задачу в текущей консоли и обязательно отправь результат через send_partner_note или send_partner_file; только потом mark_xchange_record_read",
+    ),
+  TERMINAL_PARTNER_REPLY_NUDGE_MESSAGE: z
+    .string()
+    .min(1)
+    .default(
+      "получи newest partner_note через list_xchange_records/get_xchange_record; если newest note имеет kind=reply или не требует ответа, не отправляй новый send_partner_note/send_partner_file без явного нового запроса. Если этот reply завершает задачу от человека, сразу отправь финальный результат в Telegram через notify_telegram или send_file_to_telegram; только потом mark_xchange_record_read",
+    ),
+  TERMINAL_CAPTURE_MODE: z.enum(["visible", "lines"]).default("visible"),
+  TERMINAL_CAPTURE_LINES: z.coerce.number().int().positive().default(300),
+  TERMINAL_PROMPT_SCAN_ENABLED: z
     .string()
     .optional()
     .transform((value) => value === "true"),
-  TMUX_PROMPT_SCAN_INTERVAL_SECONDS: z.coerce
+  TERMINAL_PROMPT_SCAN_INTERVAL_SECONDS: z.coerce
     .number()
     .int()
     .positive()
     .default(15),
-  TMUX_PROMPT_SCAN_COOLDOWN_SECONDS: z.coerce
+  TERMINAL_PROMPT_SCAN_COOLDOWN_SECONDS: z.coerce
     .number()
     .int()
     .positive()
     .default(120),
-  TMUX_PROMPT_SCAN_STRATEGY: z
+  TERMINAL_PROMPT_SCAN_STRATEGY: z
     .enum(["strict", "balanced"])
     .default("strict"),
-  TMUX_PROMPT_SCAN_MIN_SCORE: z.coerce.number().int().positive().default(5),
+  TERMINAL_PROMPT_SCAN_MIN_SCORE: z.coerce.number().int().positive().default(5),
   BROWSER_ENABLED: z
     .string()
     .optional()
@@ -138,31 +189,46 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((value) => value === "true"),
-  BROWSER_ADDRESS: z.string().url().optional(),
+  BROWSER_ADDRESS: optionalUrlString,
   BROWSER_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
   BROWSER_MAX_EVENTS: z.coerce.number().int().positive().default(200),
   BROWSER_WAIT_UNTIL: z
     .enum(["load", "domcontentloaded", "networkidle", "commit"])
     .default("load"),
-  BROWSER_EXECUTABLE_PATH: z.string().min(1).optional(),
-  BROWSER_CHANNEL: z.enum(["chrome", "chromium", "msedge"]).optional(),
+  BROWSER_EXECUTABLE_PATH: optionalNonEmptyString,
+  BROWSER_CHANNEL: z.preprocess(
+    emptyStringToUndefined,
+    z.enum(["chrome", "chromium", "msedge"]).optional(),
+  ),
   BROWSER_SLOW_MO_MS: z.coerce.number().int().nonnegative().default(0),
-  PROXY_USE: z.enum(["http", "socks5"]).optional(),
-  HTTP_PROXY: z.string().min(1).optional(),
-  SOCKS5_PROXY: z.string().min(1).optional(),
+  PROXY_USE: z.preprocess(
+    emptyStringToUndefined,
+    z.enum(["http", "socks5"]).optional(),
+  ),
+  HTTP_PROXY: optionalNonEmptyString,
+  SOCKS5_PROXY: optionalNonEmptyString,
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
+  LOG_STDERR_LEVEL: z
+    .preprocess(
+      emptyStringToUndefined,
+      z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).optional(),
+    ),
   LOG_FILE_ENABLED: z
     .string()
     .optional()
     .transform((value) => value === "true"),
+  LOG_FILE_LEVEL: z.preprocess(
+    emptyStringToUndefined,
+    z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).optional(),
+  ),
   LOG_FILE_PATH: z.string().min(1).default(".tellymcp/log.jsonl"),
 });
 
 export type AppConfig = {
   telegram: {
-    botToken: string;
+    botToken?: string;
     botUsername?: string;
     adminToken?: string;
     debugLanguage?: "en" | "ru";
@@ -171,8 +237,15 @@ export type AppConfig = {
     maxContextChars: number;
     maxQuestionChars: number;
     maxMessageChars: number;
-    inboxBatchSize: number;
     menuPayloadTtlSeconds: number;
+    webhook: {
+      enabled: boolean;
+      path: string;
+      publicUrl?: string;
+      secret?: string;
+      trace: boolean;
+      dropPendingUpdates: boolean;
+    };
     proxy?: {
       type: "http" | "socks5";
       url: string;
@@ -203,6 +276,8 @@ export type AppConfig = {
     gatewayBindPort: number;
     gatewayWsUrl?: string;
     gatewayWsPath: string;
+    gatewayToken?: string;
+    gatewayUserUuid?: string;
     gatewayAuthToken?: string;
     gatewayDatabaseUrl?: string;
     gatewayS3Endpoint?: string;
@@ -232,13 +307,17 @@ export type AppConfig = {
   exchange: {
     dir: string;
   };
-  tmux: {
+  terminal: {
+    shell: string;
+    cols: number;
+    rows: number;
+    scrollbackLines: number;
     nudgeEnabled: boolean;
-    socketPath?: string;
     nudgeDebounceSeconds: number;
     nudgeCooldownSeconds: number;
     nudgeMessage: string;
     partnerNudgeMessage: string;
+    partnerReplyNudgeMessage: string;
     captureMode: "visible" | "lines";
     captureLines: number;
     promptScanEnabled: boolean;
@@ -261,10 +340,14 @@ export type AppConfig = {
   };
   project: {
     name?: string | undefined;
+    sessionId?: string | undefined;
+    sessionLabel?: string | undefined;
   };
   logging: {
     level: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
+    stderrLevel?: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
     fileEnabled: boolean;
+    fileLevel?: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
     filePath: string;
   };
 };
@@ -278,6 +361,34 @@ export function loadConfig(): AppConfig {
   }
 
   const parsed = envSchema.parse(process.env);
+
+  if (
+    parsed.DISTRIBUTED_MODE !== "client" &&
+    !parsed.TELEGRAM_BOT_TOKEN?.trim()
+  ) {
+    throw new Error(
+      "TELEGRAM_BOT_TOKEN is required for gateway and both distributed modes.",
+    );
+  }
+
+  if (parsed.ADMIN_TOKEN?.trim() && !parsed.TELEGRAM_BOT_TOKEN?.trim()) {
+    throw new Error(
+      "ADMIN_TOKEN requires TELEGRAM_BOT_TOKEN because admin mode runs through the gateway bot.",
+    );
+  }
+
+  if (parsed.TELEGRAM_WEBHOOK_ENABLED) {
+    if (!parsed.TELEGRAM_WEBHOOK_PUBLIC_URL?.trim()) {
+      throw new Error(
+        "TELEGRAM_WEBHOOK_ENABLED=true requires TELEGRAM_WEBHOOK_PUBLIC_URL.",
+      );
+    }
+    if (!parsed.TELEGRAM_WEBHOOK_SECRET?.trim()) {
+      throw new Error(
+        "TELEGRAM_WEBHOOK_ENABLED=true requires TELEGRAM_WEBHOOK_SECRET.",
+      );
+    }
+  }
 
   const telegramProxy =
     parsed.PROXY_USE === "http"
@@ -302,7 +413,9 @@ export function loadConfig(): AppConfig {
 
   return {
     telegram: {
-      botToken: parsed.TELEGRAM_BOT_TOKEN,
+      ...(parsed.TELEGRAM_BOT_TOKEN
+        ? { botToken: parsed.TELEGRAM_BOT_TOKEN }
+        : {}),
       ...(parsed.TELEGRAM_BOT_USERNAME
         ? { botUsername: parsed.TELEGRAM_BOT_USERNAME }
         : {}),
@@ -315,8 +428,19 @@ export function loadConfig(): AppConfig {
       maxContextChars: parsed.TELEGRAM_MAX_CONTEXT_CHARS,
       maxQuestionChars: parsed.TELEGRAM_MAX_QUESTION_CHARS,
       maxMessageChars: parsed.TELEGRAM_MAX_MESSAGE_CHARS,
-      inboxBatchSize: parsed.TELEGRAM_INBOX_BATCH_SIZE,
       menuPayloadTtlSeconds: parsed.TELEGRAM_MENU_PAYLOAD_TTL_SECONDS,
+      webhook: {
+        enabled: parsed.TELEGRAM_WEBHOOK_ENABLED,
+        path: parsed.TELEGRAM_WEBHOOK_PATH,
+        ...(parsed.TELEGRAM_WEBHOOK_PUBLIC_URL
+          ? { publicUrl: parsed.TELEGRAM_WEBHOOK_PUBLIC_URL }
+          : {}),
+        ...(parsed.TELEGRAM_WEBHOOK_SECRET
+          ? { secret: parsed.TELEGRAM_WEBHOOK_SECRET }
+          : {}),
+        trace: parsed.TELEGRAM_WEBHOOK_TRACE,
+        dropPendingUpdates: parsed.TELEGRAM_WEBHOOK_DROP_PENDING_UPDATES,
+      },
       ...(telegramProxy ? { proxy: telegramProxy } : {}),
     },
     redis: {
@@ -350,6 +474,12 @@ export function loadConfig(): AppConfig {
         ? { gatewayWsUrl: parsed.GATEWAY_WS_URL }
         : {}),
       gatewayWsPath: parsed.GATEWAY_WS_PATH,
+      ...(parsed.GATEWAY_TOKEN
+        ? { gatewayToken: parsed.GATEWAY_TOKEN }
+        : {}),
+      ...(parsed.GATEWAY_USER_UUID
+        ? { gatewayUserUuid: parsed.GATEWAY_USER_UUID }
+        : {}),
       ...(parsed.GATEWAY_AUTH_TOKEN
         ? { gatewayAuthToken: parsed.GATEWAY_AUTH_TOKEN }
         : {}),
@@ -397,20 +527,24 @@ export function loadConfig(): AppConfig {
     exchange: {
       dir: parsed.MCP_XCHANGE_DIR,
     },
-    tmux: {
-      nudgeEnabled: parsed.TMUX_NUDGE_ENABLED,
-      ...(parsed.TMUX_SOCKET_PATH ? { socketPath: parsed.TMUX_SOCKET_PATH } : {}),
-      nudgeDebounceSeconds: parsed.TMUX_NUDGE_DEBOUNCE_SECONDS,
-      nudgeCooldownSeconds: parsed.TMUX_NUDGE_COOLDOWN_SECONDS,
-      nudgeMessage: parsed.TMUX_NUDGE_MESSAGE,
-      partnerNudgeMessage: parsed.TMUX_PARTNER_NUDGE_MESSAGE,
-      captureMode: parsed.TMUX_CAPTURE_MODE,
-      captureLines: parsed.TMUX_CAPTURE_LINES,
-      promptScanEnabled: parsed.TMUX_PROMPT_SCAN_ENABLED,
-      promptScanIntervalSeconds: parsed.TMUX_PROMPT_SCAN_INTERVAL_SECONDS,
-      promptScanCooldownSeconds: parsed.TMUX_PROMPT_SCAN_COOLDOWN_SECONDS,
-      promptScanStrategy: parsed.TMUX_PROMPT_SCAN_STRATEGY,
-      promptScanMinScore: parsed.TMUX_PROMPT_SCAN_MIN_SCORE,
+    terminal: {
+      shell: parsed.TERMINAL_SHELL,
+      cols: parsed.TERMINAL_COLS,
+      rows: parsed.TERMINAL_ROWS,
+      scrollbackLines: parsed.TERMINAL_SCROLLBACK_LINES,
+      nudgeEnabled: parsed.TERMINAL_NUDGE_ENABLED,
+      nudgeDebounceSeconds: parsed.TERMINAL_NUDGE_DEBOUNCE_SECONDS,
+      nudgeCooldownSeconds: parsed.TERMINAL_NUDGE_COOLDOWN_SECONDS,
+      nudgeMessage: parsed.TERMINAL_NUDGE_MESSAGE,
+      partnerNudgeMessage: parsed.TERMINAL_PARTNER_NUDGE_MESSAGE,
+      partnerReplyNudgeMessage: parsed.TERMINAL_PARTNER_REPLY_NUDGE_MESSAGE,
+      captureMode: parsed.TERMINAL_CAPTURE_MODE,
+      captureLines: parsed.TERMINAL_CAPTURE_LINES,
+      promptScanEnabled: parsed.TERMINAL_PROMPT_SCAN_ENABLED,
+      promptScanIntervalSeconds: parsed.TERMINAL_PROMPT_SCAN_INTERVAL_SECONDS,
+      promptScanCooldownSeconds: parsed.TERMINAL_PROMPT_SCAN_COOLDOWN_SECONDS,
+      promptScanStrategy: parsed.TERMINAL_PROMPT_SCAN_STRATEGY,
+      promptScanMinScore: parsed.TERMINAL_PROMPT_SCAN_MIN_SCORE,
     },
     browser: {
       enabled: parsed.BROWSER_ENABLED,
@@ -428,10 +562,18 @@ export function loadConfig(): AppConfig {
     },
     project: {
       ...(parsed.PROJECT_NAME ? { name: parsed.PROJECT_NAME } : {}),
+      ...(parsed.TELLYMCP_SESSION_ID
+        ? { sessionId: parsed.TELLYMCP_SESSION_ID }
+        : {}),
+      ...(parsed.TELLYMCP_SESSION_LABEL
+        ? { sessionLabel: parsed.TELLYMCP_SESSION_LABEL }
+        : {}),
     },
     logging: {
       level: parsed.LOG_LEVEL,
+      ...(parsed.LOG_STDERR_LEVEL ? { stderrLevel: parsed.LOG_STDERR_LEVEL } : {}),
       fileEnabled: parsed.LOG_FILE_ENABLED,
+      ...(parsed.LOG_FILE_LEVEL ? { fileLevel: parsed.LOG_FILE_LEVEL } : {}),
       filePath: parsed.LOG_FILE_PATH,
     },
   };

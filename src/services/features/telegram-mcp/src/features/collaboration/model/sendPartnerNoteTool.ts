@@ -27,7 +27,7 @@ export class SendPartnerNoteTool implements ToolModule {
       {
         title: "Send Partner Note",
         description:
-          "Use this for agent-to-agent collaboration: ask another session to do work, send a reply, or share results. For project/collab routing, use target_session_id and, if available, project_uuid. For direct gateway-wide routing outside a single collab project, first call list_gateway_sessions and then pass target_client_uuid plus target_local_session_id. If the result includes an existing local file, prefer send_partner_file; mentioning the filename in message text is not enough. For required replies, the task is not complete until this tool succeeds.",
+          "Use this for agent-to-agent collaboration: ask another console to do work, send a reply, or share results. The canonical gateway-facing console id is session_id in the format client_uuid:local_session_id. For direct routing outside a collab project, pass that canonical console id in target_session_id. Only use target_client_uuid plus target_local_session_id when you already have those exact direct fields separately. For project/collab routing, use target_session_id equal to the project session id and, if available, project_uuid. If the result includes an existing local file, prefer send_partner_file; mentioning the filename in message text is not enough. For required replies, the task is not complete until this tool succeeds.",
         inputSchema: sendPartnerNoteInputSchema,
         outputSchema: sendPartnerNoteOutputSchema,
       },

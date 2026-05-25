@@ -20,7 +20,7 @@ export class ListXchangeRecordsTool implements ToolModule {
       {
         title: "List Xchange Records",
         description:
-          "List structured .mcp-xchange records for the current session from the local sqlite store. Use this first for partner notes, local handoffs, unread collaboration items, and follow-up work instead of parsing markdown index files.",
+          "List structured .mcp-xchange records for the current console from the local sqlite store. Use this first for partner notes, local handoffs, unread collaboration items, human Telegram messages, and follow-up work instead of parsing markdown index files or relying on inbox-style flows.",
         inputSchema: listXchangeRecordsInputSchema,
         outputSchema: listXchangeRecordsOutputSchema,
       },

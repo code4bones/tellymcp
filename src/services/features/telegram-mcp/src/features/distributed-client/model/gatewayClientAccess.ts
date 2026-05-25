@@ -1,3 +1,5 @@
+import os from "node:os";
+
 import type { MaintenanceStore } from "../../../shared/api/storage/contract";
 
 export function normalizeGatewayBaseUrl(value: string): URL {
@@ -47,11 +49,26 @@ export async function ensureGatewayClientUuid(input: {
   gatewayAuthToken?: string;
   projectName?: string;
   botUsername?: string;
+  gatewayToken?: string;
+  gatewayUserUuid?: string;
+  namespace?: string;
+  nodeId?: string;
+  systemUsername?: string;
 }): Promise<string> {
+  const namespace = input.namespace || process.env.NAMESPACE || undefined;
+  const nodeId = input.nodeId || process.env.NODE_ID || undefined;
+  const systemUsername =
+    input.systemUsername ||
+    process.env.USER ||
+    process.env.LOGNAME ||
+    (() => {
+      try {
+        return os.userInfo().username;
+      } catch {
+        return undefined;
+      }
+    })();
   const existing = await input.maintenanceStore.getGatewayClientUuid();
-  if (existing) {
-    return existing;
-  }
 
   if (!input.gatewayPublicUrl) {
     throw new Error("Gateway client registration requires GATEWAY_PUBLIC_URL.");
@@ -64,12 +81,23 @@ export async function ensureGatewayClientUuid(input: {
       : {}),
     endpointPath: "/client/register",
     body: {
+      ...(existing ? { client_uuid: existing } : {}),
       client_label:
         input.projectName ||
+        [namespace, nodeId].filter(Boolean).join("/") ||
         input.botUsername ||
         "tellymcp client",
       ...(input.botUsername ? { bot_username: input.botUsername } : {}),
-      meta: {},
+      ...(input.gatewayToken ? { gateway_token: input.gatewayToken } : {}),
+      ...(input.gatewayUserUuid ? { owner_user_uuid: input.gatewayUserUuid } : {}),
+      meta: {
+        ...(namespace ? { namespace } : {}),
+        ...(nodeId ? { node_id: nodeId } : {}),
+        ...(systemUsername ? { system_username: systemUsername } : {}),
+        ...(input.gatewayUserUuid
+          ? { gateway_user_uuid: input.gatewayUserUuid }
+          : {}),
+      },
     },
   });
 

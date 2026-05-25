@@ -9,11 +9,17 @@ import { ProjectIdentityResolver } from "../src/services/features/telegram-mcp/s
 const tempDirs: string[] = [];
 
 function makeResolver(): ProjectIdentityResolver {
+  return makeResolverWithProject({});
+}
+
+function makeResolverWithProject(project: {
+  name?: string;
+  sessionId?: string;
+  sessionLabel?: string;
+}): ProjectIdentityResolver {
   return new ProjectIdentityResolver(
     {
-      project: {
-        name: "",
-      },
+      project,
     } as never,
     {
       info: () => undefined,
@@ -29,18 +35,13 @@ describe(".mcpsession session identity", () => {
     }
   });
 
-  it("creates a marker and reuses the same session id across tmux changes", () => {
+  it("creates a marker and reuses the same session id across terminal metadata changes", () => {
     const cwd = mkdtempSync(join(tmpdir(), "telegram-mcp-session-"));
     tempDirs.push(cwd);
     const resolver = makeResolver();
 
     const first = resolver.resolveSessionDefaults({ cwd });
-    const second = resolver.resolveSessionDefaults({
-      cwd,
-      tmux_session_name: "backend",
-      tmux_window_name: "editor",
-      tmux_pane_id: "%7",
-    });
+    const second = resolver.resolveSessionDefaults({ cwd });
 
     expect(first.sessionId).toBe(second.sessionId);
     expect(first.sessionLabel).toBe(second.sessionLabel);
@@ -64,5 +65,30 @@ describe(".mcpsession session identity", () => {
     const resolved = resolver.resolveSessionDefaults({ cwd });
     expect(resolved.sessionId).toBe("stable-session-id");
     expect(resolved.sessionLabel).toBe("leftDev");
+  });
+
+  it("uses explicit runtime session override without touching the shared marker", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "telegram-mcp-session-"));
+    tempDirs.push(cwd);
+
+    const seededResolver = makeResolver();
+    seededResolver.persistSessionMarker({
+      cwd,
+      sessionId: "seeded-session-id",
+      sessionLabel: "seededLabel",
+    });
+
+    const overriddenResolver = makeResolverWithProject({
+      name: "",
+      sessionId: "backendDev",
+      sessionLabel: "backendDev",
+    });
+
+    const resolved = overriddenResolver.resolveSessionDefaults({ cwd });
+    expect(resolved.sessionId).toBe("backendDev");
+    expect(resolved.sessionLabel).toBe("backendDev");
+    expect(readFileSync(join(cwd, ".mcpsession.json"), "utf8")).toContain(
+      "seeded-session-id",
+    );
   });
 });

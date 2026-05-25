@@ -7,7 +7,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/services/features/telegram-mcp/src/app/config/env";
 import type { SendPartnerNoteOutput } from "../src/services/features/telegram-mcp/src/entities/collaboration/model/types";
 import type { SessionContext } from "../src/services/features/telegram-mcp/src/entities/session/model/types";
-import type { SessionStore } from "../src/services/features/telegram-mcp/src/shared/api/storage/contract";
+import type {
+  MaintenanceStore,
+  SessionStore,
+} from "../src/services/features/telegram-mcp/src/shared/api/storage/contract";
 import type { Logger } from "../src/services/features/telegram-mcp/src/shared/lib/logger/logger";
 import type { ProjectIdentityResolver } from "../src/services/features/telegram-mcp/src/shared/lib/project-identity/projectIdentity";
 import { SendPartnerFileService } from "../src/services/features/telegram-mcp/src/features/collaboration/model/sendPartnerFileService";
@@ -49,7 +52,12 @@ describe("SendPartnerFileService", () => {
       .fn<CollaborationService["sendPartnerNote"]>()
       .mockResolvedValue(createOutput());
     const service = new SendPartnerFileService(
-      { tmux: {} } as AppConfig,
+      {
+        terminal: {},
+        distributed: {
+          mode: "client",
+        },
+      } as AppConfig,
       {
         getSession: vi.fn<SessionStore["getSession"]>().mockResolvedValue({
           sessionId: "left-session",
@@ -57,6 +65,9 @@ describe("SendPartnerFileService", () => {
           updatedAt: new Date().toISOString(),
         } satisfies SessionContext),
       } as SessionStore,
+      {
+        getGatewayClientUuid: vi.fn<MaintenanceStore["getGatewayClientUuid"]>(),
+      } as unknown as MaintenanceStore,
       {
         info: vi.fn(),
       } as unknown as Logger,
@@ -110,7 +121,12 @@ describe("SendPartnerFileService", () => {
     tempDirs.push(workspaceDir);
 
     const service = new SendPartnerFileService(
-      { tmux: {} } as AppConfig,
+      {
+        terminal: {},
+        distributed: {
+          mode: "client",
+        },
+      } as AppConfig,
       {
         getSession: vi.fn<SessionStore["getSession"]>().mockResolvedValue({
           sessionId: "left-session",
@@ -118,6 +134,9 @@ describe("SendPartnerFileService", () => {
           updatedAt: new Date().toISOString(),
         } satisfies SessionContext),
       } as SessionStore,
+      {
+        getGatewayClientUuid: vi.fn<MaintenanceStore["getGatewayClientUuid"]>(),
+      } as unknown as MaintenanceStore,
       {
         info: vi.fn(),
       } as unknown as Logger,

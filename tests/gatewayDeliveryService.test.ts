@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 vi.mock(
-  "../src/services/features/telegram-mcp/src/shared/integrations/tmux/client",
+  "../src/services/features/telegram-mcp/src/shared/integrations/terminal/client",
   () => ({
     ensureXchangeDir: vi.fn(async () => "/workspace/.mcp-xchange"),
     writeXchangeRelativeFile: vi.fn(),
@@ -16,7 +16,8 @@ vi.mock(
 );
 
 import GatewayDeliveryService from "../src/services/features/telegram-mcp/gateway-delivery.service";
-import { writeXchangeRelativeFile } from "../src/services/features/telegram-mcp/src/shared/integrations/tmux/client";
+import { writeXchangeRelativeFile } from "../src/services/features/telegram-mcp/src/shared/integrations/terminal/client";
+import { upsertXchangeRecord } from "../src/services/features/telegram-mcp/src/shared/integrations/xchange/sqliteRecordStore";
 
 type GatewayDelivery = {
   delivery_uuid: string;
@@ -95,7 +96,7 @@ type RuntimeHarness = {
       warn: ReturnType<typeof vi.fn>;
     };
     config: {
-      tmux: Record<string, unknown>;
+      terminal: Record<string, unknown>;
       exchange: {
         dir: string;
       };
@@ -105,6 +106,7 @@ type RuntimeHarness = {
 
 const methods = GatewayDeliveryService.methods as unknown as GatewayDeliveryMethods;
 const mockedWriteXchangeRelativeFile = vi.mocked(writeXchangeRelativeFile);
+const mockedUpsertXchangeRecord = vi.mocked(upsertXchangeRecord);
 
 function createDelivery(overrides?: Partial<GatewayDelivery>): GatewayDelivery {
   return {
@@ -163,7 +165,7 @@ function createRuntimeHarness(): RuntimeHarness {
       warn: vi.fn(),
     },
     config: {
-      tmux: {},
+      terminal: {},
       exchange: {
         dir: ".mcp-xchange",
       },
@@ -178,9 +180,10 @@ function createRuntimeHarness(): RuntimeHarness {
 describe("gatewayDelivery service", () => {
   beforeEach(() => {
     mockedWriteXchangeRelativeFile.mockReset();
+    mockedUpsertXchangeRecord.mockReset();
   });
 
-  it("materializes incoming delivery into note, inbox, and telegram notification", async () => {
+  it("materializes incoming delivery into note, xchange record, and telegram notification", async () => {
     const harness = createRuntimeHarness();
     const delivery = createDelivery({
       artifacts: [
@@ -206,13 +209,30 @@ describe("gatewayDelivery service", () => {
 
     await methods.materializeIncomingDelivery.call(harness, delivery);
 
-    expect(harness.getRuntimeOrThrow().inboxStore.createInboxMessage).toHaveBeenCalledWith(
+    expect(mockedUpsertXchangeRecord).toHaveBeenCalledWith(
+      {},
+      "/workspace",
+      ".mcp-xchange",
       expect.objectContaining({
-        sessionId: "backend-local",
-        text: expect.stringContaining("Получен вопрос от Петр Олесов."),
+        record_id: "share-1",
+        session_id: "backend-local",
+        category: "partner_note",
+        direction: "incoming",
+        status: "new",
+        kind: "question",
+        summary: "Опиши REST API",
+        note_path: "/workspace/.mcp-xchange/shares/share-1.md",
+        note_relative_path: "shares/share-1.md",
         attachments: expect.arrayContaining([
-          "/workspace/.mcp-xchange/shares/share-1.md",
-          "/workspace/.mcp-xchange/shares/files/share-1/wicardd.conf",
+          expect.objectContaining({
+            file_path: "/workspace/.mcp-xchange/shares/share-1.md",
+            relative_path: "shares/share-1.md",
+          }),
+          expect.objectContaining({
+            file_path:
+              "/workspace/.mcp-xchange/shares/files/share-1/wicardd.conf",
+            relative_path: "shares/files/share-1/wicardd.conf",
+          }),
         ]),
       }),
     );
@@ -224,6 +244,10 @@ describe("gatewayDelivery service", () => {
     );
     expect(harness.getRuntimeOrThrow().telegramTransport.nudgeSessionPartnerNote).toHaveBeenCalledWith(
       "backend-local",
+      {
+        kind: "question",
+        requiresReply: true,
+      },
     );
     expect(harness.getRuntimeOrThrow().logger.info).toHaveBeenCalledWith(
       "Gateway delivery materialized locally",
@@ -240,7 +264,7 @@ describe("gatewayDelivery service", () => {
 
     await methods.materializeIncomingDelivery.call(harness, createDelivery());
 
-    expect(harness.getRuntimeOrThrow().inboxStore.createInboxMessage).not.toHaveBeenCalled();
+    expect(mockedUpsertXchangeRecord).not.toHaveBeenCalled();
     expect(harness.getRuntimeOrThrow().logger.warn).toHaveBeenCalledWith(
       "Skipping gateway delivery because target local session is not available",
       expect.objectContaining({

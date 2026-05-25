@@ -1,6 +1,6 @@
 # Tools
 
-Version: `2026-05-18.1`
+Version: `2026-05-22.1`
 
 Gateway/client runtime compatibility:
 
@@ -10,7 +10,7 @@ Gateway/client runtime compatibility:
 - `TOOLS.md` sync tells the agent to refresh instructions.
 - `ws hello/hello_ack` checks `package_version`, `protocol_version`, and `capabilities`.
 - If protocol major versions differ, gateway transport is blocked until the older side is upgraded.
-- If you receive a system inbox message about gateway/client version mismatch, treat it as operational priority before continuing collaboration or live-relay work.
+- If you receive a system notice or structured record about gateway/client version mismatch, treat it as operational priority before continuing collaboration or live-relay work.
 
 This MCP server currently exposes the following tools.
 
@@ -51,131 +51,42 @@ Utility tools:
 
 - `refresh_tools_markdown`
 
-## `create_session_pair_code`
+## Console model
 
-Purpose:
+Gateway-first runtime model:
 
-- Create a short-lived Telegram pairing code for a session.
-
-Typical use:
-
-- first-time session linking
-- re-linking after `clear_session_pairing`
-- any request like "register me in Telegram", "link this session to Telegram", "pair this agent", or similar
-
-Input:
-
-- `session_id?`
-- `session_label?`
-- `cwd?`
-- `expires_in_seconds?`
-- `tmux_session_name?`
-- `tmux_window_name?`
-- `tmux_window_index?`
-- `tmux_pane_id?`
-- `tmux_pane_index?`
-
-Output:
-
-- `session_id`
-- `code`
-- `expires_at`
-- `status`
-- `status_message`
-- `telegram_link_hint?`
-
-Behavior:
-
-- generated pairing codes are short numeric 3-digit one-time codes
-- if `session_id` is omitted, the server derives it automatically
-- if `cwd` is provided, the server uses it as the agent workspace root for default session identity and for `.mcp-xchange` file downloads
-- `.mcp-xchange` is the active local exchange workspace for files, screenshots, notes, and handoffs
-- one directory now maps to one logical session by default
-- the service stores that logical identity in `.mcpsession.json` inside the workspace
-- tmux attributes are runtime metadata only and no longer change `session_id`
-- if tmux attributes are not provided here, the Telegram session can still pair successfully, but tmux nudges, Mini App controls, and other tmux-driven features will remain unavailable until `set_tmux_target` is called later
+- agents register themselves on the gateway automatically through `GATEWAY_TOKEN`
+- Telegram no longer links sessions with pair codes
+- `/menu` in the gateway bot shows available remote consoles directly
+- one running agent console is one logical session/console target
 
 Required agent practice:
 
-This is mandatory for the agent:
+- when the user asks to contact another agent, inspect consoles through `list_gateway_sessions`
+- when the user asks to work with Telegram-linked human interaction, use the current console `session_id` explicitly
+- in gateway mode, `session_id` means the live console id from `-s`
+- do not use workspace-derived ids like `project-abc12345` for gateway routing
+- do not use `cwd` to route to a console through the gateway
+- if you need a `session_id` and do not know it yet, call `list_gateway_sessions` and use canonical `session_id` from the matching live console
+- do not ask the user for the live console id when it can be resolved from `list_gateway_sessions`
+- assume gateway is the only user-facing control plane
+- do not mention pair codes, `/link`, admin menus, or session pairing unless the user is explicitly asking about legacy behavior
 
-- when the user asks to register, link, pair, or connect the current agent/session to Telegram, do not call `create_session_pair_code` immediately from memory
-- first determine the correct workspace `cwd`
-- if tmux is available, collect the current tmux attributes too
-- then call `create_session_pair_code` with them
+Preferred order for cross-console work:
 
-Required order:
-
-1. Determine the agent workspace `cwd`.
-2. If running inside tmux, collect tmux attributes:
-
-```bash
-tmux display-message -p '#{session_name} #{window_name} #{window_index} #{pane_id} #{pane_index}'
-```
-
-3. Call `create_session_pair_code` and pass:
-   - `cwd`
-   - tmux attributes when available
-4. Use `set_tmux_target` later only as a repair, refresh, or override path.
-
-Do not skip `cwd`. It is now the anchor for the stable session marker.
-
-After `create_session_pair_code` succeeds:
-
-- treat the returned `session_id` as the canonical session identity for this agent
-- remember it in the current task context
-- pass it explicitly to later session-scoped tools
-- do not rely on implicit session defaults unless you also know that `cwd` is already correct for this exact agent workspace
-
-Why this matters:
-
-- many MCP tools resolve `session_id` from explicit input first
-- if it is omitted, the server may derive it from `cwd`
-- if the agent did not pass the correct `cwd`, or the MCP client does not preserve it, a later tool call can hit the wrong session
-
-Mandatory rule:
-
-- after pairing, prefer:
-  - `session_id: "<returned value>"`
-- for tools like:
-  - `ask_user_telegram`
-  - `notify_telegram`
-  - `get_telegram_inbox_count`
-  - `get_telegram_inbox`
-  - `delete_telegram_inbox_message`
-  - browser/session-context tools
-- do not assume Telegram "active session" in the bot menu affects MCP tool defaults.
-
-If you skip `cwd`:
-
-- the service may create or reuse the wrong `.mcpsession.json`
-- Telegram file exchange into `.mcp-xchange` may not know the correct agent workspace
-
-If you skip tmux attributes:
-
-- pairing may still succeed
-- but tmux nudges and Mini App controls may not work until repaired later
-
-## `clear_session_pairing`
-
-Purpose:
-
-- Remove the Telegram binding for a session.
-
-Input:
-
-- `session_id?`
-
-Output:
-
-- `cleared`
-- `session_id`
+1. Call `list_gateway_sessions`.
+2. Choose the correct target by `session_label`, `node_id`, `client_label`, or canonical `session_id`.
+3. Use:
+   - `send_partner_note`
+   - `send_partner_file`
+   - browser tools
+   with explicit `session_id` for the current console or explicit target routing fields for another console.
 
 ## `set_session_context`
 
 Purpose:
 
-- Save compact reusable session context in Redis.
+- Save compact reusable console context.
 
 Input:
 
@@ -193,18 +104,19 @@ Output:
 - `session_id`
 - `updated_at`
 - `has_binding`
+  Legacy field name. Read it as: whether this console currently has an active Telegram route through the gateway.
 
 ## `rename_session`
 
 Purpose:
 
-- Rename the session title/label only.
+- Rename only the human-readable console title/label.
 
 Rules:
 
 - this changes only the human-readable title
 - it does not change `session_id`
-- it does not change pairing, tmux target, inbox, or saved context
+- it does not change routing or saved context
 
 Input:
 
@@ -218,82 +130,17 @@ Output:
 - `session_label`
 - `updated_at`
 
-## `set_tmux_target`
-
-Purpose:
-
-- Save the tmux pane target for a session so the long-running service can nudge the agent when new non-reply Telegram messages arrive for that paired session.
-
-Recommended use:
-
-- run this while still at the workstation
-- do not treat this as the source of session identity
-- use it immediately after pairing only if you need to repair, override, or refresh the target
-- prefer a pane id such as `%7`
-
-How to obtain tmux attributes:
-
-```bash
-tmux display-message -p '#{session_name} #{window_name} #{window_index} #{pane_id} #{pane_index}'
-```
-
-Input:
-
-- `session_id?`
-- `tmux_session_name?`
-- `tmux_window_name?`
-- `tmux_window_index?`
-- `tmux_pane_id?`
-- `tmux_pane_index?`
-- `tmux_target`
-
-Output:
-
-- `session_id`
-- `tmux_target`
-- `tmux_session_name?`
-- `tmux_window_name?`
-- `tmux_window_index?`
-- `tmux_pane_id?`
-- `tmux_pane_index?`
-- `status_message`
-
-## `get_tmux_target`
-
-Purpose:
-
-- Check whether a tmux target is configured for the current session and when it was last nudged.
-
-Recommended use:
-
-- setup/debug only
-- use this when configuring tmux delivery or diagnosing why nudges do not happen
-- do not call this in the normal inbox-processing path after a tmux nudge
-
-Input:
-
-- `session_id?`
-
-Output:
-
-- `session_id`
-- `configured`
-- `tmux_target?`
-- `tmux_session_name?`
-- `last_nudge_at?`
-- `status_message`
-
 ## `get_session_context`
 
 Purpose:
 
-- Read saved session context and Telegram binding status.
+- Read saved console context and routing status.
 
 Recommended use:
 
 - setup/debug only
-- use this while pairing, diagnosing state, or inspecting saved metadata
-- do not call this in the normal inbox-processing path after a tmux nudge
+- use this while diagnosing state or inspecting saved metadata
+- do not call this in the normal processing path unless you are diagnosing state
 
 Input:
 
@@ -304,41 +151,55 @@ Output:
 - `session_id`
 - `exists`
 - `has_binding`
+  Legacy field name. Read it as: whether this console is currently reachable from Telegram through the gateway.
 - `status_message`
 - `context?`
 - `binding?`
-- `tmux?`
+  Legacy field name. If present, this is the current Telegram route metadata for the console.
+- `terminal?`
+  Terminal runtime metadata for the console.
 
 ## `refresh_tools_markdown`
 
 Purpose:
 
 - Download the canonical `TOOLS.md` from the configured gateway.
-- Overwrite the local `TOOLS.md` so the agent can refresh instructions without manual copying.
+- Return the canonical instructions in a hash-based form so the agent can refresh without mandatory local file writes.
 
 Input:
 
-- `save_locally?`
+- `session_id`
+- `known_hash?`
 
 Output:
 
 - `source`
-- `saved`
+- `session_id?`
+- `current_hash`
+- `changed`
+- `content?`
 - `bytes`
-- `path?`
 
 Behavior:
 
 - if `GATEWAY_PUBLIC_URL` is configured, the tool fetches `GET /api/gateway/tools-md`
-- if no gateway is configured, the tool falls back to the local file
-- on the gateway node, the local `TOOLS.md` is the canonical source and should always be kept current
-- after successful refresh, treat the local `TOOLS.md` as updated state for this session and re-read it before continuing
+- if no gateway is configured, the tool falls back to the installed package copy
+- the canonical source is the installed gateway package copy, not an arbitrary current working directory
+- in gateway mode, routing to the target console is done only by explicit canonical `session_id = client_uuid:local_session_id`
+- `cwd` is workspace metadata for the target console after routing succeeds; it is not a routing key
+- if the live console id is not already known, call `list_gateway_sessions` first and use `session_id`
+- prefer hash-based refresh:
+  - pass `known_hash` from the last applied TOOLS state
+  - if `changed=false`, keep current instructions
+  - if `changed=true`, read and apply returned `content`
+- there is no local file-save mode in the normal flow
+- do not create or rely on workspace `TOOLS.md` copies
 
 ## `clear_session_context`
 
 Purpose:
 
-- Remove saved session context and Telegram pairing for the session.
+- Remove saved session context and related per-session state for the console.
 
 Input:
 
@@ -349,6 +210,7 @@ Output:
 - `cleared`
 - `session_id`
 - `cleared_pairing`
+  Compatibility field name. Treat it as legacy cleanup metadata, not as an instruction to use pairing.
 
 ## `send_partner_note`
 
@@ -356,11 +218,12 @@ Output:
 
 Purpose:
 
-- List all sessions currently known to the configured gateway.
+- List all consoles currently known to the configured gateway.
 - Merge:
-  - connected sessions from gateway WS presence
-  - registered project sessions from the gateway database
-- Use this before direct cross-session communication outside one collab project.
+  - connected consoles from gateway WS presence
+  - registered project consoles from the gateway database
+- Use this before direct cross-console communication outside one collab project.
+- Use this to resolve the authoritative live console id for other gateway-routed tools.
 
 Input:
 
@@ -372,6 +235,7 @@ Output:
 - `total`
 - `sessions[]`
   - `session_id`
+  - `local_session_id`
   - `client_uuid`
   - `local_session_id`
   - `session_label?`
@@ -508,7 +372,7 @@ Purpose:
 - Write a note file into the partner workspace under `.mcp-xchange/shares/`.
 - Create a structured xchange record in the partner sqlite store.
 - Optionally copy listed artifacts from the current workspace into the partner `.mcp-xchange/shares/files/<share_id>/`.
-- Create an inbox message for the partner agent and trigger the normal tmux nudge path.
+- Create a structured xchange wake-up for the partner agent through the normal gateway delivery path.
 
 Input:
 
@@ -540,6 +404,7 @@ Output:
 - `xchange_record_id`
 - `copied_artifacts`
 - `inbox_message_id`
+  Legacy compatibility field name for delivery bookkeeping.
 - `requires_reply`
 
 Required agent practice:
@@ -707,19 +572,22 @@ Canonical example for a project reply:
 
 How the receiving agent must react:
 
-- partner collaboration wake-ups are not ordinary Telegram inbox wake-ups
-- if the tmux nudge says things like:
+- wake-ups now point to the unified `.mcp-xchange` flow
+- if the wake-up says things like:
   - `проверь xchange records`
-  - `partner note`
-  - `partner notes`
-  then do not start with `get_telegram_inbox`
+  - `telegram_message`
+  - `partner_note`
+  then do not start with a legacy inbox-specific tool
 - instead:
   1. call `list_xchange_records`
-  2. select the newest relevant `partner_note` record
+  2. identify the newest relevant record by category:
+     - `telegram_message` if the sender is a human from Telegram
+     - `partner_note` if the sender is another agent
   3. call `get_xchange_record`
   4. read `body_text`, `action_desc`, `tools`, and any attachments
-- only use `get_telegram_inbox` for the normal Telegram human-message path
-- do not confuse partner collaboration notes with human Telegram inbox traffic
+- reply according to the record category:
+  - `telegram_message` -> answer with `notify_telegram`
+  - `partner_note` -> answer with `send_partner_note`
 
 What to do after reading the note:
 
@@ -845,107 +713,6 @@ Output:
 
 - `sent`
 - `message_id?`
-
-## `get_telegram_inbox_count`
-
-Purpose:
-
-- Fast inbox check.
-- Returns only the number of stored unsolicited Telegram messages.
-
-Recommended use:
-
-- use this for lightweight passive checks
-- use this when no tmux nudge path is configured
-- after a tmux nudge, prefer calling `get_telegram_inbox` directly instead of spending an extra step on count
-
-Input:
-
-- `session_id?`
-
-Output:
-
-- `session_id`
-- `total`
-
-## `get_telegram_inbox`
-
-Purpose:
-
-- Read unsolicited Telegram inbox messages stored for a session.
-- Return a bounded batch rather than forcing the agent to pull the whole backlog at once.
-
-Input:
-
-- `session_id?`
-
-Notes:
-
-- Browser tools require Playwright Chromium browser binaries.
-- If the runtime is missing, run `tellymcp browser install`, then retry `browser_open`.
-
-- the server always uses `TELEGRAM_INBOX_BATCH_SIZE`
-- the agent should not try to choose its own batch size
-
-Output:
-
-- `session_id`
-- `total`
-- `has_more`
-- `messages`
-
-Per-message fields:
-
-- `message_id`
-- `source = "telegram"`
-- `message_kind`
-  - `human`
-  - `system`
-- `telegram_message_id`
-- `telegram_chat_id`
-- `telegram_user_id`
-- `text`
-- `attachments?`
-- `received_at`
-
-Meaning:
-
-- when a task starts from one of these inbox items, treat it as a Telegram-originated task
-- use `notify_telegram` for progress updates and `ask_user_telegram` for clarifications during that task
-- if `message_kind = "system"`:
-  - treat it as an operational instruction from the service
-  - do not reinterpret it as a normal user request
-  - if it contains `Action Required`, follow that operational flow first
-  - for example, a `TOOLS.md updated` system message means:
-    1. call `refresh_tools_markdown`
-    2. re-read the local `TOOLS.md`
-    3. apply the updated rules before continuing
-  - do not answer this kind of message with a normal human-facing reply unless the instruction explicitly says to notify the user
-- process the batch one message at a time
-- move to the next inbox item only if the current one did not create a blocker
-- if the current message leads to a clarification wait or another blocking condition, stop batch processing there and leave the remaining inbox items pending
-- if `attachments` is present, those are local paths inside `.mcp-xchange` that the agent can read from the workspace
-- those paths are ordinary local workspace paths inside `.mcp-xchange`
-- file upload itself is now the handoff action when the user is inside a target context
-- there is no separate Telegram `Files` menu anymore
-- browser screenshots created by `browser_screenshot` are tracked separately and appear under Telegram `Browser -> Screenshots`
-
-## `delete_telegram_inbox_message`
-
-Purpose:
-
-- Remove a processed inbox message so it is not handled again.
-
-Input:
-
-- `session_id?`
-- `message_id`
-
-Output:
-
-- `deleted`
-- `session_id`
-- `message_id`
 
 ## `browser_open`
 
@@ -1305,30 +1072,29 @@ Output:
 
 Telegram UI summary:
 
-- `/menu` is the only top-level Telegram command for session navigation
-- root menu shows one session button per row
-- root menu also shows tmux bridge status
-- session menu uses:
+- `/menu` is the only top-level Telegram command for console navigation
+- root menu shows one console button per row
+- root menu reflects terminal bridge status for available consoles
+- console menu uses:
   - `Live | Content | Browser`
-  - `Local | Collab`
-  - `Inbox | Storage | Settings`
+  - `Collab`
+  - `Storage | Settings`
   - `Back`
-- default logical session identity comes from `.mcpsession.json` in the workspace
-- changing tmux session/window/pane does not change `session_id`
+- default logical console identity comes from `.mcpsession.json` in the workspace or explicit `-s`
+- terminal runtime metadata does not change `session_id`
 - `Browser -> Screenshots` lists screenshots created by `browser_screenshot`
-- `Storage` browses `.mcp-xchange` for the active session and can send stored notes/files back into Telegram
+- `Storage` browses `.mcp-xchange` for the active console and can send stored notes/files back into Telegram
 - `Settings` contains `Info`, `Rename`, `Unpair`, `Back`
-- `Link` creates a mutual partner relationship between two sessions visible to the same Telegram identity
-- `Local` is the Telegram UI wrapper over same-bot partner collaboration
+- project/collab work is the only supported user-facing collaboration path in Telegram UI
 - `Collab` is the project-based multi-machine collaboration flow
 - inside `Collab -> Project -> Member`, action semantics differ:
   - first row is `Ask | Share`
   - second row is `Live`
-  - `Ask` sends a task to the selected member session
-  - expected reply route is `member -> current session`
-  - `Share` creates a task for the current session
-  - expected send route is `current session -> member`
-  - `Live` first sends an approval request to the selected member session
+  - `Ask` sends a task to the selected member console
+  - expected reply route is `member -> current console`
+  - `Share` creates a task for the current console
+  - expected send route is `current console -> member`
+  - `Live` first sends an approval request to the selected member console
   - after approval, the requester receives a fresh `Open Live View` button in Telegram
 - partner-note prompt format is:
   - first line = summary
@@ -1354,7 +1120,7 @@ Distributed mode scaffold:
   - gateway compares them with canonical gateway `TOOLS.md`
   - mismatch produces `tools_event`
   - client also self-checks after `hello_ack`
-- once linked, agents should use `list_xchange_records` / `get_xchange_record` plus separate files in `.mcp-xchange/shares/` for collaboration
+- agents should use `list_xchange_records` / `get_xchange_record` plus separate files in `.mcp-xchange/shares/` for collaboration
 - recommended collaboration note kinds are:
   - `share`
   - `question`
@@ -1367,9 +1133,9 @@ Distributed mode scaffold:
   - `Broadcast`
   - `History`
   - `Delete`
-- `History` sends a markdown export of the last 5 Collab events for the current active session
+- `History` sends a markdown export of the last 5 Collab events for the current active console
 
-Current remaining operational gaps are tracked in [docs/TODO.md](/home/code4bones/Devs/coding/mcp/telegram_mcp/docs/TODO.md).
+Current remaining operational gaps are tracked in [docs/TODO.md](./docs/TODO.md).
 
 ## `ask_user_telegram`
 
@@ -1399,60 +1165,40 @@ Output:
 - `received_at?`
 - `fallback_used?`
 
-## Telegram inbox protocol
+## Telegram human-message protocol
 
-The inbox may contain new user instructions sent from Telegram.
+Human Telegram messages are now stored as structured `telegram_message` records in `.mcp-xchange`.
 
-If a paired session has a configured `tmux_target`, the preferred path is event-driven: Telegram stores the message, the service nudges tmux, and the agent then fetches `get_telegram_inbox`.
+Preferred behavior is event-driven:
 
-If no tmux nudge path exists, use passive inbox checks with `get_telegram_inbox_count`.
+1. The human sends a message through the gateway bot.
+2. The gateway routes the message to the active console as a `telegram_message` record.
+3. The running agent checks `.mcp-xchange` through MCP tools.
+4. Read actual content through `list_xchange_records` and `get_xchange_record`.
 
-## Telegram transition protocol
+## Telegram console switching
 
-When the user says they are leaving the workstation and wants to continue through Telegram:
-
-1. If running inside tmux, obtain full tmux attributes:
-
-```bash
-tmux display-message -p '#{session_name} #{window_name} #{window_index} #{pane_id} #{pane_index}'
-```
-
-2. Call `create_session_pair_code` with these attributes so the session identity is derived distinctly for this agent.
-3. Complete pairing in Telegram.
-4. If needed, call `set_tmux_target` only to override or refresh the stored target later.
-5. Continue work normally.
-6. If the long-running service nudges the tmux pane with `проверь inbox`, treat that as the signal to fetch the next inbox batch.
-7. Read actual inbox content only through MCP tools.
-
-The service does not inject Telegram message text into tmux. It only sends the wake-up phrase. Telegram messages remain stored in Redis inbox until the agent explicitly reads and deletes them. Multiple close-together Telegram messages are debounced into a single tmux wake-up.
-
-## Telegram session switching
-
-The Telegram side supports an active-session context per Telegram identity.
+The Telegram side supports an active-console context per Telegram identity.
 
 Rules:
 
-- ordinary Telegram messages are stored in the inbox of the currently active session
-- `/menu` opens a menu with all sessions linked to the current Telegram identity
-- selecting a session makes it the new active session
-- the main menu also provides a session-switch entry point
-- the list contains every distinct `session_id` paired to this Telegram identity, so multi-agent setups depend on deriving different session ids during pairing
+- ordinary Telegram messages are stored as `telegram_message` records for the currently active console
+- `/menu` opens a menu with all consoles visible to the current Telegram identity inside the current gateway scope
+- selecting a console makes it the new active console
+- the main menu also provides a console-switch entry point
+- the list reflects currently available gateway-known consoles, not a local pairing catalog
 
-If tmux nudging is configured, the preferred behavior is event-driven:
-
-1. Wait for the tmux nudge.
-2. Call `get_telegram_inbox`.
-3. Process the returned batch one message at a time.
-4. Move to the next message only if the current message did not create a blocker, follow-up question, or execution error.
-5. If the current message requires clarification or cannot be completed safely, stop batch progression, enter the `ask_user_telegram` branch, and leave the remaining inbox items pending.
-6. Call `delete_telegram_inbox_message` only for messages that were actually handled.
-7. If `has_more = true` and the current batch finished cleanly, call `get_telegram_inbox` again for the next batch.
+1. Wait for the wake-up or decide to poll explicitly.
+2. Call `list_xchange_records`.
+3. Select the newest relevant `telegram_message` record with `status = new`.
+4. Call `get_xchange_record`.
+5. Process the returned record.
+6. If the message was handled, call `mark_xchange_record_read`.
 
 Do not add extra diagnostic calls in that path:
 
-- do not call `get_tmux_target` before `get_telegram_inbox`
-- do not call `get_session_context` before `get_telegram_inbox`
-- do not call `get_telegram_inbox_count` before `get_telegram_inbox` when the wake-up already came from tmux
+- do not call `get_session_context` before `list_xchange_records`
+- do not invent a separate inbox polling pass when the wake-up already arrived
 
 ## Presence model
 
@@ -1460,19 +1206,19 @@ Current truth:
 
 - gateway can know whether a client node is online through active `ws`
 - gateway also stores `gateway_clients.last_seen_at`
-- this is not the same thing as a live coding-agent heartbeat inside each session
+- this is not the same thing as a live coding-agent heartbeat inside each console
 
 Rule:
 
-- do not claim that a session agent is definitely `offline` unless a dedicated agent heartbeat exists
+- do not claim that a console agent is definitely `offline` unless a dedicated agent heartbeat exists
 - today the honest distinction is:
   - client node `online/offline`
-  - session bound/unbound
-  - tmux target configured/not configured
+  - console visible/not visible
+  - current console context present/absent
 
-If no tmux target is configured, use passive inbox checks:
+If no wake-up has arrived, use passive record checks:
 
-1. Call `get_telegram_inbox_count`.
-2. If `total > 0`, call `get_telegram_inbox`.
-3. Process messages.
-4. Call `delete_telegram_inbox_message` for handled items.
+1. Call `list_xchange_records`.
+2. If there is a new `telegram_message` record, call `get_xchange_record`.
+3. Process the message.
+4. Call `mark_xchange_record_read` for handled items.

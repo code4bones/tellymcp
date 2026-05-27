@@ -272,6 +272,35 @@ tellymcp browser install
 
 Не подменяй browser workflow ad hoc shell-командами с Playwright, кроме случаев, когда ты отлаживаешь сам browser runtime.
 
+## Terminal Blockers
+
+Gateway prompt scanner теперь живёт от live-client lifecycle:
+
+- на старте gateway scanner только armed, но не крутится вхолостую
+- реальная работа начинается после подключения live client
+- relay console materialization идёт из `hello` и owner-route hydration, а не из `/menu`
+- детект работает по хвосту захваченного terminal buffer
+
+Основная эвристика blocker-а:
+
+- подряд идущие numbered choices: `1.`, `2.`, `3.`
+- рядом есть action hints вроде `press`, `input`, `choose`, `enter`, `esc`, `yes`, `no`
+- в Telegram notice попадают и 1-2 строки контекста выше menu block
+
+Когда blocker найден, gateway может отправить inline-кнопки:
+
+- `1..N`
+- `Enter`
+- `Esc`
+
+Эти кнопки отправляют в консоль ровно цифру или terminal action. Навигация маркером не используется.
+
+Операционные заметки:
+
+- одинаковый blocker fingerprint не перевысылается повторно
+- relay capture miss для offline agent считается debug-only шумом
+- `Storage` и `Screenshots` на gateway теперь relay-aware и читают metadata через gateway routes, а не через filesystem самого gateway
+
 ## Collaboration
 
 Проекты:

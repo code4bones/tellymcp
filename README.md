@@ -272,6 +272,34 @@ tellymcp browser install
 
 Do not replace browser workflows with ad hoc shell Playwright commands unless you are debugging the runtime itself.
 
+## Terminal Blockers
+
+Gateway prompt scanning is now live-client driven:
+
+- the scanner is armed on gateway startup but starts working only after a live client connects
+- relay console materialization happens from gateway hello/owner-route hydration, not from `/menu`
+- prompt detection works on the tail of the captured terminal buffer
+
+Primary blocker heuristic:
+
+- contiguous numbered choices like `1.`, `2.`, `3.`
+- nearby action hints such as `press`, `input`, `choose`, `enter`, `esc`, `yes`, `no`
+- optional context lines above the menu block are included in the Telegram notice
+
+When a blocker is detected, the gateway can send inline Telegram buttons for:
+
+- `1..N`
+- `Enter`
+- `Esc`
+
+Those buttons send exactly the digit or terminal action to the target console. No marker navigation is used.
+
+Operational notes:
+
+- repeated scans of the same blocker fingerprint do not resend the notice
+- relay capture misses for offline agents are treated as debug-only noise
+- `Storage` and `Screenshots` on the gateway are relay-aware and read console metadata through gateway routes instead of the gateway filesystem
+
 ## Collaboration Model
 
 Projects:

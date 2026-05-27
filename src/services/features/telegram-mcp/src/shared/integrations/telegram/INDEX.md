@@ -60,6 +60,7 @@ This directory holds the decomposed Telegram transport. `transport.ts` is now th
 
 - `transportMenuCallbacks.ts`
   Generic callback handlers for inbox/storage/screenshots/session/link/partner flows.
+  Also handles relay-aware storage/screenshot open/get/delete callbacks.
 
 - `transportMenuShell.ts`
   Top-level grammy shell registration:
@@ -69,7 +70,8 @@ This directory holds the decomposed Telegram transport. `transport.ts` is now th
 
 - `transportTerminalActions.ts`
   Terminal flow:
-  nudges, prompt scan, cooldown/fingerprint logic, terminal buffer capture helpers.
+  nudges, prompt scan detection, blocker fingerprint dedupe, relay buffer capture,
+  and inline blocker button actions (`1..N`, `Enter`, `Esc`).
 
 - `transportLiveActions.ts`
   Live/WebApp action flow:
@@ -121,7 +123,8 @@ This directory holds the decomposed Telegram transport. `transport.ts` is now th
 
 - `transportConsoleRegistry.ts`
   Gateway console registry flow:
-  scope-based remote console discovery, synthetic relay session materialization, and auto-binding of gateway consoles to a Telegram principal.
+  scope-based remote console discovery, relay session materialization for bound Telegram principals,
+  and auto-binding of gateway consoles to a Telegram principal.
 
 ## Gateway/Project State
 
@@ -156,7 +159,8 @@ This directory holds the decomposed Telegram transport. `transport.ts` is now th
 
 - `transportXchangeState.ts`
   Session xchange/storage state:
-  xchange listing, screenshot/storage/upload file filtering, file metadata reconciliation.
+  xchange listing, relay-aware screenshot/storage/upload file filtering, gateway metadata lookup,
+  and file metadata reconciliation.
 
 - `transportContext.ts`
   Telegram identity/locale/i18n context:
@@ -168,15 +172,28 @@ This directory holds the decomposed Telegram transport. `transport.ts` is now th
 
 - `transportTerminalRuntime.ts`
   Terminal scheduler/runtime loop:
-  prompt-scan interval, debounce timers, inbox nudge scheduling, typing action.
+  event-driven prompt-scan lifecycle, debounce timers, inbox nudge scheduling, typing action.
 
 - `transportTerminalActions.ts`
   Terminal-oriented interaction flow:
-  nudge, prompt scan, target recovery, and buffer capture via the generic terminal facade backed by PTY.
+  nudge, prompt scan, target recovery, relay capture, blocker excerpt building,
+  and prompt-action callbacks via the generic terminal facade backed by PTY.
 
-- `transportTerminalRuntime.ts`
-  Terminal scheduler/runtime loop:
-  prompt-scan interval, debounce timers, inbox nudge scheduling, typing action.
+## Terminal Prompt Model
+
+- prompt scanning runs on the gateway
+- scanner lifecycle is live-client driven:
+  - gateway boot arms the scanner
+  - live client `hello` starts scanning
+  - last live client disconnect pauses scanning
+- detection works on the tail of captured terminal buffer text
+- primary blocker heuristic:
+  - contiguous numbered choice block near the end of the captured buffer
+  - nearby action-hint language such as `press`, `input`, `choose`, `enter`, `esc`, `yes`, `no`
+- inline blocker buttons intentionally send only:
+  - `1..N`
+  - `Enter`
+  - `Esc`
 
 ## External Helpers
 

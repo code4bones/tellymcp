@@ -38,6 +38,21 @@ Browser runtime rule:
 - If browser tools fail because the Playwright browser runtime is missing, install it with `tellymcp browser install`.
 - Do not stop at the installation error itself. Install the browser runtime first, then retry the browser tool.
 
+Terminal prompt scan rules:
+
+- gateway prompt scan is driven by live client lifecycle, not by manual menu entry
+- the scanner works on the tail of the captured terminal buffer
+- the main blocker signal is:
+  - a contiguous numbered choice block like `1.`, `2.`, `3.`
+  - nearby action-hint language such as `press`, `input`, `choose`, `enter`, `esc`, `yes`, `no`
+- exact footer text is helpful but not required
+- when a blocker notice contains inline buttons, those buttons intentionally send only:
+  - a digit `1..N`
+  - `Enter`
+  - `Esc`
+- do not assume marker navigation
+- do not reinterpret those buttons as alternate hotkeys like `(y)` or `(p)`
+
 Collaboration tools:
 
 - `list_gateway_sessions`
@@ -1083,6 +1098,8 @@ Telegram UI summary:
 - default logical console identity comes from `.mcpsession.json` in the workspace or explicit `-s`
 - terminal runtime metadata does not change `session_id`
 - `Browser -> Screenshots` lists screenshots created by `browser_screenshot`
+- `Storage` and `Screenshots` are relay-aware on the gateway
+- for relay consoles they read file metadata through gateway routes, not through the gateway filesystem
 - `Storage` browses `.mcp-xchange` for the active console and can send stored notes/files back into Telegram
 - `Settings` contains `Info`, `Rename`, `Unpair`, `Back`
 - project/collab work is the only supported user-facing collaboration path in Telegram UI

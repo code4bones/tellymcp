@@ -137,6 +137,35 @@ Inter-console screenshot delivery:
 
 The runtime uses a built-in PTY-backed terminal layer.
 
+Prompt scan model:
+
+- prompt scanning is gateway-side
+- the gateway captures relay console buffer tails through gateway live relay routes
+- scanner lifecycle is event-driven:
+  - gateway boot arms the scanner
+  - live client `hello` starts prompt scanning
+  - last live client disconnect pauses scanning
+- relay session materialization should happen from owner-route hydration on client connect, not from manual `/menu`
+
+Prompt detection model:
+
+- detection runs on the normalized tail of the captured terminal buffer
+- the main anchor is a contiguous numbered menu block near the end of that buffer
+- exact footer phrases are secondary; the primary signal is:
+  - numbered choices
+  - nearby action-hint language like `press`, `input`, `choose`, `enter`, `esc`, `yes`, `no`
+- excerpt output should include a small amount of context above the menu block
+
+Prompt action model:
+
+- when possible, Telegram notices can include inline blocker buttons
+- current supported actions are intentionally simple:
+  - digits `1..N`
+  - `Enter`
+  - `Esc`
+- callbacks send exactly the digit or terminal action
+- do not reintroduce marker navigation or alternative hotkey parsing here unless the simple model proves insufficient
+
 ## Webhook Model
 
 Gateway supports:

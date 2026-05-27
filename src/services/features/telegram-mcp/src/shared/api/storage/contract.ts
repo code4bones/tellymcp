@@ -63,6 +63,7 @@ export interface SessionBindingStore {
   listBoundSessionIdsForPrincipal(
     principal: TelegramPrincipal,
   ): Promise<string[]>;
+  listBoundPrincipals(): Promise<TelegramPrincipal[]>;
 }
 
 export interface PendingRequestStore {

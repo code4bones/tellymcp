@@ -5,6 +5,7 @@ import type {
   SessionBindingStore,
   SessionStore,
 } from "../../api/storage/contract";
+import type { TelegramPrincipal } from "../../../entities/auth/model/types";
 import type { Logger } from "../../lib/logger/logger";
 import { isTerminalUnavailableError } from "../terminal/client";
 import type { TransportTerminalActions } from "./transportTerminalActions";
@@ -19,6 +20,9 @@ export interface TransportTerminalRuntimeHost {
   isTelegramEnabled(): boolean;
   terminalActions?: TransportTerminalActions;
   terminalNudgeDebounceTimers: Map<string, NodeJS.Timeout>;
+  ensureGatewayScopedConsolesBoundForPrincipal?(
+    principal: TelegramPrincipal,
+  ): Promise<void>;
 }
 
 export class TransportTerminalRuntime {
@@ -44,10 +48,40 @@ export class TransportTerminalRuntime {
 
   public startPromptScan(): void {
     if (!this.host.config.terminal.promptScanEnabled) {
+      this.host.logger.debug("terminal prompt scan disabled", {
+        promptScanEnabled: this.host.config.terminal.promptScanEnabled,
+      });
       return;
     }
 
-    this.clearTerminalPromptScanTimer();
+    if (this.host.config.distributed.mode === "gateway") {
+      this.host.logger.info("terminal prompt scan armed for live clients", {
+        intervalSeconds: this.host.config.terminal.promptScanIntervalSeconds,
+        cooldownSeconds: this.host.config.terminal.promptScanCooldownSeconds,
+        strategy: this.host.config.terminal.promptScanStrategy,
+        minScore: this.host.config.terminal.promptScanMinScore,
+      });
+      return;
+    }
+
+    this.ensurePromptScanRunning();
+  }
+
+  public clearTerminalPromptScanTimer(): void {
+    if (this.terminalPromptScanTimer) {
+      clearInterval(this.terminalPromptScanTimer);
+      this.terminalPromptScanTimer = undefined;
+    }
+  }
+
+  public ensurePromptScanRunning(): void {
+    if (!this.host.config.terminal.promptScanEnabled) {
+      return;
+    }
+
+    if (this.terminalPromptScanTimer) {
+      return;
+    }
 
     const intervalMs = this.host.config.terminal.promptScanIntervalSeconds * 1000;
     const timer = setInterval(() => {
@@ -80,11 +114,12 @@ export class TransportTerminalRuntime {
     });
   }
 
-  public clearTerminalPromptScanTimer(): void {
-    if (this.terminalPromptScanTimer) {
-      clearInterval(this.terminalPromptScanTimer);
-      this.terminalPromptScanTimer = undefined;
+  public pausePromptScan(): void {
+    if (!this.terminalPromptScanTimer) {
+      return;
     }
+    this.clearTerminalPromptScanTimer();
+    this.host.logger.info("terminal prompt scan paused", {});
   }
 
   public scheduleTerminalNudgeForInboxMessage(
@@ -222,16 +257,46 @@ export class TransportTerminalRuntime {
   }
 
   private async runTerminalPromptScanCycle(): Promise<void> {
-    if (!this.host.config.terminal.promptScanEnabled || this.terminalPromptScanInFlight) {
+    if (!this.host.config.terminal.promptScanEnabled) {
+      this.host.logger.debug("terminal prompt scan cycle skipped", {
+        skipReason: "disabled",
+      });
+      return;
+    }
+
+    if (this.terminalPromptScanInFlight) {
+      this.host.logger.debug("terminal prompt scan cycle skipped", {
+        skipReason: "in_flight",
+      });
       return;
     }
 
     this.terminalPromptScanInFlight = true;
     try {
+      if (this.host.ensureGatewayScopedConsolesBoundForPrincipal) {
+        const principals = await this.host.bindingStore.listBoundPrincipals();
+        this.host.logger.debug("terminal prompt scan syncing bound gateway principals", {
+          principalCount: principals.length,
+        });
+        for (const principal of principals) {
+          await this.host.ensureGatewayScopedConsolesBoundForPrincipal(principal);
+        }
+      }
+
       const sessions = await this.host.sessionStore.listSessions();
+      this.host.logger.debug("terminal prompt scan cycle started", {
+        sessionCount: sessions.length,
+      });
+      if (sessions.length === 0) {
+        this.host.logger.debug("terminal prompt scan cycle found no sessions");
+        return;
+      }
       for (const session of sessions) {
         await this.actions.scanPromptForSession(session);
       }
+      this.host.logger.debug("terminal prompt scan cycle completed", {
+        sessionCount: sessions.length,
+      });
     } finally {
       this.terminalPromptScanInFlight = false;
     }

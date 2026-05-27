@@ -430,12 +430,16 @@ export const ruMenu = {
       unavailable_action:
         "Перезапусти терминальный runtime для этой консоли или обнови/сними terminal target для этой сессии.",
       prompt_detected_title:
-        "🛎 Похоже, агент в сессии {{sessionName}} ждёт твой ввод.",
+        "🛎 Возможный блокер в {{sessionName}}",
       prompt_detected_score: "Сила срабатывания: {{score}}",
       prompt_detected_target: "terminal target: {{terminalTarget}}",
       prompt_detected_hint:
         "Открой Live или ответь в терминале, если этот prompt действительно требует тебя.",
       prompt_detected_excerpt: "Последние строки prompt:",
+      prompt_action_sent: "Отправил {{action}} в терминал.",
+      prompt_action_stale: "Это действие для блокера уже недоступно.",
+      prompt_action_failed: "Не удалось отправить действие в терминал.",
+      prompt_action_invalid: "Некорректное действие блокера.",
     },
   },
   admin: {

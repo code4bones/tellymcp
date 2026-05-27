@@ -424,12 +424,16 @@ export const enMenu = {
       unavailable_action:
         "Restart the terminal runtime for this console, or update/remove the terminal target for this session.",
       prompt_detected_title:
-        "🛎 The agent in session {{sessionName}} may be waiting for your input.",
+        "🛎 Possible blocker in {{sessionName}}",
       prompt_detected_score: "Detection score: {{score}}",
       prompt_detected_target: "terminal target: {{terminalTarget}}",
       prompt_detected_hint:
         "Open Live or answer in the terminal if this prompt really needs you.",
       prompt_detected_excerpt: "Recent prompt lines:",
+      prompt_action_sent: "Sent {{action}} to terminal.",
+      prompt_action_stale: "This blocker action is no longer available.",
+      prompt_action_failed: "Failed to send the action to terminal.",
+      prompt_action_invalid: "Invalid blocker action.",
     },
   },
   admin: {

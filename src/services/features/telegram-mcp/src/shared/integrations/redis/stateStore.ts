@@ -61,6 +61,10 @@ function principalActiveSessionMatchPattern(telegramUserId: number): string {
   return `${KEY_PREFIX}:principal:*:${telegramUserId}:active-session`;
 }
 
+function bindingMatchPattern(): string {
+  return `${KEY_PREFIX}:binding:*`;
+}
+
 function menuPayloadKey(key: string): string {
   return `${KEY_PREFIX}:menu-payload:${key}`;
 }
@@ -350,6 +354,43 @@ export class RedisStateStore
     principal: TelegramPrincipal,
   ): Promise<string[]> {
     return this.redis.smembers(principalSessionsKey(principal));
+  }
+
+  public async listBoundPrincipals(): Promise<TelegramPrincipal[]> {
+    const principals = new Map<string, TelegramPrincipal>();
+    let cursor = "0";
+
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        bindingMatchPattern(),
+        "COUNT",
+        100,
+      );
+      cursor = nextCursor;
+
+      for (const key of keys) {
+        const raw = await this.redis.get(key);
+        const binding = parseJson<SessionBinding>(raw);
+        if (!binding) {
+          continue;
+        }
+
+        const telegramChatId = Number(binding.telegramChatId);
+        const telegramUserId = Number(binding.telegramUserId);
+        if (!Number.isFinite(telegramChatId) || !Number.isFinite(telegramUserId)) {
+          continue;
+        }
+
+        principals.set(`${telegramChatId}:${telegramUserId}`, {
+          telegramChatId,
+          telegramUserId,
+        });
+      }
+    } while (cursor !== "0");
+
+    return Array.from(principals.values());
   }
 
   public async resetRuntimeState(): Promise<void> {

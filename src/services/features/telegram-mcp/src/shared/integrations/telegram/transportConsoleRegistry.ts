@@ -79,7 +79,7 @@ export class TransportConsoleRegistry {
 
   public async ensureScopedConsolesBound(input: {
     principal: Principal;
-    ctx: TelegramMenuContext;
+    ctx?: TelegramMenuContext;
   }): Promise<{
     sessionIds: string[];
     activeSessionId: string | null;
@@ -120,12 +120,20 @@ export class TransportConsoleRegistry {
         consoleSession.local_session_id,
       );
       relaySessionIds.push(relaySessionId);
-      await this.materializeRelaySession({
-        ctx: input.ctx,
-        principal: input.principal,
-        relaySessionId,
-        consoleSession,
-      });
+      await this.materializeRelaySession(
+        input.ctx
+          ? {
+              ctx: input.ctx,
+              principal: input.principal,
+              relaySessionId,
+              consoleSession,
+            }
+          : {
+              principal: input.principal,
+              relaySessionId,
+              consoleSession,
+            },
+      );
     }
 
     const existingActive =
@@ -159,7 +167,7 @@ export class TransportConsoleRegistry {
 
   private async materializeRelaySession(input: {
     principal: Principal;
-    ctx: TelegramMenuContext;
+    ctx?: TelegramMenuContext;
     relaySessionId: string;
     consoleSession: GatewayKnownSessionRecord;
   }): Promise<SessionContext> {
@@ -206,7 +214,7 @@ export class TransportConsoleRegistry {
       sessionId: input.relaySessionId,
       telegramChatId: input.principal.telegramChatId,
       telegramUserId: input.principal.telegramUserId,
-      ...(input.ctx.from?.username
+      ...(input.ctx?.from?.username
         ? { telegramUsername: input.ctx.from.username }
         : {}),
       linkedAt: new Date().toISOString(),

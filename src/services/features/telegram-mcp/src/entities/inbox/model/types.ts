@@ -40,6 +40,7 @@ export type TelegramMenuPayloadRecord = {
     | "project-delete-entry"
     | "project-member"
     | "live-approval"
+    | "terminal-prompt-action"
     | "project-file-target"
     | "partner-file-target";
   sessionId?: string | undefined;
@@ -57,6 +58,7 @@ export type TelegramMenuPayloadRecord = {
   projectUuid?: string | undefined;
   projectName?: string | undefined;
   title?: string | undefined;
+  promptActions?: string[] | undefined;
   createdAt: string;
   expiresAt: string;
 };

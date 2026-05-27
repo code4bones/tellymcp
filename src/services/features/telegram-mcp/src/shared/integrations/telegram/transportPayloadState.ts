@@ -130,6 +130,17 @@ export class TransportPayloadState {
     });
   }
 
+  public async createTerminalPromptActionPayload(
+    sessionId: string,
+    actions: string[],
+  ): Promise<string> {
+    return this.createPayload({
+      kind: "terminal-prompt-action",
+      sessionId,
+      promptActions: actions,
+    });
+  }
+
   public async createPartnerFileTargetPayload(
     sessionId: string,
     targetSessionId: string,

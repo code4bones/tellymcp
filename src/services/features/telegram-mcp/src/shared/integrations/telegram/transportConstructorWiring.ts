@@ -259,6 +259,17 @@ export function buildTransportConstructorWiring(
     sendNotification: (input) => requestFlow.sendNotification(input),
     sendLiveViewLauncherMessage: (input) => liveActions.sendLauncherMessage(input),
     callGatewayJson: (path, payload) => host.callGatewayJson(path, payload),
+    createTerminalPromptActionPayload: (sessionId, actions) =>
+      payloadState.createTerminalPromptActionPayload(sessionId, actions),
+    getMenuPayloadByKey: (key) => host.menuPayloadStore.getMenuPayload(key),
+    resolveLocaleForContext: (ctx) => context.resolveLocaleForContext(ctx),
+    sendChatMessage: (telegramChatId, text, options, meta) =>
+      outputActions.sendChatMessage(
+        telegramChatId,
+        text,
+        options as TelegramSendMessageOptions,
+        meta,
+      ),
     t: (locale, key, vars) => context.t(locale, key, vars),
   });
 
@@ -900,6 +911,8 @@ export function buildTransportConstructorWiring(
       projectActions.handleProjectMemberLiveCallback(ctx),
     handleLiveApprovalCallback: (ctx) =>
       projectActions.handleLiveApprovalCallback(ctx),
+    handleTerminalPromptActionCallback: (ctx) =>
+      terminalActions.handlePromptActionCallback(ctx),
     handleProjectDetailCallback: (ctx) =>
       projectActions.handleProjectDetailCallback(ctx),
     handleProjectDeleteCallback: (ctx) =>

@@ -2202,6 +2202,14 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             },
             { meta: { internal_call: true } },
           );
+
+          await runtime.telegramTransport.hydrateGatewayClientOwnerRoute({
+            clientUuid: hello.client_uuid,
+            ...(hello.gateway_user_uuid
+              ? { gatewayUserUuid: hello.gateway_user_uuid }
+              : {}),
+          });
+          runtime.telegramTransport.ensurePromptScanRunning();
         }
         const localVersionInfo = this.getLocalVersionInfo?.() ?? {
           packageVersion: "0.0.0-unknown",
@@ -3274,6 +3282,9 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
                 this.liveStreamHandlers?.delete(streamId);
               }
             }
+          }
+          if ((this.connectedClientsByUuid?.size ?? 0) === 0) {
+            runtime.telegramTransport.pausePromptScan();
           }
           this.connectedClientToolsAlerts?.delete(socket);
           this.connectedClients?.delete(socket);

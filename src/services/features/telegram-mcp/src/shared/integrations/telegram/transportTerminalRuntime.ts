@@ -54,7 +54,34 @@ export class TransportTerminalRuntime {
       return;
     }
 
-    this.clearTerminalPromptScanTimer();
+    if (this.host.config.distributed.mode === "gateway") {
+      this.host.logger.info("terminal prompt scan armed for live clients", {
+        intervalSeconds: this.host.config.terminal.promptScanIntervalSeconds,
+        cooldownSeconds: this.host.config.terminal.promptScanCooldownSeconds,
+        strategy: this.host.config.terminal.promptScanStrategy,
+        minScore: this.host.config.terminal.promptScanMinScore,
+      });
+      return;
+    }
+
+    this.ensurePromptScanRunning();
+  }
+
+  public clearTerminalPromptScanTimer(): void {
+    if (this.terminalPromptScanTimer) {
+      clearInterval(this.terminalPromptScanTimer);
+      this.terminalPromptScanTimer = undefined;
+    }
+  }
+
+  public ensurePromptScanRunning(): void {
+    if (!this.host.config.terminal.promptScanEnabled) {
+      return;
+    }
+
+    if (this.terminalPromptScanTimer) {
+      return;
+    }
 
     const intervalMs = this.host.config.terminal.promptScanIntervalSeconds * 1000;
     const timer = setInterval(() => {
@@ -87,11 +114,12 @@ export class TransportTerminalRuntime {
     });
   }
 
-  public clearTerminalPromptScanTimer(): void {
-    if (this.terminalPromptScanTimer) {
-      clearInterval(this.terminalPromptScanTimer);
-      this.terminalPromptScanTimer = undefined;
+  public pausePromptScan(): void {
+    if (!this.terminalPromptScanTimer) {
+      return;
     }
+    this.clearTerminalPromptScanTimer();
+    this.host.logger.info("terminal prompt scan paused", {});
   }
 
   public scheduleTerminalNudgeForInboxMessage(

@@ -436,6 +436,10 @@ export const ruMenu = {
       prompt_detected_hint:
         "Открой Live или ответь в терминале, если этот prompt действительно требует тебя.",
       prompt_detected_excerpt: "Последние строки prompt:",
+      prompt_action_sent: "Отправил {{action}} в терминал.",
+      prompt_action_stale: "Это действие для блокера уже недоступно.",
+      prompt_action_failed: "Не удалось отправить действие в терминал.",
+      prompt_action_invalid: "Некорректное действие блокера.",
     },
   },
   admin: {

@@ -61,8 +61,8 @@ function principalActiveSessionMatchPattern(telegramUserId: number): string {
   return `${KEY_PREFIX}:principal:*:${telegramUserId}:active-session`;
 }
 
-function principalSessionsMatchPattern(): string {
-  return `${KEY_PREFIX}:principal:*:*:sessions`;
+function bindingMatchPattern(): string {
+  return `${KEY_PREFIX}:binding:*`;
 }
 
 function menuPayloadKey(key: string): string {
@@ -364,22 +364,21 @@ export class RedisStateStore
       const [nextCursor, keys] = await this.redis.scan(
         cursor,
         "MATCH",
-        principalSessionsMatchPattern(),
+        bindingMatchPattern(),
         "COUNT",
         100,
       );
       cursor = nextCursor;
 
       for (const key of keys) {
-        const match = key.match(
-          /^telegram-mcp:principal:(-?\d+):(-?\d+):sessions$/u,
-        );
-        if (!match) {
+        const raw = await this.redis.get(key);
+        const binding = parseJson<SessionBinding>(raw);
+        if (!binding) {
           continue;
         }
 
-        const telegramChatId = Number(match[1]);
-        const telegramUserId = Number(match[2]);
+        const telegramChatId = Number(binding.telegramChatId);
+        const telegramUserId = Number(binding.telegramUserId);
         if (!Number.isFinite(telegramChatId) || !Number.isFinite(telegramUserId)) {
           continue;
         }

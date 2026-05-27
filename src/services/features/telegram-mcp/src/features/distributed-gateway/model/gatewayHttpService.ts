@@ -980,6 +980,62 @@ export class GatewayHttpService {
       }
     }
 
+    if (pathname === "/gateway/live/action") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const sessionId =
+          typeof body.session_id === "string" ? body.session_id.trim() : "";
+        const action =
+          typeof body.action === "string" ? body.action.trim() : "";
+        const text =
+          typeof body.text === "string" ? body.text : "";
+        const relayTarget = parseLiveRelaySessionId(sessionId);
+
+        if (!relayTarget) {
+          writeJson(res, 400, {
+            error: "relay session_id is required",
+          });
+          return true;
+        }
+
+        if (!["enter", "escape", "text"].includes(action)) {
+          writeJson(res, 400, {
+            error: "action must be one of: enter, escape, text",
+          });
+          return true;
+        }
+
+        if (action === "text" && (!text || text.length > 16)) {
+          writeJson(res, 400, {
+            error: "text payload is required and must be <= 16 characters",
+          });
+          return true;
+        }
+
+        await this.requestLiveRelayAction({
+          clientUuid: relayTarget.clientUuid,
+          localSessionId: relayTarget.localSessionId,
+          action: action as "enter" | "escape" | "text",
+          ...(action === "text" ? { text } : {}),
+        });
+        writeJson(res, 200, { ok: true });
+        return true;
+      } catch (error) {
+        console.error("Gateway live action request failed", {
+          error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+        });
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
     if (pathname === "/gateway/client/register") {
       if (req.method !== "POST") {
         writeText(res, 405, "Method not allowed");

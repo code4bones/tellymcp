@@ -26,6 +26,9 @@ type TransportMenuShellHost = {
     ctx: TelegramMenuContext,
   ) => Promise<void>;
   handleLiveApprovalCallback: (ctx: TelegramMenuContext) => Promise<void>;
+  handleTerminalPromptActionCallback: (
+    ctx: TelegramMenuContext,
+  ) => Promise<void>;
   handleProjectDetailCallback: (ctx: TelegramMenuContext) => Promise<void>;
   handleProjectDeleteCallback: (ctx: TelegramMenuContext) => Promise<void>;
   handleProjectLeaveCallback: (ctx: TelegramMenuContext) => Promise<void>;
@@ -73,6 +76,12 @@ export class TransportMenuShell {
     bot.callbackQuery(/^live-approval:(approve|deny):(.+)$/u, async (ctx) => {
       await this.host.handleLiveApprovalCallback(ctx);
     });
+    bot.callbackQuery(
+      /^terminal-prompt-action:(\d+|enter|escape):(.+)$/u,
+      async (ctx) => {
+        await this.host.handleTerminalPromptActionCallback(ctx);
+      },
+    );
     bot.callbackQuery(/^project-detail:(.+)$/u, async (ctx) => {
       await this.host.handleProjectDetailCallback(ctx);
     });

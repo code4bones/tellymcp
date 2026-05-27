@@ -8,6 +8,11 @@ export type TerminalPromptDetection = {
   excerpt: string;
   matchedLines: string[];
   reasons: string[];
+  promptActions?: {
+    numberedOptions: string[];
+    hasEnter: boolean;
+    hasEscape: boolean;
+  };
 };
 
 type DetectionOptions = {
@@ -21,8 +26,8 @@ type ScoreContribution = {
   reason: string;
 };
 
-type ChoiceFooterBlock = {
-  footerLine: string;
+type ChoiceActionBlock = {
+  footerLine: string | null;
   choiceLines: string[];
   headerLines: string[];
   tailLines: string[];
@@ -109,10 +114,16 @@ const NUMBERED_CHOICE_LINE_PATTERN = /^(?:[>›*•-]\s*)?\d+\.\s+.+$/u;
 const CONFIRM_CANCEL_FOOTER_PATTERN =
   /\b(?:press\s+enter\s+to\s+confirm|enter\s+to\s+submit)\b.*\besc\s+to\s+cancel\b/iu;
 const SUBMIT_CANCEL_FOOTER_PATTERN = /\benter\s+to\s+submit\b.*\besc\s+to\s+cancel\b/iu;
+const CONTINUE_FOOTER_PATTERN = /\b(?:press\s+enter\s+to\s+continue|hit\s+enter\s+to\s+continue)\b/iu;
+const NUMBERED_HOTKEY_FOOTER_PATTERN =
+  /\bpress\s+(?:(?:\d+\s*,\s*)+\s*(?:or\s+)?\d+\s*,?\s*)?(?:enter\b.*\besc|esc\b.*\benter|\d+\b.*\benter|\d+\b.*\besc).*\b(?:quit|continue|cancel|confirm|submit)\b/iu;
 const POSITIVE_CHOICE_PATTERN = /\b(?:yes|allow|approve|proceed|continue)\b/iu;
 const NEGATIVE_CHOICE_PATTERN = /\b(?:no|cancel|deny|reject)\b/iu;
 const STICKY_CHOICE_PATTERN = /\bdon'?t\s+ask\s+again|always\s+allow|for\s+this\s+session\b/iu;
+const SKIP_CHOICE_PATTERN = /\bskip\b/iu;
 const LEADING_SELECTION_MARKER_PATTERN = /^(?:[>›*•-]\s*)(?=\d+\.\s)/u;
+const ACTION_HINT_PATTERN =
+  /\b(?:press|input|choose|choice|select|option|enter|esc(?:ape)?|accept|decline|confirm|cancel|continue|proceed|yes|no)\b|(?:\[[Yy](?:es)?\/[Nn](?:o)?\])|(?:\([Yy](?:es)?\/[Nn](?:o)?\))/u;
 
 function normalizeLine(line: string): string {
   return line
@@ -246,34 +257,58 @@ function buildExcerptWithContext(
   return candidateLines.slice(excerptStart, excerptEnd).slice(-8).join("\n");
 }
 
-function findChoiceFooterBlock(candidateLines: string[]): ChoiceFooterBlock | null {
-  for (let footerIndex = candidateLines.length - 1; footerIndex >= 0; footerIndex -= 1) {
-    const footerLine = candidateLines[footerIndex] ?? "";
-    if (!CONFIRM_CANCEL_FOOTER_PATTERN.test(footerLine)) {
+function findChoiceActionBlock(candidateLines: string[]): ChoiceActionBlock | null {
+  for (let startIndex = candidateLines.length - 1; startIndex >= 0; startIndex -= 1) {
+    const line = candidateLines[startIndex] ?? "";
+    if (!NUMBERED_CHOICE_LINE_PATTERN.test(line)) {
       continue;
     }
 
     const choiceLines: string[] = [];
-    let scanIndex = footerIndex - 1;
-
-    while (scanIndex >= 0) {
-      const line = candidateLines[scanIndex] ?? "";
-      if (!NUMBERED_CHOICE_LINE_PATTERN.test(line)) {
+    let firstChoiceIndex = startIndex;
+    while (firstChoiceIndex >= 0) {
+      const currentLine = candidateLines[firstChoiceIndex] ?? "";
+      if (!NUMBERED_CHOICE_LINE_PATTERN.test(currentLine)) {
         break;
       }
-      choiceLines.unshift(line);
-      scanIndex -= 1;
+      choiceLines.unshift(currentLine);
+      firstChoiceIndex -= 1;
     }
+    firstChoiceIndex += 1;
 
     if (choiceLines.length < 2) {
+      continue;
+    }
+
+    const lastChoiceIndex = firstChoiceIndex + choiceLines.length - 1;
+    const headerLines = candidateLines.slice(
+      Math.max(0, firstChoiceIndex - 5),
+      firstChoiceIndex,
+    );
+    const tailLines = candidateLines.slice(
+      lastChoiceIndex + 1,
+      Math.min(candidateLines.length, lastChoiceIndex + 4),
+    );
+    const footerLine = tailLines[0] ?? null;
+    const nearbyLines = [...headerLines, ...tailLines];
+    const hasActionHint = nearbyLines.some((candidate) =>
+      ACTION_HINT_PATTERN.test(candidate),
+    );
+    const hasChoiceSemantics =
+      POSITIVE_CHOICE_PATTERN.test(choiceLines.join("\n")) ||
+      NEGATIVE_CHOICE_PATTERN.test(choiceLines.join("\n")) ||
+      STICKY_CHOICE_PATTERN.test(choiceLines.join("\n")) ||
+      SKIP_CHOICE_PATTERN.test(choiceLines.join("\n"));
+
+    if (!hasActionHint && !hasChoiceSemantics) {
       continue;
     }
 
     return {
       footerLine,
       choiceLines,
-      headerLines: candidateLines.slice(Math.max(0, scanIndex - 5), scanIndex + 1),
-      tailLines: candidateLines.slice(footerIndex + 1, Math.min(candidateLines.length, footerIndex + 4)),
+      headerLines,
+      tailLines,
     };
   }
 
@@ -287,27 +322,60 @@ function detectChoiceFooterSignals(
   score: number;
   reasons: string[];
   matchedLines: string[];
+  promptActions: {
+    numberedOptions: string[];
+    hasEnter: boolean;
+    hasEscape: boolean;
+  };
 } | null {
-  const block = findChoiceFooterBlock(candidateLines);
+  const block = findChoiceActionBlock(candidateLines);
   if (!block) {
     return null;
   }
 
   const choiceText = block.choiceLines.join("\n");
-  const contextLines = [...block.headerLines, ...block.choiceLines, block.footerLine, ...block.tailLines];
+  const contextLines = [
+    ...block.headerLines,
+    ...block.choiceLines,
+    ...(block.footerLine ? [block.footerLine] : []),
+    ...block.tailLines,
+  ];
   const reasons = new Set<string>(["numbered_choice_group"]);
-  const matchedLines = [...block.choiceLines, block.footerLine, ...block.tailLines];
+  const matchedLines = [
+    ...block.choiceLines,
+    ...(block.footerLine ? [block.footerLine] : []),
+    ...block.tailLines,
+  ];
   let score = strategy === "balanced" ? 5 : 6;
 
-  reasons.add("confirm_cancel_footer");
-  score += strategy === "balanced" ? 2 : 3;
+  const footerLine = block.footerLine ?? "";
 
-  if (SUBMIT_CANCEL_FOOTER_PATTERN.test(block.footerLine)) {
+  if (CONFIRM_CANCEL_FOOTER_PATTERN.test(footerLine)) {
+    reasons.add("confirm_cancel_footer");
+    score += strategy === "balanced" ? 2 : 3;
+  }
+
+  if (CONTINUE_FOOTER_PATTERN.test(footerLine)) {
+    reasons.add("continue_footer");
+    score += strategy === "balanced" ? 2 : 3;
+  }
+
+  if (NUMBERED_HOTKEY_FOOTER_PATTERN.test(footerLine)) {
+    reasons.add("numbered_hotkey_footer");
+    score += strategy === "balanced" ? 2 : 3;
+  }
+
+  if (SUBMIT_CANCEL_FOOTER_PATTERN.test(footerLine)) {
     reasons.add("submit_cancel_hint");
   }
 
-  if (/press\s+enter\s+to\s+confirm\b/iu.test(block.footerLine)) {
+  if (/press\s+enter\s+to\s+confirm\b/iu.test(footerLine)) {
     reasons.add("confirm_cancel_hint");
+  }
+
+  if (contextLines.some((line) => ACTION_HINT_PATTERN.test(line))) {
+    reasons.add("action_hint_present");
+    score += 2;
   }
 
   if (POSITIVE_CHOICE_PATTERN.test(choiceText)) {
@@ -325,10 +393,20 @@ function detectChoiceFooterSignals(
     score += 2;
   }
 
+  if (SKIP_CHOICE_PATTERN.test(choiceText)) {
+    reasons.add("skip_choice_present");
+    score += 2;
+  }
+
   if (reasons.has("positive_choice_present") && reasons.has("negative_choice_present")) {
     reasons.add("yes_no_choice_group");
     reasons.add("approval_choice_group");
     score += 3;
+  }
+
+  if (reasons.has("positive_choice_present") && reasons.has("skip_choice_present")) {
+    reasons.add("choice_update_group");
+    score += 2;
   }
 
   if (
@@ -349,6 +427,15 @@ function detectChoiceFooterSignals(
     score,
     reasons: Array.from(reasons),
     matchedLines,
+    promptActions: {
+      numberedOptions: block.choiceLines
+        .map((line) => line.match(/^(?:[>›*•-]\s*)?(\d+)\.\s+/u)?.[1] ?? null)
+        .filter((value): value is string => Boolean(value)),
+      hasEnter:
+        contextLines.some((line) => /\benter\b/iu.test(line)),
+      hasEscape:
+        contextLines.some((line) => /\besc(?:ape)?\b/iu.test(line)),
+    },
   };
 }
 
@@ -379,6 +466,7 @@ export function detectTerminalInteractivePrompt(
       excerpt,
       matchedLines,
       reasons: choiceFooterDetection.reasons,
+      promptActions: choiceFooterDetection.promptActions,
     };
   }
 

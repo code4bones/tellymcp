@@ -430,6 +430,10 @@ export const enMenu = {
       prompt_detected_hint:
         "Open Live or answer in the terminal if this prompt really needs you.",
       prompt_detected_excerpt: "Recent prompt lines:",
+      prompt_action_sent: "Sent {{action}} to terminal.",
+      prompt_action_stale: "This blocker action is no longer available.",
+      prompt_action_failed: "Failed to send the action to terminal.",
+      prompt_action_invalid: "Invalid blocker action.",
     },
   },
   admin: {

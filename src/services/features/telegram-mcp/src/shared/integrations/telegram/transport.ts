@@ -47,6 +47,7 @@ import { TransportLiveActions } from "./transportLiveActions";
 import { TransportLifecycleActions } from "./transportLifecycleActions";
 import { TransportAttachmentStore } from "./transportAttachmentStore";
 import { TransportBroadcastActions } from "./transportBroadcastActions";
+import { TransportConsoleRegistry } from "./transportConsoleRegistry";
 import { TransportDocumentActions } from "./transportDocumentActions";
 import { TransportContext } from "./transportContext";
 import { TransportEventActions } from "./transportEventActions";
@@ -101,6 +102,7 @@ export class TelegramTransport implements HumanTransport {
   private readonly lifecycleActions: TransportLifecycleActions;
   private readonly attachmentStore: TransportAttachmentStore;
   private readonly broadcastActions: TransportBroadcastActions;
+  private readonly consoleRegistry: TransportConsoleRegistry;
   private readonly context: TransportContext;
   private readonly documentActions: TransportDocumentActions;
   private readonly eventActions: TransportEventActions;
@@ -266,6 +268,7 @@ export class TelegramTransport implements HumanTransport {
     this.lifecycleActions = composition.lifecycleActions;
     this.attachmentStore = composition.attachmentStore;
     this.broadcastActions = composition.broadcastActions;
+    this.consoleRegistry = composition.consoleRegistry;
     this.context = composition.context;
     this.documentActions = composition.documentActions;
     this.eventActions = composition.eventActions;
@@ -610,6 +613,14 @@ export class TelegramTransport implements HumanTransport {
     await this.lifecycleActions.sendStartupNotifications(__dirname);
   }
 
+  public ensurePromptScanRunning(): void {
+    this.terminalRuntime.ensurePromptScanRunning();
+  }
+
+  public pausePromptScan(): void {
+    this.terminalRuntime.pausePromptScan();
+  }
+
   public async sendAdminGatewayRegistrationNotifications(input: {
     clientUuid: string;
     gatewayUserUuid?: string;
@@ -620,6 +631,49 @@ export class TelegramTransport implements HumanTransport {
     newSessions: AdminGatewayRegistrationSessionRecord[];
   }): Promise<void> {
     await this.requestFlow.sendAdminGatewayRegistrationNotifications(input);
+  }
+
+  public async hydrateGatewayClientOwnerRoute(input: {
+    clientUuid: string;
+    gatewayUserUuid?: string;
+  }): Promise<void> {
+    if (this.config.distributed.mode !== "gateway") {
+      return;
+    }
+
+    const route = await this.callGatewayJson<{
+      gateway_user_uuid?: string;
+      telegram_user_id?: number;
+      telegram_chat_id?: number | null;
+    }>("/user/route", {
+      client_uuid: input.clientUuid,
+      ...(input.gatewayUserUuid ? { gateway_user_uuid: input.gatewayUserUuid } : {}),
+    });
+
+    if (
+      typeof route.telegram_user_id !== "number" ||
+      typeof route.telegram_chat_id !== "number"
+    ) {
+      this.logger.debug("Skipping gateway owner route hydration because Telegram route is unavailable", {
+        clientUuid: input.clientUuid,
+        gatewayUserUuid: input.gatewayUserUuid ?? null,
+      });
+      return;
+    }
+
+    await this.consoleRegistry.ensureScopedConsolesBound({
+      principal: {
+        telegramChatId: route.telegram_chat_id,
+        telegramUserId: route.telegram_user_id,
+      },
+    });
+
+    this.logger.info("Gateway owner route hydrated for live client", {
+      clientUuid: input.clientUuid,
+      gatewayUserUuid: input.gatewayUserUuid ?? null,
+      telegramChatId: route.telegram_chat_id,
+      telegramUserId: route.telegram_user_id,
+    });
   }
 
   public async sendRequest(

@@ -258,6 +258,7 @@ export function buildTransportConstructorWiring(
       context.resolveLocaleForTelegramUserId(userId),
     sendNotification: (input) => requestFlow.sendNotification(input),
     sendLiveViewLauncherMessage: (input) => liveActions.sendLauncherMessage(input),
+    callGatewayJson: (path, payload) => host.callGatewayJson(path, payload),
     t: (locale, key, vars) => context.t(locale, key, vars),
   });
 
@@ -270,6 +271,9 @@ export function buildTransportConstructorWiring(
     isTelegramEnabled: () => host.config.distributed.mode !== "client" && Boolean(host.config.telegram.botToken?.trim()),
     terminalActions,
     terminalNudgeDebounceTimers: host.terminalNudgeDebounceTimers,
+    ensureGatewayScopedConsolesBoundForPrincipal: async (principal) => {
+      await consoleRegistry.ensureScopedConsolesBound({ principal });
+    },
   });
 
   const menuFingerprints = new TransportMenuFingerprints({

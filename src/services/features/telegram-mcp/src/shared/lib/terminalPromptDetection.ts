@@ -21,9 +21,11 @@ type ScoreContribution = {
   reason: string;
 };
 
-type DetectionSignal = {
-  score: number;
-  reason: string;
+type ChoiceFooterBlock = {
+  footerLine: string;
+  choiceLines: string[];
+  headerLines: string[];
+  tailLines: string[];
 };
 
 const ANSI_ESCAPE_SEQUENCE_PATTERN =
@@ -40,6 +42,11 @@ const STRONG_PATTERNS: Array<{ pattern: RegExp; score: number; reason: string }>
     pattern: /press\s+enter\s+to\s+continue|hit\s+enter\s+to\s+continue/iu,
     score: 5,
     reason: "press_enter_prompt",
+  },
+  {
+    pattern: /press\s+enter\s+to\s+confirm\b.*\besc\s+to\s+cancel/iu,
+    score: 5,
+    reason: "confirm_cancel_prompt",
   },
   {
     pattern:
@@ -73,6 +80,11 @@ const STRONG_PATTERNS: Array<{ pattern: RegExp; score: number; reason: string }>
     score: 4,
     reason: "tool_continue_prompt",
   },
+  {
+    pattern: /\bwould\s+you\s+like\s+to\s+run\s+the\s+following\s+command\b/iu,
+    score: 5,
+    reason: "command_approval_prompt",
+  },
 ];
 
 const MEDIUM_PATTERNS: Array<{ pattern: RegExp; score: number; reason: string }> = [
@@ -92,6 +104,15 @@ const MEDIUM_PATTERNS: Array<{ pattern: RegExp; score: number; reason: string }>
     reason: "tool_choice_keyword",
   },
 ];
+
+const NUMBERED_CHOICE_LINE_PATTERN = /^(?:[>›*•-]\s*)?\d+\.\s+.+$/u;
+const CONFIRM_CANCEL_FOOTER_PATTERN =
+  /\b(?:press\s+enter\s+to\s+confirm|enter\s+to\s+submit)\b.*\besc\s+to\s+cancel\b/iu;
+const SUBMIT_CANCEL_FOOTER_PATTERN = /\benter\s+to\s+submit\b.*\besc\s+to\s+cancel\b/iu;
+const POSITIVE_CHOICE_PATTERN = /\b(?:yes|allow|approve|proceed|continue)\b/iu;
+const NEGATIVE_CHOICE_PATTERN = /\b(?:no|cancel|deny|reject)\b/iu;
+const STICKY_CHOICE_PATTERN = /\bdon'?t\s+ask\s+again|always\s+allow|for\s+this\s+session\b/iu;
+const LEADING_SELECTION_MARKER_PATTERN = /^(?:[>›*•-]\s*)(?=\d+\.\s)/u;
 
 function normalizeLine(line: string): string {
   return line
@@ -167,38 +188,6 @@ function isStrongReason(reason: string): boolean {
   return STRONG_PATTERNS.some((candidate) => candidate.reason === reason);
 }
 
-function detectGroupedSignals(
-  candidateLines: string[],
-  strategy: TerminalPromptScanStrategy,
-): DetectionSignal[] {
-  const signals: DetectionSignal[] = [];
-  const hasPrimaryAllowChoice = candidateLines.some((line) =>
-    /^>?[\s\d.]*allow\b/iu.test(line),
-  );
-  const hasSecondaryApprovalChoice = candidateLines.some((line) =>
-    /\b(?:allow\s+once|allow\s+for\s+this\s+session|always\s+allow|cancel)\b/iu.test(line),
-  );
-  const hasSubmitCancelHint = candidateLines.some((line) =>
-    /\benter\s+to\s+submit\b.*\besc\s+to\s+cancel\b/iu.test(line),
-  );
-
-  if (hasPrimaryAllowChoice && hasSecondaryApprovalChoice) {
-    signals.push({
-      score: 5,
-      reason: "approval_choice_group",
-    });
-  }
-
-  if (hasSubmitCancelHint) {
-    signals.push({
-      score: strategy === "balanced" ? 2 : 3,
-      reason: "submit_cancel_hint",
-    });
-  }
-
-  return signals;
-}
-
 function collectCandidateLines(rawText: string, maxLines: number): string[] {
   const normalized = rawText
     .split("\n")
@@ -206,6 +195,161 @@ function collectCandidateLines(rawText: string, maxLines: number): string[] {
     .filter((line) => line.length > 0);
 
   return normalized.slice(-Math.max(1, maxLines));
+}
+
+function normalizeFingerprintLine(line: string): string {
+  return normalizeLine(line)
+    .replace(LEADING_SELECTION_MARKER_PATTERN, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function buildDetectionFingerprint(
+  strategy: TerminalPromptScanStrategy,
+  matchedLines: string[],
+): string {
+  const normalizedExcerpt = matchedLines
+    .map(normalizeFingerprintLine)
+    .join("\n");
+
+  return createHash("sha1")
+    .update(`${strategy}\n${normalizedExcerpt}`)
+    .digest("hex");
+}
+
+function buildExcerptWithContext(
+  candidateLines: string[],
+  matchedLines: string[],
+): string {
+  if (matchedLines.length === 0) {
+    return "";
+  }
+
+  const firstMatchedIndex = candidateLines.findIndex(
+    (line) => line === matchedLines[0],
+  );
+  const lastMatchedIndex =
+    matchedLines.length === 1
+      ? firstMatchedIndex
+      : candidateLines.findIndex(
+          (line, index) =>
+            index >= Math.max(0, firstMatchedIndex) &&
+            line === matchedLines[matchedLines.length - 1],
+        );
+
+  if (firstMatchedIndex < 0 || lastMatchedIndex < 0) {
+    return matchedLines.slice(-8).join("\n");
+  }
+
+  const excerptStart = Math.max(0, firstMatchedIndex - 2);
+  const excerptEnd = Math.min(candidateLines.length, lastMatchedIndex + 1);
+  return candidateLines.slice(excerptStart, excerptEnd).slice(-8).join("\n");
+}
+
+function findChoiceFooterBlock(candidateLines: string[]): ChoiceFooterBlock | null {
+  for (let footerIndex = candidateLines.length - 1; footerIndex >= 0; footerIndex -= 1) {
+    const footerLine = candidateLines[footerIndex] ?? "";
+    if (!CONFIRM_CANCEL_FOOTER_PATTERN.test(footerLine)) {
+      continue;
+    }
+
+    const choiceLines: string[] = [];
+    let scanIndex = footerIndex - 1;
+
+    while (scanIndex >= 0) {
+      const line = candidateLines[scanIndex] ?? "";
+      if (!NUMBERED_CHOICE_LINE_PATTERN.test(line)) {
+        break;
+      }
+      choiceLines.unshift(line);
+      scanIndex -= 1;
+    }
+
+    if (choiceLines.length < 2) {
+      continue;
+    }
+
+    return {
+      footerLine,
+      choiceLines,
+      headerLines: candidateLines.slice(Math.max(0, scanIndex - 5), scanIndex + 1),
+      tailLines: candidateLines.slice(footerIndex + 1, Math.min(candidateLines.length, footerIndex + 4)),
+    };
+  }
+
+  return null;
+}
+
+function detectChoiceFooterSignals(
+  candidateLines: string[],
+  strategy: TerminalPromptScanStrategy,
+): {
+  score: number;
+  reasons: string[];
+  matchedLines: string[];
+} | null {
+  const block = findChoiceFooterBlock(candidateLines);
+  if (!block) {
+    return null;
+  }
+
+  const choiceText = block.choiceLines.join("\n");
+  const contextLines = [...block.headerLines, ...block.choiceLines, block.footerLine, ...block.tailLines];
+  const reasons = new Set<string>(["numbered_choice_group"]);
+  const matchedLines = [...block.choiceLines, block.footerLine, ...block.tailLines];
+  let score = strategy === "balanced" ? 5 : 6;
+
+  reasons.add("confirm_cancel_footer");
+  score += strategy === "balanced" ? 2 : 3;
+
+  if (SUBMIT_CANCEL_FOOTER_PATTERN.test(block.footerLine)) {
+    reasons.add("submit_cancel_hint");
+  }
+
+  if (/press\s+enter\s+to\s+confirm\b/iu.test(block.footerLine)) {
+    reasons.add("confirm_cancel_hint");
+  }
+
+  if (POSITIVE_CHOICE_PATTERN.test(choiceText)) {
+    reasons.add("positive_choice_present");
+    score += 2;
+  }
+
+  if (NEGATIVE_CHOICE_PATTERN.test(choiceText)) {
+    reasons.add("negative_choice_present");
+    score += 2;
+  }
+
+  if (STICKY_CHOICE_PATTERN.test(choiceText)) {
+    reasons.add("sticky_choice_present");
+    score += 2;
+  }
+
+  if (reasons.has("positive_choice_present") && reasons.has("negative_choice_present")) {
+    reasons.add("yes_no_choice_group");
+    reasons.add("approval_choice_group");
+    score += 3;
+  }
+
+  if (
+    /^(?:[>›*•-]\s*)?(?:\d+\.\s+)?yes,\s+proceed\b/imu.test(choiceText) &&
+    reasons.has("sticky_choice_present")
+  ) {
+    reasons.add("proceed_choice_group");
+  }
+
+  for (const line of contextLines) {
+    for (const contribution of scoreStrongLine(line)) {
+      reasons.add(contribution.reason);
+      score += contribution.score;
+    }
+  }
+
+  return {
+    score,
+    reasons: Array.from(reasons),
+    matchedLines,
+  };
 }
 
 export function detectTerminalInteractivePrompt(
@@ -218,6 +362,24 @@ export function detectTerminalInteractivePrompt(
 
   if (candidateLines.length === 0) {
     return null;
+  }
+
+  const choiceFooterDetection = detectChoiceFooterSignals(candidateLines, strategy);
+  if (choiceFooterDetection && choiceFooterDetection.score >= minScore) {
+    const matchedLines = choiceFooterDetection.matchedLines.slice(-6);
+    const excerpt = buildExcerptWithContext(candidateLines, matchedLines);
+    const fingerprint = buildDetectionFingerprint(
+      strategy,
+      matchedLines,
+    );
+
+    return {
+      score: choiceFooterDetection.score,
+      fingerprint,
+      excerpt,
+      matchedLines,
+      reasons: choiceFooterDetection.reasons,
+    };
   }
 
   const scoredLines: Array<{
@@ -254,14 +416,8 @@ export function detectTerminalInteractivePrompt(
     reasons.add("multiple_options");
   }
 
-  for (const signal of detectGroupedSignals(candidateLines, strategy)) {
-    score += signal.score;
-    reasons.add(signal.reason);
-  }
-
   const hasStrongReason = Array.from(reasons).some(isStrongReason);
-  const hasGroupedReason =
-    reasons.has("approval_choice_group") || reasons.has("submit_cancel_hint");
+  const hasGroupedReason = reasons.has("multiple_options");
   const hasOnlyQuestionMarkReason =
     reasons.size === 1 && reasons.has("question_mark");
 
@@ -315,10 +471,8 @@ export function detectTerminalInteractivePrompt(
   const matchedLines = scoredLines
     .map((entry) => entry.line)
     .slice(-6);
-  const excerpt = matchedLines.join("\n");
-  const fingerprint = createHash("sha1")
-    .update(`${strategy}\n${excerpt}`)
-    .digest("hex");
+  const excerpt = buildExcerptWithContext(candidateLines, matchedLines);
+  const fingerprint = buildDetectionFingerprint(strategy, matchedLines);
 
   return {
     score,

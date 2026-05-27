@@ -430,7 +430,7 @@ export const ruMenu = {
       unavailable_action:
         "Перезапусти терминальный runtime для этой консоли или обнови/сними terminal target для этой сессии.",
       prompt_detected_title:
-        "🛎 Похоже, агент в сессии {{sessionName}} ждёт твой ввод.",
+        "🛎 Возможный блокер в {{sessionName}}",
       prompt_detected_score: "Сила срабатывания: {{score}}",
       prompt_detected_target: "terminal target: {{terminalTarget}}",
       prompt_detected_hint:

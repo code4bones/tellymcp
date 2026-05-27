@@ -424,7 +424,7 @@ export const enMenu = {
       unavailable_action:
         "Restart the terminal runtime for this console, or update/remove the terminal target for this session.",
       prompt_detected_title:
-        "🛎 The agent in session {{sessionName}} may be waiting for your input.",
+        "🛎 Possible blocker in {{sessionName}}",
       prompt_detected_score: "Detection score: {{score}}",
       prompt_detected_target: "terminal target: {{terminalTarget}}",
       prompt_detected_hint:

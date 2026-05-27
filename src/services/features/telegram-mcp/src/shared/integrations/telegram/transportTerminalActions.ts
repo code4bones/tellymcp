@@ -8,6 +8,7 @@ import {
   resolveTerminalTargetFromHint,
   sendTerminalLiteralLine,
 } from "../terminal/client";
+import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
 import type { AppConfig } from "../../../app/config/env";
 import type {
   SessionBindingStore,
@@ -49,11 +50,48 @@ export interface TransportTerminalHost {
     actor?: GatewayActorProfile;
     allowForeignBinding?: boolean;
   }): Promise<{ message_id: number } | null>;
+  callGatewayJson<T>(
+    endpointPath: string,
+    body?: Record<string, unknown>,
+  ): Promise<T>;
   t(locale: SupportedLocale, key: string, vars?: Record<string, string | number>): string;
 }
 
 export class TransportTerminalActions {
   public constructor(private readonly host: TransportTerminalHost) {}
+
+  private buildCapturePreview(capture: string): string[] {
+    return capture
+      .split("\n")
+      .map((line) => line.trimEnd())
+      .filter((line) => line.trim().length > 0)
+      .slice(-6);
+  }
+
+  private isExpectedRelayCaptureMiss(error: unknown): boolean {
+    const message =
+      error instanceof Error ? error.message : String(error);
+    return (
+      /\bInvalid live relay view response\b/u.test(message) ||
+      /\bis not connected\b/u.test(message) ||
+      /\brequest is rejected\b/u.test(message) ||
+      /\brelay live capture did not return terminal content\b/u.test(message)
+    );
+  }
+
+  private buildRelayTerminalTarget(sessionId: string): string | null {
+    const relay = parseLiveRelaySessionId(sessionId);
+    if (!relay) {
+      return null;
+    }
+
+    return `relay:${relay.clientUuid}/${relay.localSessionId}`;
+  }
+
+  private extractTerminalTextFromGatewayMarkdown(markdownContent: string): string {
+    const match = markdownContent.match(/```text\n([\s\S]*?)\n```/u);
+    return match?.[1] ?? markdownContent;
+  }
 
   private async ensurePtyTargetForSession(
     sessionId: string,
@@ -354,19 +392,42 @@ export class TransportTerminalActions {
   }
 
   public async scanPromptForSession(session: SessionRecord): Promise<void> {
-    if (!session.terminalTarget) {
+    const relayTerminalTarget = this.buildRelayTerminalTarget(session.sessionId);
+    if (!session.terminalTarget && !relayTerminalTarget) {
+      this.host.logger.debug("terminal prompt scan skipped", {
+        sessionId: session.sessionId,
+        sessionLabel: session.label,
+        isRelaySession: relayTerminalTarget !== null,
+        skipReason: "no_terminal_target",
+      });
       this.host.terminalPromptNoticeState.delete(session.sessionId);
       return;
     }
 
     const binding = await this.host.bindingStore.getBinding(session.sessionId);
     if (!binding) {
+      this.host.logger.debug("terminal prompt scan skipped", {
+        sessionId: session.sessionId,
+        sessionLabel: session.label,
+        isRelaySession: relayTerminalTarget !== null,
+        terminalTarget: session.terminalTarget ?? relayTerminalTarget,
+        skipReason: "no_binding",
+      });
       this.host.terminalPromptNoticeState.delete(session.sessionId);
       return;
     }
 
-    let terminalTarget = session.terminalTarget;
+    let terminalTarget = session.terminalTarget ?? relayTerminalTarget;
     let capture: string;
+
+    this.host.logger.debug("terminal prompt scan started", {
+      sessionId: session.sessionId,
+      sessionLabel: session.label,
+      isRelaySession: relayTerminalTarget !== null,
+      terminalTarget,
+      strategy: this.host.config.terminal.promptScanStrategy,
+      minScore: this.host.config.terminal.promptScanMinScore,
+    });
 
     try {
       capture = await this.capturePromptBuffer(session);
@@ -376,6 +437,7 @@ export class TransportTerminalActions {
           "terminal prompt scan skipped because terminal is unavailable",
           {
             sessionId: session.sessionId,
+            sessionLabel: session.label,
             terminalTarget,
           },
         );
@@ -391,6 +453,7 @@ export class TransportTerminalActions {
             "terminal prompt scan skipped because target is invalid",
             {
               sessionId: session.sessionId,
+              sessionLabel: session.label,
               terminalTarget,
             },
           );
@@ -402,6 +465,22 @@ export class TransportTerminalActions {
           terminalTarget: recoveredTarget,
         });
       } else {
+        if (
+          relayTerminalTarget &&
+          this.isExpectedRelayCaptureMiss(error)
+        ) {
+          this.host.logger.debug("terminal prompt scan skipped because relay capture is unavailable", {
+            sessionId: session.sessionId,
+            sessionLabel: session.label,
+            terminalTarget,
+            error:
+              error instanceof Error
+                ? (error.stack ?? error.message)
+                : String(error),
+          });
+          this.host.terminalPromptNoticeState.delete(session.sessionId);
+          return;
+        }
         this.host.logger.warn("terminal prompt scan capture failed", {
           sessionId: session.sessionId,
           terminalTarget,
@@ -414,6 +493,16 @@ export class TransportTerminalActions {
       }
     }
 
+    const capturePreview = this.buildCapturePreview(capture);
+    this.host.logger.debug("terminal prompt buffer captured", {
+      sessionId: session.sessionId,
+      sessionLabel: session.label,
+      terminalTarget,
+      captureChars: capture.length,
+      captureLines: capture.split("\n").length,
+      previewTail: capturePreview,
+    });
+
     const detection = detectTerminalInteractivePrompt(capture, {
       strategy: this.host.config.terminal.promptScanStrategy,
       minScore: this.host.config.terminal.promptScanMinScore,
@@ -422,9 +511,11 @@ export class TransportTerminalActions {
     if (!detection) {
       this.host.logger.debug("terminal prompt scan found no interactive prompt", {
         sessionId: session.sessionId,
+        sessionLabel: session.label,
         terminalTarget,
         strategy: this.host.config.terminal.promptScanStrategy,
         minScore: this.host.config.terminal.promptScanMinScore,
+        previewTail: capturePreview,
       });
       this.host.terminalPromptNoticeState.delete(session.sessionId);
       return;
@@ -434,13 +525,49 @@ export class TransportTerminalActions {
       return;
     }
 
-    await this.notifyPromptDetected(session, binding, detection, terminalTarget);
+    await this.notifyPromptDetected(
+      session,
+      binding,
+      detection,
+      terminalTarget ?? relayTerminalTarget ?? "unknown",
+    );
   }
 
   public async capturePromptBuffer(session: {
     sessionId: string;
     terminalTarget?: string | undefined;
   }): Promise<string> {
+    const relay = parseLiveRelaySessionId(session.sessionId);
+    if (relay) {
+      this.host.logger.debug("terminal prompt relay capture requested", {
+        sessionId: session.sessionId,
+        clientUuid: relay.clientUuid,
+        localSessionId: relay.localSessionId,
+      });
+      const output = await this.host.callGatewayJson<{
+        markdown_content?: string;
+      }>("/live/capture-buffer", {
+        session_id: session.sessionId,
+        scope: {
+          mode: "visible",
+        },
+      });
+      const markdownContent =
+        typeof output.markdown_content === "string"
+          ? output.markdown_content
+          : "";
+      if (!markdownContent.trim()) {
+        this.host.logger.warn("terminal prompt relay capture returned empty content", {
+          sessionId: session.sessionId,
+          clientUuid: relay.clientUuid,
+          localSessionId: relay.localSessionId,
+        });
+        throw new Error("relay live capture did not return terminal content");
+      }
+
+      return this.extractTerminalTextFromGatewayMarkdown(markdownContent);
+    }
+
     const target = session.terminalTarget;
     if (!target) {
       throw new Error("terminal target is not configured");
@@ -505,9 +632,11 @@ export class TransportTerminalActions {
       binding.telegramUserId,
     );
     const sessionLabel = session.label ?? session.sessionId;
-    const excerpt = detection.matchedLines
-      .slice(-TERMINAL_PROMPT_SCAN_MATCHED_LINES_LIMIT)
-      .join("\n");
+    const excerpt =
+      detection.excerpt
+        .split("\n")
+        .slice(-Math.max(TERMINAL_PROMPT_SCAN_MATCHED_LINES_LIMIT + 2, 8))
+        .join("\n") || detection.matchedLines.slice(-TERMINAL_PROMPT_SCAN_MATCHED_LINES_LIMIT).join("\n");
 
     await this.host.sendNotification({
       sessionId: session.sessionId,
@@ -520,14 +649,6 @@ export class TransportTerminalActions {
         this.host.t(locale, "menu:notices.terminal.prompt_detected_title", {
           sessionName: sessionLabel,
         }),
-        this.host.t(locale, "menu:notices.terminal.prompt_detected_score", {
-          score: detection.score,
-        }),
-        this.host.t(locale, "menu:notices.terminal.prompt_detected_target", {
-          terminalTarget: terminalTarget,
-        }),
-        this.host.t(locale, "menu:notices.terminal.prompt_detected_hint"),
-        this.host.t(locale, "menu:notices.terminal.prompt_detected_excerpt"),
         excerpt,
       ].join("\n"),
     });

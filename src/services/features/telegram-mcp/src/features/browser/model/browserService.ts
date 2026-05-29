@@ -2,6 +2,7 @@ import path from "node:path";
 
 import type {
   Browser,
+  BrowserContextOptions,
   BrowserContext,
   ConsoleMessage,
   Locator,
@@ -177,6 +178,9 @@ type RemoteConsoleInvoker = {
   ): Promise<T>;
 };
 
+const DEFAULT_BROWSER_VIEWPORT_WIDTH = 1720;
+const DEFAULT_BROWSER_VIEWPORT_HEIGHT = 980;
+
 export class BrowserService {
   private playwrightModulePromise: Promise<PlaywrightModule> | undefined;
 
@@ -215,7 +219,14 @@ export class BrowserService {
     }
     this.ensureEnabled();
     const existingState = this.sessionStates.get(normalizedSessionId);
-    const shouldReset = input.reset_context === true;
+    const requestedViewport = this.resolveRequestedViewport(input);
+    const shouldUpgradeLegacyViewport =
+      this.config.browser.headless === false &&
+      input.reset_context !== true &&
+      !requestedViewport &&
+      Boolean(existingState?.page.viewportSize());
+    const shouldReset =
+      input.reset_context === true || shouldUpgradeLegacyViewport;
     const targetUrl = this.resolveBrowserUrl(input.url);
 
     if (shouldReset && existingState) {
@@ -225,7 +236,16 @@ export class BrowserService {
     const { state, createdContext } = await this.ensureSessionState(
       normalizedSessionId,
       shouldReset,
+      input,
     );
+    if (requestedViewport) {
+      await state.page.setViewportSize(requestedViewport);
+    } else if (this.config.browser.headless !== false) {
+      await state.page.setViewportSize({
+        width: DEFAULT_BROWSER_VIEWPORT_WIDTH,
+        height: DEFAULT_BROWSER_VIEWPORT_HEIGHT,
+      });
+    }
     const waitUntil = (input.wait_until ??
       this.config.browser.waitUntil) as WaitUntilState;
 
@@ -246,14 +266,21 @@ export class BrowserService {
       createdContext,
       waitUntil,
       headless: this.config.browser.headless,
+      viewportWidth:
+        state.page.viewportSize()?.width ?? requestedViewport?.width,
+      viewportHeight:
+        state.page.viewportSize()?.height ?? requestedViewport?.height,
     });
 
+    const viewport = state.page.viewportSize();
     return {
       session_id: normalizedSessionId,
       opened: true,
       created_context: createdContext,
       url: state.currentUrl,
       ...(state.title ? { title: state.title } : {}),
+      ...(viewport?.width ? { viewport_width: viewport.width } : {}),
+      ...(viewport?.height ? { viewport_height: viewport.height } : {}),
     };
   }
 
@@ -1004,11 +1031,13 @@ export class BrowserService {
   private async ensureBrowser(): Promise<Browser> {
     this.browserPromise ??= (async () => {
       const playwright = await this.ensurePlaywright();
-      const launchArgs =
-        this.config.browser.headless === false &&
-        this.config.browser.devtools === true
-          ? ["--auto-open-devtools-for-tabs"]
-          : [];
+      const launchArgs: string[] = [];
+      if (this.config.browser.headless === false) {
+        launchArgs.push("--start-maximized");
+        if (this.config.browser.devtools === true) {
+          launchArgs.push("--auto-open-devtools-for-tabs");
+        }
+      }
       const browser = await playwright.chromium.launch({
         headless: this.config.browser.headless,
         slowMo: this.config.browser.slowMoMs,
@@ -1040,6 +1069,7 @@ export class BrowserService {
   private async ensureSessionState(
     sessionId: string,
     forceNewContext: boolean,
+    openInput?: BrowserOpenInput,
   ): Promise<{ state: BrowserSessionState; createdContext: boolean }> {
     const existing = this.sessionStates.get(sessionId);
     if (existing && !forceNewContext) {
@@ -1047,7 +1077,9 @@ export class BrowserService {
     }
 
     const browser = await this.ensureBrowser();
-    const context = await browser.newContext();
+    const context = await browser.newContext(
+      this.buildContextOptions(openInput),
+    );
     const page = await context.newPage();
     const createdAt = new Date().toISOString();
     const state: BrowserSessionState = {
@@ -1099,6 +1131,40 @@ export class BrowserService {
 
     this.sessionStates.set(sessionId, state);
     return { state, createdContext: true };
+  }
+
+  private resolveRequestedViewport(
+    input?: Pick<BrowserOpenInput, "width" | "height">,
+  ): { width: number; height: number } | null {
+    const width = input?.width;
+    const height = input?.height;
+    if (!width && !height) {
+      return null;
+    }
+    if (!width || !height) {
+      throw new Error(
+        "Browser viewport requires both width and height together.",
+      );
+    }
+    return { width, height };
+  }
+
+  private buildContextOptions(
+    input?: Pick<BrowserOpenInput, "width" | "height">,
+  ): BrowserContextOptions {
+    const requestedViewport = this.resolveRequestedViewport(input);
+    if (requestedViewport) {
+      return {
+        viewport: requestedViewport,
+        screen: requestedViewport,
+      };
+    }
+    if (this.config.browser.headless === false) {
+      return {
+        viewport: null,
+      };
+    }
+    return {};
   }
 
   private recordNetworkFailure(

@@ -740,6 +740,8 @@ Input:
 
 - `session_id?`
 - `url`
+- `width?`
+- `height?`
 - `wait_until?`
 - `reset_context?`
 
@@ -750,12 +752,19 @@ Output:
 - `created_context`
 - `url`
 - `title?`
+- `viewport_width?`
+- `viewport_height?`
 
 Notes:
 
 - each session gets its own isolated browser context and page
 - call this first before reading console, DOM, styles, or screenshots
 - `url` may be an absolute URL, or a relative path when `BROWSER_ADDRESS` is configured
+- in headed mode the browser window is started maximized by default
+- in headed mode a fresh browser context is created without a fixed viewport unless you explicitly pass `width` and `height`
+- if you want page content to grow and shrink together with the outer browser window, do not pass `width` and `height`
+- if you pass viewport size, pass both `width` and `height` together
+- use explicit `width` and `height` when the task depends on a specific responsive breakpoint or working area
 
 ## `browser_console`
 

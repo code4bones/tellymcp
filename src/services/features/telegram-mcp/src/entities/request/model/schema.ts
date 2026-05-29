@@ -179,6 +179,8 @@ export const clearSessionContextOutputSchema = z.object({
 export const browserOpenInputSchema = z.object({
   session_id: z.string().trim().min(1).optional(),
   url: z.string().trim().min(1),
+  width: z.number().int().positive().max(10000).optional(),
+  height: z.number().int().positive().max(10000).optional(),
   wait_until: z
     .enum(["load", "domcontentloaded", "networkidle", "commit"])
     .optional(),
@@ -191,6 +193,8 @@ export const browserOpenOutputSchema = z.object({
   created_context: z.boolean(),
   url: z.string().url(),
   title: z.string().optional(),
+  viewport_width: z.number().int().positive().optional(),
+  viewport_height: z.number().int().positive().optional(),
 });
 
 export const browserReloadInputSchema = z.object({

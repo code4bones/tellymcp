@@ -25,7 +25,7 @@ export class BrowserOpenTool implements ToolModule {
       {
         title: "Browser Open",
         description:
-          "Open a URL in the isolated Playwright browser context for the current session. Reuse the existing tab unless reset_context=true.",
+          "Open a URL in the isolated Playwright browser context for the current session. Reuse the existing tab unless reset_context=true. Optionally pass width and height to control the viewport.",
         inputSchema: browserOpenInputSchema,
         outputSchema: browserOpenOutputSchema,
       },

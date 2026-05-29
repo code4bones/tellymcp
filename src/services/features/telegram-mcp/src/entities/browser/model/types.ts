@@ -1,6 +1,8 @@
 export type BrowserOpenInput = {
   session_id?: string | undefined;
   url: string;
+  width?: number | undefined;
+  height?: number | undefined;
   wait_until?:
     | "load"
     | "domcontentloaded"
@@ -16,6 +18,8 @@ export type BrowserOpenOutput = {
   created_context: boolean;
   url: string;
   title?: string | undefined;
+  viewport_width?: number | undefined;
+  viewport_height?: number | undefined;
 };
 
 export type BrowserConsoleInput = {

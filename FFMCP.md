@@ -796,3 +796,138 @@ And the bundle metadata should always include:
 - page-level URL/title linkage
 
 This is easier for both humans and agents to inspect, summarize, and diff.
+
+## Future TODO: UI Performance Profiling
+
+The current browser recording bundle is already useful for:
+
+- HTML snapshots
+- network metadata and bodies
+- console events
+- page-level forensic analysis
+
+But it is not yet a real UI performance profiler.
+
+### Goal
+
+Add a future profiling layer that helps an agent or developer answer:
+
+- where the UI main thread is blocked
+- which user interaction caused a slowdown
+- whether rendering stalls come from JavaScript, layout, or excessive network work
+- which page phase or custom flow step regressed
+
+### Proposed Model
+
+Implement profiling as a separate mode from ordinary browser recording.
+
+Keep these as distinct concepts:
+
+- browser recording
+  - forensic/debug bundle
+  - HTML + network + console
+- browser profiling
+  - performance-focused bundle
+  - timing, long tasks, traces, and optional CPU profiles
+
+### Cross-browser V1
+
+For both Firefox and Chrome, add page-side performance capture based on:
+
+- `PerformanceObserver`
+- `Performance` timeline entries
+- Long Tasks API
+- optional custom marks/measures exposed through `window.TELLY`
+
+Capture at least:
+
+- `navigation`
+- `resource`
+- `mark`
+- `measure`
+- `longtask`
+
+Useful custom developer hooks:
+
+- `TELLY.mark(name)`
+- `TELLY.measure(name, startMark, endMark)`
+- `TELLY.time(label)` / `TELLY.timeEnd(label)` style wrappers if needed later
+
+Suggested bundle layout:
+
+```text
+.mcp-xchange/web/{tab-title-slug}-{timestamp}/performance/
+  summary.json
+  timeline.ndjson
+  longtasks.ndjson
+  measures.ndjson
+  resources.ndjson
+```
+
+### Chrome-only Deep Profiling
+
+Chrome can support a deeper profiling mode through `chrome.debugger`.
+
+That would allow using Chrome DevTools Protocol domains such as:
+
+- `Performance`
+- `Profiler`
+- `Tracing`
+- `Runtime`
+- `Network`
+
+This mode should be treated as a separate, more privileged capability because it requires:
+
+- Chrome extension permission: `debugger`
+- user-visible warning on installation
+
+Suggested outputs for the deep-profile mode:
+
+```text
+.mcp-xchange/web/{tab-title-slug}-{timestamp}/performance/
+  summary.json
+  timeline.ndjson
+  trace.json
+  profile.cpuprofile
+  longtasks.ndjson
+  resources.ndjson
+```
+
+### Future MCP Tools
+
+Potential future tools:
+
+- `browser_perf_start`
+- `browser_perf_stop`
+- `browser_perf_status`
+- `browser_profile_start`
+- `browser_profile_stop`
+- `browser_profile_status`
+
+Where:
+
+- `browser_perf_*`
+  - cross-browser
+  - lightweight UI timing / long-task mode
+- `browser_profile_*`
+  - Chrome-only
+  - debugger/CDP-backed deep profile mode
+
+### Important Boundary
+
+The agent should not be responsible for live low-level profiling orchestration.
+
+Correct boundary:
+
+- extension/browser backend captures performance events
+- `tellymcp` stores structured profiling artifacts
+- the agent later reads and analyzes the resulting bundle
+
+### Suggested Future Order
+
+1. Add cross-browser `PerformanceObserver` capture for long tasks and measures.
+2. Add `window.TELLY` performance helpers for custom app instrumentation.
+3. Add performance bundle writer under `performance/`.
+4. Expose `browser_perf_*` MCP tools.
+5. Add optional Chrome `chrome.debugger` deep-profile mode.
+6. Expose `browser_profile_*` MCP tools.

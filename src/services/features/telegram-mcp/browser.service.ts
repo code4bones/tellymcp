@@ -4,6 +4,7 @@ import {
   TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
   type TelegramMcpRuntimeServiceInstance,
 } from "./runtime.service";
+import { FirefoxAttachServer } from "./src/features/browser-attach/model/firefoxAttachServer";
 import { RemoteConsoleActionClient } from "./src/features/distributed-gateway/model/remoteConsoleActionClient";
 import type {
   BrowserClearLogsInput,
@@ -14,6 +15,12 @@ import type {
   BrowserDomInput,
   BrowserErrorsInput,
   BrowserFillInput,
+  BrowserInjectScriptInput,
+  BrowserListAttachedInstancesInput,
+  BrowserListTabsInput,
+  BrowserRecordingStartInput,
+  BrowserRecordingStatusInput,
+  BrowserRecordingStopInput,
   BrowserNetworkFailuresInput,
   BrowserOpenInput,
   BrowserPressInput,
@@ -59,6 +66,51 @@ const TelegramMcpBrowserService: ServiceSchema = {
         return this.getBrowserService!().getConsole(ctx.params);
       },
     },
+    listAttachedInstancesRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserListAttachedInstancesInput },
+      ) {
+        return this.getBrowserService!().listAttachedInstances(ctx.params);
+      },
+    },
+    listTabsRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserListTabsInput },
+      ) {
+        return this.getBrowserService!().listTabs(ctx.params);
+      },
+    },
+    startRecordingRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserRecordingStartInput },
+      ) {
+        return this.getBrowserService!().startRecording(ctx.params);
+      },
+    },
+    stopRecordingRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserRecordingStopInput },
+      ) {
+        return this.getBrowserService!().stopRecording(ctx.params);
+      },
+    },
+    getRecordingStatusRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserRecordingStatusInput },
+      ) {
+        return this.getBrowserService!().getRecordingStatus(ctx.params);
+      },
+    },
     clickRemote: {
       params: { $$strict: false },
       async handler(
@@ -75,6 +127,15 @@ const TelegramMcpBrowserService: ServiceSchema = {
         ctx: { params: BrowserFillInput },
       ) {
         return this.getBrowserService!().fill(ctx.params);
+      },
+    },
+    injectScriptRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserInjectScriptInput },
+      ) {
+        return this.getBrowserService!().injectScript(ctx.params);
       },
     },
     pressRemote: {
@@ -208,6 +269,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
     const runtime = await runtimeService.waitUntilReady();
 
     this.logger.info("Starting telegram_mcp browser service");
+    const firefoxAttachServer = runtime.firefoxAttachServer as FirefoxAttachServer;
     this.browserService = new BrowserService(
       runtime.config,
       runtime.sessionStore,
@@ -221,6 +283,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
       new RemoteConsoleActionClient((actionName, params) =>
         this.broker.call(actionName, params, { meta: { internal_call: true } }),
       ),
+      firefoxAttachServer,
     );
     this.logger.info("telegram_mcp browser service is ready");
   },

@@ -8,6 +8,8 @@
   },
   "files": [
     "dist",
+    "packages/firefox-attach-extension/dist",
+    "packages/chrome-attach-extension/dist",
     "scripts",
     "config/templates",
     "config/codex",
@@ -36,8 +38,9 @@
   },
   "scripts": {
     "postinstall": "node ./scripts/postinstall.js",
-    "prepack": "yarn build",
-    "prepublishOnly": "yarn build && yarn lint && yarn test",
+    "build:extensions": "node ./packages/firefox-attach-extension/scripts/build.mjs && node ./packages/chrome-attach-extension/scripts/build.mjs",
+    "prepack": "yarn build && yarn build:extensions",
+    "prepublishOnly": "yarn build && yarn build:extensions && yarn lint && yarn test",
     "mcp:local": "codex mcp add telegramHuman --url http://127.0.0.1:8787/mcp",
     "dev:gw": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_EXPERIMENTAL_RESOLVER=1 NODE_OPTIONS=--openssl-legacy-provider ts-node ./node_modules/moleculer/bin/moleculer-runner.js src/services --config src/moleculer.config.ts --envfile /opt/tellymcp-gateway/.env-gateway --hot --mask \"**/*.service.ts\"",
     "dev:builder": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_EXPERIMENTAL_RESOLVER=1 NODE_OPTIONS=--openssl-legacy-provider ts-node ./node_modules/moleculer/bin/moleculer-runner.js src/services --config src/moleculer.config.ts --envfile ./.env-builder --hot --mask \"**/*.service.ts\"",

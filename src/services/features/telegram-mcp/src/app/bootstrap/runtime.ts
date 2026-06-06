@@ -15,6 +15,7 @@ import { TelegramTransport } from "../../shared/integrations/telegram/transport"
 import { MinioExchangeStore } from "../../shared/integrations/object-storage/minioExchangeStore";
 import { GatewayHttpService } from "../../features/distributed-gateway/model/gatewayHttpService";
 import { ensureGatewayClientUuid } from "../../features/distributed-client/model/gatewayClientAccess";
+import { FirefoxAttachServer } from "../../features/browser-attach/model/firefoxAttachServer";
 import {
   ensureTerminalTargetForSession,
 } from "../../shared/integrations/terminal/client";
@@ -49,6 +50,7 @@ export type AppRuntime = {
   projectIdentityResolver: ProjectIdentityResolver;
   webAppLaunchRegistry: WebAppLaunchRegistry;
   gatewayHttpService: GatewayHttpService;
+  firefoxAttachServer: FirefoxAttachServer;
   shutdown: () => Promise<void>;
 };
 
@@ -108,6 +110,15 @@ export async function createAppRuntime(input: {
       nudgeEnabled: config.terminal.nudgeEnabled,
       nudgeDebounceSeconds: config.terminal.nudgeDebounceSeconds,
       nudgeCooldownSeconds: config.terminal.nudgeCooldownSeconds,
+    },
+    browser: {
+      enabled: config.browser.enabled,
+      headless: config.browser.headless,
+      devtools: config.browser.devtools,
+      attachEnabled: config.browser.attach.enabled,
+      attachHost: config.browser.attach.host,
+      attachPort: config.browser.attach.port,
+      attachPath: config.browser.attach.path,
     },
     telegram: {
       webhookEnabled: config.telegram.webhook.enabled,
@@ -283,6 +294,13 @@ export async function createAppRuntime(input: {
   logger.info("Startup Telegram notifications completed");
 
   const gatewayHttpService = new GatewayHttpService(config, input.callBroker);
+  const firefoxAttachServer = new FirefoxAttachServer(
+    config,
+    logger,
+    stateStore,
+    stateStore,
+  );
+  await firefoxAttachServer.start();
 
   return {
     callBroker: input.callBroker,
@@ -301,8 +319,10 @@ export async function createAppRuntime(input: {
     projectIdentityResolver,
     webAppLaunchRegistry,
     gatewayHttpService,
+    firefoxAttachServer,
     shutdown: async () => {
       logger.info("Shutdown started");
+      await firefoxAttachServer.stop();
       await telegramTransport.stop();
       stopAllPtyTargets();
       redis.disconnect();

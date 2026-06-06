@@ -197,6 +197,150 @@ export const browserOpenOutputSchema = z.object({
   viewport_height: z.number().int().positive().optional(),
 });
 
+export const browserListAttachedInstancesInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+});
+
+export const browserListAttachedInstancesOutputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  total: z.number().int().nonnegative(),
+  instances: z.array(
+    z.object({
+      instance_id: z.string().trim().min(1),
+      browser: z.literal("firefox"),
+      extension_version: z.string().trim().min(1),
+      profile_name: z.string().trim().min(1).optional(),
+      connected_at: z.string().trim().min(1),
+      last_seen_at: z.string().trim().min(1),
+      capabilities: z.array(z.string().trim().min(1)),
+      tab_count: z.number().int().nonnegative(),
+      active_tab: z
+        .object({
+          tab_id: z.number().int().nonnegative(),
+          window_id: z.number().int().nonnegative().optional(),
+          active: z.boolean(),
+          title: z.string(),
+          url: z.string(),
+          status: z.string().optional(),
+        })
+        .optional(),
+    }),
+  ),
+});
+
+export const browserListTabsInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  instance_id: z.string().trim().min(1).optional(),
+});
+
+export const browserListTabsOutputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  instance_id: z.string().trim().min(1),
+  total: z.number().int().nonnegative(),
+  tabs: z.array(
+    z.object({
+      tab_id: z.number().int().nonnegative(),
+      window_id: z.number().int().nonnegative().optional(),
+      active: z.boolean(),
+      selected: z.boolean().optional(),
+      title: z.string(),
+      url: z.string(),
+      status: z.string().optional(),
+    }),
+  ),
+});
+
+export const browserAttachActiveTabInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  instance_id: z.string().trim().min(1).optional(),
+});
+
+export const browserAttachTabInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  instance_id: z.string().trim().min(1).optional(),
+  tab_id: z.number().int().nonnegative(),
+});
+
+export const browserAttachTabOutputSchema = z.object({
+  session_id: z.string().trim().min(1),
+  backend: z.literal("firefox-attached"),
+  instance_id: z.string().trim().min(1),
+  tab_id: z.number().int().nonnegative(),
+  attached_at: z.string().trim().min(1),
+  title: z.string().optional(),
+  url: z.string().optional(),
+});
+
+export const browserDetachTabInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+});
+
+export const browserDetachTabOutputSchema = z.object({
+  session_id: z.string().trim().min(1),
+  detached: z.boolean(),
+});
+
+export const browserRecordingStartInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  instance_id: z.string().trim().min(1).optional(),
+});
+
+export const browserRecordingStartOutputSchema = z.object({
+  session_id: z.string().trim().min(1),
+  backend: z.literal("firefox-attached"),
+  started: z.boolean(),
+  recording_id: z.string().trim().min(1),
+  instance_id: z.string().trim().min(1),
+  tab_id: z.number().int().nonnegative(),
+  tab_title: z.string().optional(),
+  tab_url: z.string().optional(),
+  bundle_dir_name: z.string().trim().min(1),
+  bundle_relative_path: z.string().trim().min(1),
+  bundle_path: z.string().trim().min(1),
+  started_at: z.string().trim().min(1),
+});
+
+export const browserRecordingStopInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+});
+
+export const browserRecordingStopOutputSchema = z.object({
+  session_id: z.string().trim().min(1),
+  stopped: z.boolean(),
+  recording_id: z.string().trim().min(1).optional(),
+  bundle_dir_name: z.string().trim().min(1).optional(),
+  bundle_relative_path: z.string().trim().min(1).optional(),
+  bundle_path: z.string().trim().min(1).optional(),
+  stopped_at: z.string().trim().min(1).optional(),
+});
+
+export const browserRecordingStatusInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+});
+
+export const browserRecordingStatusOutputSchema = z.object({
+  session_id: z.string().trim().min(1),
+  active: z.boolean(),
+  recording: z
+    .object({
+      backend: z.literal("firefox-attached"),
+      recording_id: z.string().trim().min(1),
+      instance_id: z.string().trim().min(1),
+      tab_id: z.number().int().nonnegative(),
+      tab_title: z.string().optional(),
+      tab_url: z.string().optional(),
+      bundle_dir_name: z.string().trim().min(1),
+      bundle_relative_path: z.string().trim().min(1),
+      bundle_path: z.string().trim().min(1),
+      started_at: z.string().trim().min(1),
+      stopped_at: z.string().trim().min(1).optional(),
+      status: z.enum(["recording", "stopped"]),
+      event_count: z.number().int().nonnegative(),
+      last_event_at: z.string().trim().min(1).optional(),
+    })
+    .optional(),
+});
+
 export const browserReloadInputSchema = z.object({
   session_id: z.string().trim().min(1).optional(),
   wait_until: z
@@ -270,6 +414,28 @@ export const browserPressOutputSchema = z.object({
   ai_tag: z.string().optional(),
   selector: z.string().optional(),
   text: z.string().optional(),
+  url: z.string().url(),
+  title: z.string().optional(),
+});
+
+export const browserInjectScriptInputSchema = z
+  .object({
+    session_id: z.string().trim().min(1).optional(),
+    source: z.string().optional(),
+    file_path: z.string().trim().min(1).optional(),
+    namespace: z.string().trim().min(1).optional(),
+  })
+  .refine((input) => Boolean(input.source?.trim() || input.file_path?.trim()), {
+    message: "Provide source or file_path.",
+    path: ["source"],
+  });
+
+export const browserInjectScriptOutputSchema = z.object({
+  session_id: z.string(),
+  injected: z.boolean(),
+  namespace: z.string(),
+  source_type: z.enum(["inline", "file"]),
+  bytes: z.number().int().nonnegative(),
   url: z.string().url(),
   title: z.string().optional(),
 });

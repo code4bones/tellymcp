@@ -20,7 +20,7 @@ export class BrowserFillTool implements ToolModule {
       {
         title: "Browser Fill",
         description:
-          "Fill an input or textarea in the session browser page by CSS selector or visible text.",
+          "Fill an input or textarea in the current session browser target by CSS selector or visible text. If the session has a selected attached Firefox tab, fill there; otherwise use the isolated Playwright page.",
         inputSchema: browserFillInputSchema,
         outputSchema: browserFillOutputSchema,
       },

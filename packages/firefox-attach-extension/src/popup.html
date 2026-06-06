@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TellyMCP Firefox Attach</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: ui-monospace, "SFMono-Regular", "Cascadia Code", "Fira Code", monospace;
+        --bg-start: #fffdf8;
+        --bg-end: #f3efe2;
+        --card-bg: rgba(255, 255, 255, 0.88);
+        --card-border: #d7cfbb;
+        --text: #171717;
+        --muted: #4b4b4b;
+        --soft: #5a5a5a;
+        --accent: #0a6e2f;
+        --warn: #8a5a00;
+        --button-border: #171717;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg-start: #171a1d;
+          --bg-end: #101214;
+          --card-bg: rgba(28, 31, 35, 0.92);
+          --card-border: #323841;
+          --text: #f3f5f7;
+          --muted: #c5ccd3;
+          --soft: #98a2ad;
+          --accent: #71d08d;
+          --warn: #f3bf63;
+          --button-border: #56606b;
+        }
+      }
+
+      body {
+        margin: 0;
+        width: 320px;
+        padding: 16px;
+        background: linear-gradient(180deg, var(--bg-start) 0%, var(--bg-end) 100%);
+        color: var(--text);
+      }
+
+      .card {
+        border: 1px solid var(--card-border);
+        background: var(--card-bg);
+        padding: 14px;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 18px;
+      }
+
+      .status {
+        font-size: 14px;
+        font-weight: 700;
+        margin: 0 0 10px;
+      }
+
+      .meta {
+        display: grid;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 14px;
+      }
+
+      button {
+        font: inherit;
+        padding: 9px 14px;
+        border: 1px solid var(--button-border);
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>TellyMCP Firefox Attach</h1>
+      <p id="connection-status" class="status">Connecting...</p>
+      <div class="meta">
+        <div id="session">Session: -</div>
+        <div id="attached-tab">Attached: -</div>
+      </div>
+      <button id="open-settings" type="button">Open Control Panel</button>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>

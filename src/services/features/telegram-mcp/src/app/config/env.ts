@@ -201,6 +201,13 @@ const envSchema = z.object({
     z.enum(["chrome", "chromium", "msedge"]).optional(),
   ),
   BROWSER_SLOW_MO_MS: z.coerce.number().int().nonnegative().default(0),
+  BROWSER_ATTACH_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
+  BROWSER_ATTACH_WS_HOST: z.string().min(1).default("127.0.0.1"),
+  BROWSER_ATTACH_WS_PORT: z.coerce.number().int().positive().default(9999),
+  BROWSER_ATTACH_WS_PATH: z.string().min(1).default("/browser-attach/ws"),
   PROXY_USE: z.preprocess(
     emptyStringToUndefined,
     z.enum(["http", "socks5"]).optional(),
@@ -337,6 +344,12 @@ export type AppConfig = {
     executablePath?: string;
     channel?: "chrome" | "chromium" | "msedge";
     slowMoMs: number;
+    attach: {
+      enabled: boolean;
+      host: string;
+      port: number;
+      path: string;
+    };
   };
   project: {
     name?: string | undefined;
@@ -559,6 +572,12 @@ export function loadConfig(): AppConfig {
         : {}),
       ...(parsed.BROWSER_CHANNEL ? { channel: parsed.BROWSER_CHANNEL } : {}),
       slowMoMs: parsed.BROWSER_SLOW_MO_MS,
+      attach: {
+        enabled: parsed.BROWSER_ATTACH_ENABLED,
+        host: parsed.BROWSER_ATTACH_WS_HOST,
+        port: parsed.BROWSER_ATTACH_WS_PORT,
+        path: parsed.BROWSER_ATTACH_WS_PATH,
+      },
     },
     project: {
       ...(parsed.PROJECT_NAME ? { name: parsed.PROJECT_NAME } : {}),

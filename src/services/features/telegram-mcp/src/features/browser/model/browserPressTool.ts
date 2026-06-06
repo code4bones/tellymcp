@@ -20,7 +20,7 @@ export class BrowserPressTool implements ToolModule {
       {
         title: "Browser Press",
         description:
-          "Send a key press to the session browser page or to a targeted element.",
+          "Send a key press to the current session browser target or to a targeted element. If the session has a selected attached Firefox tab, press there; otherwise use the isolated Playwright page.",
         inputSchema: browserPressInputSchema,
         outputSchema: browserPressOutputSchema,
       },

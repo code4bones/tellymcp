@@ -41,9 +41,15 @@ import { BrowserConsoleTool } from "./src/features/browser/model/browserConsoleT
 import { BrowserDomTool } from "./src/features/browser/model/browserDomTool";
 import { BrowserErrorsTool } from "./src/features/browser/model/browserErrorsTool";
 import { BrowserFillTool } from "./src/features/browser/model/browserFillTool";
+import { BrowserInjectScriptTool } from "./src/features/browser/model/browserInjectScriptTool";
+import { BrowserListAttachedInstancesTool } from "./src/features/browser/model/browserListAttachedInstancesTool";
+import { BrowserListTabsTool } from "./src/features/browser/model/browserListTabsTool";
 import { BrowserNetworkFailuresTool } from "./src/features/browser/model/browserNetworkFailuresTool";
 import { BrowserOpenTool } from "./src/features/browser/model/browserOpenTool";
 import { BrowserPressTool } from "./src/features/browser/model/browserPressTool";
+import { BrowserRecordingStartTool } from "./src/features/browser/model/browserRecordingStartTool";
+import { BrowserRecordingStatusTool } from "./src/features/browser/model/browserRecordingStatusTool";
+import { BrowserRecordingStopTool } from "./src/features/browser/model/browserRecordingStopTool";
 import { BrowserReloadTool } from "./src/features/browser/model/browserReloadTool";
 import { BrowserScreenshotTool } from "./src/features/browser/model/browserScreenshotTool";
 import { BrowserWaitForTool } from "./src/features/browser/model/browserWaitForTool";
@@ -135,10 +141,16 @@ const TelegramMcpMcpServerService: ServiceSchema = {
         new NotifyTelegramTool(notifyService.getNotifyService()),
         new SendFileToTelegramTool(notifyService.getNotifyService()),
         new AskUserTelegramTool(approvalService.getApprovalOrchestrator()),
+        new BrowserListAttachedInstancesTool(browserService.getBrowserService()),
+        new BrowserListTabsTool(browserService.getBrowserService()),
+        new BrowserRecordingStartTool(browserService.getBrowserService()),
+        new BrowserRecordingStopTool(browserService.getBrowserService()),
+        new BrowserRecordingStatusTool(browserService.getBrowserService()),
         new BrowserOpenTool(browserService.getBrowserService()),
         new BrowserReloadTool(browserService.getBrowserService()),
         new BrowserClickTool(browserService.getBrowserService()),
         new BrowserFillTool(browserService.getBrowserService()),
+        new BrowserInjectScriptTool(browserService.getBrowserService()),
         new BrowserPressTool(browserService.getBrowserService()),
         new BrowserWaitForTool(browserService.getBrowserService()),
         new BrowserWaitForUrlTool(browserService.getBrowserService()),

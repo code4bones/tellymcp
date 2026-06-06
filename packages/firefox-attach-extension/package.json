@@ -1,0 +1,10 @@
+{
+  "name": "@deadragdoll/tellymcp-firefox-attach-extension",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Firefox extension for attaching TellyMCP to an existing user browser session",
+  "license": "MIT",
+  "scripts": {
+    "build": "node ./scripts/build.mjs"
+  }
+}

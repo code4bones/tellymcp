@@ -3,6 +3,10 @@ import { createHash } from "node:crypto";
 import { RedisAdapter } from "@grammyjs/storage-redis";
 
 import type {
+  BrowserAttachmentRecord,
+  BrowserRecordingRecord,
+} from "../../../entities/browser/model/types";
+import type {
   PairCodeRecord,
   SessionBinding,
   TelegramPrincipal,
@@ -83,6 +87,14 @@ function adminAuthorizedMatchPattern(): string {
 
 function gatewayClientUuidKey(): string {
   return `${KEY_PREFIX}:gateway:client-uuid`;
+}
+
+function browserAttachmentKey(sessionId: string): string {
+  return `${KEY_PREFIX}:browser-attachment:${sessionId}`;
+}
+
+function browserRecordingKey(sessionId: string): string {
+  return `${KEY_PREFIX}:browser-recording:${sessionId}`;
 }
 
 function outgoingDeliveryNoticeKey(deliveryUuid: string): string {
@@ -174,6 +186,8 @@ export class RedisStateStore
     await this.clearXchangeFileMetas(sessionId);
     await this.clearProjectMenuViewStates(sessionId);
     await this.clearOutgoingDeliveryNoticesForSession(sessionId);
+    await this.clearBrowserAttachment(sessionId);
+    await this.clearBrowserRecording(sessionId);
     await this.sessionAdapter.delete(sessionKey(sessionId));
   }
 
@@ -577,6 +591,46 @@ export class RedisStateStore
 
   public async setGatewayClientUuid(clientUuid: string): Promise<void> {
     await this.redis.set(gatewayClientUuidKey(), clientUuid);
+  }
+
+  public async getBrowserAttachment(
+    sessionId: string,
+  ): Promise<BrowserAttachmentRecord | null> {
+    const raw = await this.redis.get(browserAttachmentKey(sessionId));
+    return parseJson<BrowserAttachmentRecord>(raw);
+  }
+
+  public async setBrowserAttachment(
+    record: BrowserAttachmentRecord,
+  ): Promise<void> {
+    await this.redis.set(
+      browserAttachmentKey(record.sessionId),
+      JSON.stringify(record),
+    );
+  }
+
+  public async clearBrowserAttachment(sessionId: string): Promise<void> {
+    await this.redis.del(browserAttachmentKey(sessionId));
+  }
+
+  public async getBrowserRecording(
+    sessionId: string,
+  ): Promise<BrowserRecordingRecord | null> {
+    const raw = await this.redis.get(browserRecordingKey(sessionId));
+    return parseJson<BrowserRecordingRecord>(raw);
+  }
+
+  public async setBrowserRecording(
+    record: BrowserRecordingRecord,
+  ): Promise<void> {
+    await this.redis.set(
+      browserRecordingKey(record.sessionId),
+      JSON.stringify(record),
+    );
+  }
+
+  public async clearBrowserRecording(sessionId: string): Promise<void> {
+    await this.redis.del(browserRecordingKey(sessionId));
   }
 
   public async setProjectMenuViewState(state: ProjectMenuViewState): Promise<void> {

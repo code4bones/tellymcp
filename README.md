@@ -29,6 +29,9 @@ The current model is gateway-first:
 - lets one agent ask another agent to do work and return files or notes
 - stores structured xchange records in `.mcp-xchange`
 - supports browser automation with Playwright
+- can attach to an already running Firefox or Chrome tab through bundled local extensions
+- records browser sessions into structured `.mcp-xchange/web/...` bundles with HTML, network and console artifacts
+- can inject helper scripts into attached tabs or Playwright pages through `browser_inject_script`
 - serves the Telegram Mini App / Live View from the gateway
 - supports Telegram polling or webhook mode on the gateway
 - ships a bundled Codex workflow plugin for better agent behavior
@@ -76,9 +79,13 @@ Browser:
 - `browser_open`
 - `browser_click`
 - `browser_fill`
+- `browser_inject_script`
 - `browser_press`
 - `browser_wait_for`
 - `browser_screenshot`
+- `browser_recording_start`
+- `browser_recording_stop`
+- `browser_recording_status`
 
 Tools sync:
 
@@ -104,6 +111,18 @@ Optional browser runtime:
 ```bash
 tellymcp browser install
 ```
+
+Optional attached-browser extensions:
+
+```bash
+tellymcp extension firefox
+tellymcp extension chrome
+```
+
+This exports unpacked extension bundles into the current directory:
+
+- `./tellymcp-firefox-attach`
+- `./tellymcp-chrome-attach`
 
 Optional Codex workflow plugin:
 

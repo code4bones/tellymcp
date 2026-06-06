@@ -29,6 +29,9 @@
 - позволяет одной консоли агента ставить задачу другой консоли
 - хранит structured xchange records в `.mcp-xchange`
 - поддерживает browser automation через Playwright
+- умеет attach к уже открытому Firefox или Chrome через bundled local extensions
+- умеет писать structured browser bundles в `.mcp-xchange/web/...` с HTML, network и console артефактами
+- умеет инжектить helper scripts в attached tabs или Playwright pages через `browser_inject_script`
 - отдаёт Telegram Mini App / Live View с gateway
 - поддерживает polling и webhook на gateway
 - поставляет встроенный Codex plugin со skills под типовые workflow
@@ -76,9 +79,13 @@ Gateway
 - `browser_open`
 - `browser_click`
 - `browser_fill`
+- `browser_inject_script`
 - `browser_press`
 - `browser_wait_for`
 - `browser_screenshot`
+- `browser_recording_start`
+- `browser_recording_stop`
+- `browser_recording_status`
 
 Синхронизация инструкций:
 
@@ -104,6 +111,18 @@ npm install -g @deadragdoll/tellymcp
 ```bash
 tellymcp browser install
 ```
+
+Если нужны attach extensions для существующего Firefox/Chrome:
+
+```bash
+tellymcp extension firefox
+tellymcp extension chrome
+```
+
+Команда выгружает готовые unpacked bundles в текущий каталог:
+
+- `./tellymcp-firefox-attach`
+- `./tellymcp-chrome-attach`
 
 Если используешь Codex:
 

@@ -8,6 +8,10 @@ import type {
   TelegramXchangeFileMeta,
 } from "../../../entities/inbox/model/types";
 import type {
+  BrowserAttachmentRecord,
+  BrowserRecordingRecord,
+} from "../../../entities/browser/model/types";
+import type {
   PendingRequestRecord,
   PendingResolution,
 } from "../../../entities/request/model/types";
@@ -113,6 +117,12 @@ export interface MaintenanceStore {
   pruneAll(): Promise<{ deletedKeys: number }>;
   getGatewayClientUuid(): Promise<string | null>;
   setGatewayClientUuid(clientUuid: string): Promise<void>;
+  getBrowserAttachment(sessionId: string): Promise<BrowserAttachmentRecord | null>;
+  setBrowserAttachment(record: BrowserAttachmentRecord): Promise<void>;
+  clearBrowserAttachment(sessionId: string): Promise<void>;
+  getBrowserRecording(sessionId: string): Promise<BrowserRecordingRecord | null>;
+  setBrowserRecording(record: BrowserRecordingRecord): Promise<void>;
+  clearBrowserRecording(sessionId: string): Promise<void>;
   setProjectMenuViewState(state: ProjectMenuViewState): Promise<void>;
   listProjectMenuViewStates(projectUuid: string): Promise<ProjectMenuViewState[]>;
   deleteProjectMenuViewState(sessionId: string, projectUuid: string): Promise<boolean>;

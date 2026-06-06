@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -13,6 +14,18 @@ import type {
 
 import type { AppConfig } from "../../../app/config/env";
 import type {
+  BrowserListAttachedInstancesInput,
+  BrowserListAttachedInstancesOutput,
+  BrowserListTabsInput,
+  BrowserListTabsOutput,
+  BrowserRecordingRecord,
+  BrowserRecordingStartInput,
+  BrowserRecordingStartOutput,
+  BrowserRecordingStatusInput,
+  BrowserRecordingStatusOutput,
+  BrowserRecordingStopInput,
+  BrowserRecordingStopOutput,
+  BrowserAttachmentRecord,
   BrowserCloseInput,
   BrowserCloseOutput,
   BrowserComputedStyleInput,
@@ -34,6 +47,8 @@ import type {
   BrowserOpenOutput,
   BrowserPressInput,
   BrowserPressOutput,
+  BrowserInjectScriptInput,
+  BrowserInjectScriptOutput,
   BrowserWaitForInput,
   BrowserWaitForOutput,
   BrowserWaitForUrlInput,
@@ -60,6 +75,7 @@ import {
   callGatewayJson,
   ensureGatewayClientUuid,
 } from "../../distributed-client/model/gatewayClientAccess";
+import type { FirefoxAttachInstanceRecord } from "../../browser-attach/model/firefoxAttachRegistry";
 
 type WaitUntilState = "load" | "domcontentloaded" | "networkidle" | "commit";
 
@@ -178,6 +194,27 @@ type RemoteConsoleInvoker = {
   ): Promise<T>;
 };
 
+type FirefoxAttachHost = {
+  listInstances(): FirefoxAttachInstanceRecord[];
+  getRecordingStatus(sessionId: string): Promise<BrowserRecordingRecord | null>;
+  startRecording(input: {
+    sessionId: string;
+    instanceId: string;
+    tabId: number;
+    tabTitle: string;
+    tabUrl?: string | undefined;
+  }): Promise<BrowserRecordingRecord>;
+  stopRecording(input: {
+    sessionId: string;
+  }): Promise<BrowserRecordingRecord | null>;
+  invokeTabAction(input: {
+    instanceId: string;
+    tabId: number;
+    action: "dom" | "click" | "fill" | "press" | "screenshot" | "inject_script";
+    payload?: Record<string, unknown> | undefined;
+  }): Promise<Record<string, unknown> | undefined>;
+};
+
 const DEFAULT_BROWSER_VIEWPORT_WIDTH = 1720;
 const DEFAULT_BROWSER_VIEWPORT_HEIGHT = 980;
 
@@ -199,7 +236,235 @@ export class BrowserService {
     private readonly logger: Logger,
     private readonly projectIdentityResolver: ProjectIdentityResolver,
     private readonly remoteConsoleInvoker?: RemoteConsoleInvoker,
+    private readonly firefoxAttachRegistry?: FirefoxAttachHost,
   ) {}
+
+  public async listAttachedInstances(
+    input: BrowserListAttachedInstancesInput,
+  ): Promise<BrowserListAttachedInstancesOutput> {
+    const resolvedSessionId = await this.resolveOptionalSessionIdForRemote(input);
+    if (resolvedSessionId) {
+      const remote = await this.invokeRemote<BrowserListAttachedInstancesOutput>(
+        resolvedSessionId,
+        "telegramMcp.browser.listAttachedInstancesRemote",
+        {
+          ...input,
+          session_id: resolvedSessionId,
+        },
+      );
+      if (remote) {
+        return remote;
+      }
+    }
+
+    const instances = this.listFirefoxAttachInstances();
+    return {
+      ...(resolvedSessionId ? { session_id: resolvedSessionId } : {}),
+      total: instances.length,
+      instances: instances.map((instance) => ({
+        instance_id: instance.instanceId,
+        browser: instance.browser,
+        extension_version: instance.extensionVersion,
+        ...(instance.profileName ? { profile_name: instance.profileName } : {}),
+        connected_at: instance.connectedAt,
+        last_seen_at: instance.lastSeenAt,
+        capabilities: [...instance.capabilities],
+        tab_count: instance.tabs.length,
+        ...(instance.activeTab
+          ? {
+              active_tab: {
+                tab_id: instance.activeTab.tab_id,
+                ...(typeof instance.activeTab.window_id === "number"
+                  ? { window_id: instance.activeTab.window_id }
+                  : {}),
+                active: instance.activeTab.active,
+                title: instance.activeTab.title,
+                url: instance.activeTab.url,
+                ...(instance.activeTab.status
+                  ? { status: instance.activeTab.status }
+                  : {}),
+              },
+            }
+          : {}),
+      })),
+    };
+  }
+
+  public async listTabs(input: BrowserListTabsInput): Promise<BrowserListTabsOutput> {
+    const resolvedSessionId = await this.resolveOptionalSessionIdForRemote(input);
+    if (resolvedSessionId) {
+      const remote = await this.invokeRemote<BrowserListTabsOutput>(
+        resolvedSessionId,
+        "telegramMcp.browser.listTabsRemote",
+        {
+          ...input,
+          session_id: resolvedSessionId,
+        },
+      );
+      if (remote) {
+        return remote;
+      }
+    }
+
+    const instances = this.listFirefoxAttachInstances();
+    const instance =
+      input.instance_id?.trim()
+        ? instances.find((item) => item.instanceId === input.instance_id?.trim())
+        : instances.length === 1
+          ? instances[0]
+          : undefined;
+
+    if (!instance) {
+      if (input.instance_id?.trim()) {
+        throw new Error(
+          `Attached browser instance '${input.instance_id.trim()}' was not found.`,
+        );
+      }
+      throw new Error(
+        "Attached browser instance is ambiguous. Pass instance_id or keep exactly one connected browser instance.",
+      );
+    }
+
+    const selectedAttachment = resolvedSessionId
+      ? await this.getAttachedBrowserAttachment(resolvedSessionId)
+      : null;
+
+    return {
+      ...(resolvedSessionId ? { session_id: resolvedSessionId } : {}),
+      instance_id: instance.instanceId,
+      total: instance.tabs.length,
+      tabs: instance.tabs.map((tab) => ({
+        tab_id: tab.tab_id,
+        ...(typeof tab.window_id === "number" ? { window_id: tab.window_id } : {}),
+        active: tab.active,
+        ...(selectedAttachment &&
+        selectedAttachment.instanceId === instance.instanceId &&
+        selectedAttachment.tabId === tab.tab_id
+          ? { selected: true }
+          : {}),
+        title: tab.title,
+        url: tab.url,
+        ...(tab.status ? { status: tab.status } : {}),
+      })),
+    };
+  }
+
+  public async startRecording(
+    input: BrowserRecordingStartInput,
+  ): Promise<BrowserRecordingStartOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
+      resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserRecordingStartOutput>(
+      normalizedSessionId,
+      "telegramMcp.browser.startRecordingRemote",
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
+    );
+    if (remote) {
+      return remote;
+    }
+
+    const attached = await this.getAttachedBrowserAttachment(normalizedSessionId);
+    if (!attached) {
+      throw new Error(
+        "No attached Firefox tab is selected for this session. Select a tab in the extension popup first.",
+      );
+    }
+    if (!this.firefoxAttachRegistry) {
+      throw new Error("Firefox attach backend is not available.");
+    }
+
+    const record = await this.firefoxAttachRegistry.startRecording({
+      sessionId: normalizedSessionId,
+      instanceId: input.instance_id?.trim() || attached.instanceId,
+      tabId: attached.tabId,
+      tabTitle: attached.title?.trim() || "attached-tab",
+      ...(attached.url ? { tabUrl: attached.url } : {}),
+    });
+
+    return this.mapRecordingRecord(normalizedSessionId, record);
+  }
+
+  public async stopRecording(
+    input: BrowserRecordingStopInput,
+  ): Promise<BrowserRecordingStopOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
+      resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserRecordingStopOutput>(
+      normalizedSessionId,
+      "telegramMcp.browser.stopRecordingRemote",
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
+    );
+    if (remote) {
+      return remote;
+    }
+
+    if (!this.firefoxAttachRegistry) {
+      throw new Error("Firefox attach backend is not available.");
+    }
+
+    const record = await this.firefoxAttachRegistry.stopRecording({
+      sessionId: normalizedSessionId,
+    });
+    if (!record) {
+      return {
+        session_id: normalizedSessionId,
+        stopped: false,
+      };
+    }
+
+    return {
+      session_id: normalizedSessionId,
+      stopped: true,
+      recording_id: record.recordingId,
+      bundle_dir_name: record.bundleDirName,
+      bundle_relative_path: record.bundleRelativePath,
+      bundle_path: record.bundlePath,
+      ...(record.stoppedAt ? { stopped_at: record.stoppedAt } : {}),
+    };
+  }
+
+  public async getRecordingStatus(
+    input: BrowserRecordingStatusInput,
+  ): Promise<BrowserRecordingStatusOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
+      resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserRecordingStatusOutput>(
+      normalizedSessionId,
+      "telegramMcp.browser.getRecordingStatusRemote",
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
+    );
+    if (remote) {
+      return remote;
+    }
+
+    if (!this.firefoxAttachRegistry) {
+      throw new Error("Firefox attach backend is not available.");
+    }
+
+    const record = await this.firefoxAttachRegistry.getRecordingStatus(
+      normalizedSessionId,
+    );
+    return {
+      session_id: normalizedSessionId,
+      active: record?.status === "recording",
+      ...(record ? { recording: this.mapRecordingStatusRecord(record) } : {}),
+    };
+  }
 
   public async open(input: BrowserOpenInput): Promise<BrowserOpenOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
@@ -336,6 +601,22 @@ export class BrowserService {
       return remote;
     }
     this.ensureEnabled();
+    const attached = await this.getAttachedBrowserAttachment(normalizedSessionId);
+    if (attached) {
+      const result = await this.runAttachedTabAction(normalizedSessionId, attached, {
+        action: "click",
+        payload: this.buildAttachedLocatorPayload(input),
+      });
+      return {
+        session_id: normalizedSessionId,
+        clicked: true,
+        ...(input.ai_tag ? { ai_tag: input.ai_tag } : {}),
+        ...(input.selector ? { selector: input.selector } : {}),
+        ...(input.text ? { text: input.text } : {}),
+        url: String(result?.url || attached.url || ""),
+        ...(result?.title ? { title: String(result.title) } : {}),
+      };
+    }
     const { sessionId, state } = await this.requireSessionState(input);
     const locator = this.resolveLocator(state.page, input);
     await locator.click({
@@ -374,6 +655,26 @@ export class BrowserService {
       return remote;
     }
     this.ensureEnabled();
+    const attached = await this.getAttachedBrowserAttachment(normalizedSessionId);
+    if (attached) {
+      const result = await this.runAttachedTabAction(normalizedSessionId, attached, {
+        action: "fill",
+        payload: {
+          ...this.buildAttachedLocatorPayload(input),
+          value: input.value,
+        },
+      });
+      return {
+        session_id: normalizedSessionId,
+        filled: true,
+        ...(input.ai_tag ? { ai_tag: input.ai_tag } : {}),
+        ...(input.selector ? { selector: input.selector } : {}),
+        ...(input.text ? { text: input.text } : {}),
+        value_length: input.value.length,
+        url: String(result?.url || attached.url || ""),
+        ...(result?.title ? { title: String(result.title) } : {}),
+      };
+    }
     const { sessionId, state } = await this.requireSessionState(input);
     const locator = this.resolveLocator(state.page, input);
     await locator.fill(input.value, {
@@ -413,6 +714,26 @@ export class BrowserService {
       return remote;
     }
     this.ensureEnabled();
+    const attached = await this.getAttachedBrowserAttachment(normalizedSessionId);
+    if (attached) {
+      const result = await this.runAttachedTabAction(normalizedSessionId, attached, {
+        action: "press",
+        payload: {
+          ...this.buildAttachedLocatorPayload(input),
+          key: input.key,
+        },
+      });
+      return {
+        session_id: normalizedSessionId,
+        pressed: true,
+        key: input.key,
+        ...(input.ai_tag ? { ai_tag: input.ai_tag } : {}),
+        ...(input.selector ? { selector: input.selector } : {}),
+        ...(input.text ? { text: input.text } : {}),
+        url: String(result?.url || attached.url || ""),
+        ...(result?.title ? { title: String(result.title) } : {}),
+      };
+    }
     const { sessionId, state } = await this.requireSessionState(input);
 
     if (input.selector || input.text) {
@@ -435,6 +756,82 @@ export class BrowserService {
       ...(input.ai_tag ? { ai_tag: input.ai_tag } : {}),
       ...(input.selector ? { selector: input.selector } : {}),
       ...(input.text ? { text: input.text } : {}),
+      url: state.currentUrl,
+      ...(state.title ? { title: state.title } : {}),
+    };
+  }
+
+  public async injectScript(
+    input: BrowserInjectScriptInput,
+  ): Promise<BrowserInjectScriptOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
+      resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserInjectScriptOutput>(
+      normalizedSessionId,
+      "telegramMcp.browser.injectScriptRemote",
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
+    );
+    if (remote) {
+      return remote;
+    }
+
+    this.ensureEnabled();
+
+    const namespace = input.namespace?.trim() || "TELLY";
+    const source =
+      input.source?.trim().length
+        ? input.source
+        : input.file_path?.trim()
+          ? await readFile(path.resolve(input.file_path.trim()), "utf8")
+          : null;
+
+    if (!source) {
+      throw new Error("Provide source or file_path.");
+    }
+
+    const sourceType = input.source?.trim().length ? "inline" : "file";
+
+    const wrappedSource = this.wrapInjectedScript(source, namespace);
+    const attached = await this.getAttachedBrowserAttachment(normalizedSessionId);
+    if (attached) {
+      const result = await this.runAttachedTabAction(normalizedSessionId, attached, {
+        action: "inject_script",
+        payload: {
+          namespace,
+          source,
+        },
+      });
+      return {
+        session_id: normalizedSessionId,
+        injected: true,
+        namespace,
+        source_type: sourceType,
+        bytes: Buffer.byteLength(source, "utf8"),
+        url: String(result?.url || attached.url || ""),
+        ...(result?.title ? { title: String(result.title) } : {}),
+      };
+    }
+
+    const { sessionId, state } = await this.requireSessionState(input);
+    await state.page.addScriptTag({
+      content: wrappedSource,
+    });
+
+    state.currentUrl = state.page.url();
+    state.title = await state.page.title().catch(() => state.title);
+    state.lastUsedAt = new Date().toISOString();
+
+    return {
+      session_id: sessionId,
+      injected: true,
+      namespace,
+      source_type: sourceType,
+      bytes: Buffer.byteLength(source, "utf8"),
       url: state.currentUrl,
       ...(state.title ? { title: state.title } : {}),
     };
@@ -714,6 +1111,37 @@ export class BrowserService {
       return remote;
     }
     this.ensureEnabled();
+    const attached = await this.getAttachedBrowserAttachment(normalizedSessionId);
+    if (attached) {
+      const selector = input.selector?.trim() || "body";
+      const result = await this.runAttachedTabAction(normalizedSessionId, attached, {
+        action: "dom",
+        payload: {
+          selector,
+          include_html: input.include_html !== false,
+          include_text: input.include_text !== false,
+        },
+      });
+      return {
+        session_id: normalizedSessionId,
+        selector,
+        found: result?.found === true,
+        ...(result?.url ? { url: String(result.url) } : {}),
+        ...(result?.title ? { title: String(result.title) } : {}),
+        ...(typeof result?.outer_html === "string"
+          ? { outer_html: result.outer_html }
+          : {}),
+        ...(typeof result?.text_content === "string"
+          ? { text_content: result.text_content }
+          : {}),
+        ...(typeof result?.visible === "boolean"
+          ? { visible: result.visible }
+          : {}),
+        ...(result?.attributes && typeof result.attributes === "object"
+          ? { attributes: result.attributes as Record<string, string> }
+          : {}),
+      };
+    }
     const { sessionId, state } = await this.requireSessionState(input);
     const selector = input.selector?.trim() || "body";
     const snapshot: BrowserDomSnapshot = await state.page
@@ -880,6 +1308,82 @@ export class BrowserService {
       return remote;
     }
     this.ensureEnabled();
+    const attached = await this.getAttachedBrowserAttachment(normalizedSessionId);
+    if (attached) {
+      const session = await this.sessionStore.getSession(normalizedSessionId);
+      const fileName = sanitizeScreenshotName(input.file_name);
+      const result = await this.runAttachedTabAction(normalizedSessionId, attached, {
+        action: "screenshot",
+      });
+      const pngBase64 = typeof result?.png_base64 === "string" ? result.png_base64 : "";
+      if (!pngBase64) {
+        throw new Error("Attached browser screenshot did not return PNG data.");
+      }
+      const pngBuffer = Buffer.from(pngBase64, "base64");
+      const workspaceDir = this.objectStore.resolveWorkspaceDir(session);
+      const exchangeDir = path.resolve(workspaceDir, this.config.exchange.dir);
+      const storedFile = await this.objectStore.storeFile({
+        session,
+        sessionId: normalizedSessionId,
+        source: "browser-screenshot",
+        relativePath: buildDatedRelativePath(fileName),
+        content: pngBuffer,
+        mimeType: "image/png",
+      });
+      await this.xchangeFileMetaStore.setXchangeFileMeta({
+        sessionId: normalizedSessionId,
+        filePath: storedFile.filePath,
+        relativePath: storedFile.relativePath,
+        source: "browser-screenshot",
+        uploadedAt: new Date().toISOString(),
+        storageRef: storedFile.storageRef,
+        bucketName: storedFile.bucketName,
+        objectName: storedFile.objectName,
+        vfsNodeId: storedFile.vfsNodeId,
+        vfsPublicUrl: storedFile.vfsPublicUrl,
+        vfsParentId: storedFile.vfsParentId,
+        mimeType: "image/png",
+        sizeBytes: storedFile.sizeBytes,
+        ...(input.caption ? { caption: input.caption } : {}),
+      });
+
+      let telegramMessageId: number | undefined;
+      if (input.send_to_telegram === true) {
+        if (this.config.distributed.mode === "client") {
+          telegramMessageId = await this.sendScreenshotToGatewayTelegramRoute({
+            sessionId: normalizedSessionId,
+            fileName,
+            pngBuffer,
+            ...(input.caption ? { caption: input.caption } : {}),
+          });
+        } else {
+          const binding = await this.bindingStore.getBinding(normalizedSessionId);
+          if (!binding) {
+            throw new Error(
+              "Session is not linked to Telegram, so screenshot cannot be sent there.",
+            );
+          }
+          const sent = await this.telegramTransport.sendDocumentToChat(
+            binding.telegramChatId,
+            storedFile.filePath,
+            input.caption,
+          );
+          telegramMessageId = sent.messageId;
+        }
+      }
+
+      return {
+        session_id: normalizedSessionId,
+        file_path: storedFile.filePath,
+        workspace_dir: workspaceDir,
+        exchange_dir: exchangeDir,
+        ...(typeof telegramMessageId === "number"
+          ? { telegram_message_id: telegramMessageId }
+          : {}),
+        ...(result?.url ? { url: String(result.url) } : {}),
+        ...(result?.title ? { title: String(result.title) } : {}),
+      };
+    }
     const { sessionId, state, session } = await this.requireSessionState(input);
     const fileName = sanitizeScreenshotName(input.file_name);
     const pngBuffer = input.selector?.trim()
@@ -1274,6 +1778,137 @@ export class BrowserService {
 
     const localSession = await this.sessionStore.getSession(localSessionId);
     return localSession ? localSessionId : trimmed;
+  }
+
+  private async resolveOptionalSessionIdForRemote(
+    input: { session_id?: string | undefined },
+  ): Promise<string | undefined> {
+    const trimmed = input.session_id?.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    return await this.normalizeSessionIdForAccess(trimmed);
+  }
+
+  private listFirefoxAttachInstances(): FirefoxAttachInstanceRecord[] {
+    if (!this.firefoxAttachRegistry) {
+      return [];
+    }
+    return this.firefoxAttachRegistry.listInstances();
+  }
+
+  private buildAttachedLocatorPayload(
+    input: Pick<BrowserClickInput, "ai_tag" | "selector" | "text" | "exact">,
+  ): Record<string, unknown> {
+    return {
+      ...(input.ai_tag?.trim() ? { ai_tag: input.ai_tag.trim() } : {}),
+      ...(input.selector?.trim() ? { selector: input.selector.trim() } : {}),
+      ...(input.text?.trim() ? { text: input.text.trim() } : {}),
+      ...(typeof input.exact === "boolean" ? { exact: input.exact } : {}),
+    };
+  }
+
+  private async getAttachedBrowserAttachment(
+    sessionId: string,
+  ): Promise<BrowserAttachmentRecord | null> {
+    return await this.maintenanceStore.getBrowserAttachment(sessionId);
+  }
+
+  private mapRecordingRecord(
+    sessionId: string,
+    record: BrowserRecordingRecord,
+  ): BrowserRecordingStartOutput {
+    return {
+      session_id: sessionId,
+      started: true,
+      backend: "firefox-attached",
+      recording_id: record.recordingId,
+      instance_id: record.instanceId,
+      tab_id: record.tabId,
+      ...(record.tabTitle ? { tab_title: record.tabTitle } : {}),
+      ...(record.tabUrl ? { tab_url: record.tabUrl } : {}),
+      bundle_dir_name: record.bundleDirName,
+      bundle_relative_path: record.bundleRelativePath,
+      bundle_path: record.bundlePath,
+      started_at: record.startedAt,
+    };
+  }
+
+  private mapRecordingStatusRecord(
+    record: BrowserRecordingRecord,
+  ): NonNullable<BrowserRecordingStatusOutput["recording"]> {
+    return {
+      backend: "firefox-attached",
+      recording_id: record.recordingId,
+      instance_id: record.instanceId,
+      tab_id: record.tabId,
+      ...(record.tabTitle ? { tab_title: record.tabTitle } : {}),
+      ...(record.tabUrl ? { tab_url: record.tabUrl } : {}),
+      bundle_dir_name: record.bundleDirName,
+      bundle_relative_path: record.bundleRelativePath,
+      bundle_path: record.bundlePath,
+      started_at: record.startedAt,
+      ...(record.stoppedAt ? { stopped_at: record.stoppedAt } : {}),
+      status: record.status,
+      event_count: record.eventCount,
+      ...(record.lastEventAt ? { last_event_at: record.lastEventAt } : {}),
+    };
+  }
+
+  private async runAttachedTabAction(
+    sessionId: string,
+    attachment: BrowserAttachmentRecord,
+    input: {
+      action: "dom" | "click" | "fill" | "press" | "screenshot" | "inject_script";
+      payload?: Record<string, unknown> | undefined;
+    },
+  ): Promise<Record<string, unknown> | undefined> {
+    if (!this.firefoxAttachRegistry) {
+      throw new Error("Attached browser backend is not available.");
+    }
+
+    const result = await this.firefoxAttachRegistry.invokeTabAction({
+      instanceId: attachment.instanceId,
+      tabId: attachment.tabId,
+      action: input.action,
+      payload: input.payload,
+    });
+
+    await this.maintenanceStore.setBrowserAttachment({
+      ...attachment,
+      ...(result?.title ? { title: String(result.title) } : {}),
+      ...(result?.url ? { url: String(result.url) } : {}),
+    });
+
+    this.logger.info("Attached browser tab action executed", {
+      sessionId,
+      instanceId: attachment.instanceId,
+      tabId: attachment.tabId,
+      action: input.action,
+    });
+
+    return result;
+  }
+
+  private wrapInjectedScript(source: string, namespace: string): string {
+    return `const __tellyNamespace = ${JSON.stringify(namespace)};
+window[__tellyNamespace] = window[__tellyNamespace] || {};
+var TELLY = window[__tellyNamespace];
+const __tellyBeforeKeys = new Set(Object.getOwnPropertyNames(window));
+${source}
+for (const __tellyKey of Object.getOwnPropertyNames(window)) {
+  if (__tellyBeforeKeys.has(__tellyKey)) {
+    continue;
+  }
+  if (__tellyKey === __tellyNamespace) {
+    continue;
+  }
+  try {
+    window[__tellyNamespace][__tellyKey] = window[__tellyKey];
+  } catch {
+    // ignore unassignable globals
+  }
+}`;
   }
 
   private async sendScreenshotToGatewayTelegramRoute(input: {

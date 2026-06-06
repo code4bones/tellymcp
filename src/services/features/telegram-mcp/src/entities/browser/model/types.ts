@@ -22,6 +22,170 @@ export type BrowserOpenOutput = {
   viewport_height?: number | undefined;
 };
 
+export type BrowserListAttachedInstancesInput = {
+  session_id?: string | undefined;
+};
+
+export type BrowserListAttachedInstancesOutput = {
+  session_id?: string | undefined;
+  total: number;
+  instances: Array<{
+    instance_id: string;
+    browser: "firefox";
+    extension_version: string;
+    profile_name?: string | undefined;
+    connected_at: string;
+    last_seen_at: string;
+    capabilities: string[];
+    tab_count: number;
+    active_tab?: {
+      tab_id: number;
+      window_id?: number | undefined;
+      active: boolean;
+      title: string;
+      url: string;
+      status?: string | undefined;
+    } | undefined;
+  }>;
+};
+
+export type BrowserListTabsInput = {
+  session_id?: string | undefined;
+  instance_id?: string | undefined;
+};
+
+export type BrowserListTabsOutput = {
+  session_id?: string | undefined;
+  instance_id: string;
+  total: number;
+  tabs: Array<{
+    tab_id: number;
+    window_id?: number | undefined;
+    active: boolean;
+    selected?: boolean | undefined;
+    title: string;
+    url: string;
+    status?: string | undefined;
+  }>;
+};
+
+export type BrowserAttachActiveTabInput = {
+  session_id?: string | undefined;
+  instance_id?: string | undefined;
+};
+
+export type BrowserAttachTabInput = {
+  session_id?: string | undefined;
+  instance_id?: string | undefined;
+  tab_id: number;
+};
+
+export type BrowserAttachTabOutput = {
+  session_id: string;
+  backend: "firefox-attached";
+  instance_id: string;
+  tab_id: number;
+  attached_at: string;
+  title?: string | undefined;
+  url?: string | undefined;
+};
+
+export type BrowserDetachTabInput = {
+  session_id?: string | undefined;
+};
+
+export type BrowserDetachTabOutput = {
+  session_id: string;
+  detached: boolean;
+};
+
+export type BrowserAttachmentRecord = {
+  sessionId: string;
+  backend: "firefox-attached";
+  instanceId: string;
+  tabId: number;
+  attachedAt: string;
+  title?: string | undefined;
+  url?: string | undefined;
+};
+
+export type BrowserRecordingRecord = {
+  sessionId: string;
+  backend: "firefox-attached";
+  recordingId: string;
+  instanceId: string;
+  tabId: number;
+  tabTitle?: string | undefined;
+  tabUrl?: string | undefined;
+  bundleDirName: string;
+  bundleRelativePath: string;
+  bundlePath: string;
+  startedAt: string;
+  stoppedAt?: string | undefined;
+  status: "recording" | "stopped";
+  eventCount: number;
+  lastEventAt?: string | undefined;
+};
+
+export type BrowserRecordingStartInput = {
+  session_id?: string | undefined;
+  instance_id?: string | undefined;
+};
+
+export type BrowserRecordingStartOutput = {
+  session_id: string;
+  backend: "firefox-attached";
+  started: boolean;
+  recording_id: string;
+  instance_id: string;
+  tab_id: number;
+  tab_title?: string | undefined;
+  tab_url?: string | undefined;
+  bundle_dir_name: string;
+  bundle_relative_path: string;
+  bundle_path: string;
+  started_at: string;
+};
+
+export type BrowserRecordingStopInput = {
+  session_id?: string | undefined;
+};
+
+export type BrowserRecordingStopOutput = {
+  session_id: string;
+  stopped: boolean;
+  recording_id?: string | undefined;
+  bundle_dir_name?: string | undefined;
+  bundle_relative_path?: string | undefined;
+  bundle_path?: string | undefined;
+  stopped_at?: string | undefined;
+};
+
+export type BrowserRecordingStatusInput = {
+  session_id?: string | undefined;
+};
+
+export type BrowserRecordingStatusOutput = {
+  session_id: string;
+  active: boolean;
+  recording?: {
+    backend: "firefox-attached";
+    recording_id: string;
+    instance_id: string;
+    tab_id: number;
+    tab_title?: string | undefined;
+    tab_url?: string | undefined;
+    bundle_dir_name: string;
+    bundle_relative_path: string;
+    bundle_path: string;
+    started_at: string;
+    stopped_at?: string | undefined;
+    status: "recording" | "stopped";
+    event_count: number;
+    last_event_at?: string | undefined;
+  } | undefined;
+};
+
 export type BrowserConsoleInput = {
   session_id?: string | undefined;
   limit?: number | undefined;
@@ -91,6 +255,23 @@ export type BrowserPressOutput = {
   ai_tag?: string | undefined;
   selector?: string | undefined;
   text?: string | undefined;
+  url: string;
+  title?: string | undefined;
+};
+
+export type BrowserInjectScriptInput = {
+  session_id?: string | undefined;
+  source?: string | undefined;
+  file_path?: string | undefined;
+  namespace?: string | undefined;
+};
+
+export type BrowserInjectScriptOutput = {
+  session_id: string;
+  injected: boolean;
+  namespace: string;
+  source_type: "inline" | "file";
+  bytes: number;
   url: string;
   title?: string | undefined;
 };

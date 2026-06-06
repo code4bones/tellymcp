@@ -8,6 +8,7 @@ export default tseslint.config(
     ignores: [
       "dist/**",
       "node_modules/**",
+      "packages/**/dist/**",
       "scripts/**",
       "public/**",
       "eslint.config.js",
@@ -68,6 +69,35 @@ export default tseslint.config(
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-require-imports": "off",
+    },
+  },
+  {
+    files: [
+      "packages/firefox-attach-extension/src/**/*.js",
+      "packages/firefox-attach-extension/src/**/*.mjs",
+      "packages/chrome-attach-extension/src/**/*.js",
+      "packages/chrome-attach-extension/src/**/*.mjs",
+    ],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      globals: {
+        ...globals.browser,
+        ...globals.webextensions,
+      },
+    },
+  },
+  {
+    files: [
+      "packages/firefox-attach-extension/scripts/**/*.mjs",
+      "packages/chrome-attach-extension/scripts/**/*.mjs",
+    ],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      globals: {
+        ...globals.node,
+      },
     },
   },
 );

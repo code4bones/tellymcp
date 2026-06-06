@@ -31,6 +31,8 @@ Optional:
 
 ```bash
 tellymcp browser install
+tellymcp extension firefox
+tellymcp extension chrome
 tellymcp codex-plugin install
 ```
 
@@ -91,7 +93,41 @@ TELLYMCP_SESSION_ID=NEW
 TELLYMCP_SESSION_LABEL=NEW
 ```
 
-## 5. Run
+## 5. Attached Browser Extensions
+
+If you want to attach TellyMCP to an already running Firefox or Chrome tab on an agent machine, enable the local attach bridge in that agent env:
+
+```env
+BROWSER_ATTACH_ENABLED=true
+BROWSER_ATTACH_WS_HOST=127.0.0.1
+BROWSER_ATTACH_WS_PORT=9999
+BROWSER_ATTACH_WS_PATH=/browser-attach/ws
+```
+
+Export the unpacked extension bundle from the installed package:
+
+```bash
+tellymcp extension firefox
+tellymcp extension chrome
+```
+
+This creates one of:
+
+- `./tellymcp-firefox-attach`
+- `./tellymcp-chrome-attach`
+
+Load it into the local browser:
+
+- Firefox: `about:debugging#/runtime/this-firefox` -> `Load Temporary Add-on` -> choose `manifest.json`
+- Chrome: `chrome://extensions` -> enable Developer mode -> `Load unpacked` -> choose the exported directory
+
+After that the browser control panel can:
+
+- attach the current agent session to a live browser tab
+- start and stop structured recording bundles in `.mcp-xchange/web/...`
+- inject helper scripts into the attached tab
+
+## 6. Run
 
 Gateway:
 
@@ -111,7 +147,7 @@ After `.mcpsession.json` is created in the workspace, later runs can usually use
 tellymcp run
 ```
 
-## 6. Webhook
+## 7. Webhook
 
 Gateway supports polling and webhook.
 
@@ -131,7 +167,7 @@ If nginx already proxies `location /api/ { ... }` to the standalone listener, th
 - `/api/webapp`
 - `/api/healthz`
 
-## 7. MCP
+## 8. MCP
 
 Local client-mode MCP:
 
@@ -141,7 +177,7 @@ http://127.0.0.1:8787/mcp
 
 Use the MCP HTTP endpoint exposed by `tellymcp run`.
 
-## 8. Health Checks
+## 9. Health Checks
 
 ```bash
 tellymcp doctor --env .env
@@ -153,7 +189,7 @@ Destructive cleanup:
 tellymcp system-prune --env .env --yes
 ```
 
-## 9. Operational Notes
+## 10. Operational Notes
 
 - the gateway bot is the user-facing control plane
 - consoles are discovered from the gateway live registry
@@ -162,7 +198,7 @@ tellymcp system-prune --env .env --yes
 - browser screenshot replies to humans should use `browser_screenshot(send_to_telegram=true)`
 - file results between consoles should use `send_partner_file`
 
-## 10. Legacy Concepts To Avoid
+## 11. Legacy Concepts To Avoid
 
 Do not build new setups around:
 

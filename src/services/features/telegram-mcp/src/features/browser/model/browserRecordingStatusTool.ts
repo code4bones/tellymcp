@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import {
-  browserClickInputSchema,
-  browserClickOutputSchema,
+  browserRecordingStatusInputSchema,
+  browserRecordingStatusOutputSchema,
 } from "../../../entities/request/model/schema";
 import type { ToolModule } from "../../../shared/api/tool-registry/types";
 import { BrowserService } from "./browserService";
@@ -11,21 +11,21 @@ function createContent(output: unknown): Array<{ type: "text"; text: string }> {
   return [{ type: "text", text: JSON.stringify(output, null, 2) }];
 }
 
-export class BrowserClickTool implements ToolModule {
+export class BrowserRecordingStatusTool implements ToolModule {
   public constructor(private readonly browserService: BrowserService) {}
 
   public register(server: McpServer): void {
     server.registerTool(
-      "browser_click",
+      "browser_recording_status",
       {
-        title: "Browser Click",
+        title: "Browser Recording Status",
         description:
-          "Click an element in the current session browser target by CSS selector or visible text. If the session has a selected attached Firefox tab, click there; otherwise use the isolated Playwright page.",
-        inputSchema: browserClickInputSchema,
-        outputSchema: browserClickOutputSchema,
+          "Report whether a structured browser recording is active for the current MCP session, and return the current bundle path and metadata if it exists.",
+        inputSchema: browserRecordingStatusInputSchema,
+        outputSchema: browserRecordingStatusOutputSchema,
       },
       async (args) => {
-        const output = await this.browserService.click(args);
+        const output = await this.browserService.getRecordingStatus(args);
         return {
           content: createContent(output),
           structuredContent: output,

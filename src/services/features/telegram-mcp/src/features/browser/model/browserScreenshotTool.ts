@@ -20,7 +20,7 @@ export class BrowserScreenshotTool implements ToolModule {
       {
         title: "Browser Screenshot",
         description:
-          "Capture a screenshot from the Playwright tab for the current session. By default it is saved into .mcp-xchange. If the user wants the screenshot sent back to the human in Telegram, set send_to_telegram=true so the PNG is delivered through the gateway route instead of forcing a separate file-delivery workaround.",
+          "Capture a screenshot from the current session browser target. If the session has a selected attached Firefox tab, capture that real browser tab; otherwise use the isolated Playwright page. By default it is saved into .mcp-xchange. If the user wants the screenshot sent back to the human in Telegram, set send_to_telegram=true so the PNG is delivered through the gateway route instead of forcing a separate file-delivery workaround.",
         inputSchema: browserScreenshotInputSchema,
         outputSchema: browserScreenshotOutputSchema,
       },

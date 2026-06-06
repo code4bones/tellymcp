@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "TellyMCP Chrome Attach",
+  "version": "0.0.1",
+  "description": "Attach TellyMCP to an already running Chrome session.",
+  "permissions": [
+    "tabs",
+    "activeTab",
+    "storage",
+    "cookies",
+    "webNavigation",
+    "webRequest",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "TellyMCP Chrome Attach",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "recorder-page.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}

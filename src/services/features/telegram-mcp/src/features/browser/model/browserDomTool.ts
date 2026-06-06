@@ -20,7 +20,7 @@ export class BrowserDomTool implements ToolModule {
       {
         title: "Browser DOM",
         description:
-          "Inspect a DOM element in the Playwright tab for the current session and return text, HTML, attributes, and visibility.",
+          "Inspect a DOM element in the current session browser target and return text, HTML, attributes, and visibility. If the session has a selected attached Firefox tab, inspect that tab; otherwise use the isolated Playwright page.",
         inputSchema: browserDomInputSchema,
         outputSchema: browserDomOutputSchema,
       },

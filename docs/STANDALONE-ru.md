@@ -31,6 +31,8 @@ npm install -g @deadragdoll/tellymcp
 
 ```bash
 tellymcp browser install
+tellymcp extension firefox
+tellymcp extension chrome
 tellymcp codex-plugin install
 ```
 
@@ -91,7 +93,41 @@ TELLYMCP_SESSION_ID=NEW
 TELLYMCP_SESSION_LABEL=NEW
 ```
 
-## 5. Запуск
+## 5. Attach extensions для браузера
+
+Если нужно attach'иться к уже открытому Firefox или Chrome на агентской машине, включи локальный attach bridge в env этого агента:
+
+```env
+BROWSER_ATTACH_ENABLED=true
+BROWSER_ATTACH_WS_HOST=127.0.0.1
+BROWSER_ATTACH_WS_PORT=9999
+BROWSER_ATTACH_WS_PATH=/browser-attach/ws
+```
+
+Выгрузи unpacked extension bundle из установленного пакета:
+
+```bash
+tellymcp extension firefox
+tellymcp extension chrome
+```
+
+Команда создаст один из каталогов:
+
+- `./tellymcp-firefox-attach`
+- `./tellymcp-chrome-attach`
+
+Дальше загрузи его в локальный браузер:
+
+- Firefox: `about:debugging#/runtime/this-firefox` -> `Load Temporary Add-on` -> выбрать `manifest.json`
+- Chrome: `chrome://extensions` -> включить Developer mode -> `Load unpacked` -> выбрать выгруженный каталог
+
+После этого browser control panel умеет:
+
+- attach'ить текущую agent-сессию к живой вкладке
+- запускать и останавливать structured recording bundles в `.mcp-xchange/web/...`
+- инжектить helper scripts в attached tab
+
+## 6. Запуск
 
 Gateway:
 
@@ -111,7 +147,7 @@ tellymcp run --env .env -s NEW
 tellymcp run
 ```
 
-## 6. Webhook
+## 7. Webhook
 
 Gateway поддерживает polling и webhook.
 
@@ -131,7 +167,7 @@ TELEGRAM_WEBHOOK_SECRET=change_me_webhook_secret
 - `/api/webapp`
 - `/api/healthz`
 
-## 7. MCP
+## 8. MCP
 
 Локальный client-mode MCP endpoint:
 
@@ -141,7 +177,7 @@ http://127.0.0.1:8787/mcp
 
 Используй MCP HTTP endpoint, который поднимает `tellymcp run`.
 
-## 8. Проверки
+## 9. Проверки
 
 ```bash
 tellymcp doctor --env .env
@@ -153,7 +189,7 @@ tellymcp doctor --env .env
 tellymcp system-prune --env .env --yes
 ```
 
-## 9. Операционные заметки
+## 10. Операционные заметки
 
 - gateway-бот — это основной user-facing control plane
 - консоли видны из gateway live registry
@@ -162,7 +198,7 @@ tellymcp system-prune --env .env --yes
 - browser screenshot для человека лучше отправлять через `browser_screenshot(send_to_telegram=true)`
 - файлы между консолями лучше отправлять через `send_partner_file`
 
-## 10. Чего не делать в новых setup
+## 11. Чего не делать в новых setup
 
 Не строй новые setup вокруг:
 

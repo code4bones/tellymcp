@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import net from "node:net";
@@ -31,6 +31,7 @@ type CliCommand =
   | "mcp"
   | "doctor"
   | "browser"
+  | "extension"
   | "codex-plugin"
   | "system-prune";
 
@@ -105,6 +106,8 @@ function printHelp(): void {
     "  tellymcp doctor [--env <file>]",
     "  tellymcp system-prune [--env <file>] --yes",
     "  tellymcp browser install",
+    "  tellymcp extension firefox",
+    "  tellymcp extension chrome",
     "  tellymcp codex-plugin install",
     "  tellymcp codex-plugin status",
     "  tellymcp mcp [--url <url>] [--bearer <token>] [--format claude|legacy]",
@@ -120,6 +123,8 @@ function printHelp(): void {
     "  tellymcp doctor --env .env.client",
     "  tellymcp system-prune --env .env.gateway --yes",
     "  tellymcp browser install",
+    "  tellymcp extension firefox",
+    "  tellymcp extension chrome ./tellymcp-chrome-attach",
     "  tellymcp codex-plugin install",
     "  tellymcp codex-plugin status",
     "  tellymcp mcp --help",
@@ -306,6 +311,28 @@ function printBrowserHelp(): void {
     "  Installs the bundled Playwright Chromium browser.",
     "  Uses the Playwright dependency shipped with TellyMCP.",
     "  Avoids generic npx warnings about missing local project dependencies.",
+  ]);
+}
+
+function printExtensionHelp(): void {
+  printBanner("extension helper", "Export bundled browser attach extensions into a local directory");
+  printSection("Usage", [
+    "  tellymcp extension firefox [output-directory]",
+    "  tellymcp extension ff [output-directory]",
+    "  tellymcp extension chrome [output-directory]",
+    "  tellymcp extension <firefox|ff|chrome> --out-dir <directory>",
+    "  tellymcp extension <firefox|ff|chrome> --force",
+  ]);
+  printSection("What this command does", [
+    "  Copies the packaged unpacked extension bundle out of the installed tellymcp package.",
+    "  By default exports into the current directory.",
+    "  Creates a browser-specific folder you can load into Firefox or Chrome.",
+  ]);
+  printSection("Examples", [
+    "  tellymcp extension firefox",
+    "  tellymcp extension chrome",
+    "  tellymcp extension firefox ./tellymcp-firefox-attach",
+    "  tellymcp extension chrome --out-dir ./browser-addon",
   ]);
 }
 
@@ -864,6 +891,55 @@ function hasFlag(args: string[], flagName: string): boolean {
   return args.includes(flagName);
 }
 
+type ExtensionFlavor = "firefox" | "chrome";
+
+function normalizeExtensionFlavor(rawValue: string | undefined): ExtensionFlavor | null {
+  if (rawValue === "firefox" || rawValue === "ff") {
+    return "firefox";
+  }
+  if (rawValue === "chrome") {
+    return "chrome";
+  }
+  return null;
+}
+
+function getBundledExtensionDir(flavor: ExtensionFlavor): string {
+  return path.join(
+    packageRoot,
+    "packages",
+    flavor === "firefox" ? "firefox-attach-extension" : "chrome-attach-extension",
+    "dist",
+  );
+}
+
+function getDefaultExtensionTargetDir(flavor: ExtensionFlavor): string {
+  return path.resolve(
+    process.cwd(),
+    flavor === "firefox" ? "tellymcp-firefox-attach" : "tellymcp-chrome-attach",
+  );
+}
+
+function resolveExtensionTargetDir(args: string[], flavor: ExtensionFlavor): string {
+  const explicitOutDir = readFlagValue(args, "--out-dir");
+  if (explicitOutDir) {
+    return path.resolve(process.cwd(), explicitOutDir);
+  }
+
+  const positionalOutDir = args.find((value, index) => {
+    if (index === 0 || !value) {
+      return false;
+    }
+    if (value === "--force") {
+      return false;
+    }
+    return !value.startsWith("--out-dir=");
+  });
+
+  return positionalOutDir
+    ? path.resolve(process.cwd(), positionalOutDir)
+    : getDefaultExtensionTargetDir(flavor);
+}
+
 async function runSystemPrune(args: string[]): Promise<void> {
   const confirmed = hasFlag(args, "--yes");
   if (!confirmed) {
@@ -1027,6 +1103,62 @@ function runBrowserCommand(args: string[]): void {
   });
 }
 
+function runExtensionCommand(args: string[]): void {
+  const [rawFlavor] = args;
+  if (!rawFlavor || rawFlavor === "--help" || rawFlavor === "-h") {
+    printExtensionHelp();
+    return;
+  }
+
+  const flavor = normalizeExtensionFlavor(rawFlavor);
+  if (!flavor) {
+    fail("Supported extension targets: firefox, ff, chrome");
+  }
+
+  const sourceDir = getBundledExtensionDir(flavor);
+  const sourceManifestPath = path.join(sourceDir, "manifest.json");
+  if (!existsSync(sourceManifestPath)) {
+    fail(
+      `Missing bundled ${flavor} extension. Reinstall or republish tellymcp with packaged extension bundles.`,
+    );
+  }
+
+  const targetDir = resolveExtensionTargetDir(args, flavor);
+  const force = hasFlag(args, "--force");
+  if (existsSync(targetDir)) {
+    if (!force) {
+      fail(`Refusing to overwrite existing directory: ${targetDir}. Re-run with --force.`);
+    }
+    rmSync(targetDir, { recursive: true, force: true });
+  }
+
+  mkdirSync(path.dirname(targetDir), { recursive: true });
+  cpSync(sourceDir, targetDir, { recursive: true });
+
+  printBanner(`extension ${flavor}`, "Bundled attach extension exported");
+  printSection("result", [
+    `  source: ${sourceDir}`,
+    `  target: ${targetDir}`,
+    `  manifest: ${path.join(targetDir, "manifest.json")}`,
+  ]);
+
+  if (flavor === "firefox") {
+    printSection("next", [
+      "  1. Open about:debugging#/runtime/this-firefox",
+      "  2. Click 'Load Temporary Add-on'",
+      `  3. Choose ${path.join(targetDir, "manifest.json")}`,
+    ]);
+    return;
+  }
+
+  printSection("next", [
+    "  1. Open chrome://extensions",
+    "  2. Enable Developer mode",
+    "  3. Click 'Load unpacked'",
+    `  4. Choose ${targetDir}`,
+  ]);
+}
+
 function runCodexPluginCommand(args: string[]): void {
   const [subcommand] = args;
   if (!subcommand || subcommand === "--help" || subcommand === "-h") {
@@ -1169,7 +1301,7 @@ async function runRuntime(args: string[]): Promise<void> {
 async function main(argv: string[]): Promise<void> {
   const [rawCommand, firstArg, secondArg] = argv;
   const command: CliCommand = rawCommand === "init" || rawCommand === "run" || rawCommand === "help" || rawCommand === "mcp" || rawCommand === "doctor" || rawCommand === "browser" || rawCommand === "system-prune"
-    || rawCommand === "codex-plugin"
+    || rawCommand === "codex-plugin" || rawCommand === "extension"
     ? rawCommand
     : "help";
 
@@ -1195,6 +1327,11 @@ async function main(argv: string[]): Promise<void> {
 
   if (command === "browser") {
     runBrowserCommand(argv.slice(1));
+    return;
+  }
+
+  if (command === "extension") {
+    runExtensionCommand(argv.slice(1));
     return;
   }
 

@@ -1,6 +1,6 @@
 # Tools
 
-Version: `2026-05-22.1`
+Version: `2026-06-06.1`
 
 Gateway/client runtime compatibility:
 
@@ -16,10 +16,16 @@ This MCP server currently exposes the following tools.
 
 Browser tools:
 
+- `browser_list_attached_instances`
+- `browser_list_tabs`
+- `browser_recording_start`
+- `browser_recording_stop`
+- `browser_recording_status`
 - `browser_open`
 - `browser_reload`
 - `browser_click`
 - `browser_fill`
+- `browser_inject_script`
 - `browser_press`
 - `browser_wait_for`
 - `browser_wait_for_url`
@@ -34,7 +40,17 @@ Browser tools:
 
 Browser runtime rule:
 
-- Browser tools use Playwright Chromium.
+- Browser tools now have two backends:
+  - attached browser tab backend for a real user Firefox or Chrome session
+  - isolated Playwright Chromium backend
+- `browser_open` is only for the isolated Playwright backend.
+- `browser_list_attached_instances` and `browser_list_tabs` are for the attached browser backend.
+- if the local attach extension is connected and a tab was selected from the browser control panel, `browser_click`, `browser_fill`, `browser_inject_script`, `browser_press`, `browser_dom`, and `browser_screenshot` use that attached browser tab for the current session without requiring `browser_open`
+- `browser_recording_start`, `browser_recording_stop`, and `browser_recording_status` are also for the attached browser backend
+- browser recordings are written under `.mcp-xchange/web/{tab-title-slug}-{timestamp}/`
+- each recording bundle contains `session.json`, `timeline.ndjson`, `pages/`, `network/`, and `console/`
+- inside `network/`, use `index.ndjson` as the thin search index and `requests/{seq}-{request_id}/` as the per-request artifact bundle
+- otherwise those tools use the Playwright backend after `browser_open`
 - If browser tools fail because the Playwright browser runtime is missing, install it with `tellymcp browser install`.
 - Do not stop at the installation error itself. Install the browser runtime first, then retry the browser tool.
 
@@ -758,13 +774,156 @@ Output:
 Notes:
 
 - each session gets its own isolated browser context and page
-- call this first before reading console, DOM, styles, or screenshots
+- call this first only when you want the isolated Playwright backend
+- do not call this just to work with an already selected Firefox attached tab
 - `url` may be an absolute URL, or a relative path when `BROWSER_ADDRESS` is configured
 - in headed mode the browser window is started maximized by default
 - in headed mode a fresh browser context is created without a fixed viewport unless you explicitly pass `width` and `height`
 - if you want page content to grow and shrink together with the outer browser window, do not pass `width` and `height`
 - if you pass viewport size, pass both `width` and `height` together
 - use explicit `width` and `height` when the task depends on a specific responsive breakpoint or working area
+
+## `browser_list_attached_instances`
+
+Purpose:
+
+- list browser instances currently connected through the local attach extension bridge
+
+Input:
+
+- `session_id?`
+
+Output:
+
+- `session_id?`
+- `total`
+- `instances[]`
+  - `instance_id`
+  - `browser`
+  - `extension_version`
+  - `profile_name?`
+  - `connected_at`
+  - `last_seen_at`
+  - `capabilities[]`
+  - `tab_count`
+  - `active_tab?`
+
+## `browser_list_tabs`
+
+Purpose:
+
+- list tabs from an attached browser instance
+
+Input:
+
+- `session_id?`
+- `instance_id?`
+
+Output:
+
+- `session_id?`
+- `instance_id`
+- `total`
+- `tabs[]`
+  - `tab_id`
+  - `window_id?`
+  - `active`
+  - `selected?`
+  - `title`
+  - `url`
+  - `status?`
+
+Notes:
+
+- if only one attached browser instance is connected, `instance_id` can be omitted
+- current tab selection for the attach backend is done from the browser extension control panel
+- `active=true` means the tab is active in its browser window; there may be more than one such tab across multiple windows
+- for the tab currently selected for this MCP session, prefer `selected=true`
+
+## `browser_recording_start`
+
+Purpose:
+
+- start a structured browser recording bundle for the attached browser tab currently selected for this MCP session
+
+Input:
+
+- `session_id?`
+- `instance_id?`
+
+Output:
+
+- `session_id`
+- `backend`
+- `started`
+- `recording_id`
+- `instance_id`
+- `tab_id`
+- `tab_title?`
+- `tab_url?`
+- `bundle_dir_name`
+- `bundle_relative_path`
+- `bundle_path`
+- `started_at`
+
+Notes:
+
+- this works only with the attached browser backend, not Playwright
+- select the target tab first from the browser extension control panel
+- the bundle is created under `.mcp-xchange/web/{tab-title-slug}-{timestamp}/`
+- the recording captures page snapshots, console events, request metadata, headers, cookies snapshots, and available request/response bodies
+- for network analysis, read `network/index.ndjson` first, then open the matching `network/requests/{seq}-{request_id}/meta.json`
+- use `request.json`, `response.json`, and optional body files only when deeper detail is needed
+
+## `browser_recording_stop`
+
+Purpose:
+
+- stop the active structured browser recording for this MCP session
+
+Input:
+
+- `session_id?`
+
+Output:
+
+- `session_id`
+- `stopped`
+- `recording_id?`
+- `bundle_dir_name?`
+- `bundle_relative_path?`
+- `bundle_path?`
+- `stopped_at?`
+
+## `browser_recording_status`
+
+Purpose:
+
+- inspect whether a structured browser recording is active and where its bundle is being written
+
+Input:
+
+- `session_id?`
+
+Output:
+
+- `session_id`
+- `active`
+- `recording?`
+  - `backend`
+  - `recording_id`
+  - `instance_id`
+  - `tab_id`
+  - `tab_title?`
+  - `tab_url?`
+  - `bundle_dir_name`
+  - `bundle_relative_path`
+  - `bundle_path`
+  - `started_at`
+  - `stopped_at?`
+  - `status`
+  - `event_count`
+  - `last_event_at?`
 
 ## `browser_console`
 
@@ -806,6 +965,8 @@ Output:
 Purpose:
 
 - click an element in the current session page
+- if the session has a selected attached browser tab, click there
+- otherwise click in the isolated Playwright page
 
 Input:
 
@@ -831,6 +992,8 @@ Output:
 Purpose:
 
 - fill an input or textarea in the current session page
+- if the session has a selected attached browser tab, fill there
+- otherwise fill in the isolated Playwright page
 
 Input:
 
@@ -858,6 +1021,8 @@ Output:
 Purpose:
 
 - send a key press to the page or a targeted element
+- if the session has a selected attached browser tab, press there
+- otherwise press in the isolated Playwright page
 
 Input:
 
@@ -877,6 +1042,38 @@ Output:
 - `ai_tag?`
 - `selector?`
 - `text?`
+- `url`
+- `title?`
+
+## `browser_inject_script`
+
+Purpose:
+
+- inject JavaScript into the current session browser target
+- if the session has a selected attached browser tab, inject into that real browser tab
+- otherwise inject into the isolated Playwright page
+- the script is wrapped so `window[namespace]` exists; default namespace is `TELLY`
+
+Input:
+
+- `session_id?`
+- `source?`
+- `file_path?`
+- `namespace?`
+
+Rules:
+
+- provide either `source` or `file_path`
+- prefer `file_path` for local reusable scripts and larger payloads
+- injected scripts can use both `window.TELLY` and local `TELLY` when `namespace` is left at the default
+
+Output:
+
+- `session_id`
+- `injected`
+- `namespace`
+- `source_type`
+- `bytes`
 - `url`
 - `title?`
 
@@ -921,6 +1118,7 @@ Browser target rules for `browser_click`, `browser_fill`, `browser_press`, `brow
   - `div[data-testid="save"]`
 - use `text` only when there is no reliable selector
 - do not mix ambiguous hashed CSS classes with fuzzy text guessing when a stable selector exists
+- for the attached browser backend, prefer `selector` first; `ai_tag` and `text` still work, but the attach executor is intentionally lighter than full Playwright
 
 ## `browser_wait_for_url`
 
@@ -1002,6 +1200,8 @@ Output:
 Purpose:
 
 - inspect a DOM element in the session browser tab
+- if the session has a selected attached browser tab, inspect that real browser tab
+- otherwise inspect the isolated Playwright page
 
 Input:
 
@@ -1050,6 +1250,8 @@ Output:
 Purpose:
 
 - capture a screenshot from the session browser tab
+- if the session has a selected attached browser tab, capture from that real browser tab
+- otherwise capture from the isolated Playwright page
 
 Input:
 
@@ -1076,6 +1278,7 @@ Notes:
 - they are tracked separately from Telegram-uploaded files
 - they appear under Telegram `Browser -> Screenshots`
 - if `send_to_telegram=true`, the saved screenshot is also sent into the bound Telegram chat for that session
+- for the attached browser backend, the screenshot comes from the selected tab in the user browser session
 
 ## `browser_close`
 

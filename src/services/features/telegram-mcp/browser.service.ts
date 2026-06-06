@@ -7,11 +7,14 @@ import {
 import { FirefoxAttachServer } from "./src/features/browser-attach/model/firefoxAttachServer";
 import { RemoteConsoleActionClient } from "./src/features/distributed-gateway/model/remoteConsoleActionClient";
 import type {
+  BrowserAttachActiveTabInput,
+  BrowserAttachTabInput,
   BrowserClearLogsInput,
   BrowserClickInput,
   BrowserCloseInput,
   BrowserComputedStyleInput,
   BrowserConsoleInput,
+  BrowserDetachTabInput,
   BrowserDomInput,
   BrowserErrorsInput,
   BrowserFillInput,
@@ -82,6 +85,33 @@ const TelegramMcpBrowserService: ServiceSchema = {
         ctx: { params: BrowserListTabsInput },
       ) {
         return this.getBrowserService!().listTabs(ctx.params);
+      },
+    },
+    attachActiveTabRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserAttachActiveTabInput },
+      ) {
+        return this.getBrowserService!().attachActiveTab(ctx.params);
+      },
+    },
+    attachTabRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserAttachTabInput },
+      ) {
+        return this.getBrowserService!().attachTab(ctx.params);
+      },
+    },
+    detachTabRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: BrowserServiceCarrier,
+        ctx: { params: BrowserDetachTabInput },
+      ) {
+        return this.getBrowserService!().detachTab(ctx.params);
       },
     },
     startRecordingRemote: {

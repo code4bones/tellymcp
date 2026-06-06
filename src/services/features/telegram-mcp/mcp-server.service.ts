@@ -33,11 +33,14 @@ import {
   type TelegramMcpXchangeServiceInstance,
 } from "./xchange.service";
 import { AskUserTelegramTool } from "./src/features/ask-user/model/askUserTelegram";
+import { BrowserAttachActiveTabTool } from "./src/features/browser/model/browserAttachActiveTabTool";
+import { BrowserAttachTabTool } from "./src/features/browser/model/browserAttachTabTool";
 import { BrowserClickTool } from "./src/features/browser/model/browserClickTool";
 import { BrowserClearLogsTool } from "./src/features/browser/model/browserClearLogsTool";
 import { BrowserCloseTool } from "./src/features/browser/model/browserCloseTool";
 import { BrowserComputedStyleTool } from "./src/features/browser/model/browserComputedStyleTool";
 import { BrowserConsoleTool } from "./src/features/browser/model/browserConsoleTool";
+import { BrowserDetachTabTool } from "./src/features/browser/model/browserDetachTabTool";
 import { BrowserDomTool } from "./src/features/browser/model/browserDomTool";
 import { BrowserErrorsTool } from "./src/features/browser/model/browserErrorsTool";
 import { BrowserFillTool } from "./src/features/browser/model/browserFillTool";
@@ -143,6 +146,9 @@ const TelegramMcpMcpServerService: ServiceSchema = {
         new AskUserTelegramTool(approvalService.getApprovalOrchestrator()),
         new BrowserListAttachedInstancesTool(browserService.getBrowserService()),
         new BrowserListTabsTool(browserService.getBrowserService()),
+        new BrowserAttachActiveTabTool(browserService.getBrowserService()),
+        new BrowserAttachTabTool(browserService.getBrowserService()),
+        new BrowserDetachTabTool(browserService.getBrowserService()),
         new BrowserRecordingStartTool(browserService.getBrowserService()),
         new BrowserRecordingStopTool(browserService.getBrowserService()),
         new BrowserRecordingStatusTool(browserService.getBrowserService()),

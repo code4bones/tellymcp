@@ -207,7 +207,7 @@ export const browserListAttachedInstancesOutputSchema = z.object({
   instances: z.array(
     z.object({
       instance_id: z.string().trim().min(1),
-      browser: z.literal("firefox"),
+      browser: z.enum(["firefox", "chrome"]),
       extension_version: z.string().trim().min(1),
       profile_name: z.string().trim().min(1).optional(),
       connected_at: z.string().trim().min(1),

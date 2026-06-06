@@ -1,7 +1,7 @@
 export type FirefoxAttachInstanceHello = {
   type: "hello";
   extension_version: string;
-  browser: "firefox";
+  browser: "firefox" | "chrome";
   instance_id: string;
   profile_name?: string | undefined;
 };
@@ -39,11 +39,21 @@ export type FirefoxAttachTabActionRequest = {
   request_id: string;
   tab_id: number;
   action:
+    | "attach"
+    | "detach"
     | "dom"
     | "click"
     | "fill"
     | "press"
-    | "screenshot";
+    | "reload"
+    | "close"
+    | "wait_for"
+    | "wait_for_url"
+    | "computed_style"
+    | "screenshot"
+    | "inject_script"
+    | "get_logs"
+    | "clear_logs";
   payload?: Record<string, unknown> | undefined;
 };
 

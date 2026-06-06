@@ -25,7 +25,7 @@ export class BrowserListTabsTool implements ToolModule {
       {
         title: "Browser List Tabs",
         description:
-          "List tabs from a Firefox browser instance attached through the local browser-attach extension bridge. If only one instance is connected, instance_id can be omitted. Note: active=true is per Firefox window; for the tab selected for the current MCP session, use selected=true.",
+          "List tabs from an attached browser instance connected through the local browser-attach extension bridge. If only one instance is connected, instance_id can be omitted. Note: active=true is per browser window; for the tab selected for the current MCP session, use selected=true.",
         inputSchema: browserListTabsInputSchema,
         outputSchema: browserListTabsOutputSchema,
       },

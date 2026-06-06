@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { spawn, type IPty } from "node-pty";
@@ -30,6 +32,7 @@ type PtySessionRecord = {
   exited: boolean;
   exitCode?: number | undefined;
   signal?: number | undefined;
+  tempPaths: string[];
 };
 
 export type PtyExitInfo = {
@@ -65,6 +68,131 @@ function buildExitLine(record: PtySessionRecord): string {
   return `${parts.join(" ")}]`;
 }
 
+function sanitizeFileNameSegment(value: string): string {
+  const sanitized = value.trim().replace(/[^a-zA-Z0-9._-]+/gu, "-");
+  return sanitized || "session";
+}
+
+function shellSingleQuote(value: string): string {
+  return `'${value.replace(/'/gu, `'\\''`)}'`;
+}
+
+function buildContextPromptPrefix(record: PtySessionRecord): string {
+  return `[TELLY ${record.sessionId}]`;
+}
+
+function buildContextEnv(record: PtySessionRecord): Record<string, string> {
+  return {
+    ...(process.env as Record<string, string>),
+    TELLYMCP_TERMINAL_CONTEXT: "1",
+    TELLYMCP_SESSION_ID: record.sessionId,
+    TELLYMCP_TERMINAL_TARGET: record.target,
+    TELLYMCP_TERMINAL_CWD: record.cwd,
+  };
+}
+
+function prepareBashLaunch(record: PtySessionRecord): {
+  args: string[];
+  env: Record<string, string>;
+  tempPaths: string[];
+} {
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "tellymcp-pty-bash-"),
+  );
+  const rcPath = path.join(
+    tempDir,
+    `${sanitizeFileNameSegment(record.sessionId)}.bashrc`,
+  );
+  const promptPrefix = buildContextPromptPrefix(record);
+  const script = [
+    'if [ -r "$HOME/.profile" ]; then . "$HOME/.profile"; fi',
+    'if [ -r "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi',
+    `export TELLYMCP_TERMINAL_CONTEXT=${shellSingleQuote("1")}`,
+    `export TELLYMCP_SESSION_ID=${shellSingleQuote(record.sessionId)}`,
+    `export TELLYMCP_TERMINAL_TARGET=${shellSingleQuote(record.target)}`,
+    `export TELLYMCP_TERMINAL_CWD=${shellSingleQuote(record.cwd)}`,
+    `PS1=${shellSingleQuote(`${promptPrefix} \\u@\\h:\\w\\$ `)}`,
+  ].join("\n");
+  fs.writeFileSync(rcPath, `${script}\n`, "utf8");
+  return {
+    args: ["--rcfile", rcPath, "-i"],
+    env: buildContextEnv(record),
+    tempPaths: [tempDir],
+  };
+}
+
+function prepareZshLaunch(record: PtySessionRecord): {
+  args: string[];
+  env: Record<string, string>;
+  tempPaths: string[];
+} {
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "tellymcp-pty-zsh-"),
+  );
+  const promptPrefix = buildContextPromptPrefix(record);
+  fs.writeFileSync(
+    path.join(tempDir, ".zshenv"),
+    [
+      'if [[ -r "$HOME/.zshenv" ]]; then source "$HOME/.zshenv"; fi',
+      `export TELLYMCP_TERMINAL_CONTEXT=${shellSingleQuote("1")}`,
+      `export TELLYMCP_SESSION_ID=${shellSingleQuote(record.sessionId)}`,
+      `export TELLYMCP_TERMINAL_TARGET=${shellSingleQuote(record.target)}`,
+      `export TELLYMCP_TERMINAL_CWD=${shellSingleQuote(record.cwd)}`,
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(tempDir, ".zshrc"),
+    [
+      'if [[ -r "$HOME/.zprofile" ]]; then source "$HOME/.zprofile"; fi',
+      'if [[ -r "$HOME/.zshrc" ]]; then source "$HOME/.zshrc"; fi',
+      `PROMPT=${shellSingleQuote(`${promptPrefix} %n@%m:%~%# `)}`,
+      "RPROMPT=''",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  return {
+    args: ["-i"],
+    env: {
+      ...buildContextEnv(record),
+      ZDOTDIR: tempDir,
+    },
+    tempPaths: [tempDir],
+  };
+}
+
+function prepareShellLaunch(record: PtySessionRecord): {
+  args: string[];
+  env: Record<string, string>;
+  tempPaths: string[];
+} {
+  const shellName = getShellDisplayName(record.shell).toLowerCase();
+  if (shellName === "bash") {
+    return prepareBashLaunch(record);
+  }
+  if (shellName === "zsh") {
+    return prepareZshLaunch(record);
+  }
+  return {
+    args: [],
+    env: buildContextEnv(record),
+    tempPaths: [],
+  };
+}
+
+function cleanupRecordTempPaths(record: PtySessionRecord): void {
+  for (const tempPath of record.tempPaths) {
+    try {
+      fs.rmSync(tempPath, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup failures
+    }
+  }
+  record.tempPaths = [];
+}
+
 function createHeadlessTerminal(
   config: PtySessionConfig,
 ): InstanceType<typeof XtermHeadless.Terminal> {
@@ -95,14 +223,18 @@ function createSessionRecord(
     pendingWrite: Promise.resolve(),
     pty: null,
     exited: false,
+    tempPaths: [],
   };
 
-  const pty = spawn(record.shell, [], {
+  const launch = prepareShellLaunch(record);
+  record.tempPaths = [...launch.tempPaths];
+
+  const pty = spawn(record.shell, launch.args, {
     name: "xterm-color",
     cols: record.cols,
     rows: record.rows,
     cwd: record.cwd,
-    env: process.env as Record<string, string>,
+    env: launch.env,
   });
 
   pty.onData((data) => {
@@ -119,6 +251,7 @@ function createSessionRecord(
     record.exited = true;
     record.exitCode = exitCode;
     record.signal = signal;
+    cleanupRecordTempPaths(record);
     record.pendingWrite = record.pendingWrite.then(
       () =>
         new Promise<void>((resolve) => {
@@ -697,6 +830,7 @@ export function stopPtyTarget(target: string): boolean {
   record.pty?.kill();
   record.pty = null;
   record.exited = true;
+  cleanupRecordTempPaths(record);
   record.terminal.dispose();
   return true;
 }

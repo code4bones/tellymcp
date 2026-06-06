@@ -5,7 +5,7 @@ import { formatLocalTimestamp } from "../../../shared/lib/time/localTimestamp";
 
 export type FirefoxAttachInstanceRecord = {
   instanceId: string;
-  browser: "firefox";
+  browser: "firefox" | "chrome";
   extensionVersion: string;
   profileName?: string | undefined;
   connectedAt: string;
@@ -20,6 +20,7 @@ export class FirefoxAttachRegistry {
 
   public setConnected(input: {
     instanceId: string;
+    browser: "firefox" | "chrome";
     extensionVersion: string;
     profileName?: string;
     capabilities: string[];
@@ -28,7 +29,7 @@ export class FirefoxAttachRegistry {
     const existing = this.instances.get(input.instanceId);
     const next: FirefoxAttachInstanceRecord = {
       instanceId: input.instanceId,
-      browser: "firefox",
+      browser: input.browser,
       extensionVersion: input.extensionVersion,
       ...(input.profileName ? { profileName: input.profileName } : {}),
       connectedAt: existing?.connectedAt ?? now,

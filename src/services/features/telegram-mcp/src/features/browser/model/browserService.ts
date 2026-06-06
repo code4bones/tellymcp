@@ -16,6 +16,11 @@ import type { AppConfig } from "../../../app/config/env";
 import type {
   BrowserListAttachedInstancesInput,
   BrowserListAttachedInstancesOutput,
+  BrowserAttachActiveTabInput,
+  BrowserAttachTabInput,
+  BrowserAttachTabOutput,
+  BrowserDetachTabInput,
+  BrowserDetachTabOutput,
   BrowserListTabsInput,
   BrowserListTabsOutput,
   BrowserRecordingRecord,
@@ -216,7 +221,22 @@ type FirefoxAttachHost = {
   invokeTabAction(input: {
     instanceId: string;
     tabId: number;
-    action: "dom" | "click" | "fill" | "press" | "screenshot" | "inject_script";
+    action:
+      | "attach"
+      | "detach"
+      | "dom"
+      | "click"
+      | "fill"
+      | "press"
+      | "reload"
+      | "close"
+      | "wait_for"
+      | "wait_for_url"
+      | "computed_style"
+      | "screenshot"
+      | "inject_script"
+      | "get_logs"
+      | "clear_logs";
     payload?: Record<string, unknown> | undefined;
   }): Promise<Record<string, unknown> | undefined>;
 };
@@ -352,6 +372,190 @@ export class BrowserService {
         url: tab.url,
         ...(tab.status ? { status: tab.status } : {}),
       })),
+    };
+  }
+
+  public async attachActiveTab(
+    input: BrowserAttachActiveTabInput,
+  ): Promise<BrowserAttachTabOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
+      resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserAttachTabOutput>(
+      normalizedSessionId,
+      "telegramMcp.browser.attachActiveTabRemote",
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
+    );
+    if (remote) {
+      return remote;
+    }
+
+    const instances = this.listFirefoxAttachInstances();
+    const instance =
+      input.instance_id?.trim()
+        ? instances.find((item) => item.instanceId === input.instance_id?.trim())
+        : instances.length === 1
+          ? instances[0]
+          : undefined;
+
+    if (!instance) {
+      if (input.instance_id?.trim()) {
+        throw new Error(
+          `Attached browser instance '${input.instance_id.trim()}' was not found.`,
+        );
+      }
+      throw new Error(
+        "Attached browser instance is ambiguous. Pass instance_id or keep exactly one connected browser instance.",
+      );
+    }
+
+    const activeTab = instance.activeTab;
+    if (!activeTab) {
+      throw new Error(
+        `Attached browser instance '${instance.instanceId}' does not expose an active tab.`,
+      );
+    }
+
+    return await this.attachTab({
+      session_id: normalizedSessionId,
+      instance_id: instance.instanceId,
+      tab_id: activeTab.tab_id,
+    });
+  }
+
+  public async attachTab(
+    input: BrowserAttachTabInput,
+  ): Promise<BrowserAttachTabOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
+      resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserAttachTabOutput>(
+      normalizedSessionId,
+      "telegramMcp.browser.attachTabRemote",
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
+    );
+    if (remote) {
+      return remote;
+    }
+
+    if (!this.firefoxAttachRegistry) {
+      throw new Error("Attached browser backend is not available.");
+    }
+
+    const instances = this.listFirefoxAttachInstances();
+    const instance =
+      input.instance_id?.trim()
+        ? instances.find((item) => item.instanceId === input.instance_id?.trim())
+        : instances.length === 1
+          ? instances[0]
+          : undefined;
+
+    if (!instance) {
+      if (input.instance_id?.trim()) {
+        throw new Error(
+          `Attached browser instance '${input.instance_id.trim()}' was not found.`,
+        );
+      }
+      throw new Error(
+        "Attached browser instance is ambiguous. Pass instance_id or keep exactly one connected browser instance.",
+      );
+    }
+
+    const tab = instance.tabs.find((item) => item.tab_id === input.tab_id);
+    if (!tab) {
+      throw new Error(
+        `Tab '${input.tab_id}' was not found in attached browser instance '${instance.instanceId}'.`,
+      );
+    }
+
+    const result = await this.firefoxAttachRegistry.invokeTabAction({
+      instanceId: instance.instanceId,
+      tabId: tab.tab_id,
+      action: "attach",
+    });
+
+    const attachedAt = formatLocalTimestamp(new Date());
+    await this.maintenanceStore.setBrowserAttachment({
+      sessionId: normalizedSessionId,
+      backend: "firefox-attached",
+      instanceId: instance.instanceId,
+      tabId: tab.tab_id,
+      attachedAt,
+      ...(result?.title
+        ? { title: String(result.title) }
+        : tab.title
+          ? { title: tab.title }
+          : {}),
+      ...(result?.url
+        ? { url: String(result.url) }
+        : tab.url
+          ? { url: tab.url }
+          : {}),
+    });
+
+    return {
+      session_id: normalizedSessionId,
+      backend: "firefox-attached",
+      instance_id: instance.instanceId,
+      tab_id: tab.tab_id,
+      attached_at: attachedAt,
+      ...(result?.title
+        ? { title: String(result.title) }
+        : tab.title
+          ? { title: tab.title }
+          : {}),
+      ...(result?.url
+        ? { url: String(result.url) }
+        : tab.url
+          ? { url: tab.url }
+          : {}),
+    };
+  }
+
+  public async detachTab(
+    input: BrowserDetachTabInput,
+  ): Promise<BrowserDetachTabOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const normalizedSessionId = await this.normalizeSessionIdForAccess(
+      resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<BrowserDetachTabOutput>(
+      normalizedSessionId,
+      "telegramMcp.browser.detachTabRemote",
+      {
+        ...input,
+        session_id: normalizedSessionId,
+      },
+    );
+    if (remote) {
+      return remote;
+    }
+
+    const attachment = await this.getAttachedBrowserAttachment(normalizedSessionId);
+    if (attachment && this.firefoxAttachRegistry) {
+      try {
+        await this.firefoxAttachRegistry.invokeTabAction({
+          instanceId: attachment.instanceId,
+          tabId: attachment.tabId,
+          action: "detach",
+        });
+      } catch {
+        // Clearing local state is still the source of truth.
+      }
+    }
+
+    await this.maintenanceStore.clearBrowserAttachment(normalizedSessionId);
+    return {
+      session_id: normalizedSessionId,
+      detached: true,
     };
   }
 
@@ -574,6 +778,44 @@ export class BrowserService {
       return remote;
     }
     this.ensureEnabled();
+    const attached = await this.getAttachedBrowserAttachment(normalizedSessionId);
+    if (attached) {
+      const result = await this.runAttachedTabAction(normalizedSessionId, attached, {
+        action: "get_logs",
+        payload: {
+          limit: input.limit,
+        },
+      });
+
+      const consoleMessages = Array.isArray(result?.console_messages)
+        ? result.console_messages
+        : [];
+
+      return {
+        session_id: normalizedSessionId,
+        total:
+          typeof result?.console_total === "number"
+            ? result.console_total
+            : consoleMessages.length,
+        messages: consoleMessages.map((message) => ({
+          type:
+            typeof message?.type === "string"
+              ? message.type
+              : "log",
+          text:
+            typeof message?.text === "string"
+              ? message.text
+              : "",
+          ...(typeof message?.location === "string"
+            ? { location: message.location }
+            : {}),
+          timestamp:
+            typeof message?.timestamp === "string"
+              ? message.timestamp
+              : formatLocalTimestamp(new Date()),
+        })),
+      };
+    }
     const { sessionId, state } = await this.requireSessionState(input);
 
     state.lastUsedAt = formatLocalTimestamp(new Date());
@@ -862,6 +1104,18 @@ export class BrowserService {
       return remote;
     }
     this.ensureEnabled();
+    const attached = await this.getAttachedBrowserAttachment(normalizedSessionId);
+    if (attached) {
+      const result = await this.runAttachedTabAction(normalizedSessionId, attached, {
+        action: "reload",
+      });
+      return {
+        session_id: normalizedSessionId,
+        reloaded: true,
+        url: String(result?.url || attached.url || ""),
+        ...(result?.title ? { title: String(result.title) } : {}),
+      };
+    }
     const { sessionId, state } = await this.requireSessionState(input);
     const waitUntil = (input.wait_until ??
       this.config.browser.waitUntil) as WaitUntilState;
@@ -909,6 +1163,30 @@ export class BrowserService {
       return remote;
     }
     this.ensureEnabled();
+    const attached = await this.getAttachedBrowserAttachment(normalizedSessionId);
+    if (attached) {
+      const waitState = input.state ?? "visible";
+      const result = await this.runAttachedTabAction(normalizedSessionId, attached, {
+        action: "wait_for",
+        payload: {
+          ...this.buildAttachedLocatorPayload(input),
+          state: waitState,
+          ...(typeof input.timeout_ms === "number"
+            ? { timeout_ms: input.timeout_ms }
+            : {}),
+        },
+      });
+      return {
+        session_id: normalizedSessionId,
+        waited: true,
+        state: waitState,
+        ...(input.ai_tag ? { ai_tag: input.ai_tag } : {}),
+        ...(input.selector ? { selector: input.selector } : {}),
+        ...(input.text ? { text: input.text } : {}),
+        url: String(result?.url || attached.url || ""),
+        ...(result?.title ? { title: String(result.title) } : {}),
+      };
+    }
     const { sessionId, state } = await this.requireSessionState(input);
     const locator = this.resolveLocator(state.page, input);
     const waitState = input.state ?? "visible";
@@ -953,6 +1231,32 @@ export class BrowserService {
       return remote;
     }
     this.ensureEnabled();
+    const attached = await this.getAttachedBrowserAttachment(normalizedSessionId);
+    if (attached) {
+      const result = await this.runAttachedTabAction(normalizedSessionId, attached, {
+        action: "wait_for_url",
+        payload: {
+          ...(input.url?.trim() ? { url: input.url.trim() } : {}),
+          ...(input.url_contains?.trim()
+            ? { url_contains: input.url_contains.trim() }
+            : {}),
+          ...(typeof input.timeout_ms === "number"
+            ? { timeout_ms: input.timeout_ms }
+            : {}),
+        },
+      });
+      return {
+        session_id: normalizedSessionId,
+        waited: true,
+        matched: input.url?.trim() ? "url" : "url_contains",
+        ...(input.url?.trim() ? { url: input.url.trim() } : {}),
+        ...(input.url_contains?.trim()
+          ? { url_contains: input.url_contains.trim() }
+          : {}),
+        current_url: String(result?.url || attached.url || ""),
+        ...(result?.title ? { title: String(result.title) } : {}),
+      };
+    }
     const { sessionId, state } = await this.requireSessionState(input);
     const timeout = this.resolveTimeoutMs(input.timeout_ms);
 
@@ -1008,6 +1312,40 @@ export class BrowserService {
       return remote;
     }
     this.ensureEnabled();
+    const attached = await this.getAttachedBrowserAttachment(normalizedSessionId);
+    if (attached) {
+      const result = await this.runAttachedTabAction(normalizedSessionId, attached, {
+        action: "get_logs",
+        payload: {
+          limit: input.limit,
+        },
+      });
+
+      const pageErrors = Array.isArray(result?.page_errors)
+        ? result.page_errors
+        : [];
+
+      return {
+        session_id: normalizedSessionId,
+        total:
+          typeof result?.page_error_total === "number"
+            ? result.page_error_total
+            : pageErrors.length,
+        errors: pageErrors.map((error) => ({
+          message:
+            typeof error?.message === "string"
+              ? error.message
+              : "",
+          ...(typeof error?.stack === "string"
+            ? { stack: error.stack }
+            : {}),
+          timestamp:
+            typeof error?.timestamp === "string"
+              ? error.timestamp
+              : formatLocalTimestamp(new Date()),
+        })),
+      };
+    }
     const { sessionId, state } = await this.requireSessionState(input);
 
     state.lastUsedAt = formatLocalTimestamp(new Date());
@@ -1042,6 +1380,50 @@ export class BrowserService {
       return remote;
     }
     this.ensureEnabled();
+    const attached = await this.getAttachedBrowserAttachment(normalizedSessionId);
+    if (attached) {
+      const result = await this.runAttachedTabAction(normalizedSessionId, attached, {
+        action: "get_logs",
+        payload: {
+          limit: input.limit,
+        },
+      });
+
+      const failures = Array.isArray(result?.network_failures)
+        ? result.network_failures
+        : [];
+
+      return {
+        session_id: normalizedSessionId,
+        total:
+          typeof result?.network_failure_total === "number"
+            ? result.network_failure_total
+            : failures.length,
+        failures: failures.map((failure) => ({
+          url:
+            typeof failure?.url === "string"
+              ? failure.url
+              : "",
+          method:
+            typeof failure?.method === "string"
+              ? failure.method
+              : "GET",
+          ...(typeof failure?.status === "number"
+            ? { status: failure.status }
+            : {}),
+          ...(typeof failure?.error_text === "string"
+            ? { error_text: failure.error_text }
+            : {}),
+          ...(typeof failure?.resource_type === "string"
+            ? { resource_type: failure.resource_type }
+            : {}),
+          timestamp:
+            typeof failure?.timestamp === "string"
+              ? failure.timestamp
+              : formatLocalTimestamp(new Date()),
+        })),
+      };
+    }
     const { sessionId, state } = await this.requireSessionState(input);
 
     state.lastUsedAt = formatLocalTimestamp(new Date());
@@ -1081,6 +1463,29 @@ export class BrowserService {
       return remote;
     }
     this.ensureEnabled();
+    const attached = await this.getAttachedBrowserAttachment(normalizedSessionId);
+    if (attached) {
+      const result = await this.runAttachedTabAction(normalizedSessionId, attached, {
+        action: "clear_logs",
+      });
+
+      return {
+        session_id: normalizedSessionId,
+        cleared: true,
+        console_messages_cleared:
+          typeof result?.console_messages_cleared === "number"
+            ? result.console_messages_cleared
+            : 0,
+        page_errors_cleared:
+          typeof result?.page_errors_cleared === "number"
+            ? result.page_errors_cleared
+            : 0,
+        network_failures_cleared:
+          typeof result?.network_failures_cleared === "number"
+            ? result.network_failures_cleared
+            : 0,
+      };
+    }
     const { sessionId, state } = await this.requireSessionState(input);
     const consoleMessagesCleared = state.consoleMessages.length;
     const pageErrorsCleared = state.pageErrors.length;
@@ -1230,6 +1635,57 @@ export class BrowserService {
       return remote;
     }
     this.ensureEnabled();
+    const attached = await this.getAttachedBrowserAttachment(normalizedSessionId);
+    if (attached) {
+      const properties = input.properties?.length
+        ? input.properties
+        : [
+            "display",
+            "position",
+            "visibility",
+            "opacity",
+            "color",
+            "background-color",
+            "font-size",
+            "z-index",
+            "overflow",
+          ];
+      const result = await this.runAttachedTabAction(normalizedSessionId, attached, {
+        action: "computed_style",
+        payload: {
+          selector: input.selector,
+          properties,
+        },
+      });
+      return {
+        session_id: normalizedSessionId,
+        selector: input.selector,
+        found: result?.found === true,
+        ...(result?.url ? { url: String(result.url) } : {}),
+        ...(result?.title ? { title: String(result.title) } : {}),
+        ...(typeof result?.visible === "boolean"
+          ? { visible: result.visible }
+          : {}),
+        ...(result?.styles && typeof result.styles === "object"
+          ? { styles: result.styles as Record<string, string> }
+          : {}),
+        ...(result?.box &&
+        typeof result.box === "object" &&
+        typeof (result.box as { x?: unknown }).x === "number" &&
+        typeof (result.box as { y?: unknown }).y === "number" &&
+        typeof (result.box as { width?: unknown }).width === "number" &&
+        typeof (result.box as { height?: unknown }).height === "number"
+          ? {
+              box: {
+                x: Number((result.box as { x: number }).x),
+                y: Number((result.box as { y: number }).y),
+                width: Number((result.box as { width: number }).width),
+                height: Number((result.box as { height: number }).height),
+              },
+            }
+          : {}),
+      };
+    }
     const { sessionId, state } = await this.requireSessionState(input);
     const properties = input.properties?.length
       ? input.properties
@@ -1502,6 +1958,17 @@ export class BrowserService {
       return remote;
     }
     this.ensureEnabled();
+    const attached = await this.getAttachedBrowserAttachment(normalizedSessionId);
+    if (attached) {
+      await this.runAttachedTabAction(normalizedSessionId, attached, {
+        action: "close",
+      });
+      await this.maintenanceStore.clearBrowserAttachment(normalizedSessionId);
+      return {
+        session_id: normalizedSessionId,
+        closed: true,
+      };
+    }
     const state = this.sessionStates.get(normalizedSessionId);
 
     if (state) {
@@ -1865,7 +2332,22 @@ export class BrowserService {
     sessionId: string,
     attachment: BrowserAttachmentRecord,
     input: {
-      action: "dom" | "click" | "fill" | "press" | "screenshot" | "inject_script";
+      action:
+        | "attach"
+        | "detach"
+        | "dom"
+        | "click"
+        | "fill"
+        | "press"
+        | "reload"
+        | "close"
+        | "wait_for"
+        | "wait_for_url"
+        | "computed_style"
+        | "screenshot"
+        | "inject_script"
+        | "get_logs"
+        | "clear_logs";
       payload?: Record<string, unknown> | undefined;
     },
   ): Promise<Record<string, unknown> | undefined> {

@@ -1,36 +1,31 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import {
-  browserListAttachedInstancesInputSchema,
-  browserListAttachedInstancesOutputSchema,
+  browserAttachTabInputSchema,
+  browserAttachTabOutputSchema,
 } from "../../../entities/request/model/schema";
 import type { ToolModule } from "../../../shared/api/tool-registry/types";
 import { BrowserService } from "./browserService";
 
 function createContent(output: unknown): Array<{ type: "text"; text: string }> {
-  return [
-    {
-      type: "text",
-      text: JSON.stringify(output, null, 2),
-    },
-  ];
+  return [{ type: "text", text: JSON.stringify(output, null, 2) }];
 }
 
-export class BrowserListAttachedInstancesTool implements ToolModule {
+export class BrowserAttachTabTool implements ToolModule {
   public constructor(private readonly browserService: BrowserService) {}
 
   public register(server: McpServer): void {
     server.registerTool(
-      "browser_list_attached_instances",
+      "browser_attach_tab",
       {
-        title: "Browser List Attached Instances",
+        title: "Browser Attach Tab",
         description:
-          "List browser instances currently attached through the local browser-attach extension bridge for the current console.",
-        inputSchema: browserListAttachedInstancesInputSchema,
-        outputSchema: browserListAttachedInstancesOutputSchema,
+          "Attach the current MCP session to a specific tab in a connected attached browser instance by tab_id.",
+        inputSchema: browserAttachTabInputSchema,
+        outputSchema: browserAttachTabOutputSchema,
       },
       async (args) => {
-        const output = await this.browserService.listAttachedInstances(args);
+        const output = await this.browserService.attachTab(args);
         return {
           content: createContent(output),
           structuredContent: output,

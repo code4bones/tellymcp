@@ -469,6 +469,7 @@ export class FirefoxAttachServer {
     this.socketsByInstanceId.set(message.instance_id, state);
     const instance = this.registry.setConnected({
       instanceId: message.instance_id,
+      browser: message.browser,
       extensionVersion: message.extension_version,
       ...(message.profile_name ? { profileName: message.profile_name } : {}),
       capabilities: ["tabs", "active_tab", "recording"],

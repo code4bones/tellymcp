@@ -31,7 +31,7 @@ export type BrowserListAttachedInstancesOutput = {
   total: number;
   instances: Array<{
     instance_id: string;
-    browser: "firefox";
+    browser: "firefox" | "chrome";
     extension_version: string;
     profile_name?: string | undefined;
     connected_at: string;

@@ -1,6 +1,6 @@
 # Tools
 
-Version: `2026-06-06.1`
+Version: `2026-06-06.2`
 
 Gateway/client runtime compatibility:
 
@@ -18,6 +18,9 @@ Browser tools:
 
 - `browser_list_attached_instances`
 - `browser_list_tabs`
+- `browser_attach_active_tab`
+- `browser_attach_tab`
+- `browser_detach_tab`
 - `browser_recording_start`
 - `browser_recording_stop`
 - `browser_recording_status`
@@ -44,8 +47,8 @@ Browser runtime rule:
   - attached browser tab backend for a real user Firefox or Chrome session
   - isolated Playwright Chromium backend
 - `browser_open` is only for the isolated Playwright backend.
-- `browser_list_attached_instances` and `browser_list_tabs` are for the attached browser backend.
-- if the local attach extension is connected and a tab was selected from the browser control panel, `browser_click`, `browser_fill`, `browser_inject_script`, `browser_press`, `browser_dom`, and `browser_screenshot` use that attached browser tab for the current session without requiring `browser_open`
+- `browser_list_attached_instances`, `browser_list_tabs`, `browser_attach_active_tab`, `browser_attach_tab`, and `browser_detach_tab` are for the attached browser backend.
+- after a tab is attached for the current session, `browser_click`, `browser_fill`, `browser_inject_script`, `browser_press`, `browser_wait_for`, `browser_wait_for_url`, `browser_dom`, `browser_computed_style`, `browser_reload`, `browser_screenshot`, `browser_console`, `browser_errors`, `browser_network_failures`, `browser_clear_logs`, and `browser_close` use that attached browser tab without requiring `browser_open`
 - `browser_recording_start`, `browser_recording_stop`, and `browser_recording_status` are also for the attached browser backend
 - browser recordings are written under `.mcp-xchange/web/{tab-title-slug}-{timestamp}/`
 - each recording bundle contains `session.json`, `timeline.ndjson`, `pages/`, `network/`, and `console/`
@@ -836,9 +839,67 @@ Output:
 Notes:
 
 - if only one attached browser instance is connected, `instance_id` can be omitted
-- current tab selection for the attach backend is done from the browser extension control panel
+- tab selection for the attach backend can be done either from the browser extension control panel or through `browser_attach_active_tab` / `browser_attach_tab`
 - `active=true` means the tab is active in its browser window; there may be more than one such tab across multiple windows
 - for the tab currently selected for this MCP session, prefer `selected=true`
+
+## `browser_attach_active_tab`
+
+Purpose:
+
+- attach the current MCP session to the active tab of a connected attached browser instance
+
+Input:
+
+- `session_id?`
+- `instance_id?`
+
+Output:
+
+- `session_id`
+- `backend`
+- `instance_id`
+- `tab_id`
+- `attached_at`
+- `title?`
+- `url?`
+
+## `browser_attach_tab`
+
+Purpose:
+
+- attach the current MCP session to a specific attached browser tab by `tab_id`
+
+Input:
+
+- `session_id?`
+- `instance_id?`
+- `tab_id`
+
+Output:
+
+- `session_id`
+- `backend`
+- `instance_id`
+- `tab_id`
+- `attached_at`
+- `title?`
+- `url?`
+
+## `browser_detach_tab`
+
+Purpose:
+
+- detach the current MCP session from the currently selected attached browser tab
+
+Input:
+
+- `session_id?`
+
+Output:
+
+- `session_id`
+- `detached`
 
 ## `browser_recording_start`
 
@@ -1227,6 +1288,8 @@ Output:
 Purpose:
 
 - inspect computed styles and box metrics for a DOM element in the session browser tab
+- if the session has a selected attached browser tab, inspect that real browser tab
+- otherwise inspect the isolated Playwright page
 
 Input:
 
@@ -1284,7 +1347,9 @@ Notes:
 
 Purpose:
 
-- close the isolated browser context for the current session
+- close the current browser target for the session
+- if the session has a selected attached browser tab, close that real browser tab and clear the attach state
+- otherwise close the isolated Playwright browser context
 
 Input:
 

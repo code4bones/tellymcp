@@ -1,36 +1,31 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import {
-  browserListAttachedInstancesInputSchema,
-  browserListAttachedInstancesOutputSchema,
+  browserDetachTabInputSchema,
+  browserDetachTabOutputSchema,
 } from "../../../entities/request/model/schema";
 import type { ToolModule } from "../../../shared/api/tool-registry/types";
 import { BrowserService } from "./browserService";
 
 function createContent(output: unknown): Array<{ type: "text"; text: string }> {
-  return [
-    {
-      type: "text",
-      text: JSON.stringify(output, null, 2),
-    },
-  ];
+  return [{ type: "text", text: JSON.stringify(output, null, 2) }];
 }
 
-export class BrowserListAttachedInstancesTool implements ToolModule {
+export class BrowserDetachTabTool implements ToolModule {
   public constructor(private readonly browserService: BrowserService) {}
 
   public register(server: McpServer): void {
     server.registerTool(
-      "browser_list_attached_instances",
+      "browser_detach_tab",
       {
-        title: "Browser List Attached Instances",
+        title: "Browser Detach Tab",
         description:
-          "List browser instances currently attached through the local browser-attach extension bridge for the current console.",
-        inputSchema: browserListAttachedInstancesInputSchema,
-        outputSchema: browserListAttachedInstancesOutputSchema,
+          "Detach the current MCP session from the currently selected attached browser tab.",
+        inputSchema: browserDetachTabInputSchema,
+        outputSchema: browserDetachTabOutputSchema,
       },
       async (args) => {
-        const output = await this.browserService.listAttachedInstances(args);
+        const output = await this.browserService.detachTab(args);
         return {
           content: createContent(output),
           structuredContent: output,

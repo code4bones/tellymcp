@@ -5,6 +5,15 @@
   window.__tellyRecorderPageInstalled = true;
 
   const MAX_TEXT_CHARS = 64 * 1024;
+  const padNumber = (value, length = 2) => String(value).padStart(length, "0");
+  const formatLocalTimestamp = (date = new Date()) => {
+    return `${date.getFullYear()}-${padNumber(date.getMonth() + 1)}-${padNumber(date.getDate())}T${padNumber(
+      date.getHours(),
+    )}:${padNumber(date.getMinutes())}:${padNumber(date.getSeconds())}.${padNumber(
+      date.getMilliseconds(),
+      3,
+    )}`;
+  };
   const truncateText = (value) => {
     const text = String(value ?? "");
     return text.length > MAX_TEXT_CHARS ? text.slice(0, MAX_TEXT_CHARS) : text;
@@ -40,7 +49,7 @@
     emit({
       kind: "console_event",
       source: "page",
-      at: new Date().toISOString(),
+      at: formatLocalTimestamp(new Date()),
       level,
       text:
         textOverride ||
@@ -128,7 +137,7 @@
     emit({
       kind: "console_event",
       source: "page",
-      at: new Date().toISOString(),
+      at: formatLocalTimestamp(new Date()),
       level: "error",
       text: truncateText(event.message || "window error"),
       args: [
@@ -147,7 +156,7 @@
     emit({
       kind: "console_event",
       source: "page",
-      at: new Date().toISOString(),
+      at: formatLocalTimestamp(new Date()),
       level: "error",
       text: "Unhandled promise rejection",
       args: [serializeValue(event.reason)],
@@ -158,7 +167,7 @@
 
   const originalFetch = window.fetch.bind(window);
   window.fetch = async (...args) => {
-    const startedAt = new Date().toISOString();
+    const startedAt = formatLocalTimestamp(new Date());
     const request = new Request(...args);
     const requestId = `page-fetch-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const body = await serializeRequestBody(request);
@@ -178,7 +187,7 @@
     emit({
       kind: "network_response_complete",
       source: "page",
-      at: new Date().toISOString(),
+      at: formatLocalTimestamp(new Date()),
       request_id: requestId,
       url: request.url,
       method: request.method,
@@ -192,7 +201,7 @@
       emit({
         kind: "network_response_body",
         source: "page",
-        at: new Date().toISOString(),
+        at: formatLocalTimestamp(new Date()),
         request_id: requestId,
         url: request.url,
         body_text: truncateText(bodyText),
@@ -224,7 +233,7 @@
     return originalSetHeader.call(this, name, value);
   };
   XMLHttpRequest.prototype.send = function patchedSend(body) {
-    const startedAt = new Date().toISOString();
+    const startedAt = formatLocalTimestamp(new Date());
     const meta = this.__tellyRecorder || {
       request_id: `page-xhr-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
       method: "GET",
@@ -274,7 +283,7 @@
         emit({
           kind: "network_response_complete",
           source: "page",
-          at: new Date().toISOString(),
+          at: formatLocalTimestamp(new Date()),
           request_id: meta.request_id,
           url: meta.url,
           method: meta.method,
@@ -286,7 +295,7 @@
           emit({
             kind: "network_response_body",
             source: "page",
-            at: new Date().toISOString(),
+            at: formatLocalTimestamp(new Date()),
             request_id: meta.request_id,
             url: meta.url,
             body_text: truncateText(this.responseText),

@@ -28,6 +28,19 @@ const controlPanelPorts = new Set();
 const activeRecordingsById = new Map();
 const activeRecordingIdByTabId = new Map();
 
+function padNumber(value, length = 2) {
+  return String(value).padStart(length, "0");
+}
+
+function formatLocalTimestamp(date = new Date()) {
+  return `${date.getFullYear()}-${padNumber(date.getMonth() + 1)}-${padNumber(date.getDate())}T${padNumber(
+    date.getHours(),
+  )}:${padNumber(date.getMinutes())}:${padNumber(date.getSeconds())}.${padNumber(
+    date.getMilliseconds(),
+    3,
+  )}`;
+}
+
 function storageGet(defaults) {
   return new Promise((resolve, reject) => {
     browser.storage.local.get(defaults, (result) => {
@@ -534,7 +547,7 @@ function startHeartbeat() {
   heartbeatTimer = setInterval(() => {
     sendJson({
       type: "heartbeat",
-      sent_at: new Date().toISOString(),
+      sent_at: formatLocalTimestamp(new Date()),
     });
   }, HEARTBEAT_INTERVAL_MS);
 }
@@ -581,7 +594,7 @@ function sendRecordingEvent(recordingId, tabId, event) {
     tab_id: tabId,
     event: {
       ...event,
-      at: event.at || new Date().toISOString(),
+      at: event.at || formatLocalTimestamp(new Date()),
     },
   });
 }
@@ -600,7 +613,7 @@ async function captureTabSnapshot(tabId, reason) {
       kind: "page_snapshot",
       source: "background",
       reason: recordingReason,
-      at: new Date().toISOString(),
+      at: formatLocalTimestamp(new Date()),
       url: location.href,
       title: document.title,
       ready_state: document.readyState,
@@ -656,7 +669,7 @@ async function startRecording(message) {
     tabId,
     tabTitle: browserTab.title || "",
     tabUrl: browserTab.url || "",
-    startedAt: new Date().toISOString(),
+    startedAt: formatLocalTimestamp(new Date()),
   });
   activeRecordingIdByTabId.set(tabId, message.recording_id);
 
@@ -1015,7 +1028,7 @@ browser.storage.onChanged.addListener((changes, areaName) => {
           [POPUP_COMMAND_RESULT_KEY]: {
             command_id: command.command_id,
             result,
-            at: new Date().toISOString(),
+            at: formatLocalTimestamp(new Date()),
           },
         }),
       )
@@ -1027,7 +1040,7 @@ browser.storage.onChanged.addListener((changes, areaName) => {
               ok: false,
               error: error instanceof Error ? error.message : String(error),
             },
-            at: new Date().toISOString(),
+            at: formatLocalTimestamp(new Date()),
           },
         }),
       );

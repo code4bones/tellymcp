@@ -1,6 +1,7 @@
 import type {
   FirefoxAttachTabRecord,
 } from "./types";
+import { formatLocalTimestamp } from "../../../shared/lib/time/localTimestamp";
 
 export type FirefoxAttachInstanceRecord = {
   instanceId: string;
@@ -23,7 +24,7 @@ export class FirefoxAttachRegistry {
     profileName?: string;
     capabilities: string[];
   }): FirefoxAttachInstanceRecord {
-    const now = new Date().toISOString();
+    const now = formatLocalTimestamp(new Date());
     const existing = this.instances.get(input.instanceId);
     const next: FirefoxAttachInstanceRecord = {
       instanceId: input.instanceId,
@@ -45,7 +46,7 @@ export class FirefoxAttachRegistry {
     if (!existing) {
       return;
     }
-    existing.lastSeenAt = new Date().toISOString();
+    existing.lastSeenAt = formatLocalTimestamp(new Date());
   }
 
   public setTabs(instanceId: string, tabs: FirefoxAttachTabRecord[]): void {
@@ -56,7 +57,7 @@ export class FirefoxAttachRegistry {
     existing.tabs = tabs.map((tab) => ({ ...tab }));
     existing.activeTab =
       tabs.find((tab) => tab.active) ?? existing.activeTab ?? null;
-    existing.lastSeenAt = new Date().toISOString();
+    existing.lastSeenAt = formatLocalTimestamp(new Date());
   }
 
   public setActiveTab(
@@ -68,7 +69,7 @@ export class FirefoxAttachRegistry {
       return;
     }
     existing.activeTab = tab ? { ...tab } : null;
-    existing.lastSeenAt = new Date().toISOString();
+    existing.lastSeenAt = formatLocalTimestamp(new Date());
   }
 
   public updateTab(instanceId: string, tab: FirefoxAttachTabRecord): void {
@@ -87,7 +88,7 @@ export class FirefoxAttachRegistry {
     if (tab.active) {
       existing.activeTab = { ...tab };
     }
-    existing.lastSeenAt = new Date().toISOString();
+    existing.lastSeenAt = formatLocalTimestamp(new Date());
   }
 
   public remove(instanceId: string): void {

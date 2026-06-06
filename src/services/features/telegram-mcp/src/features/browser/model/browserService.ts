@@ -69,6 +69,12 @@ import type {
 } from "../../../shared/api/storage/contract";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
+import {
+  formatLocalDateSegment,
+  formatLocalTimeSegment,
+  formatLocalTimestamp,
+  formatLocalTimestampForFileName,
+} from "../../../shared/lib/time/localTimestamp";
 import { MinioExchangeStore } from "../../../shared/integrations/object-storage/minioExchangeStore";
 import { TelegramTransport } from "../../../shared/integrations/telegram/transport";
 import {
@@ -153,7 +159,7 @@ function trimList<T>(list: T[], limit?: number): T[] {
 function sanitizeScreenshotName(fileName?: string): string {
   const trimmed = fileName?.trim();
   if (!trimmed) {
-    const timestamp = new Date().toISOString().replace(/[:.]/gu, "-");
+    const timestamp = formatLocalTimestampForFileName(new Date());
     return `browser-screenshot-${timestamp}.png`;
   }
 
@@ -164,8 +170,8 @@ function sanitizeScreenshotName(fileName?: string): string {
 }
 
 function buildDatedRelativePath(fileName: string, date = new Date()): string {
-  const dateSegment = date.toISOString().slice(0, 10);
-  const timeSegment = date.toTimeString().slice(0, 8).replace(/:/gu, "-");
+  const dateSegment = formatLocalDateSegment(date);
+  const timeSegment = formatLocalTimeSegment(date);
   return `${dateSegment}/${timeSegment}/${fileName}`;
 }
 
@@ -521,7 +527,7 @@ export class BrowserService {
 
     state.currentUrl = state.page.url();
     state.title = await state.page.title();
-    state.lastUsedAt = new Date().toISOString();
+    state.lastUsedAt = formatLocalTimestamp(new Date());
 
     this.logger.info("Browser page opened", {
       sessionId: resolved.sessionId,
@@ -570,7 +576,7 @@ export class BrowserService {
     this.ensureEnabled();
     const { sessionId, state } = await this.requireSessionState(input);
 
-    state.lastUsedAt = new Date().toISOString();
+    state.lastUsedAt = formatLocalTimestamp(new Date());
 
     return {
       session_id: sessionId,
@@ -625,7 +631,7 @@ export class BrowserService {
 
     state.currentUrl = state.page.url();
     state.title = await state.page.title().catch(() => state.title);
-    state.lastUsedAt = new Date().toISOString();
+    state.lastUsedAt = formatLocalTimestamp(new Date());
 
     return {
       session_id: sessionId,
@@ -683,7 +689,7 @@ export class BrowserService {
 
     state.currentUrl = state.page.url();
     state.title = await state.page.title().catch(() => state.title);
-    state.lastUsedAt = new Date().toISOString();
+    state.lastUsedAt = formatLocalTimestamp(new Date());
 
     return {
       session_id: sessionId,
@@ -747,7 +753,7 @@ export class BrowserService {
 
     state.currentUrl = state.page.url();
     state.title = await state.page.title().catch(() => state.title);
-    state.lastUsedAt = new Date().toISOString();
+    state.lastUsedAt = formatLocalTimestamp(new Date());
 
     return {
       session_id: sessionId,
@@ -824,7 +830,7 @@ export class BrowserService {
 
     state.currentUrl = state.page.url();
     state.title = await state.page.title().catch(() => state.title);
-    state.lastUsedAt = new Date().toISOString();
+    state.lastUsedAt = formatLocalTimestamp(new Date());
 
     return {
       session_id: sessionId,
@@ -867,7 +873,7 @@ export class BrowserService {
 
     state.currentUrl = state.page.url();
     state.title = await state.page.title().catch(() => state.title);
-    state.lastUsedAt = new Date().toISOString();
+    state.lastUsedAt = formatLocalTimestamp(new Date());
 
     this.logger.info("Browser page reloaded", {
       sessionId,
@@ -914,7 +920,7 @@ export class BrowserService {
 
     state.currentUrl = state.page.url();
     state.title = await state.page.title().catch(() => state.title);
-    state.lastUsedAt = new Date().toISOString();
+    state.lastUsedAt = formatLocalTimestamp(new Date());
 
     return {
       session_id: sessionId,
@@ -968,7 +974,7 @@ export class BrowserService {
 
     state.currentUrl = state.page.url();
     state.title = await state.page.title().catch(() => state.title);
-    state.lastUsedAt = new Date().toISOString();
+    state.lastUsedAt = formatLocalTimestamp(new Date());
 
     return {
       session_id: sessionId,
@@ -1004,7 +1010,7 @@ export class BrowserService {
     this.ensureEnabled();
     const { sessionId, state } = await this.requireSessionState(input);
 
-    state.lastUsedAt = new Date().toISOString();
+    state.lastUsedAt = formatLocalTimestamp(new Date());
 
     return {
       session_id: sessionId,
@@ -1038,7 +1044,7 @@ export class BrowserService {
     this.ensureEnabled();
     const { sessionId, state } = await this.requireSessionState(input);
 
-    state.lastUsedAt = new Date().toISOString();
+    state.lastUsedAt = formatLocalTimestamp(new Date());
 
     return {
       session_id: sessionId,
@@ -1083,7 +1089,7 @@ export class BrowserService {
     state.consoleMessages = [];
     state.pageErrors = [];
     state.networkFailures = [];
-    state.lastUsedAt = new Date().toISOString();
+    state.lastUsedAt = formatLocalTimestamp(new Date());
 
     return {
       session_id: sessionId,
@@ -1184,7 +1190,7 @@ export class BrowserService {
       })
       .catch(() => ({ found: false } as BrowserDomSnapshot));
 
-    state.lastUsedAt = new Date().toISOString();
+    state.lastUsedAt = formatLocalTimestamp(new Date());
     state.currentUrl = state.page.url();
     state.title = await state.page.title().catch(() => state.title);
 
@@ -1271,7 +1277,7 @@ export class BrowserService {
       }, properties)
       .catch(() => ({ found: false } as BrowserStyleSnapshot));
 
-    state.lastUsedAt = new Date().toISOString();
+    state.lastUsedAt = formatLocalTimestamp(new Date());
     state.currentUrl = state.page.url();
     state.title = await state.page.title().catch(() => state.title);
 
@@ -1335,7 +1341,7 @@ export class BrowserService {
         filePath: storedFile.filePath,
         relativePath: storedFile.relativePath,
         source: "browser-screenshot",
-        uploadedAt: new Date().toISOString(),
+        uploadedAt: formatLocalTimestamp(new Date()),
         storageRef: storedFile.storageRef,
         bucketName: storedFile.bucketName,
         objectName: storedFile.objectName,
@@ -1412,7 +1418,7 @@ export class BrowserService {
     });
     const filePath = storedFile.filePath;
 
-    state.lastUsedAt = new Date().toISOString();
+    state.lastUsedAt = formatLocalTimestamp(new Date());
     state.currentUrl = state.page.url();
     state.title = await state.page.title().catch(() => state.title);
 
@@ -1428,7 +1434,7 @@ export class BrowserService {
       filePath,
       relativePath: storedFile.relativePath,
       source: "browser-screenshot",
-      uploadedAt: new Date().toISOString(),
+      uploadedAt: formatLocalTimestamp(new Date()),
       storageRef: storedFile.storageRef,
       bucketName: storedFile.bucketName,
       objectName: storedFile.objectName,
@@ -1585,7 +1591,7 @@ export class BrowserService {
       this.buildContextOptions(openInput),
     );
     const page = await context.newPage();
-    const createdAt = new Date().toISOString();
+    const createdAt = formatLocalTimestamp(new Date());
     const state: BrowserSessionState = {
       context,
       page,
@@ -1605,7 +1611,7 @@ export class BrowserService {
           ...(formatConsoleLocation(message)
             ? { location: formatConsoleLocation(message) }
             : {}),
-          timestamp: new Date().toISOString(),
+          timestamp: formatLocalTimestamp(new Date()),
         },
         this.config.browser.maxEvents,
       );
@@ -1617,7 +1623,7 @@ export class BrowserService {
         {
           message: error.message,
           ...(error.stack ? { stack: error.stack } : {}),
-          timestamp: new Date().toISOString(),
+          timestamp: formatLocalTimestamp(new Date()),
         },
         this.config.browser.maxEvents,
       );
@@ -1687,7 +1693,7 @@ export class BrowserService {
           : {}),
         ...(failure?.errorText ? { errorText: failure.errorText } : {}),
         resourceType: request.resourceType(),
-        timestamp: new Date().toISOString(),
+        timestamp: formatLocalTimestamp(new Date()),
       },
       this.config.browser.maxEvents,
     );

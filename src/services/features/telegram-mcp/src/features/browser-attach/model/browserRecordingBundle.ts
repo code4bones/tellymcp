@@ -127,8 +127,35 @@ function sanitizeSegment(value: string): string {
   return normalized || "recording";
 }
 
+function padNumber(value: number, length = 2): string {
+  return String(value).padStart(length, "0");
+}
+
+function formatLocalTimestamp(date: Date): string {
+  return `${date.getFullYear()}-${padNumber(date.getMonth() + 1)}-${padNumber(date.getDate())}T${padNumber(
+    date.getHours(),
+  )}:${padNumber(date.getMinutes())}:${padNumber(date.getSeconds())}.${padNumber(
+    date.getMilliseconds(),
+    3,
+  )}`;
+}
+
 function formatTimestampForDir(date: Date): string {
-  return date.toISOString().replace(/[:.]/gu, "-");
+  return formatLocalTimestamp(date).replace(/[:.]/gu, "-");
+}
+
+function normalizeRecordedTimestamp(rawValue?: string | undefined): string {
+  const trimmed = rawValue?.trim();
+  if (!trimmed) {
+    return formatLocalTimestamp(new Date());
+  }
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return formatLocalTimestamp(new Date());
+  }
+
+  return formatLocalTimestamp(parsed);
 }
 
 function formatJsonLine(value: unknown): Uint8Array {
@@ -239,7 +266,7 @@ export class BrowserRecordingBundleWriter {
       );
     }
 
-    const startedAt = new Date().toISOString();
+    const startedAt = formatLocalTimestamp(new Date());
     const record: BrowserRecordingRecord = {
       sessionId: input.sessionId,
       backend: "firefox-attached",
@@ -320,7 +347,7 @@ export class BrowserRecordingBundleWriter {
     state: ActiveBrowserRecordingState,
     event: BrowserRecordingEvent,
   ): Promise<ActiveBrowserRecordingState> {
-    const at = event.at?.trim() || new Date().toISOString();
+    const at = normalizeRecordedTimestamp(event.at);
     state.record.eventCount += 1;
     state.record.lastEventAt = at;
 

@@ -19,6 +19,19 @@
   }
   window.__tellyRecorderContentInstalled = true;
 
+  function padNumber(value, length = 2) {
+    return String(value).padStart(length, "0");
+  }
+
+  function formatLocalTimestamp(date = new Date()) {
+    return `${date.getFullYear()}-${padNumber(date.getMonth() + 1)}-${padNumber(date.getDate())}T${padNumber(
+      date.getHours(),
+    )}:${padNumber(date.getMinutes())}:${padNumber(date.getSeconds())}.${padNumber(
+      date.getMilliseconds(),
+      3,
+    )}`;
+  }
+
   function emit(payload) {
     void sendRuntimeMessage({
       type: "telly_recording_page_event",
@@ -31,7 +44,7 @@
       kind: "page_snapshot",
       source: "content",
       reason,
-      at: new Date().toISOString(),
+      at: formatLocalTimestamp(new Date()),
       url: location.href,
       title: document.title,
       ready_state: document.readyState,

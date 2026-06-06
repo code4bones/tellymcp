@@ -24,6 +24,19 @@ const CONTROL_PANEL_PORT_NAME = "telly-control-panel";
 let controlPanelPort = null;
 let keepAliveTimer = null;
 
+function padNumber(value, length = 2) {
+  return String(value).padStart(length, "0");
+}
+
+function formatLocalTimestamp(date = new Date()) {
+  return `${date.getFullYear()}-${padNumber(date.getMonth() + 1)}-${padNumber(date.getDate())}T${padNumber(
+    date.getHours(),
+  )}:${padNumber(date.getMinutes())}:${padNumber(date.getSeconds())}.${padNumber(
+    date.getMilliseconds(),
+    3,
+  )}`;
+}
+
 function storageGet(defaults) {
   return new Promise((resolve, reject) => {
     browser.storage.local.get(defaults, (result) => {
@@ -289,7 +302,7 @@ function startControlPanelPort() {
     try {
       controlPanelPort?.postMessage({
         type: "keepalive",
-        at: new Date().toISOString(),
+        at: formatLocalTimestamp(new Date()),
       });
     } catch {
       // ignore
@@ -326,7 +339,7 @@ async function sendPopupCommand(type, payload = {}, timeoutMs = 5000) {
       command_id: commandId,
       type,
       ...payload,
-      at: new Date().toISOString(),
+      at: formatLocalTimestamp(new Date()),
     },
   });
   try {

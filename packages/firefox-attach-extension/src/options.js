@@ -18,6 +18,19 @@ const ATTACHED_TAB_KEY = "attach_selected_tab";
 const POPUP_COMMAND_KEY = "attach_popup_command";
 const POPUP_COMMAND_RESULT_KEY = "attach_popup_command_result";
 
+function padNumber(value, length = 2) {
+  return String(value).padStart(length, "0");
+}
+
+function formatLocalTimestamp(date = new Date()) {
+  return `${date.getFullYear()}-${padNumber(date.getMonth() + 1)}-${padNumber(date.getDate())}T${padNumber(
+    date.getHours(),
+  )}:${padNumber(date.getMinutes())}:${padNumber(date.getSeconds())}.${padNumber(
+    date.getMilliseconds(),
+    3,
+  )}`;
+}
+
 function storageGet(defaults) {
   return browser.storage.local.get(defaults);
 }
@@ -412,7 +425,7 @@ async function sendPopupCommand(type, payload = {}, timeoutMs = 15000) {
       command_id: commandId,
       type,
       ...payload,
-      at: new Date().toISOString(),
+      at: formatLocalTimestamp(new Date()),
     },
   });
   try {

@@ -9,6 +9,7 @@ import type {
   SessionStore,
 } from "../../../shared/api/storage/contract";
 import type { Logger } from "../../../shared/lib/logger/logger";
+import { formatLocalTimestamp } from "../../../shared/lib/time/localTimestamp";
 import {
   BrowserRecordingBundleWriter,
   type ActiveBrowserRecordingState,
@@ -215,7 +216,7 @@ export class FirefoxAttachServer {
         sessionId: input.sessionId,
         label: this.config.project.sessionLabel?.trim() || input.sessionId,
         cwd: process.cwd(),
-        updatedAt: new Date().toISOString(),
+        updatedAt: formatLocalTimestamp(new Date()),
       } as const);
 
     if (!resolvedSession.cwd?.trim()) {
@@ -303,7 +304,7 @@ export class FirefoxAttachServer {
       const stopped: BrowserRecordingRecord = {
         ...existing,
         status: "stopped",
-        stoppedAt: new Date().toISOString(),
+        stoppedAt: formatLocalTimestamp(new Date()),
       };
       await this.maintenanceStore.setBrowserRecording(stopped);
       await this.broadcastRecordingState(stopped);
@@ -523,7 +524,7 @@ export class FirefoxAttachServer {
       backend: "firefox-attached",
       instanceId,
       tabId: tab.tab_id,
-      attachedAt: new Date().toISOString(),
+      attachedAt: formatLocalTimestamp(new Date()),
       ...(tab.title ? { title: tab.title } : {}),
       ...(tab.url ? { url: tab.url } : {}),
     });

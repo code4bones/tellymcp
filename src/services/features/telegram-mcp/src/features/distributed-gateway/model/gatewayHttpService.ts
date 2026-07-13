@@ -13,6 +13,7 @@ import type {
 } from "../../../entities/collaboration/model/types";
 import type { TelegramWebAppInitDataUnsafe } from "../../../app/webapp/auth";
 import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
+import { isGatewayAuthorizationValid } from "../../../shared/lib/gatewayAuth";
 import { getTellyMcpPackageRoot } from "../../../shared/lib/version/versionHandshake";
 
 function readHeader(
@@ -351,12 +352,11 @@ export class GatewayHttpService {
     return response;
   }
   private isAuthorized(req: IncomingMessage): boolean {
-    if (!this.config.distributed.gatewayAuthToken) {
-      return true;
-    }
-
     const authorization = readHeader(req, "authorization");
-    return authorization === `Bearer ${this.config.distributed.gatewayAuthToken}`;
+    return isGatewayAuthorizationValid(
+      authorization,
+      this.config.distributed.gatewayAuthToken,
+    );
   }
 
   private extractActionErrorMessage(value: unknown, fallback: string): string {

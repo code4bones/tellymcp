@@ -16,11 +16,18 @@ reviews rather than replacing them.
   security-relevant fields. `initDataUnsafe` is consistency-checked, the alternate
   user-fields validation protocol and sensitive validation logging were removed, and
   regression coverage includes local and relay mismatch scenarios.
+- `CR-02`: **Resolved** on `2026-07-14`.
+  Gateway and combined modes now require `GATEWAY_AUTH_TOKEN` at startup, configured
+  remote clients require it as well, and HTTP/WS authorization fails closed. Token
+  comparison is constant-time, WS requests are rejected before upgrade, only the
+  gateway health route remains public, and all env templates and standalone docs now
+  require the transport token. The updated deployment was verified operationally on
+  `2026-07-14`.
 
 ## Executive Summary
 
-The project builds cleanly and the existing test suite passes, but two critical
-authentication problems make the documented standalone deployment unsafe as-is:
+The project builds cleanly and the existing test suite passes. The two critical
+authentication problems found by this review have now been remediated:
 
 1. Telegram WebApp validation accepts an identity from unsigned `initDataUnsafe`
    after validating a different identity in signed raw init data.
@@ -28,9 +35,9 @@ authentication problems make the documented standalone deployment unsafe as-is:
    deployment examples configure `GATEWAY_TOKEN` instead of the separate
    `GATEWAY_AUTH_TOKEN` that actually protects the transport.
 
-The first remediation pass should address findings CR-01, CR-02, and H-01 before
-shipping another public package. Delivery atomicity/idempotency and resource limits
-should follow immediately after.
+H-01 is now the highest-priority unresolved finding before shipping another public
+package. Delivery atomicity/idempotency and resource limits should follow immediately
+after.
 
 ## Critical Findings
 
@@ -77,6 +84,17 @@ Recommended fix:
    (`src/app/http.ts:879-893`, `979-985`).
 
 ### CR-02 - Documented gateway deployment is unauthenticated by default
+
+Status: **Resolved** (`2026-07-14`).
+
+The remediation requires `GATEWAY_AUTH_TOKEN` for gateway/both startup and for a
+configured remote client, makes HTTP authorization fail closed, and rejects missing
+or incorrect WS authorization with HTTP `401` before upgrade. Bearer values are
+compared through fixed-length SHA-256 digests with `timingSafeEqual`. The env examples,
+CLI templates, README files, standalone guides, `TOOLS.md`, and compose guidance now
+document the separate transport token. Regression tests cover startup validation,
+HTTP health/auth behavior, exact bearer matching, and real WS upgrade rejection and
+acceptance. The updated deployment was verified by the operator on `2026-07-14`.
 
 Files:
 
@@ -373,13 +391,11 @@ large refactor into the security patch.
 
 Highest-value additions:
 
-1. WebApp raw/unsafe identity and auth-date mismatch tests.
-2. Gateway HTTP/WS fail-closed authentication tests using production-like config.
-3. Gateway enqueue rollback/idempotency and concurrent delivery claim tests.
-4. HTTP, WS, HTML snapshot, message, and artifact size-limit tests.
-5. Browser-attach schema rejection, disconnect, stop, and event ordering tests.
-6. Workspace symlink escape tests.
-7. PTY synchronous spawn-failure cleanup tests.
+1. Gateway enqueue rollback/idempotency and concurrent delivery claim tests.
+2. HTTP, WS, HTML snapshot, message, and artifact size-limit tests.
+3. Browser-attach schema rejection, disconnect, stop, and event ordering tests.
+4. Workspace symlink escape tests.
+5. PTY synchronous spawn-failure cleanup tests.
 
 ## Verification
 
@@ -389,7 +405,7 @@ Passed in this workspace:
 yarn build                 PASS
 yarn build:extensions      PASS
 yarn lint                  PASS
-yarn test                  PASS (21 files, 95 tests)
+yarn test                  PASS (25 files, 116 tests)
 ```
 
 Dependency audit:
@@ -403,8 +419,9 @@ The audit's non-zero result is expected until H-01 is remediated.
 
 ## Recommended Fix Order
 
-1. CR-01: derive identity only from verified raw Telegram init data.
+1. CR-01: derive identity only from verified raw Telegram init data. **Resolved.**
 2. CR-02: make gateway transport authentication fail closed and update all templates.
+   **Resolved.**
 3. H-01: upgrade `ws` and refresh vulnerable transitive dependencies.
 4. H-02/H-03: authenticate and bound all WS/HTTP/file inputs.
 5. H-04/H-05: make enqueue and delivery transactional, claimed, and idempotent.

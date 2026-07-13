@@ -157,6 +157,7 @@ Required gateway values:
 - `GATEWAY_PUBLIC_URL`
 - `GATEWAY_WS_URL`
 - `GATEWAY_TOKEN`
+- `GATEWAY_AUTH_TOKEN`
 
 Then run:
 
@@ -183,6 +184,7 @@ Required client values:
 - `GATEWAY_PUBLIC_URL`
 - `GATEWAY_WS_URL`
 - `GATEWAY_TOKEN`
+- `GATEWAY_AUTH_TOKEN` (the same transport token configured on the gateway)
 - `GATEWAY_USER_UUID` if this console should be scoped to a specific Telegram owner
 
 Recommended:

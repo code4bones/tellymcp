@@ -89,7 +89,8 @@ Utility tools:
 
 Gateway-first runtime model:
 
-- agents register themselves on the gateway automatically through `GATEWAY_TOKEN`
+- agents authenticate the gateway HTTP/WS transport through `GATEWAY_AUTH_TOKEN`
+  and register into their gateway scope through `GATEWAY_TOKEN`
 - Telegram no longer links sessions with pair codes
 - `/menu` in the gateway bot shows available remote consoles directly
 - one running agent console is one logical session/console target

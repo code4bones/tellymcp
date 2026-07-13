@@ -384,6 +384,23 @@ export function loadConfig(): AppConfig {
     );
   }
 
+  const gatewayServerEnabled =
+    parsed.DISTRIBUTED_MODE === "gateway" ||
+    parsed.DISTRIBUTED_MODE === "both";
+  const gatewayClientConfigured =
+    parsed.DISTRIBUTED_MODE === "client" &&
+    Boolean(parsed.GATEWAY_PUBLIC_URL || parsed.GATEWAY_WS_URL);
+  if (
+    (gatewayServerEnabled || gatewayClientConfigured) &&
+    !parsed.GATEWAY_AUTH_TOKEN?.trim()
+  ) {
+    throw new Error(
+      gatewayServerEnabled
+        ? "GATEWAY_AUTH_TOKEN is required for gateway and both distributed modes."
+        : "GATEWAY_AUTH_TOKEN is required when a client connects to a gateway.",
+    );
+  }
+
   if (parsed.ADMIN_TOKEN?.trim() && !parsed.TELEGRAM_BOT_TOKEN?.trim()) {
     throw new Error(
       "ADMIN_TOKEN requires TELEGRAM_BOT_TOKEN because admin mode runs through the gateway bot.",

@@ -61,6 +61,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      # The mounted gateway env file must define GATEWAY_AUTH_TOKEN.
       ENV_FILE: /app/.env-gateway
       MCP_HTTP_HOST: 0.0.0.0
       REDIS_HOST: redis

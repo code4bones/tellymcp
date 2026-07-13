@@ -65,6 +65,7 @@ DB_NAME=
 GATEWAY_PUBLIC_URL=https://your-domain.example/api/gateway
 GATEWAY_WS_URL=wss://your-domain.example/api/gateway/ws
 GATEWAY_TOKEN=change_me_gateway_token
+GATEWAY_AUTH_TOKEN=put_strong_shared_transport_token_here
 ROOT_PREFIX=/api
 PORT=8080
 DISTRIBUTED_MODE=gateway
@@ -83,8 +84,14 @@ DISTRIBUTED_MODE=client
 GATEWAY_PUBLIC_URL=https://your-domain.example/api/gateway
 GATEWAY_WS_URL=wss://your-domain.example/api/gateway/ws
 GATEWAY_TOKEN=change_me_gateway_token
+GATEWAY_AUTH_TOKEN=put_strong_shared_transport_token_here
 GATEWAY_USER_UUID=put_owner_uuid_here
 ```
+
+Используйте один и тот же стойкий `GATEWAY_AUTH_TOKEN` на gateway и всех клиентах.
+Не смешивайте его с `GATEWAY_TOKEN`: последний разделяет данные gateway по scope,
+но не аутентифицирует HTTP- или WebSocket-транспорт. Сгенерируйте токен один раз,
+например командой `openssl rand -hex 32`, и не используйте пример значения выше.
 
 Для первого запуска также желательно задать:
 

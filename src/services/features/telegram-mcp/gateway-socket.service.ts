@@ -33,6 +33,7 @@ import {
   hasLocalTargetSession,
   hasOutgoingDeliveryNotice,
 } from "./gateway-loopback";
+import { isGatewayAuthorizationValid } from "./src/shared/lib/gatewayAuth";
 import {
   TELLYMCP_CAPABILITIES,
   TELLYMCP_PROTOCOL_VERSION,
@@ -3220,17 +3221,6 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       const wsServer = new WebSocketServer({ noServer: true });
 
       wsServer.on("connection", (socket: any, req: any) => {
-        if (runtime.config.distributed.gatewayAuthToken) {
-          const authorization = req.headers?.authorization;
-          if (
-            authorization !==
-            `Bearer ${runtime.config.distributed.gatewayAuthToken}`
-          ) {
-            socket.close(1008, "Unauthorized");
-            return;
-          }
-        }
-
         runtime.logger.warn("Gateway WS client connected", {
           remoteAddress: req.socket.remoteAddress,
           path: req.url,
@@ -3303,6 +3293,22 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         const requestUrl = new URL(req.url ?? "/", "http://gateway.local");
         const requestPath = requestUrl.pathname.replace(/\/+$/u, "") || "/";
         if (requestPath !== wsPath) {
+          return;
+        }
+
+        if (
+          !isGatewayAuthorizationValid(
+            req.headers.authorization,
+            runtime.config.distributed.gatewayAuthToken,
+          )
+        ) {
+          socket.write(
+            "HTTP/1.1 401 Unauthorized\r\n" +
+              "Connection: close\r\n" +
+              "Content-Length: 0\r\n" +
+              "\r\n",
+          );
+          socket.destroy();
           return;
         }
 

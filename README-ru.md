@@ -157,6 +157,7 @@ tellymcp init gateway
 - `GATEWAY_PUBLIC_URL`
 - `GATEWAY_WS_URL`
 - `GATEWAY_TOKEN`
+- `GATEWAY_AUTH_TOKEN`
 
 Запуск:
 
@@ -183,6 +184,7 @@ tellymcp init client
 - `GATEWAY_PUBLIC_URL`
 - `GATEWAY_WS_URL`
 - `GATEWAY_TOKEN`
+- `GATEWAY_AUTH_TOKEN` (тот же transport-токен, который задан на gateway)
 - `GATEWAY_USER_UUID`, если консоль должна быть видна конкретному владельцу в gateway-боте
 
 Рекомендуется:

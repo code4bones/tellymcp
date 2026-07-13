@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import ws from "ws";
+import * as wsModule from "ws";
 
 import type { AppConfig } from "../../../app/config/env";
 import type { BrowserRecordingRecord } from "../../../entities/browser/model/types";
@@ -19,6 +19,7 @@ import {
   FirefoxAttachRegistry,
   type FirefoxAttachInstanceRecord,
 } from "./firefoxAttachRegistry";
+import { firefoxAttachInboundMessageSchema } from "./types";
 import type {
   FirefoxAttachGetActiveTabRequest,
   FirefoxAttachInboundMessage,
@@ -52,29 +53,58 @@ type FirefoxAttachWebSocketServer = {
   close: (callback: (error?: unknown) => void) => void;
 };
 
-const wsLib = ws as unknown as {
-  OPEN: number;
+type FirefoxAttachVerifyClientInfo = {
+  origin?: string | undefined;
+};
+
+const wsLib = wsModule as unknown as {
+  WebSocket: { OPEN: number };
   WebSocketServer: new (options: Record<string, unknown>) => FirefoxAttachWebSocketServer;
 };
 
 const WebSocketServer = wsLib.WebSocketServer;
-const WS_OPEN = wsLib.OPEN;
+const WS_OPEN = wsLib.WebSocket.OPEN;
 
 type ConnectedSocketState = {
   socket: FirefoxAttachSocket;
   instanceId?: string | undefined;
+  lastSeenAt: number;
+  rateWindowStartedAt: number;
+  rateWindowMessageCount: number;
+  protocolFailed: boolean;
 };
 
 type PendingTabAction = {
+  instanceId: string;
   resolve: (value: FirefoxAttachTabActionResult) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
 };
 
 type PendingRecordingControl = {
+  instanceId: string;
   resolve: (value: FirefoxAttachRecordingControlResult) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
+};
+
+const ATTACH_HEARTBEAT_TIMEOUT_MS = 45_000;
+const ATTACH_HEARTBEAT_REAP_INTERVAL_MS = 15_000;
+const ATTACH_RATE_WINDOW_MS = 1_000;
+const ATTACH_RATE_MAX_MESSAGES = 1_000;
+
+class FirefoxAttachProtocolError extends Error {
+  public constructor(public readonly reason: string) {
+    super(reason);
+    this.name = "FirefoxAttachProtocolError";
+  }
+}
+
+const isAllowedAttachOrigin = (origin: string | undefined): boolean => {
+  if (!origin) {
+    return false;
+  }
+  return /^(?:moz|chrome)-extension:\/\/[a-z0-9-]+\/?$/iu.test(origin);
 };
 
 export class FirefoxAttachServer {
@@ -100,6 +130,8 @@ export class FirefoxAttachServer {
     ActiveBrowserRecordingState
   >();
 
+  private heartbeatReaper: NodeJS.Timeout | null = null;
+
   public constructor(
     private readonly config: AppConfig,
     private readonly logger: Logger,
@@ -116,27 +148,51 @@ export class FirefoxAttachServer {
     if (this.wsServer) {
       return;
     }
-
-    this.wsServer = new WebSocketServer({
+    const wsServer = new WebSocketServer({
       host: this.config.browser.attach.host,
       port: this.config.browser.attach.port,
       path: this.config.browser.attach.path,
       maxPayload: BROWSER_ATTACH_WS_MAX_PAYLOAD_BYTES,
+      verifyClient: (
+        info: FirefoxAttachVerifyClientInfo,
+        done: (result: boolean, code?: number, message?: string) => void,
+      ) => {
+        if (!isAllowedAttachOrigin(info.origin)) {
+          done(false, 403, "Forbidden");
+          return;
+        }
+        done(true);
+      },
     });
+    this.wsServer = wsServer;
 
-    this.wsServer.on("connection", (socket) => {
-      const state: ConnectedSocketState = { socket };
+    wsServer.on("connection", (socket) => {
+      const now = Date.now();
+      const state: ConnectedSocketState = {
+        socket,
+        lastSeenAt: now,
+        rateWindowStartedAt: now,
+        rateWindowMessageCount: 0,
+        protocolFailed: false,
+      };
       this.sockets.add(state);
 
       socket.on("message", (payload) => {
-        void this.handleMessage(state, payload);
+        void this.handleMessage(state, payload).catch((error) => {
+          this.handleProtocolError(state, error);
+        });
       });
 
       socket.on("close", () => {
         if (state.instanceId) {
           const current = this.socketsByInstanceId.get(state.instanceId);
           if (current === state) {
-            void this.handleInstanceDisconnect(state.instanceId);
+            void this.handleInstanceDisconnect(state.instanceId).catch((error) => {
+              this.logger.error("Firefox attach disconnect cleanup failed", {
+                instanceId: state.instanceId,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
             this.registry.remove(state.instanceId);
             this.socketsByInstanceId.delete(state.instanceId);
           }
@@ -154,6 +210,11 @@ export class FirefoxAttachServer {
       });
     });
 
+    this.heartbeatReaper = setInterval(() => {
+      this.reapStaleSockets();
+    }, ATTACH_HEARTBEAT_REAP_INTERVAL_MS);
+    this.heartbeatReaper.unref();
+
     this.logger.info("Firefox attach WebSocket server started", {
       host: this.config.browser.attach.host,
       port: this.config.browser.attach.port,
@@ -166,6 +227,11 @@ export class FirefoxAttachServer {
       return;
     }
 
+    if (this.heartbeatReaper) {
+      clearInterval(this.heartbeatReaper);
+      this.heartbeatReaper = null;
+    }
+
     for (const state of this.sockets) {
       try {
         state.socket.close(1001, "server shutdown");
@@ -174,6 +240,7 @@ export class FirefoxAttachServer {
       }
     }
     this.sockets.clear();
+    this.socketsByInstanceId.clear();
 
     const wsServer = this.wsServer;
     this.wsServer = null;
@@ -359,6 +426,7 @@ export class FirefoxAttachServer {
       }, this.config.browser.timeoutMs);
 
       this.pendingTabActions.set(requestId, {
+        instanceId: input.instanceId,
         resolve,
         reject,
         timer,
@@ -397,19 +465,41 @@ export class FirefoxAttachServer {
     state: ConnectedSocketState,
     payload: unknown,
   ): Promise<void> {
+    if (state.protocolFailed) {
+      return;
+    }
+    this.enforceRateLimit(state);
+    state.lastSeenAt = Date.now();
     const raw =
       typeof payload === "string"
         ? payload
         : Buffer.isBuffer(payload)
           ? payload.toString("utf8")
-          : String(payload ?? "");
-    let message: FirefoxAttachInboundMessage;
+          : payload instanceof ArrayBuffer
+            ? Buffer.from(payload).toString("utf8")
+            : Array.isArray(payload) && payload.every(Buffer.isBuffer)
+              ? Buffer.concat(payload).toString("utf8")
+              : String(payload ?? "");
+    let decoded: unknown;
     try {
-      message = JSON.parse(raw) as FirefoxAttachInboundMessage;
+      decoded = JSON.parse(raw);
     } catch {
-      this.logger.debug("Firefox attach message ignored because it is not valid JSON");
-      return;
+      throw new FirefoxAttachProtocolError("invalid_json");
     }
+
+    const parsed = firefoxAttachInboundMessageSchema.safeParse(decoded);
+    if (!parsed.success) {
+      throw new FirefoxAttachProtocolError("invalid_message");
+    }
+    const message = parsed.data;
+
+    if (!state.instanceId && message.type !== "hello") {
+      throw new FirefoxAttachProtocolError("hello_required");
+    }
+    if (state.instanceId && message.type === "hello") {
+      throw new FirefoxAttachProtocolError("duplicate_hello");
+    }
+    const connectedInstanceId = state.instanceId;
 
     switch (message.type) {
       case "hello":
@@ -450,10 +540,14 @@ export class FirefoxAttachServer {
         }
         return;
       case "tab_action_result":
-        this.resolvePendingTabAction(message);
+        if (connectedInstanceId) {
+          this.resolvePendingTabAction(connectedInstanceId, message);
+        }
         return;
       case "recording_control_result":
-        this.resolvePendingRecordingControl(message);
+        if (connectedInstanceId) {
+          this.resolvePendingRecordingControl(connectedInstanceId, message);
+        }
         return;
       case "recording_event":
         if (state.instanceId) {
@@ -485,8 +579,15 @@ export class FirefoxAttachServer {
     state: ConnectedSocketState,
     message: FirefoxAttachInstanceHello,
   ): Promise<void> {
+    const previous = this.socketsByInstanceId.get(message.instance_id);
     state.instanceId = message.instance_id;
     this.socketsByInstanceId.set(message.instance_id, state);
+    if (previous && previous !== state) {
+      this.logger.warn("Firefox attach instance connection replaced", {
+        instanceId: message.instance_id,
+      });
+      previous.socket.close(4001, "replaced by newer connection");
+    }
     const instance = this.registry.setConnected({
       instanceId: message.instance_id,
       browser: message.browser,
@@ -559,9 +660,12 @@ export class FirefoxAttachServer {
     });
   }
 
-  private resolvePendingTabAction(message: FirefoxAttachTabActionResult): void {
+  private resolvePendingTabAction(
+    instanceId: string,
+    message: FirefoxAttachTabActionResult,
+  ): void {
     const pending = this.pendingTabActions.get(message.request_id);
-    if (!pending) {
+    if (!pending || pending.instanceId !== instanceId) {
       return;
     }
 
@@ -571,10 +675,11 @@ export class FirefoxAttachServer {
   }
 
   private resolvePendingRecordingControl(
+    instanceId: string,
     message: FirefoxAttachRecordingControlResult,
   ): void {
     const pending = this.pendingRecordingControls.get(message.request_id);
-    if (!pending) {
+    if (!pending || pending.instanceId !== instanceId) {
       return;
     }
 
@@ -609,6 +714,7 @@ export class FirefoxAttachServer {
         }, this.config.browser.timeoutMs);
 
         this.pendingRecordingControls.set(requestId, {
+          instanceId: input.instanceId,
           resolve,
           reject,
           timer,
@@ -706,7 +812,57 @@ export class FirefoxAttachServer {
   ): Promise<void> {
     const payload = this.buildRecordingStateMessage(record);
     for (const state of this.sockets) {
-      this.sendJson(state.socket, payload);
+      if (state.instanceId) {
+        this.sendJson(state.socket, payload);
+      }
+    }
+  }
+
+  private enforceRateLimit(state: ConnectedSocketState): void {
+    const now = Date.now();
+    if (now - state.rateWindowStartedAt >= ATTACH_RATE_WINDOW_MS) {
+      state.rateWindowStartedAt = now;
+      state.rateWindowMessageCount = 0;
+    }
+    state.rateWindowMessageCount += 1;
+    if (state.rateWindowMessageCount > ATTACH_RATE_MAX_MESSAGES) {
+      throw new FirefoxAttachProtocolError("rate_limit_exceeded");
+    }
+  }
+
+  private handleProtocolError(
+    state: ConnectedSocketState,
+    error: unknown,
+  ): void {
+    if (state.protocolFailed) {
+      return;
+    }
+    state.protocolFailed = true;
+    const reason =
+      error instanceof FirefoxAttachProtocolError
+        ? error.reason
+        : "message_handler_failed";
+    this.logger.warn("Firefox attach protocol error", {
+      ...(state.instanceId ? { instanceId: state.instanceId } : {}),
+      reason,
+    });
+    try {
+      state.socket.close(1008, reason);
+    } catch {
+      // The socket may already have closed while the handler was awaiting I/O.
+    }
+  }
+
+  private reapStaleSockets(): void {
+    const staleBefore = Date.now() - ATTACH_HEARTBEAT_TIMEOUT_MS;
+    for (const state of this.sockets) {
+      if (state.lastSeenAt >= staleBefore) {
+        continue;
+      }
+      this.logger.warn("Firefox attach socket heartbeat expired", {
+        ...(state.instanceId ? { instanceId: state.instanceId } : {}),
+      });
+      state.socket.close(4002, "heartbeat timeout");
     }
   }
 

@@ -2,7 +2,7 @@
 
 Operational snapshot for the next session.
 
-Last updated: `2026-07-13`
+Last updated: `2026-07-14`
 
 ## Current State
 
@@ -26,6 +26,10 @@ Last updated: `2026-07-13`
 - browser attached-tab output schemas were relaxed from strict URL validation to plain strings where needed
 - browser-attach review/plan docs were updated to reflect fixed vs still-open items
 - `DECISIONS.md` was created as the living source of truth for accepted project decisions
+- browser-attach WS inputs now have Origin checks, strict bounded schemas, rate limiting,
+  stale-heartbeat reaping, contained handler failures, and deterministic duplicate replacement
+- Chrome attach extension `0.0.2` uses a Manifest V3-compatible static executor for DOM/click/press
+  and returns correlated action errors instead of remote WS timeouts
 
 ## Files To Read First
 
@@ -64,8 +68,7 @@ These are known backlog items, not regressions from the last pass:
    - persisted backend literals are still `"firefox-attached"`
 2. attached-browser injected export semantics still differ across Chrome/Firefox for some bare `window.foo = ...` cases
 3. `activeTab` in attach registry can still become stale after tab close
-4. server-side stale-heartbeat reaping for attached-browser instances is still optional hardening, not implemented
-5. DB-level functions/views/triggers for some gateway logic are still only a deferred idea, not an accepted direction
+4. DB-level functions/views/triggers for some gateway logic are still only a deferred idea, not an accepted direction
 
 ## If Continuing Browser-Attach Work
 

@@ -477,236 +477,206 @@ function clearBufferedLogs(tabId) {
   };
 }
 
-function buildTabActionCode(action, payload) {
-  const serializedAction = JSON.stringify(action);
-  const serializedPayload = JSON.stringify(payload || {});
-
-  return `(async () => {
-    const action = ${serializedAction};
-    const payload = ${serializedPayload};
-    const normalize = (value) => typeof value === "string" ? value.trim() : "";
-    const timeoutMs = Number.isInteger(payload.timeout_ms) ? payload.timeout_ms : 30000;
-    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-    const byText = (text, exact) => {
-      const needle = normalize(text);
-      if (!needle) return null;
-      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
-      while (walker.nextNode()) {
-        const element = walker.currentNode;
-        const textContent = normalize(element.textContent || "");
-        if (!textContent) continue;
-        if ((exact && textContent === needle) || (!exact && textContent.includes(needle))) {
-          return element;
-        }
+async function executeTabActionInPage(action, payload) {
+  payload = payload || {};
+  const normalize = (value) => typeof value === "string" ? value.trim() : "";
+  const timeoutMs = Number.isInteger(payload.timeout_ms) ? payload.timeout_ms : 30000;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const byText = (text, exact) => {
+    const needle = normalize(text);
+    if (!needle) return null;
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+    while (walker.nextNode()) {
+      const element = walker.currentNode;
+      const textContent = normalize(element.textContent || "");
+      if (!textContent) continue;
+      if ((exact && textContent === needle) || (!exact && textContent.includes(needle))) {
+        return element;
       }
-      return null;
-    };
-    const isVisible = (element) => {
-      if (!element) return false;
-      const computed = window.getComputedStyle(element);
-      return computed.display !== "none" && computed.visibility !== "hidden" && computed.opacity !== "0";
-    };
-    const resolveTarget = () => {
-      const aiTag = normalize(payload.ai_tag);
-      if (aiTag) {
-        return document.querySelector('[data-drive-tag="' + aiTag.replace(/"/g, '\\"') + '"], [ai-tag="' + aiTag.replace(/"/g, '\\"') + '"]');
-      }
-      const selector = normalize(payload.selector);
-      if (selector) {
-        return document.querySelector(selector);
-      }
-      const text = normalize(payload.text);
-      if (text) {
-        return byText(text, payload.exact === true);
-      }
-      return document.body;
-    };
-    const target = resolveTarget();
-    if (action !== "screenshot" && action !== "inject_script" && !target) {
-      return { ok: false, error: "Target element was not found." };
     }
-    if (target && typeof target.scrollIntoView === "function") {
-      target.scrollIntoView({ block: "center", inline: "center" });
+    return null;
+  };
+  const isVisible = (element) => {
+    if (!element) return false;
+    const computed = window.getComputedStyle(element);
+    return computed.display !== "none" && computed.visibility !== "hidden" && computed.opacity !== "0";
+  };
+  const resolveTarget = () => {
+    const aiTag = normalize(payload.ai_tag);
+    if (aiTag) {
+      return document.querySelector('[data-drive-tag="' + aiTag.replace(/"/g, '\\"') + '"], [ai-tag="' + aiTag.replace(/"/g, '\\"') + '"]');
     }
-    if (action === "dom") {
-      const attributes = target
-        ? Object.fromEntries(Array.from(target.attributes || []).map((attr) => [attr.name, attr.value]))
-        : {};
+    const selector = normalize(payload.selector);
+    if (selector) {
+      return document.querySelector(selector);
+    }
+    const text = normalize(payload.text);
+    if (text) {
+      return byText(text, payload.exact === true);
+    }
+    return document.body;
+  };
+  const target = resolveTarget();
+  if (!target) {
+    return { ok: false, error: "Target element was not found." };
+  }
+  if (target && typeof target.scrollIntoView === "function") {
+    target.scrollIntoView({ block: "center", inline: "center" });
+  }
+  if (action === "dom") {
+    const attributes = target
+      ? Object.fromEntries(Array.from(target.attributes || []).map((attr) => [attr.name, attr.value]))
+      : {};
+    return {
+      ok: true,
+      result: {
+        found: Boolean(target),
+        outer_html: payload.include_html === false ? undefined : target.outerHTML,
+        text_content: payload.include_text === false ? undefined : (target.textContent || "").trim(),
+        visible: target ? isVisible(target) : false,
+        attributes,
+        url: location.href,
+        title: document.title,
+      },
+    };
+  }
+  if (action === "computed_style") {
+    if (!target) {
       return {
         ok: true,
         result: {
-          found: Boolean(target),
-          outer_html: payload.include_html === false ? undefined : target.outerHTML,
-          text_content: payload.include_text === false ? undefined : (target.textContent || "").trim(),
-          visible: target ? isVisible(target) : false,
-          attributes,
+          found: false,
           url: location.href,
           title: document.title,
         },
       };
     }
-    if (action === "computed_style") {
-      if (!target) {
+    const requestedProperties = Array.isArray(payload.properties) && payload.properties.length
+      ? payload.properties.map((item) => String(item))
+      : ["display","position","visibility","opacity","color","background-color","font-size","z-index","overflow"];
+    const computed = window.getComputedStyle(target);
+    const rect = target.getBoundingClientRect();
+    const styles = Object.fromEntries(
+      requestedProperties.map((property) => [property, computed.getPropertyValue(property)]),
+    );
+    return {
+      ok: true,
+      result: {
+        found: true,
+        visible: isVisible(target),
+        styles,
+        box: {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+        },
+        url: location.href,
+        title: document.title,
+      },
+    };
+  }
+  if (action === "click") {
+    target.click();
+    return {
+      ok: true,
+      result: {
+        url: location.href,
+        title: document.title,
+      },
+    };
+  }
+  if (action === "wait_for") {
+    const waitState = normalize(payload.state) || "visible";
+    const startedAt = Date.now();
+    while (Date.now() - startedAt <= timeoutMs) {
+      const current = resolveTarget();
+      const visible = current ? isVisible(current) : false;
+      if (
+        (waitState === "attached" && current) ||
+        (waitState === "detached" && !current) ||
+        (waitState === "visible" && current && visible) ||
+        (waitState === "hidden" && (!current || !visible))
+      ) {
         return {
           ok: true,
           result: {
-            found: false,
             url: location.href,
             title: document.title,
           },
         };
       }
-      const requestedProperties = Array.isArray(payload.properties) && payload.properties.length
-        ? payload.properties.map((item) => String(item))
-        : ["display","position","visibility","opacity","color","background-color","font-size","z-index","overflow"];
-      const computed = window.getComputedStyle(target);
-      const rect = target.getBoundingClientRect();
-      const styles = Object.fromEntries(
-        requestedProperties.map((property) => [property, computed.getPropertyValue(property)]),
-      );
-      return {
-        ok: true,
-        result: {
-          found: true,
-          visible: isVisible(target),
-          styles,
-          box: {
-            x: rect.x,
-            y: rect.y,
-            width: rect.width,
-            height: rect.height,
+      await sleep(100);
+    }
+    return {
+      ok: false,
+      error: "Timed out waiting for the requested element state.",
+    };
+  }
+  if (action === "wait_for_url") {
+    const exactUrl = normalize(payload.url);
+    const containsUrl = normalize(payload.url_contains);
+    const startedAt = Date.now();
+    while (Date.now() - startedAt <= timeoutMs) {
+      const currentUrl = String(location.href || "");
+      if ((exactUrl && currentUrl === exactUrl) || (containsUrl && currentUrl.includes(containsUrl))) {
+        return {
+          ok: true,
+          result: {
+            url: currentUrl,
+            title: document.title,
           },
-          url: location.href,
-          title: document.title,
-        },
-      };
-    }
-    if (action === "click") {
-      target.click();
-      return {
-        ok: true,
-        result: {
-          url: location.href,
-          title: document.title,
-        },
-      };
-    }
-    if (action === "wait_for") {
-      const waitState = normalize(payload.state) || "visible";
-      const startedAt = Date.now();
-      while (Date.now() - startedAt <= timeoutMs) {
-        const current = resolveTarget();
-        const visible = current ? isVisible(current) : false;
-        if (
-          (waitState === "attached" && current) ||
-          (waitState === "detached" && !current) ||
-          (waitState === "visible" && current && visible) ||
-          (waitState === "hidden" && (!current || !visible))
-        ) {
-          return {
-            ok: true,
-            result: {
-              url: location.href,
-              title: document.title,
-            },
-          };
-        }
-        await sleep(100);
+        };
       }
-      return {
-        ok: false,
-        error: "Timed out waiting for the requested element state.",
-      };
+      await sleep(100);
     }
-    if (action === "wait_for_url") {
-      const exactUrl = normalize(payload.url);
-      const containsUrl = normalize(payload.url_contains);
-      const startedAt = Date.now();
-      while (Date.now() - startedAt <= timeoutMs) {
-        const currentUrl = String(location.href || "");
-        if ((exactUrl && currentUrl === exactUrl) || (containsUrl && currentUrl.includes(containsUrl))) {
-          return {
-            ok: true,
-            result: {
-              url: currentUrl,
-              title: document.title,
-            },
-          };
-        }
-        await sleep(100);
-      }
-      return {
-        ok: false,
-        error: "Timed out waiting for the requested URL.",
-      };
-    }
-    if (action === "reload") {
-      location.reload();
-      return {
-        ok: true,
-        result: {
-          url: location.href,
-          title: document.title,
-        },
-      };
-    }
-    if (action === "fill") {
+    return {
+      ok: false,
+      error: "Timed out waiting for the requested URL.",
+    };
+  }
+  if (action === "reload") {
+    location.reload();
+    return {
+      ok: true,
+      result: {
+        url: location.href,
+        title: document.title,
+      },
+    };
+  }
+  if (action === "fill") {
+    target.focus();
+    target.value = payload.value || "";
+    target.dispatchEvent(new Event("input", { bubbles: true }));
+    target.dispatchEvent(new Event("change", { bubbles: true }));
+    return {
+      ok: true,
+      result: {
+        url: location.href,
+        title: document.title,
+      },
+    };
+  }
+  if (action === "press") {
+    const key = String(payload.key || "");
+    if (target && typeof target.focus === "function") {
       target.focus();
-      target.value = payload.value || "";
-      target.dispatchEvent(new Event("input", { bubbles: true }));
-      target.dispatchEvent(new Event("change", { bubbles: true }));
-      return {
-        ok: true,
-        result: {
-          url: location.href,
-          title: document.title,
-        },
-      };
     }
-    if (action === "inject_script") {
-      const namespace = normalize(payload.namespace) || "TELLY";
-      const source = String(payload.source || "");
-      if (!source) {
-        return { ok: false, error: "Script source is required." };
-      }
-      const wrapped = "const __tellyNamespace=" + JSON.stringify(namespace)
-        + ";window[__tellyNamespace]=window[__tellyNamespace]||{};var TELLY=window[__tellyNamespace];const __tellyBeforeKeys=new Set(Object.getOwnPropertyNames(window));\\n"
-        + source
-        + "\\nfor(const __tellyKey of Object.getOwnPropertyNames(window)){if(__tellyBeforeKeys.has(__tellyKey)){continue;}if(__tellyKey===__tellyNamespace){continue;}try{window[__tellyNamespace][__tellyKey]=window[__tellyKey];}catch{}}";
-      const script = document.createElement("script");
-      script.textContent = wrapped;
-      (document.documentElement || document.head || document.body).appendChild(script);
-      script.remove();
-      return {
-        ok: true,
-        result: {
-          namespace,
-          bytes: source.length,
-          url: location.href,
-          title: document.title,
-        },
-      };
-    }
-    if (action === "press") {
-      const key = String(payload.key || "");
-      if (target && typeof target.focus === "function") {
-        target.focus();
-      }
-      const eventInit = { key, bubbles: true, cancelable: true };
-      const keyboardTarget = document.activeElement || target || document.body;
-      keyboardTarget.dispatchEvent(new KeyboardEvent("keydown", eventInit));
-      keyboardTarget.dispatchEvent(new KeyboardEvent("keypress", eventInit));
-      keyboardTarget.dispatchEvent(new KeyboardEvent("keyup", eventInit));
-      return {
-        ok: true,
-        result: {
-          url: location.href,
-          title: document.title,
-        },
-      };
-    }
-    return { ok: false, error: "Unsupported tab action." };
-  })();`;
+    const eventInit = { key, bubbles: true, cancelable: true };
+    const keyboardTarget = document.activeElement || target || document.body;
+    keyboardTarget.dispatchEvent(new KeyboardEvent("keydown", eventInit));
+    keyboardTarget.dispatchEvent(new KeyboardEvent("keypress", eventInit));
+    keyboardTarget.dispatchEvent(new KeyboardEvent("keyup", eventInit));
+    return {
+      ok: true,
+      result: {
+        url: location.href,
+        title: document.title,
+      },
+    };
+  }
+  return { ok: false, error: "Unsupported tab action." };
 }
 
 async function runTabAction(tabId, action, payload) {
@@ -827,7 +797,8 @@ async function runTabAction(tabId, action, payload) {
 
   const execution = await scriptingExecuteScript({
     target: { tabId },
-    func: new Function(`return ${buildTabActionCode(action, payload)}`),
+    func: executeTabActionInPage,
+    args: [action, payload || {}],
   });
   const result = execution[0]?.result;
 
@@ -954,19 +925,31 @@ async function injectRecorderContent(tabId) {
   });
 }
 
+function capturePageSnapshotInTab(recordingReason) {
+  const now = new Date();
+  const pad = (value, length = 2) => String(value).padStart(length, "0");
+  const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(
+    now.getHours(),
+  )}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.${pad(
+    now.getMilliseconds(),
+    3,
+  )}`;
+  return {
+    kind: "page_snapshot",
+    source: "background",
+    reason: recordingReason,
+    at: timestamp,
+    url: location.href,
+    title: document.title,
+    ready_state: document.readyState,
+    html: document.documentElement ? document.documentElement.outerHTML : "",
+  };
+}
+
 async function captureTabSnapshot(tabId, reason) {
   const execution = await scriptingExecuteScript({
     target: { tabId },
-    func: (recordingReason) => ({
-      kind: "page_snapshot",
-      source: "background",
-      reason: recordingReason,
-      at: formatLocalTimestamp(new Date()),
-      url: location.href,
-      title: document.title,
-      ready_state: document.readyState,
-      html: document.documentElement ? document.documentElement.outerHTML : ""
-    }),
+    func: capturePageSnapshotInTab,
     args: [reason],
   });
   const result = execution[0]?.result;
@@ -1197,6 +1180,29 @@ async function sendManualRecordingRequest(type, payload = {}) {
   return result;
 }
 
+async function handleTabActionMessage(message) {
+  let result;
+  try {
+    result = await runTabAction(
+      message.tab_id,
+      message.action,
+      message.payload || {},
+    );
+  } catch (error) {
+    result = {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+  sendJson({
+    type: "tab_action_result",
+    request_id: message.request_id,
+    ok: result.ok === true,
+    ...(result.result ? { result: result.result } : {}),
+    ...(result.error ? { error: result.error } : {}),
+  });
+}
+
 async function handleMessage(rawData) {
   const message =
     typeof rawData === "string"
@@ -1231,18 +1237,7 @@ async function handleMessage(rawData) {
       return;
     }
     case "tab_action": {
-      const result = await runTabAction(
-        message.tab_id,
-        message.action,
-        message.payload || {},
-      );
-      sendJson({
-        type: "tab_action_result",
-        request_id: message.request_id,
-        ok: result.ok === true,
-        ...(result.result ? { result: result.result } : {}),
-        ...(result.error ? { error: result.error } : {}),
-      });
+      await handleTabActionMessage(message);
       return;
     }
     case "recording_start": {

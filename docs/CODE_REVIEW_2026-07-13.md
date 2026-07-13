@@ -29,6 +29,21 @@ reviews rather than replacing them.
   protocol has an explicit payload limit. Gateway limits are also applied to the WS
   client. Regression coverage verifies that an oversized fragmented gateway message
   is rejected with close code `1009` without reaching the message handler.
+- `H-02`: **Protocol hardening completed** on `2026-07-14`; peer authentication is
+  intentionally not part of the current trusted-network model. Browser-attach now
+  accepts only Firefox/Chrome extension origins, requires `hello` before all other
+  messages, validates every inbound union with bounded Zod schemas, contains async
+  handler failures to the offending socket, reaps stale peers, rate-limits messages,
+  and replaces duplicate instance connections deterministically. A native client on
+  the reachable local/private network can spoof an extension Origin, so network reach
+  to the configured attach listener remains an explicit trust boundary.
+- `BA-01`: **Resolved** on `2026-07-14` in Chrome attach extension `0.0.2`.
+  Manifest V3 tab actions no longer construct injected functions with `new Function`.
+  DOM, click, press, fill, wait, and computed-style actions now use a static,
+  self-contained `chrome.scripting.executeScript` function plus serialized arguments.
+  Execution failures return a correlated `tab_action_result` instead of surfacing as
+  `Remote action WS request timed out`. Recording snapshot injection was also made
+  closure-free.
 
 ## Executive Summary
 
@@ -41,8 +56,10 @@ authentication problems found by this review have now been remediated:
    deployment examples configure `GATEWAY_TOKEN` instead of the separate
    `GATEWAY_AUTH_TOKEN` that actually protects the transport.
 
-H-02 and H-03 are now the highest-priority unresolved findings before shipping another
-public package. Delivery atomicity/idempotency should follow immediately after.
+H-03 is now the highest-priority unresolved input-hardening finding before shipping
+another public package. Browser-attach peer authentication remains a documented,
+accepted trust-boundary decision. Delivery atomicity/idempotency should follow
+immediately after.
 
 ## Critical Findings
 
@@ -185,6 +202,23 @@ Recommended fix:
 
 ### H-02 - Browser-attach WS trusts any local peer and unvalidated messages
 
+Status: **Protocol hardening completed; peer authentication accepted as a trusted-
+network boundary** (`2026-07-14`).
+
+The remediation validates extension Origin during upgrade, requires `hello` as the
+first message, strictly validates and bounds all inbound message variants, closes bad
+peers with `1008`, contains asynchronous handler failures, rate-limits each peer,
+reaps stale heartbeats, and defines duplicate-instance replacement behavior. The
+existing 16 MiB WebSocket payload cap remains in force. Regression tests cover Origin
+rejection, hello ordering, invalid schemas, async storage failure, duplicate
+replacement, stale-heartbeat reaping, and nested/array bounds.
+
+No attach token was added: this bridge is intentionally used across a trusted local or
+private network, including browser VMs. This means a native process with network reach
+to the listener can spoof an extension Origin. Deployments that do not share that
+trust assumption must restrict the listener at the firewall/VPN boundary; adding
+optional peer authentication remains future hardening for that deployment model.
+
 Files:
 
 - `src/services/features/telegram-mcp/src/features/browser-attach/model/firefoxAttachServer.ts:111-153`
@@ -212,6 +246,27 @@ Recommended fix:
    offending socket with `1008`.
 4. Configure `maxPayload`, heartbeat reaping, per-peer rate limits, and duplicate
    instance replacement semantics.
+
+#### BA-01 - Chrome MV3 attached-tab actions time out
+
+Status: **Resolved** in Chrome attach extension `0.0.2` (`2026-07-14`).
+
+Chrome routed `dom`, `click`, `press`, and the other generic page actions through
+`chrome.scripting.executeScript({ func: new Function(...) })`. Manifest V3 extension
+workers prohibit string-to-code evaluation, so function construction failed before an
+action result could be sent. Screenshot worked through `captureVisibleTab`, and script
+injection worked through a separately declared static function, which explained the
+action-specific symptom. Firefox used its Manifest V2 string-code injection path and
+was unaffected.
+
+The Chrome extension now passes the static, self-contained
+`executeTabActionInPage(action, payload)` function with `args`. The `tab_action`
+message boundary catches execution failures and always emits a response using the
+original request id. `capturePageSnapshotInTab()` is also self-contained because
+Chrome serializes injected functions without their surrounding closure. Regression
+coverage executes DOM/click/press in an isolated page context, verifies correlated
+error responses, checks snapshot execution, and prevents `new Function` from returning
+to the Chrome bundle.
 
 ### H-03 - HTTP and artifact paths have no application-level size limits
 
@@ -411,7 +466,8 @@ Highest-value additions:
 
 1. Gateway enqueue rollback/idempotency and concurrent delivery claim tests.
 2. HTTP, WS, HTML snapshot, message, and artifact size-limit tests.
-3. Browser-attach schema rejection, disconnect, stop, and event ordering tests.
+3. Browser-attach disconnect, stop, and event ordering tests (schema rejection and
+   protocol-boundary coverage now exist).
 4. Workspace symlink escape tests.
 5. PTY synchronous spawn-failure cleanup tests.
 
@@ -442,7 +498,8 @@ The audit exits successfully because no high or critical advisories remain.
    **Resolved.**
 3. H-01: upgrade `ws`, refresh vulnerable transitive dependencies, and bound WS
    payloads. **Resolved.**
-4. H-02/H-03: authenticate and bound all WS/HTTP/file inputs.
+4. H-02/H-03: browser-attach protocol bounds are implemented under the documented
+   trusted-network model; HTTP/file input bounds remain open in H-03.
 5. H-04/H-05: make enqueue and delivery transactional, claimed, and idempotent.
 6. H-06: make workspace path containment symlink-safe.
 7. M-01/M-02/M-03: serialize and reduce recording I/O, reuse SQLite, fix PTY cleanup.

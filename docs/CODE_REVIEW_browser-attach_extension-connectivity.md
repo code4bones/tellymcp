@@ -25,6 +25,25 @@ Remaining follow-up, still optional:
 - Server-side stale-heartbeat reaping is still a separate hardening task and is not covered by the
   extension-side reconnect fix.
 
+## Follow-up on 2026-07-14: Chrome MV3 tab-action timeouts
+
+Resolved in Chrome attach extension `0.0.2`.
+
+The generic Chrome tab-action path used
+`chrome.scripting.executeScript({ func: new Function(...) })`. Manifest V3 blocks
+string-to-code evaluation in the extension service worker, so DOM, click, press, fill,
+wait, and computed-style requests threw before sending `tab_action_result`. Screenshot
+and script injection used separate, static API paths and therefore continued to work.
+
+The action executor is now a static, self-contained function passed with serializable
+`args`. The WS message boundary converts execution exceptions into correlated error
+responses, and recording snapshot injection no longer refers to a helper from a lost
+closure. Regression tests cover DOM/click/press execution, error responses, snapshot
+capture, and the absence of `new Function` from the Chrome source and built bundle.
+
+Server-side stale-heartbeat reaping mentioned above was also implemented on
+`2026-07-14` as part of the browser-attach protocol-hardening pass.
+
 ---
 
 ## 1. Firefox: global, unconditional `fetch` interception hangs unrelated pages

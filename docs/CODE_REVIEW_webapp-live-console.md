@@ -283,3 +283,98 @@ All three compound: Finding 1 makes poll mode sticky, poll mode is where Finding
 lives, and Finding 2's frozen columns apply in both modes. Fixing Finding 1 alone would make the
 other two far less noticeable in practice (poll mode would become rare again), but Findings 2 and 3
 are real bugs in their own right and worth fixing regardless.
+
+---
+
+## Finding 4 (new, 2026-07-14): touch-scroll drag barely moves the buffer on mobile/tablet, except right at the scrollbar edge
+
+Reported behavior: on tablet/mobile, a swipe over the terminal's content area scrolls almost
+nothing (about one line per swipe); a swipe near the right edge of the panel (where a scrollbar
+would normally sit) scrolls smoothly and normally.
+
+### Root cause: two scroll drivers fighting over the same element during the same gesture
+
+`assets.ts` (`.terminal.xterm-host .xterm-viewport`) forces:
+```css
+.terminal.xterm-host .xterm-viewport {
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+```
+
+`@xterm/xterm@5.5.0` (`node_modules/@xterm/xterm/lib/xterm.js`) independently binds its own
+`touchstart`/`touchmove` handlers to `this.element` (the `.xterm` root, which — per this project's
+own CSS, `width: max-content; min-width: 100%;` — spans essentially the full width of the
+container, so this isn't a narrow-hit-target issue). Its `Viewport` class implements a plain,
+correct 1:1 pixel-drag scroll:
+```js
+handleTouchStart(e) { this._lastTouchY = e.touches[0].pageY; }
+handleTouchMove(e) {
+  const t = this._lastTouchY - e.touches[0].pageY;
+  this._lastTouchY = e.touches[0].pageY;
+  return 0 !== t && (this._viewportElement.scrollTop += t, this._bubbleScroll(e, t));
+}
+```
+It directly mutates `this._viewportElement.scrollTop` (i.e. `.xterm-viewport`'s scroll position) by
+the exact pixel delta of finger movement, on every `touchmove`.
+
+The conflict: `-webkit-overflow-scrolling: touch` puts `.xterm-viewport` into WebKit's native
+momentum/rubber-band scroll mode. xterm's own JS is *simultaneously* driving `scrollTop` on that
+same element on every touch-move frame. This is a well-known WebKit/mobile-browser gotcha —
+programmatically mutating `scrollTop` on an element that has native momentum scrolling active
+during the same gesture causes the browser's inertia/rubber-band physics to fight or dampen the JS
+update, instead of just tracking the finger 1:1. That produces exactly the reported symptom:
+finger moves, buffer barely scrolls.
+
+Near the very edge of the panel, touches land on (or are recognized by the platform as) a
+scrollbar-track/thumb drag rather than a general content touch-move gesture. That's a distinct
+native interaction path on most mobile/tablet browser engines, handled by the browser/OS compositor
+directly rather than going through the page's `touchmove` listener chain — so it bypasses the
+conflict above entirely, which is why it "just works" there.
+
+`-webkit-overflow-scrolling: touch` is also largely a legacy hint at this point: since iOS 13, all
+scrollable overflow regions get native momentum scrolling automatically, so this property mostly
+just adds the conflict described above without providing anything modern WebKit doesn't already do
+for free.
+
+### Proposed solutions (not yet applied — pick one)
+
+**Option A — remove the conflicting CSS hint, let xterm's own touch handling run unopposed
+(recommended first thing to try).**
+Delete just the `-webkit-overflow-scrolling: touch !important;` line from
+`.terminal.xterm-host .xterm-viewport` (keep `overflow-y: auto !important;` /
+`overflow-x: hidden !important;` as-is, since those aren't part of the conflict — they only affect
+whether a scrollbar track exists/shows, not who drives `scrollTop`). This is the smallest possible
+change: it removes the only thing actively fighting xterm's own `handleTouchMove`, and xterm's 1:1
+pixel-drag implementation shown above should then behave like a normal native drag-to-scroll
+without needing the momentum-scroll CSS hint's help. Lowest risk, most targeted — try this first
+and verify on a real tablet/phone before considering anything more invasive.
+
+**Option B — drop the whole custom `.xterm-viewport` override, fall back to xterm's own default CSS.**
+If Option A alone doesn't fully resolve it (e.g. if `overflow-y: auto` itself turns out to matter
+for some device/browser combination), remove the entire
+`.terminal.xterm-host .xterm-viewport { ... }` block and let `.xterm-viewport` use xterm's own
+shipped default (`overflow-y: scroll` from `node_modules/@xterm/xterm/css/xterm.css`). This
+fully un-does whatever this project changed relative to xterm's out-of-the-box scroll behavior,
+which is the safest way to confirm the override (rather than something else) is really the cause.
+Slightly larger change than A; worth doing only if A isn't sufficient, since it also reintroduces a
+permanently-reserved scrollbar gutter (`scroll` vs `auto`) that may not be wanted on a
+space-constrained mobile layout.
+
+**Option C — go the other direction: make `.xterm-viewport` non-natively-scrollable and let xterm's
+JS own 100% of the scrolling (touch *and* mouse-drag-on-scrollbar).**
+Force `overflow-y: hidden` on `.xterm-viewport` instead, removing native scroll capability (and any
+native scrollbar) entirely, relying purely on xterm's own touch (`Viewport.handleTouchMove`) and
+wheel (`Viewport.handleWheel`) handlers to drive `scrollTop` programmatically — `scrollTop`
+assignment still repositions clipped overflow content even with `overflow: hidden`, so this is a
+legitimate technique. Not recommended as the first move: it would also remove the currently-working
+"drag the edge like a scrollbar" interaction the report specifically called out as working well
+today, which is a real regression for desktop/mouse users who rely on dragging a visible scrollbar.
+Only worth considering if Options A/B turn out to be insufficient on some specific
+device/browser combination and a fully custom scroll UX becomes necessary.
+
+**Recommendation:** start with Option A. It's a one-line removal, directly targets the documented
+mechanism (JS `scrollTop` mutation racing WebKit momentum scroll), and doesn't touch anything else
+about the current (already-working-for-mouse/edge-drag) scroll behavior. Only escalate to B or C if
+real-device testing (tablet + phone, both platforms if possible) shows it isn't fully fixed.

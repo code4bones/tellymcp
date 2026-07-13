@@ -1,5 +1,4 @@
 import {
-  createHash,
   createHmac,
   randomUUID,
   timingSafeEqual,
@@ -28,19 +27,6 @@ export type ValidatedWebAppInitData = {
   rawInitData: string;
   queryId?: string;
   startParam?: string;
-  validationDebug: {
-    providedHash: string;
-    officialRaw: {
-      checkString: string;
-      computedHash: string;
-      matches: boolean;
-    };
-    userFields: {
-      checkString: string;
-      computedHash: string;
-      matches: boolean;
-    } | null;
-  };
 };
 
 export type WebAppSessionTokenRecord = {
@@ -216,39 +202,50 @@ function normalizeTelegramWebAppInitData(rawInitData: string): string {
   return normalized.trim();
 }
 
-function normalizeUnsafeUser(
-  user: TelegramWebAppInitDataUnsafe["user"],
-): TelegramWebAppUser | null {
-  if (!user || typeof user !== "object" || typeof user.id !== "number") {
+function normalizeTelegramWebAppUser(user: unknown): TelegramWebAppUser | null {
+  if (!user || typeof user !== "object") {
+    return null;
+  }
+
+  const record = user as Record<string, unknown>;
+  if (
+    typeof record.id !== "number" ||
+    !Number.isSafeInteger(record.id) ||
+    record.id <= 0
+  ) {
     return null;
   }
 
   return {
-    id: user.id,
-    ...(typeof user.first_name === "string" ? { first_name: user.first_name } : {}),
-    ...(typeof user.last_name === "string" ? { last_name: user.last_name } : {}),
-    ...(typeof user.username === "string" ? { username: user.username } : {}),
-    ...(typeof user.language_code === "string"
-      ? { language_code: user.language_code }
+    id: record.id,
+    ...(typeof record.first_name === "string"
+      ? { first_name: record.first_name }
       : {}),
-    ...(typeof user.photo_url === "string" ? { photo_url: user.photo_url } : {}),
+    ...(typeof record.last_name === "string"
+      ? { last_name: record.last_name }
+      : {}),
+    ...(typeof record.username === "string"
+      ? { username: record.username }
+      : {}),
+    ...(typeof record.language_code === "string"
+      ? { language_code: record.language_code }
+      : {}),
+    ...(typeof record.photo_url === "string"
+      ? { photo_url: record.photo_url }
+      : {}),
   };
 }
 
-function buildOfficialRawValidation(
+function validateOfficialRawHash(
   rawInitData: string,
   botToken: string,
-): {
-  checkString: string;
-  computedHash: string;
-  providedHash: string;
-  matches: boolean;
-} | null {
+): URLSearchParams {
   const params = new URLSearchParams(rawInitData);
-  const receivedHash = params.get("hash");
-  if (!receivedHash) {
-    return null;
+  const receivedHashes = params.getAll("hash");
+  if (receivedHashes.length !== 1 || !receivedHashes[0]) {
+    throw new Error("Telegram WebApp initData hash validation failed.");
   }
+  const receivedHash = receivedHashes[0];
 
   const checkString = [...params.entries()]
     .filter(([key, value]) => key !== "hash" && value !== undefined)
@@ -270,75 +267,90 @@ function buildOfficialRawValidation(
       Buffer.from(receivedHash, "utf8"),
     );
 
-  return {
-    checkString,
-    computedHash: computed,
-    providedHash: receivedHash,
-    matches,
-  };
+  if (!matches) {
+    throw new Error("Telegram WebApp initData hash validation failed.");
+  }
+
+  return params;
 }
 
-function buildUserFieldsValidation(
-  unsafe: TelegramWebAppInitDataUnsafe | null,
-  botToken: string,
-): {
-  checkString: string;
-  computedHash: string;
-  providedHash: string;
-  matches: boolean;
-} | null {
-  if (!unsafe) {
-    return null;
+function readSignedParam(
+  params: URLSearchParams,
+  key: string,
+  required: boolean,
+): string | undefined {
+  const values = params.getAll(key);
+  if (values.length > 1) {
+    throw new Error(`Telegram WebApp initData contains duplicate ${key}.`);
   }
 
-  const user = normalizeUnsafeUser(unsafe.user);
-  const authDateValue =
+  const value = values[0];
+  if (required && (value === undefined || value.length === 0)) {
+    throw new Error(`Telegram WebApp initData is missing ${key}.`);
+  }
+
+  return value;
+}
+
+function parseSignedUser(value: string): TelegramWebAppUser {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("Telegram WebApp signed user is malformed.");
+  }
+
+  const user = normalizeTelegramWebAppUser(parsed);
+  if (!user) {
+    throw new Error("Telegram WebApp signed user is invalid.");
+  }
+
+  return user;
+}
+
+function assertUnsafeDataMatchesSigned(
+  unsafe: TelegramWebAppInitDataUnsafe,
+  signed: {
+    user: TelegramWebAppUser;
+    authDate: number;
+    queryId?: string;
+    startParam?: string;
+    hash: string;
+  },
+): void {
+  const unsafeUser = normalizeTelegramWebAppUser(unsafe.user);
+  if (
+    !unsafeUser ||
+    JSON.stringify(unsafeUser) !== JSON.stringify(signed.user)
+  ) {
+    throw new Error("Telegram WebApp unsafe user does not match signed initData.");
+  }
+
+  const unsafeAuthDate =
     typeof unsafe.auth_date === "number" || typeof unsafe.auth_date === "string"
-      ? unsafe.auth_date
+      ? String(unsafe.auth_date)
       : undefined;
-  const receivedHash =
-    typeof unsafe.hash === "string" && unsafe.hash.length > 0
-      ? unsafe.hash
-      : undefined;
-
-  if (!user || authDateValue === undefined || !receivedHash) {
-    return null;
+  if (unsafeAuthDate !== String(signed.authDate)) {
+    throw new Error(
+      "Telegram WebApp unsafe auth_date does not match signed initData.",
+    );
   }
 
-  const params: Record<string, string | number | undefined> = {
-    id: user.id,
-    first_name: user.first_name,
-    last_name: user.last_name,
-    username: user.username,
-    photo_url: user.photo_url,
-    auth_date: authDateValue,
-  };
-
-  const checkString = Object.keys(params)
-    .sort()
-    .filter((key) => params[key] !== undefined)
-    .map((key) => `${key}=${params[key]}`)
-    .join("\n");
-
-  const secretKey = createHash("sha256")
-    .update(botToken.trim())
-    .digest();
-  const computed = createHmac("sha256", secretKey)
-    .update(checkString)
-    .digest("hex");
-  const matches =
-    computed.length === receivedHash.length &&
-    timingSafeEqual(
-      Buffer.from(computed, "utf8"),
-      Buffer.from(receivedHash, "utf8"),
+  if (unsafe.query_id !== signed.queryId) {
+    throw new Error(
+      "Telegram WebApp unsafe query_id does not match signed initData.",
     );
+  }
 
-  return {
-    checkString,
-    computedHash: computed,
-    providedHash: receivedHash,
-    matches,
-  };
+  if (unsafe.start_param !== signed.startParam) {
+    throw new Error(
+      "Telegram WebApp unsafe start_param does not match signed initData.",
+    );
+  }
+
+  if (unsafe.hash !== undefined && unsafe.hash !== signed.hash) {
+    throw new Error("Telegram WebApp unsafe hash does not match signed initData.");
+  }
 }
 
 export function validateTelegramWebAppInitData(
@@ -350,42 +362,33 @@ export function validateTelegramWebAppInitData(
   const normalizedRaw = rawInitData
     ? normalizeTelegramWebAppInitData(rawInitData)
     : "";
-  const normalizedUnsafe = unsafeInitData ?? null;
 
-  if (!normalizedRaw && !normalizedUnsafe) {
+  if (!normalizedRaw) {
     throw new Error("Telegram WebApp initData is empty.");
   }
 
-  const officialRawValidation = buildOfficialRawValidation(
-    normalizedRaw,
-    botToken,
-  );
-  const userFieldsValidation = buildUserFieldsValidation(
-    normalizedUnsafe,
-    botToken,
-  );
-
-  if (!officialRawValidation?.matches && !userFieldsValidation?.matches) {
-    throw new Error("Telegram WebApp initData hash validation failed.");
-  }
-
-  if (!normalizedUnsafe) {
-    throw new Error("Telegram WebApp unsafe init data is missing.");
-  }
-
-  const user = normalizeUnsafeUser(normalizedUnsafe.user);
-  const authDateRaw =
-    typeof normalizedUnsafe.auth_date === "number" ||
-    typeof normalizedUnsafe.auth_date === "string"
-      ? String(normalizedUnsafe.auth_date)
-      : null;
-  if (!authDateRaw || !user) {
-    throw new Error("Telegram WebApp initData is missing auth_date or user.");
-  }
-
-  const authDate = Number.parseInt(authDateRaw, 10);
-  if (!Number.isFinite(authDate) || authDate <= 0) {
+  const signedParams = validateOfficialRawHash(normalizedRaw, botToken);
+  const user = parseSignedUser(readSignedParam(signedParams, "user", true)!);
+  const authDateRaw = readSignedParam(signedParams, "auth_date", true)!;
+  if (!/^\d+$/.test(authDateRaw)) {
     throw new Error("Telegram WebApp auth_date is invalid.");
+  }
+  const authDate = Number(authDateRaw);
+  if (!Number.isSafeInteger(authDate) || authDate <= 0) {
+    throw new Error("Telegram WebApp auth_date is invalid.");
+  }
+
+  const queryId = readSignedParam(signedParams, "query_id", false);
+  const startParam = readSignedParam(signedParams, "start_param", false);
+
+  if (unsafeInitData) {
+    assertUnsafeDataMatchesSigned(unsafeInitData, {
+      user,
+      authDate,
+      ...(queryId !== undefined ? { queryId } : {}),
+      ...(startParam !== undefined ? { startParam } : {}),
+      hash: readSignedParam(signedParams, "hash", true)!,
+    });
   }
 
   const nowSeconds = Math.floor(Date.now() / 1000);
@@ -397,29 +400,7 @@ export function validateTelegramWebAppInitData(
     user,
     authDate,
     rawInitData: normalizedRaw,
-    ...(typeof normalizedUnsafe.query_id === "string"
-      ? { queryId: normalizedUnsafe.query_id }
-      : {}),
-    ...(typeof normalizedUnsafe.start_param === "string"
-      ? { startParam: normalizedUnsafe.start_param }
-      : {}),
-    validationDebug: {
-      providedHash:
-        officialRawValidation?.providedHash ??
-        userFieldsValidation?.providedHash ??
-        "",
-      officialRaw: {
-        checkString: officialRawValidation?.checkString ?? "",
-        computedHash: officialRawValidation?.computedHash ?? "",
-        matches: officialRawValidation?.matches ?? false,
-      },
-      userFields: userFieldsValidation
-        ? {
-            checkString: userFieldsValidation.checkString,
-            computedHash: userFieldsValidation.computedHash,
-            matches: userFieldsValidation.matches,
-          }
-        : null,
-    },
+    ...(queryId !== undefined ? { queryId } : {}),
+    ...(startParam !== undefined ? { startParam } : {}),
   };
 }

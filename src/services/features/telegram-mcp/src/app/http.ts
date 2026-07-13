@@ -876,21 +876,6 @@ export function createMcpHttpHandler(
             ),
             runtime.config.webapp.initDataTtlSeconds,
           );
-          runtime.logger.info("Telegram WebApp initData validation debug", {
-            sessionId: sessionId || null,
-            telegramUserId: validated.user.id,
-            providedHash: validated.validationDebug.providedHash,
-            officialRawMatches: validated.validationDebug.officialRaw.matches,
-            officialRawCheckString: validated.validationDebug.officialRaw.checkString,
-            officialRawComputedHash:
-              validated.validationDebug.officialRaw.computedHash,
-            userFieldsMatches:
-              validated.validationDebug.userFields?.matches ?? null,
-            userFieldsCheckString:
-              validated.validationDebug.userFields?.checkString ?? null,
-            userFieldsComputedHash:
-              validated.validationDebug.userFields?.computedHash ?? null,
-          });
           if (!sessionId) {
             sessionId =
               (await runtime.bindingStore.getActiveSessionIdForTelegramUser(
@@ -979,7 +964,6 @@ export function createMcpHttpHandler(
           runtime.logger.warn("Telegram WebApp bootstrap rejected", {
             sessionId,
             initDataLength: initDataRaw.length,
-            initDataPreview: initDataRaw.slice(0, 160),
             hasUnsafeUser:
               Boolean(initDataUnsafe?.user) &&
               typeof initDataUnsafe?.user?.id === "number",

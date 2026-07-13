@@ -16,6 +16,11 @@ const XTERM_WEBAPP_JS = readFileSync(
   "utf8",
 );
 
+const XTERM_FIT_WEBAPP_JS = readFileSync(
+  require.resolve("@xterm/addon-fit/lib/addon-fit.js"),
+  "utf8",
+);
+
 export const WEBAPP_STYLES_CSS = `
 :root {
   color-scheme: dark;
@@ -270,18 +275,19 @@ const config = window.__TELEGRAM_MCP_WEBAPP__;
 const state = {
   token: null,
   sessionId: null,
-  timer: null,
   actionBusy: false,
-  pollIntervalMs: 2000,
   wrapEnabled: true,
   recoverPromise: null,
   xterm: null,
+  xtermFitAddon: null,
   xtermInputBound: false,
   liveSocket: null,
   liveSocketConnected: false,
+  liveConnectPromise: null,
+  liveReconnectTimer: null,
+  liveReconnectAttempt: 0,
   lastRenderSignature: null,
   resizeObserver: null,
-  fittedRows: null,
 };
 
 const elements = {
@@ -314,7 +320,10 @@ function setUpdated(text) {
 }
 
 function setLiveModeStatus(mode) {
-  setStatus(mode === "stream" ? "Live (stream)" : "Live (poll)");
+  setStatus(
+    mode === "stream" ? "Live (stream)" : "Reconnecting live stream...",
+    mode !== "stream",
+  );
 }
 
 function createHttpError(message, status) {
@@ -384,46 +393,28 @@ function getXtermCtor() {
   return window.Terminal || window.XtermTerminal || null;
 }
 
-function getTerminalCellHeight(terminal) {
-  const cell =
-    terminal &&
-    terminal._core &&
-    terminal._core._renderService &&
-    terminal._core._renderService.dimensions &&
-    terminal._core._renderService.dimensions.css &&
-    terminal._core._renderService.dimensions.css.cell;
-
-  if (!cell || !cell.height) {
-    return null;
-  }
-
-  return cell.height;
+function getXtermFitAddonCtor() {
+  return window.FitAddon?.FitAddon || null;
 }
 
-function fitTerminalRows(notifyServer = true) {
+function fitTerminal(notifyServer = true) {
   const terminal = state.xterm;
-  if (!terminal || !elements.terminal) {
+  const fitAddon = state.xtermFitAddon;
+  if (!terminal || !fitAddon) {
     return;
   }
 
-  const cellHeight = getTerminalCellHeight(terminal);
-  if (!cellHeight) {
+  const previousCols = terminal.cols;
+  const previousRows = terminal.rows;
+  try {
+    fitAddon.fit();
+  } catch (_error) {
     return;
   }
 
-  const nextRows = Math.max(5, Math.floor(elements.terminal.clientHeight / cellHeight));
-  if (!Number.isFinite(nextRows) || nextRows <= 0) {
+  if (terminal.cols === previousCols && terminal.rows === previousRows) {
     return;
   }
-
-  if (state.fittedRows === nextRows) {
-    return;
-  }
-
-  state.fittedRows = nextRows;
-  const currentCols =
-    typeof terminal.cols === "number" && terminal.cols > 0 ? terminal.cols : 80;
-  terminal.resize(currentCols, nextRows);
 
   if (
     notifyServer &&
@@ -432,7 +423,7 @@ function fitTerminalRows(notifyServer = true) {
     state.liveSocket.readyState === WebSocket.OPEN
   ) {
     state.liveSocket.send(
-      JSON.stringify({ type: "resize", cols: currentCols, rows: nextRows }),
+      JSON.stringify({ type: "resize", cols: terminal.cols, rows: terminal.rows }),
     );
   }
 }
@@ -443,7 +434,8 @@ function ensureXterm() {
   }
 
   const TerminalCtor = getXtermCtor();
-  if (!TerminalCtor || !elements.terminal) {
+  const FitAddonCtor = getXtermFitAddonCtor();
+  if (!TerminalCtor || !FitAddonCtor || !elements.terminal) {
     return null;
   }
 
@@ -465,6 +457,8 @@ function ensureXterm() {
       allowTransparency: true,
       scrollback: 4000,
   });
+  const fitAddon = new FitAddonCtor();
+  terminal.loadAddon(fitAddon);
   terminal.open(elements.terminal);
   terminal.onData((data) => {
     if (!state.liveSocketConnected || !state.liveSocket) {
@@ -482,43 +476,19 @@ function ensureXterm() {
   });
   if (!state.resizeObserver && typeof ResizeObserver !== "undefined") {
     state.resizeObserver = new ResizeObserver(() => {
-      fitTerminalRows();
+      fitTerminal();
     });
     state.resizeObserver.observe(elements.terminal);
   }
   window.addEventListener("resize", () => {
-    fitTerminalRows();
+    fitTerminal();
   });
   state.xterm = terminal;
+  state.xtermFitAddon = fitAddon;
   window.setTimeout(() => {
-    fitTerminalRows(false);
+    fitTerminal();
   }, 0);
   return terminal;
-}
-
-function estimateTerminalSizeFromPayload(payload, options = {}) {
-  const text = payload.ansi || payload.content || "";
-  const lines = text.split("\\n");
-  const useViewportRows =
-    options.preferViewportRows === true &&
-    Number.isFinite(payload.rows) &&
-    payload.rows > 0;
-  const rows = useViewportRows
-    ? Math.max(2, Math.min(120, payload.rows))
-    : Math.max(2, Math.min(400, lines.length || payload.rows || 24));
-  const baseCols = Number.isFinite(payload.cols) && payload.cols > 0
-      ? payload.cols
-      : 40;
-  const cols = Math.max(
-    baseCols,
-    Math.min(
-      240,
-      Number.isFinite(payload.cols) && payload.cols > 0
-        ? payload.cols
-        : lines.reduce((max, line) => Math.max(max, line.replace(/\\u001b\\[[0-9;]*m/g, "").length), 0) || 80,
-    ),
-  );
-  return { cols, rows };
 }
 
 function renderTerminalPayload(payload, options = {}) {
@@ -527,7 +497,6 @@ function renderTerminalPayload(payload, options = {}) {
     content: payload.content || "",
     cols: payload.cols || null,
     rows: payload.rows || null,
-    preferViewportRows: options.preferViewportRows === true,
   });
   if (state.lastRenderSignature === signature) {
     return;
@@ -541,14 +510,13 @@ function renderTerminalPayload(payload, options = {}) {
     return;
   }
 
-  const size = estimateTerminalSizeFromPayload(payload, options);
   const previousViewportY = terminal.buffer.active.viewportY;
   const previousBaseY = terminal.buffer.active.baseY;
   const wasNearBottom =
     previousBaseY <= 0 ||
     previousViewportY >= Math.max(0, previousBaseY - 2);
   terminal.reset();
-  terminal.resize(size.cols, size.rows);
+  fitTerminal();
   terminal.write(payload.ansi || payload.content || "");
   if (options.forceScrollBottom === true || wasNearBottom) {
     terminal.scrollToBottom();
@@ -556,7 +524,7 @@ function renderTerminalPayload(payload, options = {}) {
     terminal.scrollToLine(Math.min(previousViewportY, terminal.buffer.active.baseY));
   }
   window.setTimeout(() => {
-    fitTerminalRows(false);
+    fitTerminal();
   }, 0);
   state.lastRenderSignature = signature;
 }
@@ -900,7 +868,6 @@ async function bootstrap() {
 function applyBootstrapPayload(bootstrapPayload) {
   state.token = bootstrapPayload.token;
   state.sessionId = bootstrapPayload.session_id;
-  state.pollIntervalMs = bootstrapPayload.poll_interval_ms || state.pollIntervalMs;
   elements.session.textContent =
     bootstrapPayload.session_label || bootstrapPayload.session_id;
   elements.session.hidden = false;
@@ -938,22 +905,6 @@ async function withRecoveredSession(operation) {
     await recoverWebAppSession();
     return operation();
   }
-}
-
-async function fetchVisibleBuffer() {
-  const response = await fetch(config.basePath + "/api/view", {
-    method: "GET",
-    headers: {
-      authorization: "Bearer " + state.token,
-    },
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw createHttpError(text || "Failed to fetch visible buffer.", response.status);
-  }
-
-  return response.json();
 }
 
 async function sendAction(action) {
@@ -1048,74 +999,132 @@ function closeLiveSocket() {
   }
 }
 
-async function connectLiveSocket() {
-  closeLiveSocket();
-  if (!state.token) {
-    throw new Error("WebApp token is missing");
+function clearLiveReconnectTimer() {
+  if (state.liveReconnectTimer) {
+    clearTimeout(state.liveReconnectTimer);
+    state.liveReconnectTimer = null;
+  }
+}
+
+function scheduleLiveReconnect() {
+  if (
+    state.liveSocketConnected ||
+    state.liveReconnectTimer ||
+    !state.token
+  ) {
+    return;
   }
 
-  const socket = new WebSocket(getLiveWsUrl());
-  state.liveSocket = socket;
+  const delay = Math.min(
+    30000,
+    1000 * 2 ** Math.min(state.liveReconnectAttempt, 5),
+  );
+  state.liveReconnectAttempt += 1;
+  state.liveReconnectTimer = setTimeout(async () => {
+    state.liveReconnectTimer = null;
+    try {
+      await connectLiveSocket();
+    } catch (_error) {
+      setLiveModeStatus("reconnect");
+      scheduleLiveReconnect();
+    }
+  }, delay);
+}
 
-  await new Promise((resolve, reject) => {
-    let settled = false;
+function connectLiveSocket() {
+  if (
+    state.liveSocketConnected &&
+    state.liveSocket?.readyState === WebSocket.OPEN
+  ) {
+    return Promise.resolve();
+  }
+  if (state.liveConnectPromise) {
+    return state.liveConnectPromise;
+  }
 
-    socket.addEventListener("open", () => {
-      state.liveSocketConnected = true;
-      settled = true;
-      stopPolling();
-      resolve();
-    }, { once: true });
+  state.liveConnectPromise = (async () => {
+    closeLiveSocket();
+    if (!state.token) {
+      throw new Error("WebApp token is missing");
+    }
 
-    socket.addEventListener("error", () => {
-      if (settled) {
+    const socket = new WebSocket(getLiveWsUrl());
+    state.liveSocket = socket;
+
+    socket.addEventListener("message", (event) => {
+      if (state.liveSocket !== socket) {
         return;
       }
-      settled = true;
-      reject(new Error("Live stream connection failed"));
-    }, { once: true });
-  });
-
-  socket.addEventListener("message", (event) => {
-    const payload = JSON.parse(String(event.data));
-    if (payload.type === "snapshot") {
-      renderTerminalPayload(payload, {
-        preferViewportRows: true,
-        forceScrollBottom: true,
-      });
-      setUpdated(formatCapturedAt(payload.captured_at));
-      setLiveModeStatus("stream");
-      return;
-    }
-    if (payload.type === "data") {
-      const terminal = ensureXterm();
-      if (terminal && typeof payload.data === "string") {
-        const previousViewportY = terminal.buffer.active.viewportY;
-        const previousBaseY = terminal.buffer.active.baseY;
-        const wasNearBottom =
-          previousBaseY <= 0 ||
-          previousViewportY >= Math.max(0, previousBaseY - 2);
-        terminal.write(payload.data);
-        if (wasNearBottom) {
-          terminal.scrollToBottom();
-        }
+      const payload = JSON.parse(String(event.data));
+      if (payload.type === "snapshot") {
+        state.liveReconnectAttempt = 0;
+        renderTerminalPayload(payload, {
+          forceScrollBottom: true,
+        });
+        setUpdated(formatCapturedAt(payload.captured_at));
+        setLiveModeStatus("stream");
+        return;
       }
-      return;
-    }
-    if (payload.type === "exit") {
-      setStatus("Terminal exited", true);
-      return;
-    }
+      if (payload.type === "data") {
+        const terminal = ensureXterm();
+        if (terminal && typeof payload.data === "string") {
+          const previousViewportY = terminal.buffer.active.viewportY;
+          const previousBaseY = terminal.buffer.active.baseY;
+          const wasNearBottom =
+            previousBaseY <= 0 ||
+            previousViewportY >= Math.max(0, previousBaseY - 2);
+          terminal.write(payload.data);
+          if (wasNearBottom) {
+            terminal.scrollToBottom();
+          }
+        }
+        return;
+      }
+      if (payload.type === "exit") {
+        setStatus("Terminal exited", true);
+      }
+    });
+
+    await new Promise((resolve, reject) => {
+      let settled = false;
+
+      socket.addEventListener("open", () => {
+        if (state.liveSocket !== socket) {
+          return;
+        }
+        state.liveSocketConnected = true;
+        clearLiveReconnectTimer();
+        settled = true;
+        resolve();
+      }, { once: true });
+
+      socket.addEventListener("error", () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        reject(new Error("Live stream connection failed"));
+      }, { once: true });
+
+      socket.addEventListener("close", () => {
+        if (state.liveSocket !== socket) {
+          return;
+        }
+        state.liveSocket = null;
+        state.liveSocketConnected = false;
+        if (!settled) {
+          settled = true;
+          reject(new Error("Live stream connection closed"));
+        }
+        setLiveModeStatus("reconnect");
+        scheduleLiveReconnect();
+      });
+    });
+  })().finally(() => {
+    state.liveConnectPromise = null;
   });
 
-  socket.addEventListener("close", () => {
-    state.liveSocketConnected = false;
-    if (state.liveSocket === socket) {
-      state.liveSocket = null;
-    }
-    setLiveModeStatus("poll");
-    startPolling();
-  });
+  return state.liveConnectPromise;
 }
 
 function confirmInterrupt() {
@@ -1129,33 +1138,6 @@ function confirmInterrupt() {
 
     resolve(window.confirm("Send Ctrl+C to the terminal session? This can stop the running agent."));
   });
-}
-
-async function refreshVisibleBuffer() {
-  const payload = await withRecoveredSession(fetchVisibleBuffer);
-  renderTerminalPayload(payload);
-  setUpdated(formatCapturedAt(payload.captured_at));
-  setLiveModeStatus("poll");
-}
-
-function stopPolling() {
-  if (state.timer) {
-    clearTimeout(state.timer);
-    state.timer = null;
-  }
-}
-
-function startPolling() {
-  stopPolling();
-  state.timer = setTimeout(async () => {
-    try {
-      await refreshVisibleBuffer();
-    } catch (error) {
-      setStatus(error.message || String(error), true);
-    } finally {
-      startPolling();
-    }
-  }, state.pollIntervalMs);
 }
 
 function bindUi() {
@@ -1247,8 +1229,8 @@ async function main() {
     try {
       await connectLiveSocket();
     } catch (_error) {
-      await refreshVisibleBuffer();
-      startPolling();
+      setLiveModeStatus("reconnect");
+      scheduleLiveReconnect();
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1309,6 +1291,9 @@ ${XTERM_WEBAPP_CSS}</style>
     </script>
     <script>
 ${XTERM_WEBAPP_JS}
+    </script>
+    <script>
+${XTERM_FIT_WEBAPP_JS}
     </script>
     <script>
       (() => {

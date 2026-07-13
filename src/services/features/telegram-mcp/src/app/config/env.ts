@@ -126,7 +126,6 @@ const envSchema = z.object({
     .enum(["default", "expand", "fullscreen"])
     .default("fullscreen"),
   WEBAPP_VISIBLE_SCREENS: z.coerce.number().int().positive().default(2),
-  WEBAPP_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
   WEBAPP_ACTION_COOLDOWN_MS: z.coerce.number().int().nonnegative().default(150),
   MCP_XCHANGE_DIR: z.string().min(1).default(".mcp-xchange"),
   TERMINAL_SHELL: z.string().min(1).default(process.env.SHELL || "bash"),
@@ -308,7 +307,6 @@ export type AppConfig = {
     sessionTtlSeconds: number;
     launchMode: "default" | "expand" | "fullscreen";
     visibleScreens: number;
-    pollIntervalMs: number;
     actionCooldownMs: number;
   };
   exchange: {
@@ -551,7 +549,6 @@ export function loadConfig(): AppConfig {
       sessionTtlSeconds: parsed.WEBAPP_SESSION_TTL_SECONDS,
       launchMode: parsed.WEBAPP_LAUNCH_MODE,
       visibleScreens: parsed.WEBAPP_VISIBLE_SCREENS,
-      pollIntervalMs: parsed.WEBAPP_POLL_INTERVAL_MS,
       actionCooldownMs: parsed.WEBAPP_ACTION_COOLDOWN_MS,
     },
     exchange: {

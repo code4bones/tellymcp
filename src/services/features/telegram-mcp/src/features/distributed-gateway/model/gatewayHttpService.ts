@@ -80,7 +80,6 @@ type LiveRelayBootstrapResult = {
   session_id: string;
   session_label: string | null;
   terminal_target: boolean;
-  poll_interval_ms: number;
   telegram_user_id: number;
 };
 
@@ -157,10 +156,6 @@ function normalizeLiveRelayBootstrapResult(
     session_label:
       typeof record.session_label === "string" ? record.session_label : null,
     terminal_target: record.terminal_target === true,
-    poll_interval_ms:
-      typeof record.poll_interval_ms === "number" && record.poll_interval_ms > 0
-        ? record.poll_interval_ms
-        : 2000,
     telegram_user_id: telegramUserId,
   };
 }
@@ -279,33 +274,6 @@ export class GatewayHttpService {
       throw new Error(
         `Invalid live relay bootstrap validation response: ${JSON.stringify(rawResponse)}`,
       );
-    }
-
-    return response;
-  }
-
-  public async requestLiveRelayView(input: {
-    clientUuid: string;
-    localSessionId: string;
-  }): Promise<LiveRelayViewResult> {
-    const rawResponse = await this.callBroker<LiveRelayViewResult>(
-      "telegramMcp.gatewaySocket.requestLiveRelay",
-      {
-        clientUuid: input.clientUuid,
-        localSessionId: input.localSessionId,
-        requestType: "view",
-        payload: {},
-      },
-      { meta: { internal_call: true } },
-    );
-    const response = unwrapLiveRelayResult<LiveRelayViewResult>(rawResponse);
-
-    if (
-      !response ||
-      typeof response !== "object" ||
-      typeof (response as { content?: unknown }).content !== "string"
-    ) {
-      throw new Error("Invalid live relay view response");
     }
 
     return response;

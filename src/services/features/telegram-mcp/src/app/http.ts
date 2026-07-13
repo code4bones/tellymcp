@@ -278,7 +278,7 @@ export function createMcpHttpHandler(
       requestLiveRelay?: (params: {
         clientUuid: string;
         localSessionId: string;
-        requestType: "action";
+        requestType: "action" | "resize";
         payload: Record<string, unknown>;
       }) => Promise<unknown>;
     } | null;
@@ -478,6 +478,15 @@ export function createMcpHttpHandler(
                 Math.max(20, Math.min(400, Math.round(cols))),
                 Math.max(5, Math.min(200, Math.round(rows))),
               );
+              return;
+            }
+            if (resolved.relayTarget) {
+              await input.getGatewaySocketService?.()?.requestLiveRelay?.({
+                clientUuid: resolved.relayTarget.clientUuid,
+                localSessionId: resolved.relayTarget.localSessionId,
+                requestType: "resize",
+                payload: { cols, rows },
+              });
             }
           }
         })().catch((error) => {
@@ -812,7 +821,6 @@ export function createMcpHttpHandler(
               session_id: relayBootstrap.session_id,
               session_label: relayBootstrap.session_label,
               terminal_target: relayBootstrap.terminal_target,
-              poll_interval_ms: relayBootstrap.poll_interval_ms,
               expires_at: new Date(record.expiresAtMs).toISOString(),
             });
 
@@ -929,7 +937,6 @@ export function createMcpHttpHandler(
             session_id: sessionId,
             session_label: session?.label ?? null,
             terminal_target: Boolean(session?.terminalTarget),
-            poll_interval_ms: runtime.config.webapp.pollIntervalMs,
             expires_at: new Date(record.expiresAtMs).toISOString(),
           });
 
@@ -976,107 +983,6 @@ export function createMcpHttpHandler(
             res,
             403,
             error instanceof Error ? error.message : "WebApp bootstrap failed",
-          );
-        }
-        return;
-      }
-
-      if (requestUrl.pathname === `${webAppBasePath}/api/view`) {
-        if (method !== "GET") {
-          writeText(res, 405, "Method not allowed");
-          return;
-        }
-
-        const token = readBearerToken(req);
-        const webAppSession = token ? webAppSessions.get(token) : null;
-        if (!webAppSession) {
-          writeText(res, 401, "Unauthorized");
-          return;
-        }
-
-        const relayTarget = parseLiveRelaySessionId(webAppSession.sessionId);
-        if (relayTarget) {
-          try {
-            const result = await runtime.gatewayHttpService.requestLiveRelayView({
-              clientUuid: relayTarget.clientUuid,
-              localSessionId: relayTarget.localSessionId,
-            });
-            writeJson(res, 200, result);
-          } catch (error) {
-            runtime.logger.error("Telegram WebApp relay visible buffer capture failed", {
-              sessionId: webAppSession.sessionId,
-              clientUuid: relayTarget.clientUuid,
-              localSessionId: relayTarget.localSessionId,
-              error:
-                error instanceof Error
-                  ? (error.stack ?? error.message)
-                  : String(error),
-            });
-            writeText(
-              res,
-              isRelayTerminalUnavailableMessage(error) ? 503 : 500,
-              error instanceof Error ? error.message : "Failed to capture relay terminal buffer",
-            );
-          }
-          return;
-        }
-
-        const binding = await runtime.bindingStore.getBinding(
-          webAppSession.sessionId,
-        );
-        if (
-          !binding ||
-          binding.telegramUserId !== webAppSession.telegramUserId
-        ) {
-          writeText(res, 403, "Session binding is no longer valid");
-          return;
-        }
-
-        const session = await runtime.sessionStore.getSession(
-          webAppSession.sessionId,
-        );
-        if (!session?.terminalTarget) {
-          writeText(res, 409, "terminal target is not configured for this session");
-          return;
-        }
-
-        try {
-          const terminalSize = await getTerminalWindowSize(
-            runtime.config.terminal,
-            session.terminalTarget,
-          );
-          const content = await captureVisibleTerminal(
-            runtime.config.terminal,
-            session.terminalTarget,
-            runtime.config.terminal.captureLines,
-            runtime.config.webapp.visibleScreens,
-          );
-          const ansi = await captureVisibleTerminalAnsi(
-            runtime.config.terminal,
-            session.terminalTarget,
-            runtime.config.terminal.captureLines,
-            runtime.config.webapp.visibleScreens,
-          );
-          writeJson(res, 200, {
-            session_id: session.sessionId,
-            session_label: session.label ?? null,
-            captured_at: new Date().toISOString(),
-            content,
-            ansi,
-            ...(terminalSize ? terminalSize : {}),
-          });
-        } catch (error) {
-          runtime.logger.error("Telegram WebApp visible buffer capture failed", {
-            sessionId: webAppSession.sessionId,
-            error:
-              error instanceof Error
-                ? (error.stack ?? error.message)
-                : String(error),
-          });
-          writeText(
-            res,
-            isTerminalUnavailableError(error) ? 503 : 500,
-            formatTerminalHttpError(error, "Failed to capture visible terminal buffer"),
           );
         }
         return;

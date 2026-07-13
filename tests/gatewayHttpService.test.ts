@@ -103,7 +103,6 @@ describe("GatewayHttpService live relay bootstrap", () => {
         session_id: "telegram-mcp-708ad3c5",
         session_label: "backend",
         terminal_target: true,
-        poll_interval_ms: 1500,
         telegram_user_id: "1711337558",
       },
     }));
@@ -122,7 +121,6 @@ describe("GatewayHttpService live relay bootstrap", () => {
       session_id: "telegram-mcp-708ad3c5",
       session_label: "backend",
       terminal_target: true,
-      poll_interval_ms: 1500,
       telegram_user_id: 1711337558,
     });
   });

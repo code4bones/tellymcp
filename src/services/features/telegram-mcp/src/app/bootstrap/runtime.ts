@@ -103,7 +103,6 @@ export async function createAppRuntime(input: {
       initDataTtlSeconds: config.webapp.initDataTtlSeconds,
       sessionTtlSeconds: config.webapp.sessionTtlSeconds,
       launchMode: config.webapp.launchMode,
-      pollIntervalMs: config.webapp.pollIntervalMs,
       actionCooldownMs: config.webapp.actionCooldownMs,
     },
     terminal: {

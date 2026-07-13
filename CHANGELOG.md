@@ -74,6 +74,11 @@
   - безопасные packaged templates для `.env`
 
 ### Changed
+- Telegram Mini App Live Console переведена на WS-only rendering:
+  - HTTP polling и `/api/view` удалены
+  - после разрыва WebSocket автоматически восстанавливается с exponential backoff
+  - размеры xterm рассчитываются официальным `@xterm/addon-fit`
+  - resize колонок и строк передаётся локальным и relay PTY
 - Полностью убран legacy standalone MCP transport. `telegram_mcp` работает только через REST/MCP over HTTP.
 - Локальный standalone HTTP listener убран; `telegram_mcp` больше не поднимает отдельный сервер вне Moleculer gateway.
 - UI Telegram переосмыслен по двум режимам:

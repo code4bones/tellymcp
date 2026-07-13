@@ -1,12 +1,43 @@
-# Analysis: Live Console rendering in the Telegram Mini App (WebApp)
+# Analysis and resolution: Live Console rendering in the Telegram Mini App (WebApp)
 
 Scope: `src/services/features/telegram-mcp/src/app/webapp/assets.ts` (the embedded client-side
 `WEBAPP_APP_JS`, an xterm.js-based terminal renderer) and its server counterpart
-`src/services/features/telegram-mcp/src/app/http.ts` (`/api/live/ws`, `/api/view`), plus
+`src/services/features/telegram-mcp/src/app/http.ts` (`/api/live/ws`), plus
 `gateway-socket.service.ts` / `gatewayHttpService.ts` for the relay path. "Live console" here is
 the Telegram Mini App's live terminal view (xterm.js), not the browser-extension console — one row
-in `gateway_live_consoles` = one connected agent/session, per `docs/DECISIONS.md:33`. No code
-changed as part of this analysis.
+in `gateway_live_consoles` = one connected agent/session, per `docs/DECISIONS.md:33`.
+
+## Resolution (implemented 2026-07-14)
+
+All three findings are resolved. The final design deliberately keeps the live console on a single
+streaming transport instead of retaining polling as a degraded mode:
+
+- The Mini App reconnects `/api/live/ws` after initial connection failures and later disconnects.
+  Retries use exponential backoff from 1 second up to a 30-second cap, are deduplicated, and reset
+  after a usable `snapshot` arrives. Events from superseded sockets cannot mutate current state.
+- Client polling was removed completely: there is no poll timer, `/api/view` fetch, poll-mode
+  status, bootstrap `poll_interval_ms`, `WEBAPP_POLL_INTERVAL_MS`, or WebApp `/api/view` route.
+  While disconnected, the UI reports that the live stream is reconnecting.
+- Terminal fitting now uses the official `@xterm/addon-fit@0.10.0`, matched to
+  `@xterm/xterm@5.5.0`. The client no longer reaches into xterm's private `_core` render service.
+  Both columns and rows follow the real container dimensions through `ResizeObserver` and window
+  resize events.
+- Full snapshots are reset and written directly at the fitted viewport size. The competing
+  payload-size/line-count heuristic and `fittedRows` cache were removed, eliminating the periodic
+  resize fight described in Finding 3.
+- Fitted `{cols, rows}` are sent to the PTY over the live socket. Relay sessions forward the same
+  resize message to the remote console, where the dimensions are validated, bounded, and applied
+  to the local PTY.
+- Normal VT/ANSI rendering remains xterm.js-owned. The small manual HTML renderer remains only as
+  an emergency fallback when xterm or its fit addon cannot initialize.
+
+Verification added in `tests/webappAssets.test.ts` and `tests/gatewayLiveResize.test.ts` covers
+addon embedding, fitted resize messages, full-snapshot sizing, reconnect behavior, and relayed PTY
+resize. At implementation time, TypeScript build, ESLint, and the complete Vitest suite passed
+(`27` test files, `121` tests).
+
+The findings below are retained as the pre-fix investigation record; their line references and
+polling descriptions refer to the old implementation.
 
 ---
 
@@ -135,6 +166,88 @@ displayed, independent of any client-side rendering bug in the browser.
 
 ---
 
+## Finding 3: poll-mode render mechanics itself — wrong row count computed every tick, and a stale-cache bug that stops it from self-correcting
+
+This is the direct answer to "is the render mechanism itself okay, or is the lag just inherent to
+the webapp." **It is not inherent — poll-mode rendering has a real, reproducible mechanics bug on
+top of Findings 1 and 2**, and it's the most likely source of a *periodic* (roughly every
+`pollIntervalMs` = 2000ms by default, `env.ts:129`) visible stutter/jump, as opposed to a one-off
+issue.
+
+### 3a — poll-mode row count is computed from captured buffer size, not real viewport rows, even though the real value is available
+
+`estimateTerminalSizeFromPayload` (`assets.ts:499-522`):
+```js
+const useViewportRows =
+  options.preferViewportRows === true &&
+  Number.isFinite(payload.rows) && payload.rows > 0;
+const rows = useViewportRows
+  ? Math.max(2, Math.min(120, payload.rows))                       // real PTY rows
+  : Math.max(2, Math.min(400, lines.length || payload.rows || 24)); // captured-buffer line count
+```
+`preferViewportRows` is only passed as `true` for the live-socket **snapshot** message
+(`connectLiveSocket`, `assets.ts:1082-1085`) — every **poll** call
+(`refreshVisibleBuffer` → `renderTerminalPayload(payload)`, `assets.ts:1134-1139`, no options
+passed) falls into the `else` branch and sizes the terminal to `lines.length` — the number of
+newline-split lines in the just-captured buffer text — **not** the real PTY row count, even though
+`payload.rows` is present in that same payload (`/api/view` always spreads in
+`getTerminalWindowSize`'s result, `http.ts:1044-1067`). Since `"".split("\\n")` already has
+`length === 1`, `lines.length` is essentially never falsy, so the `payload.rows` fallback in that
+`||` chain is dead code in practice — the real row count is available but never used here.
+
+`WEBAPP_VISIBLE_SCREENS` defaults to `2` (`env.ts:128`), meaning `/api/view` typically captures
+**about two screens' worth of lines** (current view + one screen of scrollback context) for exactly
+this reason — to give the poll fallback some context. But that means `lines.length` in a poll
+payload is routinely close to **2x** the real number of viewport rows. Every poll tick therefore
+resizes the terminal to roughly double the row count it should have.
+
+### 3b — that wrong resize isn't corrected, because it bypasses the fit-cache that would normally fix it
+
+`renderTerminalPayload` calls `terminal.resize(size.cols, size.rows)` directly
+(`assets.ts:551`) and then schedules a corrective `fitTerminalRows(false)` on the next tick
+(`assets.ts:558-560`, `window.setTimeout(..., 0)`). That correction should bring rows back to the
+real viewport-fitting value — except `fitTerminalRows` guards itself with:
+```js
+if (state.fittedRows === nextRows) {
+  return;   // "nothing changed, skip the resize"
+}
+```
+`nextRows` here is recomputed purely from `elements.terminal.clientHeight / cellHeight` — the
+container's actual size, which hasn't changed. `state.fittedRows` still holds whatever the *last
+successful `fitTerminalRows` call* set it to (the correct value from before). Because
+`renderTerminalPayload`'s own `terminal.resize()` call never touches `state.fittedRows`, the cache
+has no idea the terminal's row count was just changed out from under it — so this guard compares
+"the same real container height as always" against "the same cached value as always," concludes
+nothing changed, and **skips the correction** even though `terminal.rows` was just set to roughly
+2x the correct value moments earlier.
+
+### Net effect
+
+Every poll tick (default every 2s, and — per Finding 1 — this becomes the *permanent* mode after
+any single live-socket drop): the terminal is resized to a wrong (typically ~2x too tall) row
+count, and the self-correcting fit logic silently no-ops because its cache thinks the container
+never changed. Combined with the full `terminal.reset()` immediately before it (discarding the
+prior render state) and `write()` afterward (parsing/repainting the whole captured buffer), this is
+a real, code-verifiable "the terminal jumps/resizes every couple of seconds" mechanism — not
+something inherent to running inside a Telegram Mini App WebView. It is specifically a poll-mode
+bug, so it's invisible while the live WebSocket is genuinely connected and streaming (where updates
+come from incremental `data` messages with no reset/resize at all) — which is also why Finding 1
+(silently getting stuck in poll mode after any drop) makes this so much more noticeable in
+practice than the code's happy path would suggest.
+
+**Fix direction:**
+- In the poll branch, prefer `payload.rows` (already present) over the captured-line-count
+  heuristic for terminal sizing — same as the `preferViewportRows` branch already does for the live
+  snapshot case; there's no real reason poll-mode sizing should behave differently once a real
+  row count is available in both payloads.
+- Route `renderTerminalPayload`'s resize through the same code path that updates
+  `state.fittedRows` (or update `state.fittedRows` directly alongside its `terminal.resize()` call)
+  so the two resize call sites can't desync — right now there are effectively two independent
+  "what size should the terminal be" answers (`estimateTerminalSizeFromPayload`'s guess and
+  `fitTerminalRows`'s real measurement) that don't share state and can silently fight each other.
+
+---
+
 ## Lower-confidence / worth a quick look, not fully chased down
 
 - **Relay-path terminal size**: the local live-socket and poll endpoints both confirmed-populate
@@ -156,7 +269,17 @@ displayed, independent of any client-side rendering bug in the browser.
 ## Priority
 1. **Finding 1** (no live-socket reconnect) — the more severe issue: a single transient drop
    silently and permanently degrades the whole session's experience, with no user-visible way to
-   recover short of restarting the Mini App.
-2. **Finding 2** (columns never re-fit) — a real, always-reproducible rendering bug (rotate the
+   recover short of restarting the Mini App, and directly amplifies Finding 3 by making poll mode
+   "sticky."
+2. **Finding 3** (poll-mode row-count/cache bug) — the direct explanation for periodic visual
+   "lag": every poll tick (2s default) resizes the terminal to roughly 2x the correct row count and
+   the self-correction logic silently no-ops. Reproducible on demand by forcing poll mode (e.g.
+   disable/re-enable network briefly to drop the live socket, given Finding 1).
+3. **Finding 2** (columns never re-fit) — a real, always-reproducible rendering bug (rotate the
    device, or resize the Mini App panel, and columns won't follow), but lower severity since it's
    "wrong wrapping," not "stopped working."
+
+All three compound: Finding 1 makes poll mode sticky, poll mode is where Finding 3's row-count bug
+lives, and Finding 2's frozen columns apply in both modes. Fixing Finding 1 alone would make the
+other two far less noticeable in practice (poll mode would become rare again), but Findings 2 and 3
+are real bugs in their own right and worth fixing regardless.

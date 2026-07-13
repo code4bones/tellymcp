@@ -26,6 +26,7 @@ import {
 } from "./src/app/webapp/terminal";
 import {
   isStreamableTerminalTarget,
+  resizeForegroundTerminal,
   subscribeForegroundTerminal,
   type TerminalExitInfo,
 } from "./src/shared/integrations/terminal/client";
@@ -163,6 +164,7 @@ type GatewaySocketLiveRequest = {
     | "bootstrap_validate"
     | "view"
     | "action"
+    | "resize"
     | "stream_subscribe"
     | "stream_unsubscribe";
   local_session_id: string;
@@ -458,6 +460,7 @@ type GatewaySocketCarrier = Service & {
       | "bootstrap_validate"
       | "view"
       | "action"
+      | "resize"
       | "stream_subscribe"
       | "stream_unsubscribe";
     payload: Record<string, unknown>;
@@ -755,6 +758,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             "bootstrap_validate",
             "view",
             "action",
+            "resize",
             "stream_subscribe",
             "stream_unsubscribe",
           ],
@@ -772,6 +776,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
               | "bootstrap_validate"
               | "view"
               | "action"
+              | "resize"
               | "stream_subscribe"
               | "stream_unsubscribe";
             payload?: Record<string, unknown>;
@@ -1826,7 +1831,6 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
               session_id: sessionId,
               session_label: session?.label ?? null,
               terminal_target: Boolean(session?.terminalTarget),
-              poll_interval_ms: runtime.config.webapp.pollIntervalMs,
               telegram_user_id: telegramUserId,
             },
           };
@@ -1920,6 +1924,34 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             result: {
               ok: true,
             },
+          };
+        }
+
+        if (request.request_type === "resize") {
+          const cols =
+            typeof request.payload?.cols === "number" ? request.payload.cols : NaN;
+          const rows =
+            typeof request.payload?.rows === "number" ? request.payload.rows : NaN;
+          if (!Number.isFinite(cols) || !Number.isFinite(rows)) {
+            throw new Error("Terminal cols and rows are required");
+          }
+
+          const sessionId = request.local_session_id.trim();
+          const session = await runtime.sessionStore.getSession(sessionId);
+          if (!session?.terminalTarget || !isStreamableTerminalTarget(session.terminalTarget)) {
+            throw new Error("Terminal target does not support resize");
+          }
+
+          resizeForegroundTerminal(
+            session.terminalTarget,
+            Math.max(20, Math.min(400, Math.round(cols))),
+            Math.max(5, Math.min(200, Math.round(rows))),
+          );
+          return {
+            type: "live_response",
+            request_id: request.request_id,
+            ok: true,
+            result: { ok: true },
           };
         }
 
@@ -2805,7 +2837,14 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       params: {
         clientUuid: string;
         localSessionId: string;
-        requestType: "bootstrap" | "bootstrap_validate" | "view" | "action";
+        requestType:
+          | "bootstrap"
+          | "bootstrap_validate"
+          | "view"
+          | "action"
+          | "resize"
+          | "stream_subscribe"
+          | "stream_unsubscribe";
         payload: Record<string, unknown>;
       },
     ): Promise<unknown> {

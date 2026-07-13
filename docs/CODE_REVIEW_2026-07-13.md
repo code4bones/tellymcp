@@ -9,6 +9,14 @@ packaging, deployment examples, and current tests.
 This review is a current-state snapshot. It supplements the existing browser-attach
 reviews rather than replacing them.
 
+## Remediation Status
+
+- `CR-01`: **Resolved** on `2026-07-13` in commit `d0f497d`.
+  Signed raw init data is now the only source for Telegram identity and other
+  security-relevant fields. `initDataUnsafe` is consistency-checked, the alternate
+  user-fields validation protocol and sensitive validation logging were removed, and
+  regression coverage includes local and relay mismatch scenarios.
+
 ## Executive Summary
 
 The project builds cleanly and the existing test suite passes, but two critical
@@ -27,6 +35,8 @@ should follow immediately after.
 ## Critical Findings
 
 ### CR-01 - Signed Telegram identity can be replaced through `initDataUnsafe`
+
+Status: **Resolved** in `d0f497d` (`2026-07-13`).
 
 Files:
 

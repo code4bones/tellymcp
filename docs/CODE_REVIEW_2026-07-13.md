@@ -23,6 +23,12 @@ reviews rather than replacing them.
   gateway health route remains public, and all env templates and standalone docs now
   require the transport token. The updated deployment was verified operationally on
   `2026-07-14`.
+- `H-01`: **Resolved** on `2026-07-14`.
+  The direct `ws` dependency is now `8.21.0`, the MCP SDK and vulnerable transitive
+  dependencies were refreshed to patched versions, and every inbound WebSocket
+  protocol has an explicit payload limit. Gateway limits are also applied to the WS
+  client. Regression coverage verifies that an oversized fragmented gateway message
+  is rejected with close code `1009` without reaching the message handler.
 
 ## Executive Summary
 
@@ -35,9 +41,8 @@ authentication problems found by this review have now been remediated:
    deployment examples configure `GATEWAY_TOKEN` instead of the separate
    `GATEWAY_AUTH_TOKEN` that actually protects the transport.
 
-H-01 is now the highest-priority unresolved finding before shipping another public
-package. Delivery atomicity/idempotency and resource limits should follow immediately
-after.
+H-02 and H-03 are now the highest-priority unresolved findings before shipping another
+public package. Delivery atomicity/idempotency should follow immediately after.
 
 ## Critical Findings
 
@@ -140,18 +145,31 @@ Recommended fix:
 
 ### H-01 - Direct `ws` dependency has a known memory-exhaustion vulnerability
 
+Status: **Resolved** (`2026-07-14`).
+
+The remediation upgrades `ws` to `8.21.0`, `@modelcontextprotocol/sdk` to `1.29.0`,
+`fast-uri` to `3.1.2`, and `hono` to `4.12.25`. Explicit inbound limits are 64 KiB for
+WebApp live commands, 8 MiB for the gateway server and client, and 16 MiB for browser
+attach. Socket errors caused by rejected payloads are handled locally. The production
+dependency audit now reports no high or critical advisories.
+
 Files:
 
-- `package.json` (`ws: 8.20.1`)
+- `package.json`
 - `yarn.lock`
+- `src/services/features/telegram-mcp/src/shared/lib/websocketLimits.ts`
+- `src/services/features/telegram-mcp/gateway-socket.service.ts`
+- `src/services/features/telegram-mcp/src/app/http.ts`
+- `src/services/features/telegram-mcp/src/features/browser-attach/model/firefoxAttachServer.ts`
+- `tests/gatewayWsAuth.test.ts`
 
-`yarn audit --groups dependencies --level high` reports the direct `ws@8.20.1`
-dependency as vulnerable to memory exhaustion from tiny fragments/data chunks. The
-reported patched version is `>=8.21.0`. This is relevant because the project exposes
-gateway, WebApp live, and browser-attach WebSocket servers, and none configures a
-small `maxPayload`.
+Before remediation, `yarn audit --groups dependencies --level high` reported the
+direct `ws@8.20.1` dependency as vulnerable to memory exhaustion from tiny
+fragments/data chunks. The reported patched version was `>=8.21.0`. This was relevant
+because the project exposes gateway, WebApp live, and browser-attach WebSocket servers,
+and none configured a small `maxPayload`.
 
-The same audit reports `21` advisories in the production graph: `6 high`,
+The same audit reported `21` advisories in the production graph: `6 high`,
 `14 moderate`, and `1 low`. The other high reports observed in this snapshot are
 transitive `fast-uri@3.1.0` and `hono@4.12.16` paths through
 `@modelcontextprotocol/sdk`; their actual reachability must be checked after updating
@@ -405,24 +423,25 @@ Passed in this workspace:
 yarn build                 PASS
 yarn build:extensions      PASS
 yarn lint                  PASS
-yarn test                  PASS (25 files, 116 tests)
+yarn test                  PASS (27 files, 121 tests)
 ```
 
 Dependency audit:
 
 ```text
 yarn audit --groups dependencies --level high
-21 vulnerabilities: 6 high, 14 moderate, 1 low
+4 vulnerabilities: 4 moderate
 ```
 
-The audit's non-zero result is expected until H-01 is remediated.
+The audit exits successfully because no high or critical advisories remain.
 
 ## Recommended Fix Order
 
 1. CR-01: derive identity only from verified raw Telegram init data. **Resolved.**
 2. CR-02: make gateway transport authentication fail closed and update all templates.
    **Resolved.**
-3. H-01: upgrade `ws` and refresh vulnerable transitive dependencies.
+3. H-01: upgrade `ws`, refresh vulnerable transitive dependencies, and bound WS
+   payloads. **Resolved.**
 4. H-02/H-03: authenticate and bound all WS/HTTP/file inputs.
 5. H-04/H-05: make enqueue and delivery transactional, claimed, and idempotent.
 6. H-06: make workspace path containment symlink-safe.

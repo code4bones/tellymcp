@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket, type WebSocketServer } from "ws";
 
 import GatewaySocketService from "../src/services/features/telegram-mcp/gateway-socket.service";
+import { GATEWAY_WS_MAX_PAYLOAD_BYTES } from "../src/services/features/telegram-mcp/src/shared/lib/websocketLimits";
 
 const startGatewayWsServer = (
   GatewaySocketService.methods as unknown as {
@@ -123,7 +124,7 @@ describe("gateway WebSocket transport authentication", () => {
     );
   });
 
-  it("accepts the configured bearer token", async () => {
+  it("accepts the configured bearer token and rejects oversized fragmented messages", async () => {
     const httpServer = createServer();
     await new Promise<void>((resolve) =>
       httpServer.listen(0, "127.0.0.1", resolve),
@@ -187,8 +188,20 @@ describe("gateway WebSocket transport authentication", () => {
       client.once("open", resolve);
       client.once("error", reject);
     });
-    client.close();
-    await new Promise<void>((resolve) => client.once("close", () => resolve()));
+
+    const closed = new Promise<number>((resolve) => {
+      client.once("close", (code) => resolve(code));
+    });
+    client.on("error", () => undefined);
+
+    const fragment = Buffer.alloc(8 * 1024);
+    const fragmentCount = GATEWAY_WS_MAX_PAYLOAD_BYTES / fragment.length + 1;
+    for (let index = 0; index < fragmentCount; index += 1) {
+      client.send(fragment, { binary: true, fin: false });
+    }
+
+    await expect(closed).resolves.toBe(1009);
+    expect(carrier.handleGatewayWsServerMessage).not.toHaveBeenCalled();
 
     expect(logger.warn).toHaveBeenCalledWith(
       "Gateway WS client connected",

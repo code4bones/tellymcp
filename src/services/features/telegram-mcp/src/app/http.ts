@@ -37,6 +37,7 @@ import {
   sendAllowedTerminalAction,
   sendTerminalLiteralText,
 } from "./webapp/terminal";
+import { WEBAPP_LIVE_WS_MAX_PAYLOAD_BYTES } from "../shared/lib/websocketLimits";
 
 type SessionEntry = {
   server: McpServer;
@@ -286,7 +287,10 @@ export function createMcpHttpHandler(
 ): McpHttpHandler {
   const transports = new Map<string, SessionEntry>();
   const webAppSessions = new WebAppSessionRegistry();
-  const liveWsServer = new WebSocketServer({ noServer: true });
+  const liveWsServer = new WebSocketServer({
+    noServer: true,
+    maxPayload: WEBAPP_LIVE_WS_MAX_PAYLOAD_BYTES,
+  });
   const webAppBasePath =
     runtime.config.webapp.basePath.replace(/\/+$/u, "") || "/webapp";
   const rootPrefix = normalizeBasePath(process.env.ROOT_PREFIX || "/api");
@@ -377,6 +381,12 @@ export function createMcpHttpHandler(
 
       socket.on("close", () => {
         void cleanup();
+      });
+
+      socket.on("error", (error: unknown) => {
+        runtime.logger.warn("Telegram WebApp live WS socket error", {
+          error: error instanceof Error ? error.message : String(error),
+        });
       });
 
       socket.on("message", (raw: unknown) => {
@@ -1510,7 +1520,10 @@ type LiveWebSocket = {
   readyState: number;
   send: (data: string) => void;
   close: (code?: number, reason?: string) => void;
-  on: (event: "close" | "message", listener: (payload?: unknown) => void) => void;
+  on: (
+    event: "close" | "error" | "message",
+    listener: (payload?: unknown) => void,
+  ) => void;
 };
 
 type LiveWebSocketServer = {

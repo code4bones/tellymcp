@@ -35,6 +35,7 @@ import {
   hasOutgoingDeliveryNotice,
 } from "./gateway-loopback";
 import { isGatewayAuthorizationValid } from "./src/shared/lib/gatewayAuth";
+import { GATEWAY_WS_MAX_PAYLOAD_BYTES } from "./src/shared/lib/websocketLimits";
 import {
   TELLYMCP_CAPABILITIES,
   TELLYMCP_PROTOCOL_VERSION,
@@ -3257,7 +3258,10 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       const httpServer = await this.waitForHttpServer?.();
       const wsPath =
         runtime.config.distributed.gatewayWsPath.replace(/\/+$/u, "") || "/";
-      const wsServer = new WebSocketServer({ noServer: true });
+      const wsServer = new WebSocketServer({
+        noServer: true,
+        maxPayload: GATEWAY_WS_MAX_PAYLOAD_BYTES,
+      });
 
       wsServer.on("connection", (socket: any, req: any) => {
         runtime.logger.warn("Gateway WS client connected", {
@@ -3271,6 +3275,12 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
               error:
                 error instanceof Error ? (error.stack ?? error.message) : String(error),
             });
+          });
+        });
+
+        socket.on("error", (error: unknown) => {
+          runtime.logger.warn("Gateway WS server socket error", {
+            error: error instanceof Error ? error.message : String(error),
           });
         });
 
@@ -3425,6 +3435,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       this.wsConnectionId = randomUUID();
 
       const socket = new wsLib.WebSocket(normalizedUrl, {
+        maxPayload: GATEWAY_WS_MAX_PAYLOAD_BYTES,
         headers: runtime.config.distributed.gatewayAuthToken
           ? {
               authorization: `Bearer ${runtime.config.distributed.gatewayAuthToken}`,

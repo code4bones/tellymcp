@@ -22,3 +22,4 @@ logs
 *.tgz
 dev2.sh
 current
+.resume-old

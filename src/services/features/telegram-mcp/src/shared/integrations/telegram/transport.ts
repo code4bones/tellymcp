@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 
 import { Menu } from "@grammyjs/menu";
 import { Bot, GrammyError, InputFile } from "grammy";
@@ -28,6 +28,7 @@ import type { Logger } from "../../lib/logger/logger";
 import { writeLocalTaskXchangeRecord } from "../../lib/telegramXchangeRecords";
 import type { MinioExchangeStore } from "../object-storage/minioExchangeStore";
 import { isExecutorTargetKind } from "./collabSemantics";
+import { assertBodySize } from "../../lib/bodyLimits";
 import type {
   AdminGatewayRegistrationSessionRecord,
   CurrentAttachmentTargetRecord,
@@ -517,6 +518,8 @@ export class TelegramTransport implements HumanTransport {
     caption?: string,
   ): Promise<{ messageId: number }> {
     this.ensureTelegramEnabledFor("send Telegram documents");
+    const fileStats = await stat(filePath);
+    assertBodySize(fileStats.size);
     const fileBuffer = await readFile(filePath);
     const response = await this.bot.api.sendDocument(
       telegramChatId,

@@ -14,7 +14,18 @@ import type {
 import type { TelegramWebAppInitDataUnsafe } from "../../../app/webapp/auth";
 import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
 import { isGatewayAuthorizationValid } from "../../../shared/lib/gatewayAuth";
+import {
+  assertSerializedBodySize,
+  isBodySizeLimitError,
+  MAX_BODY_SIZE,
+  readLimitedJsonBody,
+} from "../../../shared/lib/bodyLimits";
 import { getTellyMcpPackageRoot } from "../../../shared/lib/version/versionHandshake";
+
+type CachedBodyRequest = IncomingMessage & {
+  body?: unknown;
+  limitedJsonBodyRead?: boolean;
+};
 
 function readHeader(
   req: IncomingMessage,
@@ -382,8 +393,15 @@ export class GatewayHttpService {
   }
 
   private async readJsonBody(req: IncomingMessage): Promise<unknown> {
-    const knownBody = (req as IncomingMessage & { body?: unknown }).body;
+    const cachedRequest = req as CachedBodyRequest;
+    if (cachedRequest.limitedJsonBodyRead) {
+      return cachedRequest.body;
+    }
+
+    const knownBody = cachedRequest.body;
     if (knownBody !== undefined) {
+      assertSerializedBodySize(knownBody);
+      cachedRequest.limitedJsonBodyRead = true;
       return knownBody;
     }
 
@@ -398,24 +416,15 @@ export class GatewayHttpService {
         "message" in knownParams ||
         "session_id" in knownParams)
     ) {
+      assertSerializedBodySize(knownParams);
+      cachedRequest.body = knownParams;
+      cachedRequest.limitedJsonBodyRead = true;
       return knownParams;
     }
-
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
-    }
-
-    if (chunks.length === 0) {
-      return undefined;
-    }
-
-    const raw = Buffer.concat(chunks).toString("utf8").trim();
-    if (!raw) {
-      return undefined;
-    }
-
-    return JSON.parse(raw) as unknown;
+    const parsedBody = await readLimitedJsonBody(req);
+    cachedRequest.body = parsedBody;
+    cachedRequest.limitedJsonBodyRead = true;
+    return parsedBody;
   }
 
   public async handleRequest(
@@ -466,6 +475,21 @@ export class GatewayHttpService {
         writeJson(res, 404, {
           error: error instanceof Error ? error.message : String(error),
         });
+        return true;
+      }
+    }
+
+    if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method ?? "")) {
+      try {
+        await this.readJsonBody(req);
+      } catch (error) {
+        if (isBodySizeLimitError(error)) {
+          writeJson(res, 413, {
+            error: `Request body exceeds the ${MAX_BODY_SIZE} MiB limit`,
+          });
+        } else {
+          writeJson(res, 400, { error: "Invalid JSON request body" });
+        }
         return true;
       }
     }

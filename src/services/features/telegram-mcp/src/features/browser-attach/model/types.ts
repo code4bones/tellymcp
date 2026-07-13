@@ -1,8 +1,9 @@
 import * as z from "zod/v4";
+import { MAX_BODY_SIZE_BYTES } from "../../../shared/lib/bodyLimits";
 
 const MAX_ID_LENGTH = 256;
 const MAX_TEXT_LENGTH = 16 * 1024;
-const MAX_GENERIC_STRING_LENGTH = 8 * 1024 * 1024;
+const MAX_GENERIC_STRING_LENGTH = MAX_BODY_SIZE_BYTES;
 const MAX_GENERIC_ARRAY_ITEMS = 4096;
 const MAX_GENERIC_OBJECT_KEYS = 512;
 const MAX_GENERIC_DEPTH = 24;

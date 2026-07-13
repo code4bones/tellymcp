@@ -3,6 +3,7 @@ import type {
   SendPartnerNoteOutput,
 } from "../../../entities/collaboration/model/types";
 import type { Logger } from "../../../shared/lib/logger/logger";
+import { assertSerializedBodySize } from "../../../shared/lib/bodyLimits";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
 import type { CollaborationBackend } from "./backend";
 
@@ -16,6 +17,7 @@ export class CollaborationService {
   public async sendPartnerNote(
     input: SendPartnerNoteInput,
   ): Promise<SendPartnerNoteOutput> {
+    assertSerializedBodySize(input);
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
     const output = await this.backend.sendPartnerNote(input, resolved);
 

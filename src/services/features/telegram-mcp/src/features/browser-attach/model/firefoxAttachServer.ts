@@ -10,7 +10,7 @@ import type {
 } from "../../../shared/api/storage/contract";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import { formatLocalTimestamp } from "../../../shared/lib/time/localTimestamp";
-import { BROWSER_ATTACH_WS_MAX_PAYLOAD_BYTES } from "../../../shared/lib/websocketLimits";
+import { MAX_BODY_SIZE_BYTES } from "../../../shared/lib/bodyLimits";
 import {
   BrowserRecordingBundleWriter,
   type ActiveBrowserRecordingState,
@@ -152,7 +152,7 @@ export class FirefoxAttachServer {
       host: this.config.browser.attach.host,
       port: this.config.browser.attach.port,
       path: this.config.browser.attach.path,
-      maxPayload: BROWSER_ATTACH_WS_MAX_PAYLOAD_BYTES,
+      maxPayload: MAX_BODY_SIZE_BYTES,
       verifyClient: (
         info: FirefoxAttachVerifyClientInfo,
         done: (result: boolean, code?: number, message?: string) => void,

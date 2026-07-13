@@ -1,4 +1,7 @@
 import * as z from "zod/v4";
+import { MAX_BODY_SIZE_BYTES } from "../../../shared/lib/bodyLimits";
+
+const bodyStringSchema = z.string().max(MAX_BODY_SIZE_BYTES);
 
 const partnerNoteKindSchema = z.enum([
   "share",
@@ -628,9 +631,9 @@ export const sendPartnerNoteInputSchema = z.object({
   target_local_session_id: z.string().trim().min(1).optional(),
   project_uuid: z.string().trim().min(1).optional(),
   kind: partnerNoteKindSchema,
-  summary: z.string().trim().min(1),
-  message: z.string().trim().min(1),
-  expected_reply: z.string().trim().min(1).optional(),
+  summary: bodyStringSchema.trim().min(1),
+  message: bodyStringSchema.trim().min(1),
+  expected_reply: bodyStringSchema.trim().min(1).optional(),
   requires_reply: z.boolean().optional(),
   in_reply_to: z.string().trim().min(1).optional(),
   artifacts: z.array(z.string().trim().min(1)).optional(),
@@ -643,7 +646,7 @@ export const sendPartnerNoteInputSchema = z.object({
         mime_type: z.string().trim().min(1).optional(),
         size_bytes: z.number().int().nonnegative().optional(),
         storage_ref: z.string().trim().min(1).optional(),
-        content_base64: z.string().trim().min(1).optional(),
+        content_base64: bodyStringSchema.trim().min(1).optional(),
       }),
     )
     .optional(),
@@ -658,9 +661,9 @@ export const sendPartnerFileInputSchema = z.object({
   cwd: z.string().trim().min(1).optional(),
   file_path: z.string().trim().min(1),
   kind: partnerNoteKindSchema.optional(),
-  summary: z.string().trim().min(1).optional(),
-  message: z.string().trim().min(1).optional(),
-  expected_reply: z.string().trim().min(1).optional(),
+  summary: bodyStringSchema.trim().min(1).optional(),
+  message: bodyStringSchema.trim().min(1).optional(),
+  expected_reply: bodyStringSchema.trim().min(1).optional(),
   requires_reply: z.boolean().optional(),
   in_reply_to: z.string().trim().min(1).optional(),
 });

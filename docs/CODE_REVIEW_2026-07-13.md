@@ -29,14 +29,20 @@ reviews rather than replacing them.
   protocol has an explicit payload limit. Gateway limits are also applied to the WS
   client. Regression coverage verifies that an oversized fragmented gateway message
   is rejected with close code `1009` without reaching the message handler.
-- `H-02`: **Protocol hardening completed** on `2026-07-14`; peer authentication is
-  intentionally not part of the current trusted-network model. Browser-attach now
+- `H-02`: **Resolved** on `2026-07-14` under the accepted trusted-network model;
+  peer authentication is intentionally out of scope. Browser-attach now
   accepts only Firefox/Chrome extension origins, requires `hello` before all other
   messages, validates every inbound union with bounded Zod schemas, contains async
   handler failures to the offending socket, reaps stale peers, rate-limits messages,
   and replaces duplicate instance connections deterministically. A native client on
   the reachable local/private network can spoof an extension Origin, so network reach
   to the configured attach listener remains an explicit trust boundary.
+- `H-03`: **Resolved** on `2026-07-14` with a single code-level
+  `MAX_BODY_SIZE = 16` MiB policy. HTTP readers reject oversized declared or streamed
+  bodies with `413`; WebSocket protocols use the same byte limit; gateway clients,
+  inline/base64 artifacts, workspace file reads, and decoded deliveries are bounded
+  before the relevant allocation or transport step. Inline/base64 remains the product
+  model; object-storage/reference delivery is intentionally out of scope.
 - `BA-01`: **Resolved** on `2026-07-14` in Chrome attach extension `0.0.2`.
   Manifest V3 tab actions no longer construct injected functions with `new Function`.
   DOM, click, press, fill, wait, and computed-style actions now use a static,
@@ -56,10 +62,8 @@ authentication problems found by this review have now been remediated:
    deployment examples configure `GATEWAY_TOKEN` instead of the separate
    `GATEWAY_AUTH_TOKEN` that actually protects the transport.
 
-H-03 is now the highest-priority unresolved input-hardening finding before shipping
-another public package. Browser-attach peer authentication remains a documented,
-accepted trust-boundary decision. Delivery atomicity/idempotency should follow
-immediately after.
+H-02 and H-03 are resolved under the documented browser-attach network trust boundary
+and the shared 16 MiB body policy. Delivery atomicity/idempotency should follow next.
 
 ## Critical Findings
 
@@ -165,16 +169,15 @@ Recommended fix:
 Status: **Resolved** (`2026-07-14`).
 
 The remediation upgrades `ws` to `8.21.0`, `@modelcontextprotocol/sdk` to `1.29.0`,
-`fast-uri` to `3.1.2`, and `hono` to `4.12.25`. Explicit inbound limits are 64 KiB for
-WebApp live commands, 8 MiB for the gateway server and client, and 16 MiB for browser
-attach. Socket errors caused by rejected payloads are handled locally. The production
-dependency audit now reports no high or critical advisories.
+`fast-uri` to `3.1.2`, and `hono` to `4.12.25`. All WebSocket protocols now use the
+shared 16 MiB body limit. Socket errors caused by rejected payloads are handled
+locally. The production dependency audit now reports no high or critical advisories.
 
 Files:
 
 - `package.json`
 - `yarn.lock`
-- `src/services/features/telegram-mcp/src/shared/lib/websocketLimits.ts`
+- `src/services/features/telegram-mcp/src/shared/lib/bodyLimits.ts`
 - `src/services/features/telegram-mcp/gateway-socket.service.ts`
 - `src/services/features/telegram-mcp/src/app/http.ts`
 - `src/services/features/telegram-mcp/src/features/browser-attach/model/firefoxAttachServer.ts`
@@ -202,8 +205,7 @@ Recommended fix:
 
 ### H-02 - Browser-attach WS trusts any local peer and unvalidated messages
 
-Status: **Protocol hardening completed; peer authentication accepted as a trusted-
-network boundary** (`2026-07-14`).
+Status: **Resolved under the accepted trusted-network boundary** (`2026-07-14`).
 
 The remediation validates extension Origin during upgrade, requires `hello` as the
 first message, strictly validates and bounds all inbound message variants, closes bad
@@ -219,13 +221,17 @@ to the listener can spoof an extension Origin. Deployments that do not share tha
 trust assumption must restrict the listener at the firewall/VPN boundary; adding
 optional peer authentication remains future hardening for that deployment model.
 
+The remaining text in this finding records the original pre-remediation state and
+recommendation for audit history; it does not describe the current implementation.
+
 Files:
 
 - `src/services/features/telegram-mcp/src/features/browser-attach/model/firefoxAttachServer.ts:111-153`
 - `src/services/features/telegram-mcp/src/features/browser-attach/model/firefoxAttachServer.ts:394-479`
 - `src/services/features/telegram-mcp/src/features/browser-attach/model/types.ts:1-185`
 
-The server has no token, Origin validation, subprotocol authentication, rate limit, or
+Original finding (pre-remediation): the server had no token, Origin validation,
+subprotocol authentication, rate limit, or
 `maxPayload`. Any process that can reach the configured port can register an arbitrary
 `instance_id`, replace an existing instance, publish selected tabs, request manual
 recording, and feed recording events. Loopback reduces remote exposure by default but
@@ -236,7 +242,7 @@ starts `handleMessage()` with `void` and no rejection handler. A malformed but v
 JSON recording/control message can therefore cause an unhandled rejected promise
 after filesystem or Redis work, rather than closing only the bad peer.
 
-Recommended fix:
+Original recommended fix:
 
 1. Add a random attach token shared through extension settings and authenticate before
    accepting `hello`.
@@ -270,6 +276,19 @@ to the Chrome bundle.
 
 ### H-03 - HTTP and artifact paths have no application-level size limits
 
+Status: **Resolved** (`2026-07-14`).
+
+The remediation defines `MAX_BODY_SIZE = 16` in code, with byte and base64-source
+limits derived from it. HTTP readers check `Content-Length` and count streamed bytes,
+returning `413` on overflow. WebSocket `maxPayload`, browser-attach string validation,
+gateway JSON requests, partner-note fields, inline base64 artifacts, workspace file
+reads, and target-side base64 decoding all use the same policy. Files that will be
+embedded as base64 are rejected before reading at the derived 12 MiB source limit,
+then the complete serialized request is checked again against 16 MiB. There is no env
+setting because this is a protocol invariant rather than an operational tuning value.
+
+The text below records the original finding and recommendation for audit history.
+
 Files:
 
 - `src/services/features/telegram-mcp/src/app/http.ts:121-136`
@@ -278,7 +297,7 @@ Files:
 - `src/services/features/telegram-mcp/src/features/collaboration/model/sendPartnerFileService.ts:99-153`
 - `src/services/features/telegram-mcp/gateway-delivery.service.ts:492-529`
 
-Both JSON readers buffer the complete request before parsing. Partner artifact arrays,
+Original finding: both JSON readers buffered the complete request before parsing. Partner artifact arrays,
 text fields, and `content_base64` have no maximum sizes. `send_partner_file` reads the
 complete file, creates another base64 copy, persists/transports it, and decodes another
 full copy on the target. A large file or request can consume several times its size in
@@ -288,14 +307,17 @@ The nginx sample's `client_max_body_size 32m` is only a partial external mitigat
 direct listeners, WebSockets, internal broker calls, and non-nginx deployments remain
 unbounded.
 
-Recommended fix:
+Original recommended fix:
 
 1. Implement streaming body readers with a hard byte counter and return `413`.
 2. Add schema limits for messages, arrays, filenames, HTML snapshots, and base64.
 3. Reject files before reading when `stat.size` exceeds policy.
-4. Move large artifacts to streaming/object storage and send references rather than
-   base64 through DB/WS payloads.
-5. Apply endpoint-specific limits instead of one global 32 MB value.
+4. Keep the current inline/base64 product model, but define its supported maximum and
+   reject larger artifacts before reading, encoding, persisting, or transporting them.
+   Object-storage/reference delivery is out of scope for this product.
+5. Keep transport limits in code as protocol invariants unless an operational need for
+   env overrides is established. The implemented product policy intentionally uses one
+   shared 16 MiB body limit to avoid drift between transports.
 
 ### H-04 - Gateway message enqueue is not transactional
 
@@ -465,7 +487,8 @@ large refactor into the security patch.
 Highest-value additions:
 
 1. Gateway enqueue rollback/idempotency and concurrent delivery claim tests.
-2. HTTP, WS, HTML snapshot, message, and artifact size-limit tests.
+2. Extend the existing HTTP, WS, message, and artifact size-limit tests to additional
+   endpoint-specific edge cases as those endpoints evolve.
 3. Browser-attach disconnect, stop, and event ordering tests (schema rejection and
    protocol-boundary coverage now exist).
 4. Workspace symlink escape tests.
@@ -498,8 +521,8 @@ The audit exits successfully because no high or critical advisories remain.
    **Resolved.**
 3. H-01: upgrade `ws`, refresh vulnerable transitive dependencies, and bound WS
    payloads. **Resolved.**
-4. H-02/H-03: browser-attach protocol bounds are implemented under the documented
-   trusted-network model; HTTP/file input bounds remain open in H-03.
+4. H-02 browser-attach protocol hardening and H-03 HTTP/file input bounds are
+   **Resolved** under the documented trust boundary and shared 16 MiB body policy.
 5. H-04/H-05: make enqueue and delivery transactional, claimed, and idempotent.
 6. H-06: make workspace path containment symlink-safe.
 7. M-01/M-02/M-03: serialize and reduce recording I/O, reuse SQLite, fix PTY cleanup.

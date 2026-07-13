@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -13,6 +13,10 @@ import type {
 } from "playwright";
 
 import type { AppConfig } from "../../../app/config/env";
+import {
+  assertBodySize,
+  assertStringBodySize,
+} from "../../../shared/lib/bodyLimits";
 import type {
   BrowserListAttachedInstancesInput,
   BrowserListAttachedInstancesOutput,
@@ -1031,16 +1035,23 @@ export class BrowserService {
     this.ensureEnabled();
 
     const namespace = input.namespace?.trim() || "TELLY";
-    const source =
-      input.source?.trim().length
-        ? input.source
-        : input.file_path?.trim()
-          ? await readFile(path.resolve(input.file_path.trim()), "utf8")
-          : null;
+    const sourcePath = input.file_path?.trim()
+      ? path.resolve(input.file_path.trim())
+      : null;
+    if (!input.source?.trim().length && sourcePath) {
+      const sourceStats = await stat(sourcePath);
+      assertBodySize(sourceStats.size);
+    }
+    const source = input.source?.trim().length
+      ? input.source
+      : sourcePath
+        ? await readFile(sourcePath, "utf8")
+        : null;
 
     if (!source) {
       throw new Error("Provide source or file_path.");
     }
+    assertStringBodySize(source);
 
     const sourceType = input.source?.trim().length ? "inline" : "file";
 

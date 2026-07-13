@@ -35,7 +35,7 @@ import {
   hasOutgoingDeliveryNotice,
 } from "./gateway-loopback";
 import { isGatewayAuthorizationValid } from "./src/shared/lib/gatewayAuth";
-import { GATEWAY_WS_MAX_PAYLOAD_BYTES } from "./src/shared/lib/websocketLimits";
+import { MAX_BODY_SIZE_BYTES } from "./src/shared/lib/bodyLimits";
 import {
   TELLYMCP_CAPABILITIES,
   TELLYMCP_PROTOCOL_VERSION,
@@ -3260,7 +3260,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         runtime.config.distributed.gatewayWsPath.replace(/\/+$/u, "") || "/";
       const wsServer = new WebSocketServer({
         noServer: true,
-        maxPayload: GATEWAY_WS_MAX_PAYLOAD_BYTES,
+        maxPayload: MAX_BODY_SIZE_BYTES,
       });
 
       wsServer.on("connection", (socket: any, req: any) => {
@@ -3435,7 +3435,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       this.wsConnectionId = randomUUID();
 
       const socket = new wsLib.WebSocket(normalizedUrl, {
-        maxPayload: GATEWAY_WS_MAX_PAYLOAD_BYTES,
+        maxPayload: MAX_BODY_SIZE_BYTES,
         headers: runtime.config.distributed.gatewayAuthToken
           ? {
               authorization: `Bearer ${runtime.config.distributed.gatewayAuthToken}`,

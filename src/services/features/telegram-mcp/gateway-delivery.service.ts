@@ -16,6 +16,10 @@ import {
 import { writeXchangeRelativeFile } from "./src/shared/integrations/terminal/client";
 import { upsertXchangeRecord } from "./src/shared/integrations/xchange/sqliteRecordStore";
 import type { OutgoingDeliveryNotice } from "./src/shared/api/storage/contract";
+import {
+  assertBodySize,
+  assertStringBodySize,
+} from "./src/shared/lib/bodyLimits";
 
 export const TELEGRAM_MCP_GATEWAY_DELIVERY_SERVICE_NAME =
   "telegramMcp.gatewayDelivery";
@@ -497,12 +501,15 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
           `shares/files/${delivery.share_id}/${artifact.original_name}`;
         let localArtifactPath: string;
         if (artifact.content_base64) {
+          assertStringBodySize(artifact.content_base64);
+          const decodedContent = Buffer.from(artifact.content_base64, "base64");
+          assertBodySize(decodedContent.byteLength);
           localArtifactPath = await writeXchangeRelativeFile(
             runtime.config.terminal,
             workspaceDir,
             runtime.config.exchange.dir,
             relativePath,
-            Buffer.from(artifact.content_base64, "base64"),
+            decodedContent,
           );
         } else {
           localArtifactPath = await runtime.objectStore.ensureLocalFile({

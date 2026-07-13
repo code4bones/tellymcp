@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { describe, expect, it, vi } from "vitest";
 
 import { GatewayHttpService } from "../src/services/features/telegram-mcp/src/features/distributed-gateway/model/gatewayHttpService";
+import { MAX_BODY_SIZE_BYTES } from "../src/services/features/telegram-mcp/src/shared/lib/bodyLimits";
 
 function makeService(
   callBroker: <T>(actionName: string, params?: unknown) => Promise<T>,
@@ -93,6 +94,25 @@ describe("GatewayHttpService transport authentication", () => {
 
     expect(response.statusCode).toBe(405);
     expect(response.body).toBe("Method not allowed");
+  });
+
+  it("returns 413 for an oversized authenticated request body", async () => {
+    const service = makeService(async () => ({}), "transport-secret");
+    const response = makeResponse();
+    const request = {
+      method: "POST",
+      headers: {
+        authorization: "Bearer transport-secret",
+        "content-length": String(MAX_BODY_SIZE_BYTES + 1),
+      },
+    } as IncomingMessage;
+
+    await service.handleRequest(request, response, "/gateway/client/register");
+
+    expect(response.statusCode).toBe(413);
+    expect(JSON.parse(response.body)).toEqual({
+      error: "Request body exceeds the 16 MiB limit",
+    });
   });
 });
 

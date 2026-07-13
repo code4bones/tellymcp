@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, truncate, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -15,6 +15,7 @@ import type { Logger } from "../src/services/features/telegram-mcp/src/shared/li
 import type { ProjectIdentityResolver } from "../src/services/features/telegram-mcp/src/shared/lib/project-identity/projectIdentity";
 import { SendPartnerFileService } from "../src/services/features/telegram-mcp/src/features/collaboration/model/sendPartnerFileService";
 import type { CollaborationService } from "../src/services/features/telegram-mcp/src/features/collaboration/model/collaborationService";
+import { MAX_BASE64_SOURCE_SIZE_BYTES } from "../src/services/features/telegram-mcp/src/shared/lib/bodyLimits";
 
 const tempDirs: string[] = [];
 
@@ -163,5 +164,47 @@ describe("SendPartnerFileService", () => {
         file_path: "../outside.txt",
       }),
     ).rejects.toThrow("File path is outside the workspace directory.");
+  });
+
+  it("rejects an oversized inline artifact before reading it", async () => {
+    const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "telegram-mcp-file-"));
+    tempDirs.push(workspaceDir);
+    await writeFile(path.join(workspaceDir, "large.bin"), "");
+    await truncate(
+      path.join(workspaceDir, "large.bin"),
+      MAX_BASE64_SOURCE_SIZE_BYTES + 1,
+    );
+    const sendPartnerNote = vi.fn();
+    const service = new SendPartnerFileService(
+      { terminal: {}, distributed: { mode: "client" } } as AppConfig,
+      {
+        getSession: vi.fn().mockResolvedValue({
+          sessionId: "left-session",
+          cwd: workspaceDir,
+          updatedAt: new Date().toISOString(),
+        }),
+      } as unknown as SessionStore,
+      { getGatewayClientUuid: vi.fn() } as unknown as MaintenanceStore,
+      { info: vi.fn() } as unknown as Logger,
+      {
+        resolveSessionDefaults: vi.fn().mockReturnValue({
+          sessionId: "left-session",
+          sessionLabel: "leftDev",
+          cwd: workspaceDir,
+          sessionIdDerived: false,
+          sessionLabelDerived: false,
+        }),
+      } as unknown as ProjectIdentityResolver,
+      { sendPartnerNote } as unknown as CollaborationService,
+    );
+
+    await expect(
+      service.send({
+        session_id: "left-session",
+        target_session_id: "right-session",
+        file_path: "large.bin",
+      }),
+    ).rejects.toThrow("exceeds the 12 MiB limit");
+    expect(sendPartnerNote).not.toHaveBeenCalled();
   });
 });

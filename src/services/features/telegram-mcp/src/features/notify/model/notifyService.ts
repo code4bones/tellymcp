@@ -25,6 +25,10 @@ import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
 import { redactSecrets } from "../../../shared/lib/redact-secrets/redactSecrets";
 import { readWorkspaceFile } from "../../../shared/integrations/terminal/client";
+import {
+  assertBodySize,
+  assertStringBodySize,
+} from "../../../shared/lib/bodyLimits";
 import type { RiskLevel } from "../../../shared/types/common";
 import { buildLiveRelaySessionId } from "../../../app/webapp/relay";
 import {
@@ -469,6 +473,9 @@ export class NotifyService {
       throw new Error("Gateway relay session has no active Telegram route yet.");
     }
 
+    assertStringBodySize(input.contentBase64);
+    const decodedContent = Buffer.from(input.contentBase64, "base64");
+    assertBodySize(decodedContent.byteLength);
     const sendResult = await (this.transport as HumanTransport & {
       sendDocumentBufferToChat?: (
         telegramChatId: number,
@@ -479,7 +486,7 @@ export class NotifyService {
     }).sendDocumentBufferToChat?.(
       binding.telegramChatId,
       input.fileName,
-      Buffer.from(input.contentBase64, "base64"),
+      decodedContent,
       input.caption,
     );
 

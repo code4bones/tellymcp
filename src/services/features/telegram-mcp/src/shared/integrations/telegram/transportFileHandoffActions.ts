@@ -14,6 +14,10 @@ import { readWorkspaceFile, writeXchangeRelativeFile } from "../terminal/client"
 import type { ExchangeFileSource } from "../object-storage/minioExchangeStore";
 import type { PendingFileHandoffRecord, TelegramMenuContext } from "./transportTypes";
 import { buildPrincipalKey, buildLocalHandoffId, buildLocalNoteContent } from "./transportUtils";
+import {
+  assertSerializedBodySize,
+  MAX_BASE64_SOURCE_SIZE_BYTES,
+} from "../../lib/bodyLimits";
 
 type Principal = { telegramChatId: number; telegramUserId: number };
 
@@ -521,6 +525,7 @@ export class TransportFileHandoffActions {
       this.host.config.terminal,
       this.host.objectStore.resolveWorkspaceDir(session),
       localFilePath,
+      MAX_BASE64_SOURCE_SIZE_BYTES,
     );
     const handoffSummary =
       input.description
@@ -528,11 +533,11 @@ export class TransportFileHandoffActions {
         .map((line) => line.trim())
         .find(Boolean) ?? `Передача файла: ${fileName}`;
 
-    return this.host.sendPartnerNote({
+    const note = {
       session_id: input.sessionId,
       ...(input.targetSessionId ? { target_session_id: input.targetSessionId } : {}),
       ...(input.projectUuid ? { project_uuid: input.projectUuid } : {}),
-      kind: "handoff",
+      kind: "handoff" as const,
       summary: handoffSummary,
       message: [
         "Partner sent a file for the current task.",
@@ -553,6 +558,8 @@ export class TransportFileHandoffActions {
           content_base64: Buffer.from(fileContent).toString("base64"),
         },
       ],
-    });
+    };
+    assertSerializedBodySize(note);
+    return this.host.sendPartnerNote(note);
   }
 }

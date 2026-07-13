@@ -1,6 +1,7 @@
 import os from "node:os";
 
 import type { MaintenanceStore } from "../../../shared/api/storage/contract";
+import { assertStringBodySize } from "../../../shared/lib/bodyLimits";
 
 export function normalizeGatewayBaseUrl(value: string): URL {
   const url = new URL(value);
@@ -21,6 +22,8 @@ export async function callGatewayJson<T>(input: {
 }): Promise<T> {
   const url = normalizeGatewayBaseUrl(input.gatewayPublicUrl);
   url.pathname = `${url.pathname}${input.endpointPath}`.replace(/\/{2,}/gu, "/");
+  const serializedBody = JSON.stringify(input.body);
+  assertStringBodySize(serializedBody);
 
   const response = await fetch(url, {
     method: "POST",
@@ -30,7 +33,7 @@ export async function callGatewayJson<T>(input: {
         ? { authorization: `Bearer ${input.gatewayAuthToken}` }
         : {}),
     },
-    body: JSON.stringify(input.body),
+    body: serializedBody,
   });
 
   if (!response.ok) {

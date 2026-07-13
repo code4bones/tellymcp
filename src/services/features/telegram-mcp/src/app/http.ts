@@ -37,7 +37,13 @@ import {
   sendAllowedTerminalAction,
   sendTerminalLiteralText,
 } from "./webapp/terminal";
-import { WEBAPP_LIVE_WS_MAX_PAYLOAD_BYTES } from "../shared/lib/websocketLimits";
+import {
+  assertSerializedBodySize,
+  isBodySizeLimitError,
+  MAX_BODY_SIZE,
+  MAX_BODY_SIZE_BYTES,
+  readLimitedJsonBody,
+} from "../shared/lib/bodyLimits";
 
 type SessionEntry = {
   server: McpServer;
@@ -111,30 +117,23 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
     typeof knownParams === "object" &&
     Object.keys(knownParams).length > 0
   ) {
+    assertSerializedBodySize(knownParams);
     return knownParams;
   }
 
   const knownBody = (req as IncomingMessage & { body?: unknown }).body;
   if (knownBody !== undefined) {
+    assertSerializedBodySize(knownBody);
     return knownBody;
   }
+  return readLimitedJsonBody(req);
+}
 
-  const chunks: Buffer[] = [];
-
-  for await (const chunk of req) {
-    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+function ignoreInvalidJsonBody(error: unknown): undefined {
+  if (isBodySizeLimitError(error)) {
+    throw error;
   }
-
-  if (chunks.length === 0) {
-    return undefined;
-  }
-
-  const raw = Buffer.concat(chunks).toString("utf8").trim();
-  if (!raw) {
-    return undefined;
-  }
-
-  return JSON.parse(raw) as unknown;
+  return undefined;
 }
 
 function writeJson(
@@ -289,7 +288,7 @@ export function createMcpHttpHandler(
   const webAppSessions = new WebAppSessionRegistry();
   const liveWsServer = new WebSocketServer({
     noServer: true,
-    maxPayload: WEBAPP_LIVE_WS_MAX_PAYLOAD_BYTES,
+    maxPayload: MAX_BODY_SIZE_BYTES,
   });
   const webAppBasePath =
     runtime.config.webapp.basePath.replace(/\/+$/u, "") || "/webapp";
@@ -586,7 +585,7 @@ export function createMcpHttpHandler(
     });
   });
 
-  const handleRequest = async (
+  const handleRequestInternal = async (
     req: IncomingMessage,
     res: ServerResponse,
     pathname: string,
@@ -729,7 +728,7 @@ export function createMcpHttpHandler(
           path: requestUrl.pathname,
         });
 
-        const body = await readJsonBody(req).catch(() => undefined);
+        const body = await readJsonBody(req).catch(ignoreInvalidJsonBody);
         let sessionId =
           body &&
           typeof body === "object" &&
@@ -1011,7 +1010,7 @@ export function createMcpHttpHandler(
           return;
         }
 
-        const body = await readJsonBody(req).catch(() => undefined);
+        const body = await readJsonBody(req).catch(ignoreInvalidJsonBody);
         const action =
           body &&
           typeof body === "object" &&
@@ -1463,6 +1462,27 @@ export function createMcpHttpHandler(
           },
           id: null,
         });
+      }
+    }
+  };
+
+  const handleRequest = async (
+    req: IncomingMessage,
+    res: ServerResponse,
+    pathname: string,
+  ): Promise<void> => {
+    try {
+      await handleRequestInternal(req, res, pathname);
+    } catch (error) {
+      if (!isBodySizeLimitError(error)) {
+        throw error;
+      }
+      if (!res.headersSent) {
+        writeJson(res, 413, {
+          error: `Request body exceeds the ${MAX_BODY_SIZE} MiB limit`,
+        });
+      } else if (!res.writableEnded) {
+        res.end();
       }
     }
   };

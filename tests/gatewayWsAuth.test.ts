@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket, type WebSocketServer } from "ws";
 
 import GatewaySocketService from "../src/services/features/telegram-mcp/gateway-socket.service";
-import { GATEWAY_WS_MAX_PAYLOAD_BYTES } from "../src/services/features/telegram-mcp/src/shared/lib/websocketLimits";
+import { MAX_BODY_SIZE_BYTES } from "../src/services/features/telegram-mcp/src/shared/lib/bodyLimits";
 
 const startGatewayWsServer = (
   GatewaySocketService.methods as unknown as {
@@ -195,7 +195,7 @@ describe("gateway WebSocket transport authentication", () => {
     client.on("error", () => undefined);
 
     const fragment = Buffer.alloc(8 * 1024);
-    const fragmentCount = GATEWAY_WS_MAX_PAYLOAD_BYTES / fragment.length + 1;
+    const fragmentCount = MAX_BODY_SIZE_BYTES / fragment.length + 1;
     for (let index = 0; index < fragmentCount; index += 1) {
       client.send(fragment, { binary: true, fin: false });
     }

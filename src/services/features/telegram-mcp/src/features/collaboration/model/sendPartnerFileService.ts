@@ -5,6 +5,7 @@ import { lookup as lookupMimeType } from "mime-types";
 import type { AppConfig } from "../../../app/config/env";
 import type {
   SendPartnerFileInput,
+  SendPartnerNoteInput,
   SendPartnerNoteOutput,
 } from "../../../entities/collaboration/model/types";
 import type {
@@ -14,6 +15,10 @@ import type {
 import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
 import { readWorkspaceFile } from "../../../shared/integrations/terminal/client";
+import {
+  assertSerializedBodySize,
+  MAX_BASE64_SOURCE_SIZE_BYTES,
+} from "../../../shared/lib/bodyLimits";
 import { CollaborationService } from "./collaborationService";
 
 type RemoteConsoleInvoker = {
@@ -110,11 +115,12 @@ export class SendPartnerFileService {
       this.config.terminal,
       workspaceDir,
       relativeFilePath,
+      MAX_BASE64_SOURCE_SIZE_BYTES,
     );
     const originalName = path.basename(relativeFilePath);
     const mimeType = lookupMimeType(originalName) || "application/octet-stream";
 
-    const output = await this.collaborationService.sendPartnerNote({
+    const note: SendPartnerNoteInput = {
       session_id: sessionId,
       ...(input.target_session_id?.trim()
         ? { target_session_id: input.target_session_id.trim() }
@@ -152,7 +158,9 @@ export class SendPartnerFileService {
           content_base64: Buffer.from(fileContent).toString("base64"),
         },
       ],
-    });
+    };
+    assertSerializedBodySize(note);
+    const output = await this.collaborationService.sendPartnerNote(note);
 
     this.logger.info("Partner file sent through send_partner_file", {
       sessionId: output.session_id,

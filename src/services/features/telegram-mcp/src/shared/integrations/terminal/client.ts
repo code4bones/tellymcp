@@ -5,9 +5,14 @@ import {
   readdir,
   readFile,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import {
+  assertBodySize,
+  MAX_BODY_SIZE_BYTES,
+} from "../../lib/bodyLimits";
 
 import {
   buildPtyTarget,
@@ -262,8 +267,11 @@ export async function readWorkspaceFile(
   config: TerminalRuntimeConfig,
   workspaceDir: string,
   filePath: string,
+  maxBytes = MAX_BODY_SIZE_BYTES,
 ): Promise<Uint8Array> {
   const resolvedFilePath = resolvePathInsideWorkspace(workspaceDir, filePath);
+  const fileStats = await stat(resolvedFilePath);
+  assertBodySize(fileStats.size, maxBytes);
   return readFile(resolvedFilePath);
 }
 

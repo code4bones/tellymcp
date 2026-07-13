@@ -581,7 +581,7 @@ export class BrowserService {
     const attached = await this.getAttachedBrowserAttachment(normalizedSessionId);
     if (!attached) {
       throw new Error(
-        "No attached Firefox tab is selected for this session. Select a tab in the extension popup first.",
+        "No attached browser tab is selected for this session. Select a tab in the browser attach panel first.",
       );
     }
     if (!this.firefoxAttachRegistry) {

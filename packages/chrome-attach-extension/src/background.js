@@ -15,6 +15,8 @@ const POPUP_COMMAND_RESULT_KEY = "attach_popup_command_result";
 const CONTROL_PANEL_PORT_NAME = "telly-control-panel";
 const RECONNECT_DELAY_MS = 3000;
 const HEARTBEAT_INTERVAL_MS = 15000;
+const KEEPALIVE_ALARM_NAME = "telly-keepalive";
+const KEEPALIVE_ALARM_PERIOD_MINUTES = 0.5;
 const MAX_CAPTURE_BYTES = 512 * 1024;
 const MAX_BUFFERED_LOG_ENTRIES = 200;
 
@@ -846,6 +848,14 @@ function sendJson(payload) {
   socket.send(JSON.stringify(payload));
 }
 
+function isSocketOpenOrConnecting() {
+  return Boolean(
+    socket &&
+      (socket.readyState === WebSocket.OPEN ||
+        socket.readyState === WebSocket.CONNECTING),
+  );
+}
+
 function clearTimers() {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
@@ -1289,6 +1299,9 @@ async function connect() {
     });
     return;
   }
+  if (isSocketOpenOrConnecting()) {
+    return;
+  }
   clearTimers();
   await setConnectionStatus({
     state: "connecting",
@@ -1708,6 +1721,19 @@ browser.webRequest.onErrorOccurred.addListener(
   },
   { urls: ["<all_urls>"] },
 );
+
+browser.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== KEEPALIVE_ALARM_NAME || manualDisconnect) {
+    return;
+  }
+  if (!isSocketOpenOrConnecting()) {
+    void connect();
+  }
+});
+
+browser.alarms.create(KEEPALIVE_ALARM_NAME, {
+  periodInMinutes: KEEPALIVE_ALARM_PERIOD_MINUTES,
+});
 
 void hydrateAttachedTabSelection();
 void computeInstanceId();

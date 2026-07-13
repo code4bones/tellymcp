@@ -351,7 +351,7 @@ export const browserReloadInputSchema = z.object({
 export const browserReloadOutputSchema = z.object({
   session_id: z.string(),
   reloaded: z.boolean(),
-  url: z.string().url(),
+  url: z.string(),
   title: z.string().optional(),
 });
 
@@ -377,7 +377,7 @@ export const browserClickOutputSchema = z.object({
   ai_tag: z.string().optional(),
   selector: z.string().optional(),
   text: z.string().optional(),
-  url: z.string().url(),
+  url: z.string(),
   title: z.string().optional(),
 });
 
@@ -398,7 +398,7 @@ export const browserFillOutputSchema = z.object({
   selector: z.string().optional(),
   text: z.string().optional(),
   value_length: z.number().int().nonnegative(),
-  url: z.string().url(),
+  url: z.string(),
   title: z.string().optional(),
 });
 
@@ -414,7 +414,7 @@ export const browserPressOutputSchema = z.object({
   ai_tag: z.string().optional(),
   selector: z.string().optional(),
   text: z.string().optional(),
-  url: z.string().url(),
+  url: z.string(),
   title: z.string().optional(),
 });
 
@@ -436,7 +436,7 @@ export const browserInjectScriptOutputSchema = z.object({
   namespace: z.string(),
   source_type: z.enum(["inline", "file"]),
   bytes: z.number().int().nonnegative(),
-  url: z.string().url(),
+  url: z.string(),
   title: z.string().optional(),
 });
 
@@ -457,7 +457,7 @@ export const browserWaitForOutputSchema = z.object({
   ai_tag: z.string().optional(),
   selector: z.string().optional(),
   text: z.string().optional(),
-  url: z.string().url(),
+  url: z.string(),
   title: z.string().optional(),
 });
 
@@ -479,7 +479,7 @@ export const browserWaitForUrlOutputSchema = z.object({
   matched: z.enum(["url", "url_contains"]),
   url: z.string().optional(),
   url_contains: z.string().optional(),
-  current_url: z.string().url(),
+  current_url: z.string(),
   title: z.string().optional(),
 });
 
@@ -528,7 +528,7 @@ export const browserNetworkFailuresOutputSchema = z.object({
   total: z.number().int().nonnegative(),
   failures: z.array(
     z.object({
-      url: z.string().url(),
+      url: z.string(),
       method: z.string(),
       status: z.number().int().optional(),
       error_text: z.string().optional(),

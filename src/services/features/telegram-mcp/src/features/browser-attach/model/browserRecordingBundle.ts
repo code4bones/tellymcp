@@ -502,6 +502,31 @@ export class BrowserRecordingBundleWriter {
     return state;
   }
 
+  public async finalizeExisting(
+    input: {
+      session: SessionContext;
+      record: BrowserRecordingRecord;
+    },
+  ): Promise<BrowserRecordingRecord> {
+    const state: ActiveBrowserRecordingState = {
+      record: { ...input.record },
+      session: input.session,
+      currentPageId: undefined,
+      currentPageUrl: input.record.tabUrl,
+      pageCounter: 0,
+      snapshotCounter: 0,
+      requestCounter: 0,
+      requestArtifacts: new Map(),
+    };
+
+    await this.appendEvent(state, {
+      kind: "session_stopped",
+      status: "stopped",
+    });
+
+    return state.record;
+  }
+
   private async appendJsonLine(
     state: ActiveBrowserRecordingState,
     relativePath: string,

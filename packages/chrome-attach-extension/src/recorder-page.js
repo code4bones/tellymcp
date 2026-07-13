@@ -161,16 +161,23 @@
     });
 
     try {
-      const bodyText = await response.clone().text();
-      emit({
-        kind: "network_response_body",
-        source: "page",
-        at: formatLocalTimestamp(new Date()),
-        request_id: requestId,
-        url: request.url,
-        body_text: truncateText(bodyText),
-        body_truncated: bodyText.length > MAX_TEXT_CHARS,
-      });
+      void response
+        .clone()
+        .text()
+        .then((bodyText) => {
+          emit({
+            kind: "network_response_body",
+            source: "page",
+            at: formatLocalTimestamp(new Date()),
+            request_id: requestId,
+            url: request.url,
+            body_text: truncateText(bodyText),
+            body_truncated: bodyText.length > MAX_TEXT_CHARS,
+          });
+        })
+        .catch(() => {
+          // ignore
+        });
     } catch {
       // ignore
     }

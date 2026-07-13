@@ -33,18 +33,6 @@
     "page": "options.html",
     "browser_style": true
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "<all_urls>"
-      ],
-      "js": [
-        "recorder-content.js"
-      ],
-      "run_at": "document_start",
-      "all_frames": true
-    }
-  ],
   "web_accessible_resources": [
     "recorder-page.js"
   ],

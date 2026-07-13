@@ -132,9 +132,12 @@ export class FirefoxAttachServer {
 
       socket.on("close", () => {
         if (state.instanceId) {
-          void this.handleInstanceDisconnect(state.instanceId);
-          this.registry.remove(state.instanceId);
-          this.socketsByInstanceId.delete(state.instanceId);
+          const current = this.socketsByInstanceId.get(state.instanceId);
+          if (current === state) {
+            void this.handleInstanceDisconnect(state.instanceId);
+            this.registry.remove(state.instanceId);
+            this.socketsByInstanceId.delete(state.instanceId);
+          }
           this.logger.info("Firefox attach instance disconnected", {
             instanceId: state.instanceId,
           });
@@ -205,6 +208,11 @@ export class FirefoxAttachServer {
     if (existing?.status === "recording") {
       if (existing.instanceId !== input.instanceId) {
         throw new Error("Recording is already active in another browser instance.");
+      }
+      if (existing.tabId !== input.tabId) {
+        throw new Error(
+          `Browser instance '${input.instanceId}' is already recording tab '${existing.tabId}'. Stop it before starting recording for tab '${input.tabId}'.`,
+        );
       }
       return existing;
     }
@@ -277,19 +285,22 @@ export class FirefoxAttachServer {
       return null;
     }
 
+    const socketState = this.socketsByInstanceId.get(existing.instanceId);
     const activeState = this.activeRecordingsById.get(existing.recordingId);
-    if (activeState) {
+    if (socketState) {
       try {
         await this.invokeRecordingControl({
-          instanceId: activeState.record.instanceId,
-          tabId: activeState.record.tabId,
-          recordingId: activeState.record.recordingId,
+          instanceId: existing.instanceId,
+          tabId: existing.tabId,
+          recordingId: existing.recordingId,
           mode: "stop",
         });
       } catch {
-        // Local writer still finalizes the bundle.
+        // Local writer or persisted state still finalizes the bundle.
       }
+    }
 
+    if (activeState) {
       await this.recordingWriter.appendEvent(activeState, {
         kind: "session_stopped",
         status: "stopped",
@@ -301,11 +312,18 @@ export class FirefoxAttachServer {
     }
 
     if (existing.status !== "stopped") {
-      const stopped: BrowserRecordingRecord = {
-        ...existing,
-        status: "stopped",
-        stoppedAt: formatLocalTimestamp(new Date()),
-      };
+      const session = await this.sessionStore.getSession(existing.sessionId);
+      const stopped: BrowserRecordingRecord =
+        session?.cwd?.trim()
+          ? await this.recordingWriter.finalizeExisting({
+              session,
+              record: existing,
+            })
+          : {
+              ...existing,
+              status: "stopped",
+              stoppedAt: formatLocalTimestamp(new Date()),
+            };
       await this.maintenanceStore.setBrowserRecording(stopped);
       await this.broadcastRecordingState(stopped);
       return stopped;

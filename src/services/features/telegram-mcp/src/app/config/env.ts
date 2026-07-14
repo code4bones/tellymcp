@@ -74,6 +74,22 @@ const envSchema = z.object({
   MCP_HTTP_PORT: z.coerce.number().int().positive().default(8787),
   MCP_HTTP_PATH: z.string().min(1).default("/mcp"),
   MCP_HTTP_BEARER_TOKEN: optionalNonEmptyString,
+  TELLYMCP_PUBLIC_URL: optionalUrlString,
+  TELLYMCP_OAUTH_ISSUER: optionalUrlString,
+  TELLYMCP_OAUTH_AUDIENCE: optionalUrlString,
+  TELLYMCP_MAGIC_TOKEN: optionalNonEmptyString,
+  TELLYMCP_MAGIC_TOKEN_HASH: optionalNonEmptyString,
+  TELLYMCP_OAUTH_CLIENT_ID: optionalNonEmptyString,
+  TELLYMCP_OAUTH_CLIENT_SECRET: optionalNonEmptyString,
+  TELLYMCP_ALLOWED_REDIRECT_URIS: optionalNonEmptyString,
+  TELLYMCP_OAUTH_PRIVATE_KEY_PEM: optionalNonEmptyString,
+  TELLYMCP_AUTH_CODE_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(300),
+  TELLYMCP_OAUTH_SCOPES: z.string().min(1).default("tellymcp:read tellymcp:write"),
+  TELLYMCP_OAUTH_KEY_ID: z.string().min(1).default("tellymcp-oauth"),
   MCP_HTTP_ENABLE_DEBUG_ROUTES: z
     .string()
     .optional()
@@ -275,6 +291,20 @@ export type AppConfig = {
     enableDebugRoutes: boolean;
     enablePruneRoute: boolean;
   };
+  oauth?: {
+    publicUrl: string;
+    issuer: string;
+    audience: string;
+    magicToken?: string;
+    magicTokenHash?: string;
+    clientId?: string;
+    clientSecret?: string;
+    allowedRedirectUris: string[];
+    privateKeyPem?: string;
+    authCodeTtlSeconds: number;
+    scopes: string[];
+    keyId: string;
+  };
   distributed: {
     mode: "client" | "gateway" | "both";
     gatewayPublicUrl?: string;
@@ -418,6 +448,89 @@ export function loadConfig(): AppConfig {
     }
   }
 
+  const oauthConfigured = Boolean(
+    parsed.TELLYMCP_PUBLIC_URL ||
+      parsed.TELLYMCP_OAUTH_ISSUER ||
+      parsed.TELLYMCP_OAUTH_AUDIENCE ||
+      parsed.TELLYMCP_MAGIC_TOKEN ||
+      parsed.TELLYMCP_MAGIC_TOKEN_HASH ||
+      parsed.TELLYMCP_OAUTH_CLIENT_ID ||
+      parsed.TELLYMCP_OAUTH_CLIENT_SECRET ||
+      parsed.TELLYMCP_ALLOWED_REDIRECT_URIS ||
+      parsed.TELLYMCP_OAUTH_PRIVATE_KEY_PEM,
+  );
+  if (oauthConfigured && !parsed.TELLYMCP_PUBLIC_URL) {
+    throw new Error(
+      "TELLYMCP_PUBLIC_URL is required when OAuth connector settings are configured.",
+    );
+  }
+  if (
+    oauthConfigured &&
+    !parsed.TELLYMCP_MAGIC_TOKEN &&
+    !parsed.TELLYMCP_MAGIC_TOKEN_HASH
+  ) {
+    throw new Error(
+      "TELLYMCP_MAGIC_TOKEN or TELLYMCP_MAGIC_TOKEN_HASH is required when OAuth is configured.",
+    );
+  }
+  if (parsed.TELLYMCP_MAGIC_TOKEN && parsed.TELLYMCP_MAGIC_TOKEN_HASH) {
+    throw new Error(
+      "Configure only one of TELLYMCP_MAGIC_TOKEN and TELLYMCP_MAGIC_TOKEN_HASH.",
+    );
+  }
+  if (
+    parsed.TELLYMCP_MAGIC_TOKEN_HASH &&
+    !/^sha256:[a-f0-9]{64}$/iu.test(parsed.TELLYMCP_MAGIC_TOKEN_HASH)
+  ) {
+    throw new Error(
+      "TELLYMCP_MAGIC_TOKEN_HASH must use the format sha256:<64 hex characters>.",
+    );
+  }
+  if (parsed.TELLYMCP_OAUTH_CLIENT_SECRET && !parsed.TELLYMCP_OAUTH_CLIENT_ID) {
+    throw new Error(
+      "TELLYMCP_OAUTH_CLIENT_SECRET requires TELLYMCP_OAUTH_CLIENT_ID.",
+    );
+  }
+  for (const [name, value] of [
+    ["TELLYMCP_PUBLIC_URL", parsed.TELLYMCP_PUBLIC_URL],
+    ["TELLYMCP_OAUTH_ISSUER", parsed.TELLYMCP_OAUTH_ISSUER],
+    ["TELLYMCP_OAUTH_AUDIENCE", parsed.TELLYMCP_OAUTH_AUDIENCE],
+  ] as const) {
+    if (!value) {
+      continue;
+    }
+    const url = new URL(value);
+    if (url.search || url.hash) {
+      throw new Error(`${name} must not contain a query string or fragment.`);
+    }
+  }
+
+  const oauthScopes = parsed.TELLYMCP_OAUTH_SCOPES
+    .split(/[\s,]+/u)
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+  if (oauthConfigured && oauthScopes.length === 0) {
+    throw new Error("TELLYMCP_OAUTH_SCOPES must contain at least one scope.");
+  }
+
+  const allowedRedirectUris = parsed.TELLYMCP_ALLOWED_REDIRECT_URIS
+    ? parsed.TELLYMCP_ALLOWED_REDIRECT_URIS.split(",")
+        .map((redirectUri) => redirectUri.trim())
+        .filter(Boolean)
+    : [];
+  for (const redirectUri of allowedRedirectUris) {
+    try {
+      const parsedRedirectUri = new URL(redirectUri);
+      if (parsedRedirectUri.hash) {
+        throw new Error("fragment");
+      }
+    } catch {
+      throw new Error(
+        `TELLYMCP_ALLOWED_REDIRECT_URIS contains an invalid URL: ${redirectUri}`,
+      );
+    }
+  }
+
   const telegramProxy =
     parsed.PROXY_USE === "http"
       ? parsed.HTTP_PROXY
@@ -491,6 +604,43 @@ export function loadConfig(): AppConfig {
       enableDebugRoutes: parsed.MCP_HTTP_ENABLE_DEBUG_ROUTES,
       enablePruneRoute: parsed.MCP_HTTP_ENABLE_PRUNE_ROUTE,
     },
+    ...(oauthConfigured && parsed.TELLYMCP_PUBLIC_URL
+      ? {
+          oauth: {
+            publicUrl: parsed.TELLYMCP_PUBLIC_URL.replace(/\/+$/u, ""),
+            issuer: (
+              parsed.TELLYMCP_OAUTH_ISSUER ?? parsed.TELLYMCP_PUBLIC_URL
+            ).replace(/\/+$/u, ""),
+            audience: (
+              parsed.TELLYMCP_OAUTH_AUDIENCE ?? parsed.TELLYMCP_PUBLIC_URL
+            ).replace(/\/+$/u, ""),
+            ...(parsed.TELLYMCP_MAGIC_TOKEN
+              ? { magicToken: parsed.TELLYMCP_MAGIC_TOKEN }
+              : {}),
+            ...(parsed.TELLYMCP_MAGIC_TOKEN_HASH
+              ? { magicTokenHash: parsed.TELLYMCP_MAGIC_TOKEN_HASH }
+              : {}),
+            ...(parsed.TELLYMCP_OAUTH_CLIENT_ID
+              ? { clientId: parsed.TELLYMCP_OAUTH_CLIENT_ID }
+              : {}),
+            ...(parsed.TELLYMCP_OAUTH_CLIENT_SECRET
+              ? { clientSecret: parsed.TELLYMCP_OAUTH_CLIENT_SECRET }
+              : {}),
+            allowedRedirectUris,
+            ...(parsed.TELLYMCP_OAUTH_PRIVATE_KEY_PEM
+              ? {
+                  privateKeyPem: parsed.TELLYMCP_OAUTH_PRIVATE_KEY_PEM.replace(
+                    /\\n/gu,
+                    "\n",
+                  ),
+                }
+              : {}),
+            authCodeTtlSeconds: parsed.TELLYMCP_AUTH_CODE_TTL_SECONDS,
+            scopes: oauthScopes,
+            keyId: parsed.TELLYMCP_OAUTH_KEY_ID,
+          },
+        }
+      : {}),
     distributed: {
       mode: parsed.DISTRIBUTED_MODE,
       ...(parsed.GATEWAY_PUBLIC_URL

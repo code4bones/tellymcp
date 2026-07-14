@@ -9,7 +9,7 @@ Rules:
 - keep open ideas and experiments in `docs/TODO.md`
 - when a decision changes, update this file instead of layering contradictory docs on top
 
-Last updated: `2026-07-13`
+Last updated: `2026-07-14`
 
 ## Core Architecture
 
@@ -255,6 +255,23 @@ Status: accepted
   - `docs/DEVELOPMENT.md`
   - `docs/IMPLEMENTATION_PLAN.md`, when the architecture direction or invariants changed
   - this `DECISIONS.md`, if the change affects architecture, product behavior, or workflow rules
+
+### D-028 — Chat connectors use an OAuth facade alongside existing MCP auth
+
+Status: accepted
+
+- the public chat-host connection URL is the concrete Streamable HTTP endpoint,
+  for example `https://drd.undoo.ru/api/mcp`
+- the OAuth issuer and default audience remain the gateway base URL, for example
+  `https://drd.undoo.ru/api`
+- protected-resource discovery may expose `/api/mcp` as the more specific MCP
+  resource without changing the configured base audience
+- RFC 8414 path-insertion discovery ending in `/api` is expected when the issuer
+  itself has the `/api` path
+- OAuth JWT bearer auth coexists with `MCP_HTTP_BEARER_TOKEN`; existing internal
+  clients must not be forced to migrate
+- configured client id/secret and redirect allowlists are static operator-owned
+  values; dynamic client registration is not part of this implementation
 
 ## Deferred Or Not Yet Accepted
 

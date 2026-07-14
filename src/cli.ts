@@ -3,6 +3,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { generateKeyPairSync } from "node:crypto";
 import net from "node:net";
 import { parse as parseDotenv } from "dotenv";
 import Redis from "ioredis";
@@ -29,6 +30,7 @@ type CliCommand =
   | "init"
   | "run"
   | "mcp"
+  | "oauth"
   | "doctor"
   | "browser"
   | "extension"
@@ -111,6 +113,7 @@ function printHelp(): void {
     "  tellymcp codex-plugin install",
     "  tellymcp codex-plugin status",
     "  tellymcp mcp [--url <url>] [--bearer <token>] [--format claude|legacy]",
+    "  tellymcp oauth key",
     "  tellymcp help",
   ]);
   printSection("Examples", [
@@ -128,6 +131,7 @@ function printHelp(): void {
     "  tellymcp codex-plugin install",
     "  tellymcp codex-plugin status",
     "  tellymcp mcp --help",
+    "  tellymcp oauth key",
   ]);
   printSection("terminal", [
     `${pc.green("  OK")} built-in PTY runtime`,
@@ -300,6 +304,28 @@ function printMcpHelp(): void {
     "  tellymcp mcp --url https://builder.undoo.ru/api/mcp --bearer YOUR_TOKEN",
     "  tellymcp mcp --url https://builder.undoo.ru/api/mcp --format legacy",
   ]);
+}
+
+function runOAuthCommand(args: string[]): void {
+  const [subcommand] = args;
+  if (!subcommand || subcommand === "--help" || subcommand === "-h") {
+    printBanner("OAuth helper", "Generate connector signing material");
+    printSection("Usage", ["  tellymcp oauth key"]);
+    printSection("Output", [
+      "  Prints a dotenv-ready TELLYMCP_OAUTH_PRIVATE_KEY_PEM value.",
+      "  Store it only on the gateway and never expose it to chat clients.",
+    ]);
+    return;
+  }
+  if (subcommand !== "key") {
+    fail("Supported OAuth subcommands: key");
+  }
+
+  const privateKeyPem = generateKeyPairSync("rsa", { modulusLength: 2048 })
+    .privateKey.export({ type: "pkcs8", format: "pem" })
+    .toString()
+    .replace(/\n/gu, "\\n");
+  process.stdout.write(`TELLYMCP_OAUTH_PRIVATE_KEY_PEM="${privateKeyPem}"\n`);
 }
 
 function printBrowserHelp(): void {
@@ -1300,7 +1326,7 @@ async function runRuntime(args: string[]): Promise<void> {
 
 async function main(argv: string[]): Promise<void> {
   const [rawCommand, firstArg, secondArg] = argv;
-  const command: CliCommand = rawCommand === "init" || rawCommand === "run" || rawCommand === "help" || rawCommand === "mcp" || rawCommand === "doctor" || rawCommand === "browser" || rawCommand === "system-prune"
+  const command: CliCommand = rawCommand === "init" || rawCommand === "run" || rawCommand === "help" || rawCommand === "mcp" || rawCommand === "oauth" || rawCommand === "doctor" || rawCommand === "browser" || rawCommand === "system-prune"
     || rawCommand === "codex-plugin" || rawCommand === "extension"
     ? rawCommand
     : "help";
@@ -1317,6 +1343,11 @@ async function main(argv: string[]): Promise<void> {
 
   if (command === "mcp") {
     printMcpConfig(argv.slice(1));
+    return;
+  }
+
+  if (command === "oauth") {
+    runOAuthCommand(argv.slice(1));
     return;
   }
 

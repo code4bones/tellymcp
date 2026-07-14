@@ -13,6 +13,15 @@ describe("gateway transport auth configuration", () => {
     vi.stubEnv("GATEWAY_PUBLIC_URL", "");
     vi.stubEnv("GATEWAY_WS_URL", "");
     vi.stubEnv("GATEWAY_AUTH_TOKEN", "");
+    vi.stubEnv("TELLYMCP_PUBLIC_URL", "");
+    vi.stubEnv("TELLYMCP_OAUTH_ISSUER", "");
+    vi.stubEnv("TELLYMCP_OAUTH_AUDIENCE", "");
+    vi.stubEnv("TELLYMCP_MAGIC_TOKEN", "");
+    vi.stubEnv("TELLYMCP_MAGIC_TOKEN_HASH", "");
+    vi.stubEnv("TELLYMCP_OAUTH_CLIENT_ID", "");
+    vi.stubEnv("TELLYMCP_OAUTH_CLIENT_SECRET", "");
+    vi.stubEnv("TELLYMCP_ALLOWED_REDIRECT_URIS", "");
+    vi.stubEnv("TELLYMCP_OAUTH_PRIVATE_KEY_PEM", "");
   });
 
   afterEach(() => {
@@ -50,5 +59,48 @@ describe("gateway transport auth configuration", () => {
     vi.stubEnv("DISTRIBUTED_MODE", "client");
 
     expect(loadConfig().distributed.gatewayAuthToken).toBeUndefined();
+  });
+
+  it("loads OAuth connector configuration", () => {
+    vi.stubEnv("DISTRIBUTED_MODE", "client");
+    vi.stubEnv("TELLYMCP_PUBLIC_URL", "https://mcp.example.com/api/");
+    vi.stubEnv("TELLYMCP_MAGIC_TOKEN", "private-magic-token");
+    vi.stubEnv(
+      "TELLYMCP_ALLOWED_REDIRECT_URIS",
+      "https://chatgpt.com/callback, https://claude.ai/callback",
+    );
+
+    expect(loadConfig().oauth).toEqual(
+      expect.objectContaining({
+        publicUrl: "https://mcp.example.com/api",
+        issuer: "https://mcp.example.com/api",
+        audience: "https://mcp.example.com/api",
+        magicToken: "private-magic-token",
+        allowedRedirectUris: [
+          "https://chatgpt.com/callback",
+          "https://claude.ai/callback",
+        ],
+        scopes: ["tellymcp:read", "tellymcp:write"],
+      }),
+    );
+  });
+
+  it("rejects incomplete OAuth connector configuration", () => {
+    vi.stubEnv("DISTRIBUTED_MODE", "client");
+    vi.stubEnv("TELLYMCP_PUBLIC_URL", "https://mcp.example.com/api");
+
+    expect(() => loadConfig()).toThrow(
+      "TELLYMCP_MAGIC_TOKEN or TELLYMCP_MAGIC_TOKEN_HASH is required",
+    );
+  });
+
+  it("rejects malformed magic-token hashes", () => {
+    vi.stubEnv("DISTRIBUTED_MODE", "client");
+    vi.stubEnv("TELLYMCP_PUBLIC_URL", "https://mcp.example.com/api");
+    vi.stubEnv("TELLYMCP_MAGIC_TOKEN_HASH", "sha256:not-a-digest");
+
+    expect(() => loadConfig()).toThrow(
+      "TELLYMCP_MAGIC_TOKEN_HASH must use the format sha256:",
+    );
   });
 });

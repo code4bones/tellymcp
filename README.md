@@ -376,6 +376,7 @@ tellymcp system-prune --env .env --yes
 - [README-ru.md](./README-ru.md)
 - [STANDALONE.md](./docs/STANDALONE.md)
 - [STANDALONE-ru.md](./docs/STANDALONE-ru.md)
+- [CHAT_CONNECTOR.md](./docs/CHAT_CONNECTOR.md) — ChatGPT/Claude OAuth connector
 - [TOOLS.md](./TOOLS.md)
 - [screenshots/README.md](./screenshots/README.md)
 

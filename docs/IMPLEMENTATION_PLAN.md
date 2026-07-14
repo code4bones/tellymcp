@@ -13,6 +13,9 @@ The project has already moved to the gateway-first model. This document now trac
 - browser workflows are Playwright-based
 - `TOOLS.md` is refreshed online by hash
 - Codex plugin skills are a separate static layer
+- chat connectors use an OAuth facade alongside the existing static MCP bearer
+- a chat host connects to the concrete `/api/mcp` endpoint; `/api` remains the
+  OAuth issuer/audience base
 
 ## Invariants
 
@@ -50,6 +53,14 @@ Do not regress these:
 
 - keep `tellymcp run`, `doctor`, `browser install`, and `codex-plugin install` documented and stable
 - keep bundled plugin installation idempotent
+
+### Chat Connector Continuity
+
+- preserve dual MCP authentication: internal static bearer and OAuth JWT
+- keep base-resource and MCP-resource discovery distinct
+- keep RFC 8414 path-insertion routes available for an issuer under `/api`
+- treat refresh tokens, bounded access-token expiry, and finer per-tool scopes
+  as explicit future work rather than silently changing the working flow
 
 ## Explicitly Retired Plans
 

@@ -15,6 +15,16 @@ Last updated: `2026-07-14`
 
 ## What Was Just Finished
 
+- ChatGPT/Claude OAuth connector support was implemented around the existing
+  Streamable HTTP MCP endpoint
+- the connector was validated in production with ChatGPT on
+  `https://drd.undoo.ru/api/mcp`; reconnect and tool refresh succeeded
+- OAuth discovery, PKCE authorization-code exchange, RS256 JWT bearer auth,
+  exact redirect allowlisting, confidential-client auth, JWKS, dual MCP auth,
+  Nginx routes, signing-key CLI support, and safe diagnostics are present
+- the production incident was caused by entering the OAuth base `/api` in the
+  ChatGPT `Connection` field; the required endpoint is `/api/mcp`
+- detailed continuation notes are in `docs/HANDOFF_CHAT_CONNECTOR_OAUTH.md`
 - browser-attach connectivity fixes landed:
   - Firefox global recorder injection removed
   - Firefox/Chrome fetch wrapper no longer blocks page `fetch()` on body capture
@@ -34,11 +44,13 @@ Last updated: `2026-07-14`
 ## Files To Read First
 
 1. `DECISIONS.md`
-2. `docs/DEVELOPMENT.md`
-3. `docs/IMPLEMENTATION_PLAN.md`
-4. `TOOLS.md`
-5. `docs/CODE_REVIEW_browser-attach.md`
-6. `docs/CODE_REVIEW_browser-attach_FIXES.md`
+2. `docs/HANDOFF_CHAT_CONNECTOR_OAUTH.md` when continuing connector work
+3. `docs/CHAT_CONNECTOR.md`
+4. `docs/DEVELOPMENT.md`
+5. `docs/IMPLEMENTATION_PLAN.md`
+6. `TOOLS.md`
+7. `docs/CODE_REVIEW_browser-attach.md`
+8. `docs/CODE_REVIEW_browser-attach_FIXES.md`
 
 ## Verified Commands
 
@@ -50,6 +62,12 @@ yarn build:extensions
 yarn lint
 yarn test
 ```
+
+During the OAuth implementation, the full suite reached 150 passing tests and
+build/lint passed before the final request/response diagnostic logging change.
+At the user's request, no validation suite was run after that last logging-only
+change. Do not describe the final working tree as fully revalidated until that
+is done explicitly.
 
 ## Known Accepted Invariants
 
@@ -94,7 +112,14 @@ Keep these aligned together:
 
 ## Working Tree Note
 
-At the time of writing, this session added:
+At the time of writing, the connector work is uncommitted and spans source,
+tests, env templates, Nginx, and documentation. The primary new files are:
 
-- `DECISIONS.md`
-- `HANDOFF.md`
+- `src/services/features/telegram-mcp/src/app/oauthFacade.ts`
+- `tests/oauthFacade.test.ts`
+- `docs/CHAT_CONNECTOR.md`
+- `docs/HANDOFF_CHAT_CONNECTOR_OAUTH.md`
+
+The user supplied `docs/CHAT_CONNECTOR_OAUTH_GUIDE.md` and
+`nginx/tellymcp.gw.conf`; preserve them. The Nginx file was intentionally
+edited in place as part of the connector work.

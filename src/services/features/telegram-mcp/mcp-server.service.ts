@@ -185,6 +185,10 @@ const TelegramMcpMcpServerService: ServiceSchema = {
         ),
       ];
 
+      this.logger.info("telegram_mcp MCP server instance created", {
+        toolCount: tools.length,
+      });
+
       return createMcpServer(tools);
     },
   },

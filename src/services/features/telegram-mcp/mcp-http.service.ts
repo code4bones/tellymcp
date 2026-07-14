@@ -144,6 +144,7 @@ const TelegramMcpHttpService: ServiceSchema = {
       path: runtime.config.mcp.httpPath,
       webappBasePath: runtime.config.webapp.basePath,
       bearerAuthEnabled: Boolean(runtime.config.mcp.bearerToken),
+      oauthConnectorEnabled: Boolean(runtime.config.oauth),
     });
   },
 

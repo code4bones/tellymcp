@@ -79,6 +79,7 @@ export async function createAppRuntime(input: {
       httpPort: config.mcp.httpPort,
       httpPath: config.mcp.httpPath,
       bearerAuthEnabled: Boolean(config.mcp.bearerToken),
+      oauthConnectorEnabled: Boolean(config.oauth),
       enableDebugRoutes: config.mcp.enableDebugRoutes,
       enablePruneRoute: config.mcp.enablePruneRoute,
     },

@@ -12,6 +12,7 @@ import type { Update } from "grammy/types";
 import ws from "ws";
 
 import type { AppRuntime } from "./bootstrap/runtime";
+import { createOAuthFacade, type OAuthFacade } from "./oauthFacade";
 import {
   type TelegramWebAppInitDataUnsafe,
   WebAppSessionRegistry,
@@ -95,6 +96,14 @@ function isInitializeRequest(body: unknown): boolean {
 
   const method = Reflect.get(body, "method");
   return method === "initialize";
+}
+
+function readMcpRpcMethod(body: unknown): string | undefined {
+  if (!body || typeof body !== "object") {
+    return undefined;
+  }
+  const method = Reflect.get(body, "method");
+  return typeof method === "string" ? method : undefined;
 }
 
 function readHeader(
@@ -208,6 +217,32 @@ function readBearerToken(req: IncomingMessage): string | null {
   return header.slice("Bearer ".length).trim() || null;
 }
 
+export type McpHttpAuthorizationMode = "public" | "internal_bearer" | "oauth";
+
+export function resolveMcpHttpAuthorization(
+  req: IncomingMessage,
+  internalBearerToken: string | undefined,
+  oauthFacade: Pick<OAuthFacade, "verifyAccessToken"> | null,
+): McpHttpAuthorizationMode | null {
+  if (!internalBearerToken && !oauthFacade) {
+    return "public";
+  }
+  if (internalBearerToken && isAuthorized(req, internalBearerToken)) {
+    return "internal_bearer";
+  }
+
+  const token = readBearerToken(req);
+  return token && oauthFacade?.verifyAccessToken(token) ? "oauth" : null;
+}
+
+export function isMcpHttpRequestAuthorized(
+  req: IncomingMessage,
+  internalBearerToken: string | undefined,
+  oauthFacade: Pick<OAuthFacade, "verifyAccessToken"> | null,
+): boolean {
+  return resolveMcpHttpAuthorization(req, internalBearerToken, oauthFacade) !== null;
+}
+
 function isDuplicateSseStreamError(error: unknown): boolean {
   const message =
     error instanceof Error ? (error.stack ?? error.message) : String(error);
@@ -303,6 +338,21 @@ export function createMcpHttpHandler(
   const telegramWebhookPath =
     runtime.config.telegram.webhook.path.replace(/\/+$/u, "") ||
     "/telegram/webhook";
+  const mcpHttpPath =
+    runtime.config.mcp.httpPath.replace(/\/+$/u, "") || "/mcp";
+  const oauthFacade = runtime.config.oauth
+    ? createOAuthFacade(
+        runtime.config.oauth,
+        mcpHttpPath,
+        runtime.logger,
+      )
+    : null;
+
+  if (oauthFacade?.ephemeralSigningKey) {
+    runtime.logger.warn(
+      "OAuth connector is using an ephemeral signing key; access tokens will stop working after restart",
+    );
+  }
 
   const closeSessionEntry = async (entry: SessionEntry): Promise<void> => {
     await entry.close();
@@ -598,12 +648,47 @@ export function createMcpHttpHandler(
     );
     requestUrl.pathname = normalizedPathname;
 
+    if (oauthFacade) {
+      const authorizationHeader = readHeader(req, "authorization");
+      const connectorRequestContext = {
+        method,
+        rawPath: pathname,
+        path: requestUrl.pathname,
+        queryParameters: [...requestUrl.searchParams.keys()],
+        userAgent: readHeader(req, "user-agent"),
+        accept: readHeader(req, "accept"),
+        contentType: readHeader(req, "content-type"),
+        authorizationHeaderPresent: Boolean(authorizationHeader),
+        authorizationScheme: authorizationHeader?.split(/\s+/u, 1)[0],
+        mcpSessionId: readHeader(req, "mcp-session-id"),
+        remoteAddress: req.socket.remoteAddress,
+      };
+      runtime.logger.info(
+        "OAuth connector HTTP request received",
+        connectorRequestContext,
+      );
+      res.once("finish", () => {
+        runtime.logger.info("OAuth connector HTTP response completed", {
+          ...connectorRequestContext,
+          statusCode: res.statusCode,
+          responseContentType: String(res.getHeader("content-type") ?? ""),
+        });
+      });
+    }
+
     if (requestUrl.pathname === "/healthz") {
       writeJson(res, 200, {
         ok: true,
         service: "tellymcp",
         transport: "streamable-http",
       });
+      return;
+    }
+
+    if (
+      oauthFacade &&
+      (await oauthFacade.handleRequest(req, res, requestUrl.pathname))
+    ) {
       return;
     }
 
@@ -1267,17 +1352,29 @@ export function createMcpHttpHandler(
       return;
     }
 
-    if (requestUrl.pathname !== runtime.config.mcp.httpPath) {
+    if (
+      requestUrl.pathname !== mcpHttpPath &&
+      requestUrl.pathname !== `${mcpHttpPath}/`
+    ) {
       writeText(res, 404, "Not found");
       return;
     }
 
-    if (!isAuthorized(req, runtime.config.mcp.bearerToken)) {
+    const authorizationMode = resolveMcpHttpAuthorization(
+      req,
+      runtime.config.mcp.bearerToken,
+      oauthFacade,
+    );
+    if (!authorizationMode) {
+      const authorizationHeader = readHeader(req, "authorization");
       runtime.logger.warn("Unauthorized MCP HTTP request rejected", {
         method,
         path: requestUrl.pathname,
         remoteAddress: req.socket.remoteAddress,
+        authorizationHeaderPresent: Boolean(authorizationHeader),
+        authorizationScheme: authorizationHeader?.split(/\s+/u, 1)[0],
       });
+      oauthFacade?.writeMcpChallenge(res);
       writeText(res, 401, "Unauthorized");
       return;
     }
@@ -1287,13 +1384,35 @@ export function createMcpHttpHandler(
       method === "POST" || method === "DELETE"
         ? await readJsonBody(req)
         : undefined;
+    const rpcMethod = readMcpRpcMethod(parsedBody);
 
     runtime.logger.debug("MCP HTTP request received", {
       method,
       path: requestUrl.pathname,
       sessionId,
+      authorizationMode,
+      rpcMethod,
       hasBody: parsedBody !== undefined,
     });
+    if (rpcMethod === "initialize" || rpcMethod === "tools/list") {
+      runtime.logger.info("Chat connector MCP handshake request received", {
+        rpcMethod,
+        authorizationMode,
+        sessionId,
+        userAgent: readHeader(req, "user-agent"),
+      });
+      res.once("finish", () => {
+        runtime.logger.info("Chat connector MCP handshake response completed", {
+          rpcMethod,
+          authorizationMode,
+          statusCode: res.statusCode,
+          sessionId:
+            readHeader(req, "mcp-session-id") ??
+            (String(res.getHeader("mcp-session-id") ?? "") || undefined),
+          contentType: String(res.getHeader("content-type") ?? ""),
+        });
+      });
+    }
 
     try {
       if (method === "POST") {

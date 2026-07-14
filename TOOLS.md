@@ -287,6 +287,7 @@ Behavior:
 - source extensions such as `.ts` and `.tsx` use text MIME overrides instead of the generic MPEG/octet-stream mappings
 - sensitive paths including live `.env` files, credential stores, private-key extensions, and secret directories are rejected server-side; documented `.env.example`/`.env.sample`/`.env.template` files remain readable
 - URL mode uploads the file as a binary stream to `.tellymcp/tmp/file-links` on the gateway and returns a link valid for 10 minutes
+- temporary-link filenames are sanitized before storage and download headers: control and filesystem-reserved characters are replaced, while a safe basename is preserved
 - image mode is explicit: `structuredContent.type` is `image`, `structuredContent.data` contains the URL, and the native top-level MCP `image` is the first content block without duplicating base64 into structured output
 - image mode accepts only `image/*` files up to the safe native-inline limit; use `url` for larger images
 - URL links allow up to three GET downloads; HEAD requests do not consume the limit

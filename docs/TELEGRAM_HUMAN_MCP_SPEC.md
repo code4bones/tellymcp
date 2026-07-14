@@ -83,6 +83,9 @@ default: the client streams the file to `.tellymcp/tmp/file-links` on the gatewa
 contains a short-lived HTTPS link. If the chat client cannot fetch it, the caller
 retries with `type="base64"`, in which case `data` contains base64. Paths are
 confined to the workspace after symlink resolution, and payload sizes are bounded.
+The gateway treats the uploaded filename as untrusted metadata: it keeps only a
+basename and replaces control characters and filesystem-reserved punctuation
+before temporary storage and before producing the download `Content-Disposition`.
 With `type="image"`, structured output is `{type: "image", data: downloadUrl,
 ...}` while the top-level MCP content additionally contains the native image
 block.

@@ -292,6 +292,7 @@ Status: accepted
 - `selector = "latest_screenshot"` resolves the newest screenshot from existing per-session file metadata when the human does not know its generated path
 - file access must stay within the selected session workspace after symlink resolution and remain subject to body-size limits
 - temporary gateway files expire after 10 minutes and download links allow a small bounded number of GET requests
+- client-provided temporary filenames are untrusted and sanitized to a safe basename before storage and `Content-Disposition`; control and filesystem-reserved characters are replaced
 
 ## Deferred Or Not Yet Accepted
 

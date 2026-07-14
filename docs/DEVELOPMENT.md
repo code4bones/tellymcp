@@ -133,6 +133,18 @@ Inter-console screenshot delivery:
 - `browser_screenshot(...)`
 - then `send_partner_file(...)`
 
+MCP chat-client file delivery:
+
+- `get_file_list(...)` returns the selected console's managed Telegram uploads, browser screenshots, and partner artifacts with paths accepted by `get_file`
+- `get_file(file_path=...)` retrieves the exact file returned by another tool
+- `get_file(selector="latest_screenshot")` resolves the newest recorded browser screenshot when no path is known
+- `type="url"` is the default: the client streams the file to gateway storage under `.tellymcp/tmp/file-links` and the tool returns a 10-minute download URL
+- `type="image"` returns `{type: "image", data: downloadUrl, ...}` as structured output and emits the pixels as the first native MCP content block, subject to a safe inline-size limit
+- `type="text"` accepts exact UTF-8 project paths and returns their content as a native MCP text block; source MIME overrides keep `.ts`, `.tsx`, and similar files text-readable
+- `type="base64"` is the explicit raw-data and Claude compatibility fallback; it returns the complete JSON payload in a regular MCP text block so hosts that hide structured output or replace native images with `[image]` still expose `data` to the model
+- client-side file access remains confined to the selected session workspace, including after symlink resolution
+- client-side policy rejects live environment files, credential stores, private-key extensions, and sensitive directories before reading or uploading them
+
 ## Terminal Model
 
 The runtime uses a built-in PTY-backed terminal layer.

@@ -2688,7 +2688,10 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             requestId,
             actionName,
             error: formattedError,
-            payload: parsed.payload ?? {},
+            payload:
+              actionName === "telegramMcp.fileContent.uploadFileRemote"
+                ? { ...(parsed.payload ?? {}), upload_url: "[redacted]" }
+                : (parsed.payload ?? {}),
           });
           this.wsClient?.send(
             JSON.stringify({

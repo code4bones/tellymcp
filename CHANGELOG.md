@@ -3,6 +3,27 @@
 ## Unreleased
 
 ### Added
+
+- Добавлены связанные MCP tools `get_file_list` и `get_file` для получения
+  файлов из workspace выбранной live-консоли через gateway. Первый возвращает
+  список managed files и точные пути, второй принимает `file_path` либо
+  `selector=latest_screenshot`. По умолчанию `get_file(type="url")` возвращает
+  короткоживущую download-ссылку в `data`; временная gateway-копия хранится в
+  `.tellymcp/tmp/file-links`, а `type="base64"` остаётся fallback.
+- Добавлен явный режим `get_file(type="image")`: download URL остаётся в
+  `structuredContent.data`, сам structured type равен `image`, а изображение
+  возвращается отдельным нативным MCP-блоком, чтобы Claude и другие совместимые
+  клиенты могли рендерить его inline.
+- Для Claude.ai сохранён совместимый `type="base64"`: полный JSON вместе с raw
+  base64 в `data` возвращается обычным MCP text-блоком без native image, поскольку
+  некоторые MCP-host адаптеры заменяют изображение на `[image]` и скрывают
+  structured output от модели.
+- Добавлен `get_file(type="text")` для прямого чтения UTF-8 Markdown и исходников
+  через native MCP text-блок. Для `.ts`, `.tsx` и других source-расширений добавлены
+  текстовые MIME overrides.
+- Доступ к live `.env`, credential stores, private-key расширениям и чувствительным
+  директориям теперь блокируется на клиенте до чтения или отправки файла; выход
+  за workspace и через symlink по-прежнему запрещён.
 - Перенос `telegram_mcp` на сервисную архитектуру `Moleculer`:
   - `telegramMcp.runtime`
   - `telegramMcp.http`
@@ -74,6 +95,9 @@
   - безопасные packaged templates для `.env`
 
 ### Changed
+
+- Общее чтение workspace-файлов теперь проверяет реальный путь после разрешения
+  symlink и не позволяет выйти за пределы workspace.
 - Telegram Mini App Live Console переведена на WS-only rendering:
   - HTTP polling и `/api/view` удалены
   - после разрыва WebSocket автоматически восстанавливается с exponential backoff
@@ -118,6 +142,7 @@
 - старый `go/node terminal-proxy` path полностью удалён, поддерживается только прямой локальный terminal runtime
 
 ### Fixed
+
 - Исправлен `Headers have already sent` при работе MCP/WebApp через общий HTTP runtime.
 - Исправлены route/alias проблемы после перехода под `${ROOT_PREFIX}`.
 - Исправлены зависания Mini App bootstrap и проблемы с relative WebApp routes.

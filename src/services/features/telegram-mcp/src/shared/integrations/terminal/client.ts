@@ -2,6 +2,7 @@ import {
   access,
   appendFile,
   mkdir,
+  realpath,
   readdir,
   readFile,
   rm,
@@ -9,10 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import {
-  assertBodySize,
-  MAX_BODY_SIZE_BYTES,
-} from "../../lib/bodyLimits";
+import { assertBodySize, MAX_BODY_SIZE_BYTES } from "../../lib/bodyLimits";
 
 import {
   buildPtyTarget,
@@ -86,7 +84,9 @@ function sanitizeRelativeXchangePath(relativePath: string): string {
   const normalized = relativePath
     .split(/[/\\]+/u)
     .map((segment) => segment.trim())
-    .filter((segment) => segment.length > 0 && segment !== "." && segment !== "..")
+    .filter(
+      (segment) => segment.length > 0 && segment !== "." && segment !== "..",
+    )
     .join("/");
 
   if (!normalized) {
@@ -112,7 +112,10 @@ function resolvePathInsideRoot(rootDir: string, relativePath: string): string {
   return resolvedPath;
 }
 
-function resolvePathInsideWorkspace(workspaceDir: string, filePath: string): string {
+function resolvePathInsideWorkspace(
+  workspaceDir: string,
+  filePath: string,
+): string {
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
   const resolvedFilePath = path.isAbsolute(filePath)
     ? path.resolve(filePath)
@@ -140,9 +143,7 @@ async function allocateAvailableFilePath(
 
   for (let attempt = 0; attempt < 1000; attempt += 1) {
     const candidateName =
-      attempt === 0
-        ? safeFileName
-        : `${baseName}--${attempt}${extension}`;
+      attempt === 0 ? safeFileName : `${baseName}--${attempt}${extension}`;
     const candidatePath = path.join(dir, candidateName);
 
     try {
@@ -152,7 +153,9 @@ async function allocateAvailableFilePath(
     }
   }
 
-  throw new Error("Could not allocate a unique file name in exchange directory.");
+  throw new Error(
+    "Could not allocate a unique file name in exchange directory.",
+  );
 }
 
 function delay(ms: number): Promise<void> {
@@ -269,10 +272,45 @@ export async function readWorkspaceFile(
   filePath: string,
   maxBytes = MAX_BODY_SIZE_BYTES,
 ): Promise<Uint8Array> {
+  const resolved = await resolveWorkspaceFileForRead(
+    config,
+    workspaceDir,
+    filePath,
+    maxBytes,
+  );
+  return readFile(resolved.filePath);
+}
+
+export async function resolveWorkspaceFileForRead(
+  config: TerminalRuntimeConfig,
+  workspaceDir: string,
+  filePath: string,
+  maxBytes = MAX_BODY_SIZE_BYTES,
+): Promise<{ filePath: string; sizeBytes: number }> {
+  void config;
   const resolvedFilePath = resolvePathInsideWorkspace(workspaceDir, filePath);
-  const fileStats = await stat(resolvedFilePath);
+  const [realWorkspaceDir, realFilePath] = await Promise.all([
+    realpath(path.resolve(workspaceDir)),
+    realpath(resolvedFilePath),
+  ]);
+  const relative = path.relative(realWorkspaceDir, realFilePath);
+  if (
+    relative.startsWith("..") ||
+    path.isAbsolute(relative) ||
+    relative.trim() === ""
+  ) {
+    throw new Error("File path is outside the workspace directory.");
+  }
+
+  const fileStats = await stat(realFilePath);
+  if (!fileStats.isFile()) {
+    throw new Error("File path does not point to a regular file.");
+  }
   assertBodySize(fileStats.size, maxBytes);
-  return readFile(resolvedFilePath);
+  return {
+    filePath: realFilePath,
+    sizeBytes: fileStats.size,
+  };
 }
 
 export function isTerminalUnavailableError(error: unknown): boolean {
@@ -322,9 +360,8 @@ export async function resolveTerminalTargetFromHint(
   config: TerminalRuntimeConfig,
   hint: TerminalTargetHint,
 ): Promise<string | null> {
-  const target =
-    hint.terminalTarget?.trim() || buildPtyTarget("default");
-  return hasPtyTarget(target) ? target : hint.terminalTarget?.trim() ?? null;
+  const target = hint.terminalTarget?.trim() || buildPtyTarget("default");
+  return hasPtyTarget(target) ? target : (hint.terminalTarget?.trim() ?? null);
 }
 
 export async function getTerminalWindowHeight(
@@ -419,7 +456,10 @@ export function resizeForegroundTerminal(
   resizePtyTarget(target, cols, rows);
 }
 
-export function sendForegroundTerminalInput(target: string, data: string): void {
+export function sendForegroundTerminalInput(
+  target: string,
+  data: string,
+): void {
   sendPtyText(target, data);
 }
 

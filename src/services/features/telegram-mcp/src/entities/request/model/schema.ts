@@ -61,6 +61,52 @@ export const sendFileToTelegramOutputSchema = z.object({
   message_id: z.number().int().positive().optional(),
 });
 
+export const getFileInputSchema = z
+  .object({
+    session_id: z.string().trim().min(1).optional(),
+    file_path: z.string().trim().min(1).optional(),
+    selector: z.enum(["latest_screenshot"]).optional(),
+    type: z.enum(["url", "image", "text", "base64"]).optional(),
+  })
+  .refine((input) => Boolean(input.file_path) !== Boolean(input.selector), {
+    message: "Provide exactly one of file_path or selector.",
+  });
+
+export const getFileOutputSchema = z.object({
+  type: z.enum(["url", "image", "text", "base64"]),
+  data: bodyStringSchema,
+  mimetype: z.string().trim().min(1),
+  filename: z.string().trim().min(1),
+  size_bytes: z.number().int().nonnegative(),
+  expires_at: z.string().trim().min(1).optional(),
+});
+
+const getFileListSourceSchema = z.enum([
+  "telegram-upload",
+  "browser-screenshot",
+  "partner-artifact",
+]);
+
+export const getFileListInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+  source: getFileListSourceSchema.optional(),
+  limit: z.number().int().positive().max(200).optional(),
+});
+
+export const getFileListOutputSchema = z.object({
+  total: z.number().int().nonnegative(),
+  files: z.array(
+    z.object({
+      file_path: z.string().trim().min(1),
+      filename: z.string().trim().min(1),
+      mimetype: z.string().trim().min(1),
+      source: getFileListSourceSchema,
+      size_bytes: z.number().int().nonnegative().optional(),
+      created_at: z.string().trim().min(1),
+    }),
+  ),
+});
+
 export const listGatewaySessionsInputSchema = z.object({
   client_uuid: z.string().trim().min(1).optional(),
   connected_only: z.boolean().optional(),
@@ -731,7 +777,9 @@ const xchangeRecordSchema = z.object({
 export const listXchangeRecordsInputSchema = z.object({
   session_id: z.string().trim().min(1).optional(),
   status: z.enum(["new", "read", "archived"]).optional(),
-  category: z.enum(["partner_note", "local_handoff", "telegram_message"]).optional(),
+  category: z
+    .enum(["partner_note", "local_handoff", "telegram_message"])
+    .optional(),
   direction: z.enum(["incoming", "outgoing", "local"]).optional(),
   limit: z.number().int().positive().max(200).optional(),
 });

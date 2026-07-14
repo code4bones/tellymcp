@@ -16,6 +16,7 @@ import { MinioExchangeStore } from "../../shared/integrations/object-storage/min
 import { GatewayHttpService } from "../../features/distributed-gateway/model/gatewayHttpService";
 import { ensureGatewayClientUuid } from "../../features/distributed-client/model/gatewayClientAccess";
 import { FirefoxAttachServer } from "../../features/browser-attach/model/firefoxAttachServer";
+import { TemporaryFileLinkStore } from "../../features/file-content/model/temporaryFileLinkStore";
 import {
   ensureTerminalTargetForSession,
 } from "../../shared/integrations/terminal/client";
@@ -51,6 +52,7 @@ export type AppRuntime = {
   webAppLaunchRegistry: WebAppLaunchRegistry;
   gatewayHttpService: GatewayHttpService;
   firefoxAttachServer: FirefoxAttachServer;
+  temporaryFileLinkStore: TemporaryFileLinkStore | null;
   shutdown: () => Promise<void>;
 };
 
@@ -294,6 +296,15 @@ export async function createAppRuntime(input: {
   logger.info("Startup Telegram notifications completed");
 
   const gatewayHttpService = new GatewayHttpService(config, input.callBroker);
+  const temporaryFileLinkStore =
+    config.distributed.mode !== "client" &&
+    config.distributed.gatewayPublicUrl?.trim()
+      ? new TemporaryFileLinkStore(
+          config.distributed.gatewayPublicUrl,
+          logger,
+        )
+      : null;
+  await temporaryFileLinkStore?.start();
   const firefoxAttachServer = new FirefoxAttachServer(
     config,
     logger,
@@ -320,8 +331,10 @@ export async function createAppRuntime(input: {
     webAppLaunchRegistry,
     gatewayHttpService,
     firefoxAttachServer,
+    temporaryFileLinkStore,
     shutdown: async () => {
       logger.info("Shutdown started");
+      await temporaryFileLinkStore?.stop();
       await firefoxAttachServer.stop();
       await telegramTransport.stop();
       stopAllPtyTargets();

@@ -26,6 +26,8 @@ import { SendPartnerFileTool } from "../../../features/collaboration/model/sendP
 import { ListGatewaySessionsTool } from "../../../features/collaboration/model/listGatewaySessionsTool";
 import { SendPartnerNoteTool } from "../../../features/collaboration/model/sendPartnerNoteTool";
 import { RefreshToolsMarkdownTool } from "../../../features/tools-sync/model/refreshToolsMarkdownTool";
+import { GetFileTool } from "../../../features/file-content/model/getFileTool";
+import { GetFileListTool } from "../../../features/file-content/model/getFileListTool";
 import type { ToolModule } from "../../../shared/api/tool-registry/types";
 import { registerTools } from "../../../shared/api/tool-registry/registry";
 import { getTellyMcpPackageVersion } from "../../../shared/lib/version/versionHandshake";
@@ -67,4 +69,6 @@ export type AppToolModules = {
   listGatewaySessionsTool: ListGatewaySessionsTool;
   sendPartnerNoteTool: SendPartnerNoteTool;
   refreshToolsMarkdownTool: RefreshToolsMarkdownTool;
+  getFileTool: GetFileTool;
+  getFileListTool: GetFileListTool;
 };

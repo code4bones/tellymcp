@@ -1,9 +1,7 @@
 import type { Service, ServiceSchema } from "moleculer";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import {
-  createMcpServer,
-} from "./src/app/providers/mcp/server";
+import { createMcpServer } from "./src/app/providers/mcp/server";
 import {
   TELEGRAM_MCP_APPROVAL_SERVICE_NAME,
   type TelegramMcpApprovalServiceInstance,
@@ -16,6 +14,10 @@ import {
   TELEGRAM_MCP_COLLABORATION_SERVICE_NAME,
   type TelegramMcpCollaborationServiceInstance,
 } from "./collaboration.service";
+import {
+  TELEGRAM_MCP_FILE_CONTENT_SERVICE_NAME,
+  type TelegramMcpFileContentServiceInstance,
+} from "./file-content.service";
 import {
   TELEGRAM_MCP_NOTIFY_SERVICE_NAME,
   type TelegramMcpNotifyServiceInstance,
@@ -60,6 +62,8 @@ import { BrowserWaitForUrlTool } from "./src/features/browser/model/browserWaitF
 import { SendPartnerFileTool } from "./src/features/collaboration/model/sendPartnerFileTool";
 import { ListGatewaySessionsTool } from "./src/features/collaboration/model/listGatewaySessionsTool";
 import { SendPartnerNoteTool } from "./src/features/collaboration/model/sendPartnerNoteTool";
+import { GetFileTool } from "./src/features/file-content/model/getFileTool";
+import { GetFileListTool } from "./src/features/file-content/model/getFileListTool";
 import { SendFileToTelegramTool } from "./src/features/notify/model/sendFileToTelegramTool";
 import { NotifyTelegramTool } from "./src/features/notify/model/notifyTelegramTool";
 import { ClearSessionContextTool } from "./src/features/session-context/model/clearSessionContextTool";
@@ -90,6 +94,7 @@ const TelegramMcpMcpServerService: ServiceSchema = {
     TELEGRAM_MCP_APPROVAL_SERVICE_NAME,
     TELEGRAM_MCP_BROWSER_SERVICE_NAME,
     TELEGRAM_MCP_COLLABORATION_SERVICE_NAME,
+    TELEGRAM_MCP_FILE_CONTENT_SERVICE_NAME,
     TELEGRAM_MCP_TOOLS_SYNC_SERVICE_NAME,
     TELEGRAM_MCP_XCHANGE_SERVICE_NAME,
   ],
@@ -111,6 +116,9 @@ const TelegramMcpMcpServerService: ServiceSchema = {
       const collaborationService = this.broker.getLocalService(
         TELEGRAM_MCP_COLLABORATION_SERVICE_NAME,
       ) as TelegramMcpCollaborationServiceInstance | null;
+      const fileContentService = this.broker.getLocalService(
+        TELEGRAM_MCP_FILE_CONTENT_SERVICE_NAME,
+      ) as TelegramMcpFileContentServiceInstance | null;
       const toolsSyncService = this.broker.getLocalService(
         TELEGRAM_MCP_TOOLS_SYNC_SERVICE_NAME,
       ) as TelegramMcpToolsSyncServiceInstance | null;
@@ -124,6 +132,7 @@ const TelegramMcpMcpServerService: ServiceSchema = {
         !approvalService ||
         !browserService ||
         !collaborationService ||
+        !fileContentService ||
         !toolsSyncService ||
         !xchangeService
       ) {
@@ -144,7 +153,9 @@ const TelegramMcpMcpServerService: ServiceSchema = {
         new NotifyTelegramTool(notifyService.getNotifyService()),
         new SendFileToTelegramTool(notifyService.getNotifyService()),
         new AskUserTelegramTool(approvalService.getApprovalOrchestrator()),
-        new BrowserListAttachedInstancesTool(browserService.getBrowserService()),
+        new BrowserListAttachedInstancesTool(
+          browserService.getBrowserService(),
+        ),
         new BrowserListTabsTool(browserService.getBrowserService()),
         new BrowserAttachActiveTabTool(browserService.getBrowserService()),
         new BrowserAttachTabTool(browserService.getBrowserService()),
@@ -168,15 +179,15 @@ const TelegramMcpMcpServerService: ServiceSchema = {
         new BrowserComputedStyleTool(browserService.getBrowserService()),
         new BrowserScreenshotTool(browserService.getBrowserService()),
         new BrowserCloseTool(browserService.getBrowserService()),
-        new SendPartnerNoteTool(
-          collaborationService.getCollaborationService(),
-        ),
+        new SendPartnerNoteTool(collaborationService.getCollaborationService()),
         new ListGatewaySessionsTool(
           collaborationService.getGatewaySessionsService(),
         ),
         new SendPartnerFileTool(
           collaborationService.getSendPartnerFileService(),
         ),
+        new GetFileTool(fileContentService.getGetFileService()),
+        new GetFileListTool(fileContentService.getGetFileService()),
         new ListXchangeRecordsTool(xchangeService.getXchangeService()),
         new GetXchangeRecordTool(xchangeService.getXchangeService()),
         new MarkXchangeRecordReadTool(xchangeService.getXchangeService()),
@@ -200,6 +211,7 @@ const TelegramMcpMcpServerService: ServiceSchema = {
       TELEGRAM_MCP_APPROVAL_SERVICE_NAME,
       TELEGRAM_MCP_BROWSER_SERVICE_NAME,
       TELEGRAM_MCP_COLLABORATION_SERVICE_NAME,
+      TELEGRAM_MCP_FILE_CONTENT_SERVICE_NAME,
       TELEGRAM_MCP_TOOLS_SYNC_SERVICE_NAME,
       TELEGRAM_MCP_XCHANGE_SERVICE_NAME,
     ]);

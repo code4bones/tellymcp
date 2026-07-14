@@ -648,6 +648,17 @@ export function createMcpHttpHandler(
     );
     requestUrl.pathname = normalizedPathname;
 
+    if (
+      runtime.temporaryFileLinkStore &&
+      (await runtime.temporaryFileLinkStore.handleRequest(
+        req,
+        res,
+        requestUrl.pathname,
+      ))
+    ) {
+      return;
+    }
+
     if (oauthFacade) {
       const authorizationHeader = readHeader(req, "authorization");
       const connectorRequestContext = {

@@ -171,8 +171,14 @@ TELEGRAM_WEBHOOK_SECRET=change_me_webhook_secret
 
 - `/api/telegram/webhook`
 - `/api/gateway`
+- `/api/files` для короткоживущих upload/download запросов `get_file(type="url")`
 - `/api/webapp`
 - `/api/healthz`
+
+Отдельный `location ^~ /api/files/` рекомендуется, хотя для самой маршрутизации
+он не обязателен. В нём следует отключить access log, потому что путь содержит
+токен, задать `client_max_body_size 32m` и отключить buffering запросов и
+ответов. Канонический блок приведён в `nginx/tellymcp.gw.conf`.
 
 ## 8. MCP
 

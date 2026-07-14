@@ -16,6 +16,7 @@ The project has already moved to the gateway-first model. This document now trac
 - chat connectors use an OAuth facade alongside the existing static MCP bearer
 - a chat host connects to the concrete `/api/mcp` endpoint; `/api` remains the
   OAuth issuer/audience base
+- chat-host file reads use `get_file`; text mode returns exact UTF-8 project files, URL mode creates a bounded short-lived gateway copy, and base64 remains an explicit fallback
 
 ## Invariants
 
@@ -28,6 +29,7 @@ Do not regress these:
 5. browser screenshot tasks should prefer browser tools over shell Playwright
 6. `.mcpsession.json` is the workspace-level startup marker
 7. `.mcpsession.json` also stores per-console tools hash state
+8. gateway-routed file reads must use canonical session ids and remain confined to the selected console workspace
 
 ## Active Roadmap
 

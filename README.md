@@ -27,6 +27,7 @@ The current model is gateway-first:
 
 - exposes MCP tools for human Telegram interaction
 - lets one agent ask another agent to do work and return files or notes
+- lets MCP chat clients retrieve project text, images, and artifacts from a selected console
 - stores structured xchange records in `.mcp-xchange`
 - supports browser automation with Playwright
 - can attach to an already running Firefox or Chrome tab through bundled local extensions
@@ -66,6 +67,7 @@ Human-facing:
 - `telegram_message` records
 - `notify_telegram`
 - `browser_screenshot(send_to_telegram=true)`
+- `get_file` for returning screenshots and artifacts to MCP chat clients
 
 Agent-to-agent:
 
@@ -86,6 +88,15 @@ Browser:
 - `browser_recording_start`
 - `browser_recording_stop`
 - `browser_recording_status`
+
+Files:
+
+- `get_file_list(source=..., limit=...)`
+- `get_file(file_path=..., type="url")`
+- `get_file(file_path=..., type="image")`
+- `get_file(file_path=..., type="text")`
+- `get_file(file_path=..., type="base64")`
+- `get_file(selector="latest_screenshot")`
 
 Tools sync:
 

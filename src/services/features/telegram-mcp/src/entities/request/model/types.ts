@@ -50,6 +50,45 @@ export type SendFileToTelegramOutput = {
   message_id?: number | undefined;
 };
 
+export type GetFileInput = {
+  session_id?: string | undefined;
+  file_path?: string | undefined;
+  selector?: "latest_screenshot" | undefined;
+  type?: "url" | "image" | "text" | "base64" | undefined;
+};
+
+export type GetFileOutput = {
+  type: "url" | "image" | "text" | "base64";
+  data: string;
+  mimetype: string;
+  filename: string;
+  size_bytes: number;
+  expires_at?: string | undefined;
+};
+
+export type GetFileListSource =
+  | "telegram-upload"
+  | "browser-screenshot"
+  | "partner-artifact";
+
+export type GetFileListInput = {
+  session_id?: string | undefined;
+  source?: GetFileListSource | undefined;
+  limit?: number | undefined;
+};
+
+export type GetFileListOutput = {
+  total: number;
+  files: Array<{
+    file_path: string;
+    filename: string;
+    mimetype: string;
+    source: GetFileListSource;
+    size_bytes?: number | undefined;
+    created_at: string;
+  }>;
+};
+
 export type RefreshToolsMarkdownInput = {
   session_id?: string | undefined;
   cwd?: string | undefined;

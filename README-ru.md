@@ -27,6 +27,7 @@
 
 - даёт MCP tools для human-in-the-loop через Telegram
 - позволяет одной консоли агента ставить задачу другой консоли
+- позволяет MCP chat-клиенту получать проектный текст, изображения и артефакты выбранной консоли
 - хранит structured xchange records в `.mcp-xchange`
 - поддерживает browser automation через Playwright
 - умеет attach к уже открытому Firefox или Chrome через bundled local extensions
@@ -66,6 +67,7 @@ Gateway
 - `telegram_message`
 - `notify_telegram`
 - `browser_screenshot(send_to_telegram=true)`
+- `get_file` для возврата скриншотов и артефактов в MCP chat-клиент
 
 Для agent-to-agent:
 
@@ -86,6 +88,15 @@ Gateway
 - `browser_recording_start`
 - `browser_recording_stop`
 - `browser_recording_status`
+
+Файлы:
+
+- `get_file_list(source=..., limit=...)`
+- `get_file(file_path=..., type="url")`
+- `get_file(file_path=..., type="image")`
+- `get_file(file_path=..., type="text")`
+- `get_file(file_path=..., type="base64")`
+- `get_file(selector="latest_screenshot")`
 
 Синхронизация инструкций:
 

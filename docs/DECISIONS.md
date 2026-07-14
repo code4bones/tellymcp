@@ -5,6 +5,7 @@ Accepted product, architecture, runtime, UX, and operational decisions for `tele
 This file is a living source of truth.
 
 Rules:
+
 - keep only accepted decisions here
 - keep open ideas and experiments in `docs/TODO.md`
 - when a decision changes, update this file instead of layering contradictory docs on top
@@ -272,6 +273,25 @@ Status: accepted
   clients must not be forced to migrate
 - configured client id/secret and redirect allowlists are static operator-owned
   values; dynamic client registration is not part of this implementation
+
+### D-029 — MCP chat clients retrieve console-owned files through synchronous gateway relay
+
+Status: accepted
+
+- `get_file_list` is the canonical discovery tool for TellyMCP-managed files and returns paths accepted by `get_file`
+- `get_file` is the canonical MCP tool for returning actual workspace file content as `{type, data, mimetype, filename, size_bytes, expires_at?}`
+- the gateway routes the request to the selected live console by canonical `session_id = client_uuid:local_session_id`
+- `type = "url"` is the default; the client streams the file into bounded temporary gateway storage under `.tellymcp/tmp/file-links` and `data` contains a short-lived HTTPS link
+- `type = "image"` is the explicit inline-preview mode; structured output is `{type: "image", data: downloadUrl, ...}` while the top-level MCP content contains the native image block
+- `type = "text"` returns an exact UTF-8 workspace file directly as native MCP text and applies source-code MIME overrides
+- `type = "base64"` is the explicit raw-data and compatibility fallback; the complete JSON is emitted as regular MCP text, without a native image, because some hosts replace native tool images with `[image]` or omit structured output from model context
+- callers may pass an exact `file_path`, including one returned by `browser_screenshot`
+- callers that do not know an existing managed file path should use `get_file_list` first
+- arbitrary project paths are intentionally not enumerated by `get_file_list`; callers must already know the exact path
+- sensitive filenames, extensions, and directories are rejected on the client before file reads and uploads; path confinement is still verified after realpath resolution
+- `selector = "latest_screenshot"` resolves the newest screenshot from existing per-session file metadata when the human does not know its generated path
+- file access must stay within the selected session workspace after symlink resolution and remain subject to body-size limits
+- temporary gateway files expire after 10 minutes and download links allow a small bounded number of GET requests
 
 ## Deferred Or Not Yet Accepted
 

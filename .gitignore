@@ -9,6 +9,7 @@ artifacts
 data
 tmux-proxy-go/telegram-human-tmux-proxy
 .mcp-xchange
+.tellymcp/
 .telegram-human-mcp
 public
 logs

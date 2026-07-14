@@ -83,6 +83,8 @@ Collaboration tools:
 
 Utility tools:
 
+- `get_file_list`
+- `get_file`
 - `refresh_tools_markdown`
 
 ## Console model
@@ -115,7 +117,18 @@ Preferred order for cross-console work:
    - `send_partner_note`
    - `send_partner_file`
    - browser tools
-   with explicit `session_id` for the current console or explicit target routing fields for another console.
+     with explicit `session_id` for the current console or explicit target routing fields for another console.
+
+Preferred file-return flow for MCP chat clients:
+
+1. Resolve the selected live console and keep its canonical `session_id`.
+2. If the user refers to an existing managed file without an exact path, call `get_file_list` and select the matching `file_path`.
+3. If creating a screenshot now, call `browser_screenshot` and keep its returned `file_path`.
+4. For an exact Markdown, source-code, or other UTF-8 project path, call `get_file(type = "text")`; arbitrary project files are not discovered by `get_file_list`.
+5. For binary files, call `get_file` with the selected or newly returned `file_path`; default to `type = "url"`.
+6. If the chat cannot fetch an image URL, repeat the same call with `type = "image"` for a native inline MCP image block.
+7. If a host such as Claude.ai replaces the native block with `[image]`, retry with `type = "base64"`; this host-independent fallback returns the complete JSON, including raw `data`, in a regular MCP text block.
+8. If the user asks for the most recent existing screenshot, `get_file(selector = "latest_screenshot")` is the direct shortcut.
 
 ## `set_session_context`
 
@@ -193,6 +206,99 @@ Output:
   Legacy field name. If present, this is the current Telegram route metadata for the console.
 - `terminal?`
   Terminal runtime metadata for the console.
+
+## `get_file_list`
+
+Purpose:
+
+- List managed files available in a selected console workspace before calling `get_file`.
+- Return exact `file_path` values accepted by `get_file`.
+
+Input:
+
+- `session_id`
+- `source?`
+  - `telegram-upload`
+  - `browser-screenshot`
+  - `partner-artifact`
+- `limit?`
+  - default: `50`
+  - maximum: `200`
+
+Output:
+
+- `total`
+- `files[]`
+  - `file_path`
+  - `filename`
+  - `mimetype`
+  - `source`
+  - `size_bytes?`
+  - `created_at`
+
+Behavior:
+
+- results are ordered newest first
+- `total` is the number of matching managed files before `limit` is applied
+- this tool lists TellyMCP-managed Telegram uploads, browser screenshots, and partner artifacts; it does not recursively enumerate arbitrary source files in the workspace
+- in gateway mode, always pass the canonical `session_id = client_uuid:local_session_id`
+- pass the chosen `files[].file_path` unchanged to `get_file`
+
+## `get_file`
+
+Purpose:
+
+- Return the actual content of a file from a selected console workspace to an MCP chat client.
+- URL mode creates a bounded temporary gateway copy; text and base64 modes relay content directly.
+
+Input:
+
+- `session_id`
+- `type?`
+  - `url` (default)
+  - `image` (native inline image plus download URL)
+  - `text` (native UTF-8 MCP text content)
+  - `base64` (fallback)
+- exactly one of:
+  - `file_path`
+  - `selector = "latest_screenshot"`
+
+Output:
+
+- `type`
+- `data`
+  - short-lived HTTPS URL when `type = "url"`
+  - short-lived HTTPS URL when `type = "image"`; the actual pixels are in the native MCP image content block
+  - decoded UTF-8 file content when `type = "text"`
+  - base64 payload when `type = "base64"`
+- `mimetype`
+- `filename`
+- `size_bytes`
+- `expires_at?`
+
+Behavior:
+
+- in gateway mode, always pass the canonical `session_id = client_uuid:local_session_id` returned by `list_gateway_sessions`
+- `file_path` may be the exact path returned by `browser_screenshot`, so the human does not need to know generated filenames
+- `selector = "latest_screenshot"` selects the newest file metadata with `source = "browser-screenshot"` for that session
+- file reads are limited to the selected console workspace, including after symlink resolution
+- exact project-relative paths such as `README.md` or `src/test.ts` are accepted even though `get_file_list` only discovers managed artifacts
+- text mode returns the decoded file directly as a native MCP text content block and rejects invalid UTF-8 or binary NUL content
+- source extensions such as `.ts` and `.tsx` use text MIME overrides instead of the generic MPEG/octet-stream mappings
+- sensitive paths including live `.env` files, credential stores, private-key extensions, and secret directories are rejected server-side; documented `.env.example`/`.env.sample`/`.env.template` files remain readable
+- URL mode uploads the file as a binary stream to `.tellymcp/tmp/file-links` on the gateway and returns a link valid for 10 minutes
+- image mode is explicit: `structuredContent.type` is `image`, `structuredContent.data` contains the URL, and the native top-level MCP `image` is the first content block without duplicating base64 into structured output
+- image mode accepts only `image/*` files up to the safe native-inline limit; use `url` for larger images
+- URL links allow up to three GET downloads; HEAD requests do not consume the limit
+- if URL fetching fails for an image, retry with `type = "image"`
+- base64 mode is the compatibility fallback for hosts that replace native images with `[image]` or hide `structuredContent`: it returns the complete JSON payload, including raw base64 in `data`, as a regular MCP text block and does not emit a native image
+- base64 mode is bounded by the final MCP response body limit
+- do not attempt to bypass the sensitive-file policy or retrieve renamed secrets
+
+Screenshot examples:
+
+- "take a screenshot and send it": call `browser_screenshot`, then pass its returned `file_path` to `get_file`
+- "send the latest screenshot": call `get_file` with `selector = "latest_screenshot"`
 
 ## `refresh_tools_markdown`
 
@@ -451,7 +557,7 @@ Required agent practice:
   - "tell frontend what changed"
   - "send the error to your teammate"
   - "tell the other agent what's new"
-  then the correct path is `send_partner_note`
+    then the correct path is `send_partner_note`
 
 How to find the partner correctly:
 
@@ -511,7 +617,7 @@ Reply rule for project asks:
   - `Reply project_uuid: ...`
   - `Reply target_client_uuid: ...`
   - `Reply target_local_session_id: ...`
-  or a `Reply Params` section with the same data
+    or a `Reply Params` section with the same data
 - then reply with those exact values
 - if `in_reply_to` is available, prefer `Reply message_uuid`
 - if only the note `share_id` is available, gateway now also accepts that value in `in_reply_to`
@@ -612,7 +718,7 @@ How the receiving agent must react:
   - `проверь xchange records`
   - `telegram_message`
   - `partner_note`
-  then do not start with a legacy inbox-specific tool
+    then do not start with a legacy inbox-specific tool
 - instead:
   1. call `list_xchange_records`
   2. identify the newest relevant record by category:

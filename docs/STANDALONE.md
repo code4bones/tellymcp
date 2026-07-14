@@ -171,8 +171,14 @@ If nginx already proxies `location /api/ { ... }` to the standalone listener, th
 
 - `/api/telegram/webhook`
 - `/api/gateway`
+- `/api/files` for short-lived `get_file(type="url")` uploads and downloads
 - `/api/webapp`
 - `/api/healthz`
+
+A dedicated `location ^~ /api/files/` is recommended, though not required for
+routing. It should disable access logs because the path contains a token, set
+`client_max_body_size 32m`, and disable proxy request/response buffering. See
+`nginx/tellymcp.gw.conf` for the canonical block.
 
 ## 8. MCP
 

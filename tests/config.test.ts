@@ -4,11 +4,21 @@ import { loadConfig } from "../src/services/features/telegram-mcp/src/app/config
 
 describe("gateway transport auth configuration", () => {
   beforeEach(() => {
+    for (const legacyName of [
+      "MODE",
+      "GATEWAY_TOKEN",
+      "DB_SCHEME",
+      "ENABLE_LOGFEED",
+      "TMUX_CAPTURE_MODE",
+      "PAIR_CODE_TTL_SECONDS",
+    ]) {
+      vi.stubEnv(legacyName, undefined);
+    }
     vi.stubEnv("ENV_FILE", "");
     vi.stubEnv("REDIS_HOST", "127.0.0.1");
     vi.stubEnv("REDIS_PORT", "6379");
     vi.stubEnv("REDIS_DB", "1");
-    vi.stubEnv("MODE", "reject");
+    vi.stubEnv("TELEGRAM_REQUEST_MODE", "reject");
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "telegram-token");
     vi.stubEnv("GATEWAY_PUBLIC_URL", "");
     vi.stubEnv("GATEWAY_WS_URL", "");
@@ -59,6 +69,58 @@ describe("gateway transport auth configuration", () => {
     vi.stubEnv("DISTRIBUTED_MODE", "client");
 
     expect(loadConfig().distributed.gatewayAuthToken).toBeUndefined();
+  });
+
+  it("loads client mode without Redis environment variables", () => {
+    vi.stubEnv("DISTRIBUTED_MODE", "client");
+    vi.stubEnv("REDIS_HOST", undefined);
+    vi.stubEnv("REDIS_PORT", undefined);
+    vi.stubEnv("REDIS_DB", undefined);
+
+    expect(loadConfig().redis).toEqual({
+      host: "127.0.0.1",
+      port: 6379,
+      db: 1,
+    });
+  });
+
+  it.each([
+    ["MODE", "TELEGRAM_REQUEST_MODE"],
+    ["GATEWAY_TOKEN", "GATEWAY_SCOPE_TOKEN"],
+    ["DB_SCHEME", "DB_SCHEMA"],
+    ["ENABLE_LOGFEED", "LOGFEED_ENABLED"],
+  ])("requires migration for legacy %s and names %s", (legacyName, replacement) => {
+    vi.stubEnv("DISTRIBUTED_MODE", "client");
+    vi.stubEnv(legacyName, legacyName === "MODE" ? "reject" : "legacy-value");
+
+    expect(() => loadConfig()).toThrow(
+      `Environment migration is required: ${legacyName} -> ${replacement}`,
+    );
+  });
+
+  it("ignores a non-TellyMCP MODE value supplied by build tooling", () => {
+    vi.stubEnv("DISTRIBUTED_MODE", "client");
+    vi.stubEnv("MODE", "test");
+
+    expect(loadConfig().mode).toBe("reject");
+  });
+
+  it("rejects retired tmux configuration", () => {
+    vi.stubEnv("DISTRIBUTED_MODE", "client");
+    vi.stubEnv("TMUX_CAPTURE_MODE", "visible");
+
+    expect(() => loadConfig()).toThrow(
+      "Environment migration is required: TMUX_CAPTURE_MODE -> TERMINAL_CAPTURE_MODE",
+    );
+  });
+
+  it("rejects removed environment settings", () => {
+    vi.stubEnv("DISTRIBUTED_MODE", "client");
+    vi.stubEnv("PAIR_CODE_TTL_SECONDS", "300");
+
+    expect(() => loadConfig()).toThrow(
+      "Environment migration is required: PAIR_CODE_TTL_SECONDS (remove)",
+    );
   });
 
   it("loads OAuth connector configuration", () => {

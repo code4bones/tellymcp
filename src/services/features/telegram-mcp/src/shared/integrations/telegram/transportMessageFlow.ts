@@ -190,7 +190,7 @@ export class TransportMessageFlow {
         return true;
       }
 
-      if (authToken !== this.host.config.distributed.gatewayToken) {
+      if (authToken !== this.host.config.distributed.gatewayScopeToken) {
         await this.host.replyText(
           ctx,
           await this.host.tForContext(ctx, "menu:admin.auth.invalid"),

@@ -76,6 +76,10 @@ Agent-to-agent:
 - `send_partner_file`
 - `list_gateway_sessions`
 
+Diagnostics:
+
+- `get_runtime_diagnostics` for safe end-to-end gateway/client health checks
+
 Browser:
 
 - `browser_open`
@@ -106,7 +110,7 @@ Tools sync:
 ## Requirements
 
 - Node.js `>= 24`
-- Redis
+- Redis for gateway and `both` modes only; clients do not use Redis
 - PostgreSQL for gateway mode
 - optional RabbitMQ for durable gateway fanout
 - Playwright browser binaries if you use browser tools
@@ -150,8 +154,19 @@ Create a gateway workspace and env:
 ```bash
 mkdir -p ~/telly-gateway
 cd ~/telly-gateway
-tellymcp init gateway
+tellymcp configure
 ```
+
+This opens a token-protected local page on `127.0.0.1`. Choose `Gateway` in the
+wizard, fill and validate the settings, then save `.env-gateway` through the
+normal browser download flow. Set its permissions to `0600` before use. Use
+`tellymcp init gateway` when you specifically want a commented template for
+manual editing.
+
+Enter the public origin or API base only once. The wizard derives gateway HTTP,
+WebSocket, Mini App, webhook, root-prefix, and optional OAuth connector URLs.
+The key stages include live connection checks for Telegram, Redis, PostgreSQL,
+the gateway HTTP/WebSocket endpoints, and optional RabbitMQ.
 
 Or copy the sample from this package:
 
@@ -167,7 +182,7 @@ Required gateway values:
 - `DB_NAME`
 - `GATEWAY_PUBLIC_URL`
 - `GATEWAY_WS_URL`
-- `GATEWAY_TOKEN`
+- `GATEWAY_SCOPE_TOKEN`
 - `GATEWAY_AUTH_TOKEN`
 
 Then run:
@@ -183,8 +198,16 @@ Create one workspace per agent console:
 ```bash
 mkdir -p ~/agent-a
 cd ~/agent-a
-tellymcp init client
+tellymcp configure
 ```
+
+Choose `Client` in the wizard. The form includes the gateway connection, local
+console identity, terminal, browser, MCP, and advanced runtime settings.
+After validation the browser downloads `.env-client`. Use `--no-open` to print
+the local URL without opening a browser automatically.
+
+For clients, the same Public base URL automatically produces
+`GATEWAY_PUBLIC_URL`, `GATEWAY_WS_URL`, and `GATEWAY_WS_PATH`.
 
 Or copy:
 
@@ -194,7 +217,7 @@ Required client values:
 
 - `GATEWAY_PUBLIC_URL`
 - `GATEWAY_WS_URL`
-- `GATEWAY_TOKEN`
+- `GATEWAY_SCOPE_TOKEN`
 - `GATEWAY_AUTH_TOKEN` (the same transport token configured on the gateway)
 - `GATEWAY_USER_UUID` if this console should be scoped to a specific Telegram owner
 
@@ -214,6 +237,10 @@ After that, `.mcpsession.json` stores:
 - `local_session_id`
 - `session_label`
 - `env_file`
+- `gateway_client_uuid`
+
+Client runtime state is local and does not require Redis. The persisted
+`gateway_client_uuid` keeps the client identity stable across restarts.
 
 So later the same workspace can usually start with:
 
@@ -352,6 +379,7 @@ Expected agent behavior:
 
 Use the shipped samples as the canonical starting point:
 
+- [Environment contract and migration guide](./docs/ENVIRONMENT.md)
 - [.env.example.gateway](./.env.example.gateway)
 - [.env.example.client](./.env.example.client)
 
@@ -367,6 +395,8 @@ The samples were cleaned to match the current runtime:
 - removed obsolete pairing-oriented wording
 - removed unused secrets like `SESSION_SECRET`
 - removed unused `APP_NAME`
+- renamed ambiguous legacy keys to `TERMINAL_*`, `GATEWAY_SCOPE_TOKEN`,
+  `TELEGRAM_REQUEST_MODE`, `DB_SCHEMA`, and `LOGFEED_ENABLED`
 
 ## Operational Commands
 
@@ -381,6 +411,15 @@ Destructive local+gateway cleanup:
 ```bash
 tellymcp system-prune --env .env --yes
 ```
+
+Normalize an older env file to the current role-aware contract:
+
+```bash
+tellymcp migrate-env ./old.env > ./.migrated-env
+```
+
+The runtime does not fall back to the old schema. If legacy keys are detected,
+startup stops and prints the migration command.
 
 ## Documentation Map
 

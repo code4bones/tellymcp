@@ -64,7 +64,7 @@ DB_PASSWORD=
 DB_NAME=
 GATEWAY_PUBLIC_URL=https://your-domain.example/api/gateway
 GATEWAY_WS_URL=wss://your-domain.example/api/gateway/ws
-GATEWAY_TOKEN=change_me_gateway_token
+GATEWAY_SCOPE_TOKEN=change_me_scope_token
 GATEWAY_AUTH_TOKEN=put_strong_shared_transport_token_here
 ROOT_PREFIX=/api
 PORT=8080
@@ -83,13 +83,16 @@ Minimum client settings:
 DISTRIBUTED_MODE=client
 GATEWAY_PUBLIC_URL=https://your-domain.example/api/gateway
 GATEWAY_WS_URL=wss://your-domain.example/api/gateway/ws
-GATEWAY_TOKEN=change_me_gateway_token
+GATEWAY_SCOPE_TOKEN=change_me_scope_token
 GATEWAY_AUTH_TOKEN=put_strong_shared_transport_token_here
 GATEWAY_USER_UUID=put_owner_uuid_here
 ```
 
+The agent/client machine does not need Redis. Its transient runtime state is
+local, while the stable gateway client UUID is stored in `.mcpsession.json`.
+
 Use the same strong `GATEWAY_AUTH_TOKEN` on the gateway and every client. Keep it
-separate from `GATEWAY_TOKEN`, which scopes gateway data but does not authenticate
+separate from `GATEWAY_SCOPE_TOKEN`, which scopes gateway data but does not authenticate
 the HTTP or WebSocket transport. Generate it once, for example with
 `openssl rand -hex 32`, and do not use the illustrative value above.
 
@@ -192,8 +195,20 @@ Use the MCP HTTP endpoint exposed by `tellymcp run`.
 
 ## 9. Health Checks
 
+Guided dotenv setup:
+
+```bash
+tellymcp configure
+```
+
 ```bash
 tellymcp doctor --env .env
+```
+
+Normalize a legacy env before startup:
+
+```bash
+tellymcp migrate-env ./old.env > ./.migrated-env
 ```
 
 Destructive cleanup:

@@ -520,8 +520,8 @@ export class NotifyService {
       ...(this._config.distributed.gatewayAuthToken
         ? { gatewayAuthToken: this._config.distributed.gatewayAuthToken }
         : {}),
-      ...(this._config.distributed.gatewayToken
-        ? { gatewayToken: this._config.distributed.gatewayToken }
+      ...(this._config.distributed.gatewayScopeToken
+        ? { gatewayScopeToken: this._config.distributed.gatewayScopeToken }
         : {}),
       ...(this._config.project.name
         ? { projectName: this._config.project.name }
@@ -593,8 +593,8 @@ export class NotifyService {
       ...(this._config.distributed.gatewayAuthToken
         ? { gatewayAuthToken: this._config.distributed.gatewayAuthToken }
         : {}),
-      ...(this._config.distributed.gatewayToken
-        ? { gatewayToken: this._config.distributed.gatewayToken }
+      ...(this._config.distributed.gatewayScopeToken
+        ? { gatewayScopeToken: this._config.distributed.gatewayScopeToken }
         : {}),
       ...(this._config.project.name
         ? { projectName: this._config.project.name }

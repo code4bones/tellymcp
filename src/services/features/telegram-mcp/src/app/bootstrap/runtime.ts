@@ -8,9 +8,14 @@ import { createLogger, type Logger } from "../../shared/lib/logger/logger";
 import {
   ProjectIdentityResolver,
   readSessionMarkerState,
+  writeSessionMarkerState,
 } from "../../shared/lib/project-identity/projectIdentity";
 import { RedisStateStore } from "../../shared/integrations/redis/stateStore";
 import { ProcessLocalSessionStore } from "../../shared/integrations/memory/processLocalSessionStore";
+import {
+  ProcessLocalStateStore,
+  type RuntimeStateStore,
+} from "../../shared/integrations/memory/processLocalStateStore";
 import { TelegramTransport } from "../../shared/integrations/telegram/transport";
 import { MinioExchangeStore } from "../../shared/integrations/object-storage/minioExchangeStore";
 import { GatewayHttpService } from "../../features/distributed-gateway/model/gatewayHttpService";
@@ -38,8 +43,8 @@ export type AppRuntime = {
   ) => Promise<T>;
   config: AppConfig;
   logger: Logger;
-  redis: RedisClient;
-  stateStore: RedisStateStore;
+  redis: RedisClient | null;
+  stateStore: RuntimeStateStore;
   telegramTransport: TelegramTransport;
   sessionStore: SessionStore;
   bindingStore: SessionBindingStore;
@@ -68,11 +73,14 @@ export async function createAppRuntime(input: {
   const projectIdentityResolver = new ProjectIdentityResolver(config, logger);
   logger.info("Configuration loaded", {
     mode: config.mode,
-    redis: {
-      host: config.redis.host,
-      port: config.redis.port,
-      db: config.redis.db,
-    },
+    state: config.distributed.mode === "client"
+      ? { backend: "process-local" }
+      : {
+          backend: "redis",
+          host: config.redis.host,
+          port: config.redis.port,
+          db: config.redis.db,
+        },
     logging: {
       level: config.logging.level,
     },
@@ -88,15 +96,9 @@ export async function createAppRuntime(input: {
     distributed: {
       mode: config.distributed.mode,
       gatewayPublicUrlConfigured: Boolean(config.distributed.gatewayPublicUrl),
-      gatewayBindHost: config.distributed.gatewayBindHost,
-      gatewayBindPort: config.distributed.gatewayBindPort,
       gatewayWsUrlConfigured: Boolean(config.distributed.gatewayWsUrl),
       gatewayWsPath: config.distributed.gatewayWsPath,
       gatewayAuthEnabled: Boolean(config.distributed.gatewayAuthToken),
-      gatewayDatabaseConfigured: Boolean(
-        config.distributed.gatewayDatabaseUrl,
-      ),
-      gatewayS3Configured: Boolean(config.distributed.gatewayS3Bucket),
       gatewayRmqConfigured: Boolean(config.distributed.rmq?.host),
     },
     webapp: {
@@ -131,33 +133,59 @@ export async function createAppRuntime(input: {
     project: projectIdentityResolver.getIdentity(),
   });
 
-  const redis = await createRedisClient(config);
-  logger.info("Redis connected", {
-    host: config.redis.host,
-    port: config.redis.port,
-    db: config.redis.db,
-  });
-
-  const stateStore = new RedisStateStore(redis);
-  let sessionStore: SessionStore = stateStore;
+  let redis: RedisClient | null = null;
+  let stateStore: RuntimeStateStore;
+  let sessionStore: SessionStore;
+  if (config.distributed.mode === "client") {
+    const resolvedSession = projectIdentityResolver.resolveSessionDefaults({ cwd: process.cwd() });
+    const marker = readSessionMarkerState(resolvedSession.cwd, logger);
+    stateStore = new ProcessLocalStateStore({
+      ...(marker?.gatewayClientUuid
+        ? { gatewayClientUuid: marker.gatewayClientUuid }
+        : {}),
+      onGatewayClientUuidChange: (gatewayClientUuid) => {
+        writeSessionMarkerState({
+          cwd: resolvedSession.cwd,
+          localSessionId: resolvedSession.sessionId,
+          sessionLabel: resolvedSession.sessionLabel,
+          ...(marker?.envFile ? { envFile: marker.envFile } : {}),
+          ...(marker?.lastSeenToolsHash
+            ? { lastSeenToolsHash: marker.lastSeenToolsHash }
+            : {}),
+          ...(marker?.lastNotifiedToolsHash
+            ? { lastNotifiedToolsHash: marker.lastNotifiedToolsHash }
+            : {}),
+          gatewayClientUuid,
+          logger,
+        });
+      },
+    });
+    sessionStore = new ProcessLocalSessionStore();
+    logger.info("Client process-local state store initialized", {
+      gatewayClientUuidRestored: Boolean(marker?.gatewayClientUuid),
+    });
+  } else {
+    redis = await createRedisClient(config);
+    logger.info("Redis connected", {
+      host: config.redis.host,
+      port: config.redis.port,
+      db: config.redis.db,
+    });
+    const redisStateStore = new RedisStateStore(redis);
+    stateStore = redisStateStore;
+    sessionStore = redisStateStore;
+  }
   const webAppLaunchRegistry = new WebAppLaunchRegistry();
   const objectStore = new MinioExchangeStore(
-    input.callBroker,
-    stateStore,
     config.terminal,
     config.exchange.dir,
-    config.mcp.vfsScope,
     logger,
-    config.distributed.mode,
-    config.distributed.gatewayPublicUrl,
-    config.distributed.gatewayAuthToken,
   );
 
   if (config.distributed.mode === "client") {
     const resolvedSession = projectIdentityResolver.resolveSessionDefaults({
       cwd: process.cwd(),
     });
-    const existingSession = await stateStore.getSession(resolvedSession.sessionId);
     const persistedToolsState = readSessionMarkerState(
       resolvedSession.cwd,
       logger,
@@ -165,9 +193,6 @@ export async function createAppRuntime(input: {
     const terminalTarget = ensureTerminalTargetForSession(config.terminal, {
       sessionId: resolvedSession.sessionId,
       cwd: resolvedSession.cwd,
-      ...(typeof existingSession?.terminalTarget === "string"
-        ? { target: existingSession.terminalTarget }
-        : {}),
     });
 
     if (!terminalTarget) {
@@ -176,45 +201,13 @@ export async function createAppRuntime(input: {
 
     const initialSession = {
       sessionId: resolvedSession.sessionId,
-      ...(typeof existingSession?.label === "string"
-        ? { label: existingSession.label }
-        : { label: resolvedSession.sessionLabel }),
-      ...(typeof existingSession?.cwd === "string"
-        ? { cwd: existingSession.cwd }
-        : { cwd: resolvedSession.cwd }),
-      ...(typeof existingSession?.activeProjectUuid === "string"
-        ? { activeProjectUuid: existingSession.activeProjectUuid }
-        : {}),
-      ...(typeof existingSession?.activeProjectName === "string"
-        ? { activeProjectName: existingSession.activeProjectName }
-        : {}),
-      ...(typeof existingSession?.task === "string"
-        ? { task: existingSession.task }
-        : {}),
-      ...(typeof existingSession?.summary === "string"
-        ? { summary: existingSession.summary }
-        : {}),
-      ...(Array.isArray(existingSession?.files)
-        ? { files: existingSession.files }
-        : {}),
-      ...(Array.isArray(existingSession?.decisions)
-        ? { decisions: existingSession.decisions }
-        : {}),
-      ...(Array.isArray(existingSession?.risks)
-        ? { risks: existingSession.risks }
-        : {}),
+      label: resolvedSession.sessionLabel,
+      cwd: resolvedSession.cwd,
       terminalTarget: terminalTarget,
-      ...(typeof existingSession?.lastTerminalNudgeAt === "string"
-        ? { lastTerminalNudgeAt: existingSession.lastTerminalNudgeAt }
-        : {}),
-      ...(typeof existingSession?.lastSeenToolsHash === "string"
-        ? { lastSeenToolsHash: existingSession.lastSeenToolsHash }
-        : typeof persistedToolsState?.lastSeenToolsHash === "string"
+      ...(typeof persistedToolsState?.lastSeenToolsHash === "string"
           ? { lastSeenToolsHash: persistedToolsState.lastSeenToolsHash }
         : {}),
-      ...(typeof existingSession?.lastNotifiedToolsHash === "string"
-        ? { lastNotifiedToolsHash: existingSession.lastNotifiedToolsHash }
-        : typeof persistedToolsState?.lastNotifiedToolsHash === "string"
+      ...(typeof persistedToolsState?.lastNotifiedToolsHash === "string"
           ? { lastNotifiedToolsHash: persistedToolsState.lastNotifiedToolsHash }
         : {}),
       updatedAt: new Date().toISOString(),
@@ -223,7 +216,12 @@ export async function createAppRuntime(input: {
     sessionStore = new ProcessLocalSessionStore({
       initialSessions: [initialSession],
       onClearSession: async (sessionId) => {
-        await stateStore.clearSession(sessionId);
+        await stateStore.clearBinding(sessionId);
+        await stateStore.clearBrowserAttachment(sessionId);
+        await stateStore.clearBrowserRecording(sessionId);
+        for (const meta of await stateStore.listXchangeFileMetas(sessionId)) {
+          await stateStore.deleteXchangeFileMeta(sessionId, meta.filePath);
+        }
       },
     });
 
@@ -244,8 +242,8 @@ export async function createAppRuntime(input: {
         : {}),
       ...(config.project.name ? { projectName: config.project.name } : {}),
       ...(config.telegram.botUsername ? { botUsername: config.telegram.botUsername } : {}),
-      ...(config.distributed.gatewayToken
-        ? { gatewayToken: config.distributed.gatewayToken }
+      ...(config.distributed.gatewayScopeToken
+        ? { gatewayScopeToken: config.distributed.gatewayScopeToken }
         : {}),
       ...(config.distributed.gatewayUserUuid
         ? { gatewayUserUuid: config.distributed.gatewayUserUuid }
@@ -308,7 +306,7 @@ export async function createAppRuntime(input: {
   const firefoxAttachServer = new FirefoxAttachServer(
     config,
     logger,
-    stateStore,
+    sessionStore,
     stateStore,
   );
   await firefoxAttachServer.start();
@@ -338,7 +336,7 @@ export async function createAppRuntime(input: {
       await firefoxAttachServer.stop();
       await telegramTransport.stop();
       stopAllPtyTargets();
-      redis.disconnect();
+      redis?.disconnect();
       logger.info("Shutdown completed");
     },
   };

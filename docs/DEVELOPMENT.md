@@ -42,6 +42,7 @@ Responsibilities:
 - browser runtime
 - direct MCP endpoint for the agent
 - gateway registration and hello/refresh
+- process-local transient runtime state; no Redis connection
 
 Key runtime entrypoints:
 
@@ -60,10 +61,15 @@ Key runtime entrypoints:
   - env file path
   - last seen tools hash
   - last notified tools hash
+  - stable gateway client UUID
 - `.mcp-xchange/`
   - local structured records
   - file artifacts
   - screenshots
+
+Redis belongs to gateway and `both` runtimes. Client bindings, pending requests,
+browser attachment state, and other transient coordination state are kept in the
+client process. Do not restore a client-side Redis fallback.
 
 ### Gateway Database
 
@@ -222,7 +228,12 @@ When updating runtime behavior:
 - update `README.md`
 - update `README-ru.md`
 - update `.env` examples/templates
+- update `docs/ENVIRONMENT.md` whenever an environment key is added, renamed, or removed
 - update `TOOLS.md` if tool behavior changed
 - update this file if the architectural model changed
 
 Do not leave legacy pairing/inbox documentation in place after model changes.
+
+Environment migrations must go through
+`tellymcp migrate-env <input> > <output>` so production files, examples, and
+startup validation follow the same contract.

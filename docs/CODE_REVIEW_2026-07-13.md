@@ -23,6 +23,9 @@ reviews rather than replacing them.
   gateway health route remains public, and all env templates and standalone docs now
   require the transport token. The updated deployment was verified operationally on
   `2026-07-14`.
+- Environment follow-up: the scope-only `GATEWAY_TOKEN` name referenced by this
+  historical review was renamed to `GATEWAY_SCOPE_TOKEN`. It remains distinct from
+  the required `GATEWAY_AUTH_TOKEN` transport credential.
 - `H-01`: **Resolved** on `2026-07-14`.
   The direct `ws` dependency is now `8.21.0`, the MCP SDK and vulnerable transitive
   dependencies were refreshed to patched versions, and every inbound WebSocket
@@ -59,7 +62,8 @@ authentication problems found by this review have now been remediated:
 1. Telegram WebApp validation accepts an identity from unsigned `initDataUnsafe`
    after validating a different identity in signed raw init data.
 2. Gateway HTTP and WebSocket authentication is optional, while the recommended
-   deployment examples configure `GATEWAY_TOKEN` instead of the separate
+   deployment examples configure the then-named `GATEWAY_TOKEN` (now
+   `GATEWAY_SCOPE_TOKEN`) instead of the separate
    `GATEWAY_AUTH_TOKEN` that actually protects the transport.
 
 H-02 and H-03 are resolved under the documented browser-attach network trust boundary
@@ -135,9 +139,9 @@ Files:
 - `docker-compose.yml:63-71`
 
 Both gateway transports explicitly allow all requests when `GATEWAY_AUTH_TOKEN` is
-missing. The documented setup instead requires `GATEWAY_TOKEN` and leaves
+missing. The documented setup instead required the then-named `GATEWAY_TOKEN` and left
 `GATEWAY_AUTH_TOKEN` commented out. These values are not interchangeable:
-`GATEWAY_TOKEN` is used for gateway scope/binding, while `GATEWAY_AUTH_TOKEN` supplies
+`GATEWAY_SCOPE_TOKEN` is used for gateway scope/binding, while `GATEWAY_AUTH_TOKEN` supplies
 the HTTP/WS `Authorization` header.
 
 The exposed surface includes state pruning, user/client registration, session and

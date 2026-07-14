@@ -12,6 +12,8 @@ import { redactSecrets } from "../../../shared/lib/redact-secrets/redactSecrets"
 import type {
   ClearSessionContextInput,
   ClearSessionContextOutput,
+  GetRuntimeDiagnosticsInput,
+  GetRuntimeDiagnosticsOutput,
   GetSessionContextInput,
   GetSessionContextOutput,
   SetSessionContextInput,
@@ -19,6 +21,16 @@ import type {
   RenameSessionInput,
   RenameSessionOutput,
 } from "../../../entities/session/model/types";
+
+type RuntimeDiagnosticsContext = {
+  mode: "client" | "gateway" | "both";
+  packageVersion: string;
+  protocolVersion: string;
+  nodeId?: string | undefined;
+  gatewayWsUrlConfigured: boolean;
+  gatewayAuthConfigured: boolean;
+  pingRedis?: (() => Promise<string>) | undefined;
+};
 
 type RemoteConsoleInvoker = {
   invokeForRelaySession<T>(
@@ -35,17 +47,195 @@ export class SessionContextService {
     private readonly logger: Logger,
     private readonly projectIdentityResolver: ProjectIdentityResolver,
     private readonly remoteConsoleInvoker?: RemoteConsoleInvoker,
+    private readonly runtimeDiagnostics?: RuntimeDiagnosticsContext,
   ) {}
+
+  private getRemoteConsoleInvoker(): RemoteConsoleInvoker | undefined {
+    return this.runtimeDiagnostics?.mode === "client"
+      ? undefined
+      : this.remoteConsoleInvoker;
+  }
+
+  private formatDiagnosticError(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+    const redacted = redactSecrets(message).replace(/\s+/gu, " ").trim();
+    return redacted.length > 500
+      ? `${redacted.slice(0, 497)}...`
+      : redacted || "Unknown error";
+  }
+
+  private finalizeDiagnostics(
+    output: Omit<GetRuntimeDiagnosticsOutput, "status">,
+  ): GetRuntimeDiagnosticsOutput {
+    const degraded = Object.values(output.checks).some(
+      (check) => check.status !== "ok",
+    );
+    return {
+      ...output,
+      status: degraded ? "degraded" : "ok",
+    };
+  }
+
+  private async collectLocalDiagnostics(
+    sessionId: string,
+  ): Promise<GetRuntimeDiagnosticsOutput> {
+    const runtime = this.runtimeDiagnostics;
+    let session: Awaited<ReturnType<SessionStore["getSession"]>> = null;
+    let sessionStoreCheck: GetRuntimeDiagnosticsOutput["checks"]["session_store"];
+    try {
+      session = await this.sessionStore.getSession(sessionId);
+      await this.bindingStore.getBinding(sessionId);
+      sessionStoreCheck = {
+        status: "ok",
+        message: session
+          ? "Session and route stores are readable; session metadata exists."
+          : "Session and route stores are readable; no saved metadata exists for this id.",
+      };
+    } catch (error) {
+      sessionStoreCheck = {
+        status: "error",
+        message: `Session store check failed: ${this.formatDiagnosticError(error)}`,
+      };
+    }
+
+    let redisCheck: GetRuntimeDiagnosticsOutput["checks"]["redis"];
+    if (runtime?.mode === "client") {
+      redisCheck = {
+        status: "ok",
+        message: "Redis is not required in client mode; process-local state is active.",
+      };
+    } else if (!runtime?.pingRedis) {
+      redisCheck = {
+        status: "warn",
+        message: "Runtime Redis probe is unavailable.",
+      };
+    } else {
+      try {
+        const reply = await runtime.pingRedis();
+        redisCheck = {
+          status: reply.trim().toUpperCase() === "PONG" ? "ok" : "warn",
+          message: `Redis probe returned ${reply.trim() || "an empty response"}.`,
+        };
+      } catch (error) {
+        redisCheck = {
+          status: "error",
+          message: `Redis probe failed: ${this.formatDiagnosticError(error)}`,
+        };
+      }
+    }
+
+    const mode = runtime?.mode ?? "client";
+    const gatewayConfigured = Boolean(runtime?.gatewayWsUrlConfigured);
+    const gatewayConfiguration =
+      mode === "gateway"
+        ? {
+            status: "ok" as const,
+            message:
+              "Gateway runtime does not require an outbound gateway WebSocket URL.",
+          }
+        : gatewayConfigured
+          ? {
+              status: "ok" as const,
+              message: runtime?.gatewayAuthConfigured
+                ? "Gateway WebSocket URL and authentication are configured."
+                : "Gateway WebSocket URL is configured; authentication is not configured.",
+            }
+          : {
+              status: "error" as const,
+              message:
+                "Gateway WebSocket URL is not configured for this client runtime.",
+            };
+
+    return this.finalizeDiagnostics({
+      checked_at: new Date().toISOString(),
+      session_id: sessionId,
+      runtime: {
+        mode,
+        package_version: runtime?.packageVersion ?? "unknown",
+        protocol_version: runtime?.protocolVersion ?? "unknown",
+        ...(runtime?.nodeId ? { node_id: runtime.nodeId } : {}),
+      },
+      checks: {
+        configuration: runtime
+          ? {
+              status: "ok",
+              message: "Normalized environment schema was accepted at startup.",
+            }
+          : {
+              status: "warn",
+              message: "Runtime configuration metadata is unavailable.",
+            },
+        redis: redisCheck,
+        session_store: sessionStoreCheck,
+        terminal: session?.terminalTarget
+          ? {
+              status: "ok",
+              message: "A PTY terminal target is configured for this session.",
+            }
+          : {
+              status: "warn",
+              message: "No PTY terminal target is configured for this session.",
+            },
+        gateway_configuration: gatewayConfiguration,
+        relay: {
+          status: "ok",
+          message: "Local diagnostic action completed.",
+        },
+      },
+    });
+  }
+
+  public async getRuntimeDiagnostics(
+    input: GetRuntimeDiagnosticsInput,
+  ): Promise<GetRuntimeDiagnosticsOutput> {
+    const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
+    const remoteConsoleInvoker = this.getRemoteConsoleInvoker();
+    if (!remoteConsoleInvoker) {
+      return await this.collectLocalDiagnostics(resolved.sessionId);
+    }
+
+    try {
+      const remote =
+        await remoteConsoleInvoker.invokeForRelaySession<GetRuntimeDiagnosticsOutput>(
+          resolved.sessionId,
+          "telegramMcp.sessionContext.getRuntimeDiagnosticsRemote",
+          input as Record<string, unknown>,
+        );
+      return this.finalizeDiagnostics({
+        ...remote,
+        checks: {
+          ...remote.checks,
+          relay: {
+            status: "ok",
+            message: "Gateway-to-client relay completed successfully.",
+          },
+        },
+      });
+    } catch (error) {
+      const local = await this.collectLocalDiagnostics(resolved.sessionId);
+      return this.finalizeDiagnostics({
+        ...local,
+        checks: {
+          ...local.checks,
+          relay: {
+            status: "error",
+            message: `Gateway-to-client relay failed: ${this.formatDiagnosticError(error)}`,
+          },
+        },
+      });
+    }
+  }
 
   public async setContext(
     input: SetSessionContextInput,
   ): Promise<SetSessionContextOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<SetSessionContextOutput>(
-      resolved.sessionId,
-      "telegramMcp.sessionContext.setContextRemote",
-      input as Record<string, unknown>,
-    );
+    const remote =
+      await this.getRemoteConsoleInvoker()?.invokeForRelaySession<SetSessionContextOutput>(
+        resolved.sessionId,
+        "telegramMcp.sessionContext.setContextRemote",
+        input as Record<string, unknown>,
+      );
     if (remote) {
       return remote;
     }
@@ -90,10 +280,12 @@ export class SessionContextService {
         : existing?.risks
           ? { risks: existing.risks }
           : {}),
-      ...(existing?.terminalTarget ? { terminalTarget: existing.terminalTarget } : {}),
+      ...(existing?.terminalTarget
+        ? { terminalTarget: existing.terminalTarget }
+        : {}),
       ...(existing?.lastTerminalNudgeAt
         ? { lastTerminalNudgeAt: existing.lastTerminalNudgeAt }
-          : {}),
+        : {}),
       ...(existing?.lastSeenToolsHash
         ? { lastSeenToolsHash: existing.lastSeenToolsHash }
         : {}),
@@ -131,11 +323,12 @@ export class SessionContextService {
     input: RenameSessionInput,
   ): Promise<RenameSessionOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<RenameSessionOutput>(
-      resolved.sessionId,
-      "telegramMcp.sessionContext.renameSessionRemote",
-      input as Record<string, unknown>,
-    );
+    const remote =
+      await this.getRemoteConsoleInvoker()?.invokeForRelaySession<RenameSessionOutput>(
+        resolved.sessionId,
+        "telegramMcp.sessionContext.renameSessionRemote",
+        input as Record<string, unknown>,
+      );
     if (remote) {
       return remote;
     }
@@ -158,7 +351,9 @@ export class SessionContextService {
       ...(existing?.files ? { files: existing.files } : {}),
       ...(existing?.decisions ? { decisions: existing.decisions } : {}),
       ...(existing?.risks ? { risks: existing.risks } : {}),
-      ...(existing?.terminalTarget ? { terminalTarget: existing.terminalTarget } : {}),
+      ...(existing?.terminalTarget
+        ? { terminalTarget: existing.terminalTarget }
+        : {}),
       ...(existing?.lastTerminalNudgeAt
         ? { lastTerminalNudgeAt: existing.lastTerminalNudgeAt }
         : {}),
@@ -194,11 +389,12 @@ export class SessionContextService {
     input: GetSessionContextInput,
   ): Promise<GetSessionContextOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<GetSessionContextOutput>(
-      resolved.sessionId,
-      "telegramMcp.sessionContext.getContextRemote",
-      input as Record<string, unknown>,
-    );
+    const remote =
+      await this.getRemoteConsoleInvoker()?.invokeForRelaySession<GetSessionContextOutput>(
+        resolved.sessionId,
+        "telegramMcp.sessionContext.getContextRemote",
+        input as Record<string, unknown>,
+      );
     if (remote) {
       return remote;
     }
@@ -277,11 +473,12 @@ export class SessionContextService {
     input: ClearSessionContextInput,
   ): Promise<ClearSessionContextOutput> {
     const resolved = this.projectIdentityResolver.resolveSessionDefaults(input);
-    const remote = await this.remoteConsoleInvoker?.invokeForRelaySession<ClearSessionContextOutput>(
-      resolved.sessionId,
-      "telegramMcp.sessionContext.clearContextRemote",
-      input as Record<string, unknown>,
-    );
+    const remote =
+      await this.getRemoteConsoleInvoker()?.invokeForRelaySession<ClearSessionContextOutput>(
+        resolved.sessionId,
+        "telegramMcp.sessionContext.clearContextRemote",
+        input as Record<string, unknown>,
+      );
     if (remote) {
       return remote;
     }
@@ -292,7 +489,9 @@ export class SessionContextService {
     }
     await this.sessionStore.clearSession(resolved.sessionId);
     await this.bindingStore.clearBinding(resolved.sessionId);
-    this.projectIdentityResolver.removeSessionMarker(existing?.cwd || resolved.cwd);
+    this.projectIdentityResolver.removeSessionMarker(
+      existing?.cwd || resolved.cwd,
+    );
 
     this.logger.info("Session context cleared", {
       sessionId: resolved.sessionId,
@@ -306,5 +505,4 @@ export class SessionContextService {
       cleared_pairing: true,
     };
   }
-
 }

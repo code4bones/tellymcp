@@ -120,6 +120,10 @@ For client workspaces:
   - `session_label`
   - `env_file`
   - tools hash state
+  - stable `gateway_client_uuid`
+
+Client runtimes do not use Redis. Redis configuration and diagnostics belong to
+gateway/`both` runtimes only.
 
 If the workspace already has `.mcpsession.json`, plain:
 

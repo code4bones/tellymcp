@@ -16,7 +16,7 @@ export class GatewaySessionsService {
     private readonly maintenanceStore: MaintenanceStore,
     private readonly gatewayPublicUrl?: string,
     private readonly gatewayAuthToken?: string,
-    private readonly gatewayToken?: string,
+    private readonly gatewayScopeToken?: string,
     private readonly gatewayUserUuid?: string,
     private readonly projectName?: string,
     private readonly botUsername?: string,
@@ -37,7 +37,7 @@ export class GatewaySessionsService {
       ...(this.gatewayAuthToken
         ? { gatewayAuthToken: this.gatewayAuthToken }
         : {}),
-      ...(this.gatewayToken ? { gatewayToken: this.gatewayToken } : {}),
+      ...(this.gatewayScopeToken ? { gatewayScopeToken: this.gatewayScopeToken } : {}),
       ...(this.gatewayUserUuid ? { gatewayUserUuid: this.gatewayUserUuid } : {}),
       ...(this.projectName ? { projectName: this.projectName } : {}),
       ...(this.botUsername ? { botUsername: this.botUsername } : {}),
@@ -56,7 +56,7 @@ export class GatewaySessionsService {
         ...(input.client_uuid?.trim()
           ? { client_uuid: input.client_uuid.trim() }
           : {}),
-        ...(this.gatewayToken ? { gateway_token: this.gatewayToken } : {}),
+        ...(this.gatewayScopeToken ? { gateway_token: this.gatewayScopeToken } : {}),
         ...(this.gatewayUserUuid
           ? { owner_user_uuid: this.gatewayUserUuid }
           : {}),

@@ -71,7 +71,8 @@ Status: accepted
 Status: accepted
 
 - `.mcpsession.json` is the canonical workspace-level startup marker
-- it stores local session identity, label, env path, and tools-hash state
+- it stores local session identity, label, env path, tools-hash state, and the
+  stable gateway client UUID for client workspaces
 - `.tellymcpsession.json` is retired and must not be reintroduced
 
 ### D-008 — `TOOLS.md` and the Codex plugin are separate layers
@@ -293,6 +294,34 @@ Status: accepted
 - file access must stay within the selected session workspace after symlink resolution and remain subject to body-size limits
 - temporary gateway files expire after 10 minutes and download links allow a small bounded number of GET requests
 - client-provided temporary filenames are untrusted and sanitized to a safe basename before storage and `Content-Disposition`; control and filesystem-reserved characters are replaced
+
+### D-030 — Environment names describe their actual scope and legacy keys fail fast
+
+Status: accepted
+
+- `GATEWAY_SCOPE_TOKEN` is the data-scope key; `GATEWAY_AUTH_TOKEN` is the transport credential
+- terminal configuration uses only `TERMINAL_*`; `TMUX_*` is retired
+- request policy uses `TELEGRAM_REQUEST_MODE`, the database schema uses `DB_SCHEMA`, and logfeed uses `LOGFEED_ENABLED`
+- removed settings are not retained as ignored compatibility aliases
+- startup reports all detected legacy names and requires migration; there is no old-schema fallback
+- `tellymcp migrate-env <input>` writes normalized dotenv to stdout and diagnostics to stderr
+- `docs/ENVIRONMENT.md` is the canonical operator contract
+
+### D-031 — Redis is gateway-only; clients use local runtime state
+
+Status: accepted
+
+- Redis is required only by `gateway` and `both` runtimes
+- a `client` runtime must not connect to Redis or require `REDIS_*` variables
+- client session, binding, pending-request, browser-attach, and related transient
+  state is process-local; structured xchange data remains in the existing local
+  `.mcp-xchange` storage
+- the stable gateway client UUID is persisted in `.mcpsession.json`, so removing
+  Redis does not create a new gateway identity on every client restart
+- client env templates, the configurator, migration output, doctor, prune, and
+  runtime diagnostics must reflect that Redis is not a client dependency
+- `REDIS_*` remains part of gateway and `both` configuration and must not be
+  reintroduced into client examples as a compatibility fallback
 
 ## Deferred Or Not Yet Accepted
 

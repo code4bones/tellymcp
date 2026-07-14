@@ -80,6 +80,7 @@ type SessionMarkerShape = {
   env_file?: unknown;
   last_seen_tools_hash?: unknown;
   last_notified_tools_hash?: unknown;
+  gateway_client_uuid?: unknown;
   created_at?: unknown;
   updated_at?: unknown;
   first_seen_local_session_id?: unknown;
@@ -154,6 +155,7 @@ export type SessionMarkerState = {
   envFile?: string | undefined;
   lastSeenToolsHash?: string | undefined;
   lastNotifiedToolsHash?: string | undefined;
+  gatewayClientUuid?: string | undefined;
   updatedAt?: string | undefined;
 };
 
@@ -199,6 +201,10 @@ export function readSessionMarkerState(
       parsed.last_notified_tools_hash.trim()
         ? { lastNotifiedToolsHash: parsed.last_notified_tools_hash.trim() }
         : {}),
+      ...(typeof parsed.gateway_client_uuid === "string" &&
+      parsed.gateway_client_uuid.trim()
+        ? { gatewayClientUuid: parsed.gateway_client_uuid.trim() }
+        : {}),
       ...(typeof parsed.updated_at === "string" && parsed.updated_at.trim()
         ? { updatedAt: parsed.updated_at.trim() }
         : {}),
@@ -220,6 +226,7 @@ export function writeSessionMarkerState(input: {
   envFile?: string | undefined;
   lastSeenToolsHash?: string | undefined;
   lastNotifiedToolsHash?: string | undefined;
+  gatewayClientUuid?: string | undefined;
   logger?: Logger;
 }): void {
   const resolvedCwd = resolve(input.cwd);
@@ -260,6 +267,12 @@ export function writeSessionMarkerState(input: {
             ? { last_notified_tools_hash: input.lastNotifiedToolsHash.trim() }
             : current?.lastNotifiedToolsHash
               ? { last_notified_tools_hash: current.lastNotifiedToolsHash }
+              : {}),
+          ...(typeof input.gatewayClientUuid === "string" &&
+          input.gatewayClientUuid.trim()
+            ? { gateway_client_uuid: input.gatewayClientUuid.trim() }
+            : current?.gatewayClientUuid
+              ? { gateway_client_uuid: current.gatewayClientUuid }
               : {}),
           created_at: now,
           updated_at: now,

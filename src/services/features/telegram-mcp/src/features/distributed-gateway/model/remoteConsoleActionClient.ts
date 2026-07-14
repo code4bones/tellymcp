@@ -2,18 +2,30 @@ import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
 
 function isBackendErrorLike(
   value: unknown,
-): value is { message?: string; statusCode: number; code: string; name?: string; data?: unknown } {
+): value is {
+  message?: string;
+  statusCode: number;
+  code: string;
+  name?: string;
+  data?: unknown;
+} {
   return Boolean(
     value &&
-      typeof value === "object" &&
-      typeof (value as { statusCode?: unknown }).statusCode === "number" &&
-      typeof (value as { code?: unknown }).code === "string",
+    typeof value === "object" &&
+    typeof (value as { statusCode?: unknown }).statusCode === "number" &&
+    typeof (value as { code?: unknown }).code === "string",
   );
 }
 
-function formatBackendErrorLike(
-  value: { message?: string; statusCode: number; code: string; name?: string; data?: unknown },
-): string {
+function formatBackendErrorLike(value: {
+  message?: string;
+  statusCode: number;
+  code: string;
+  name?: string;
+  data?: unknown;
+}): string {
+  const truncate = (text: string, maxLength = 2_000): string =>
+    text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
   const details: string[] = [];
   if (typeof value.code === "string" && value.code.trim()) {
     details.push(`code=${value.code.trim()}`);
@@ -23,14 +35,14 @@ function formatBackendErrorLike(
   }
   if (value.data !== undefined) {
     try {
-      details.push(`data=${JSON.stringify(value.data)}`);
+      details.push(`data=${truncate(JSON.stringify(value.data))}`);
     } catch {
-      details.push(`data=${String(value.data)}`);
+      details.push(`data=${truncate(String(value.data))}`);
     }
   }
   const base =
     typeof value.message === "string" && value.message.trim()
-      ? value.message.trim()
+      ? truncate(value.message.trim())
       : `${value.name ?? "BackendError"} (${value.code})`;
   return details.length > 0 ? `${base}\n${details.join("\n")}` : base;
 }
@@ -88,14 +100,17 @@ export class RemoteConsoleActionClient {
   ): Promise<T> {
     const target = await this.resolveTarget(sessionId, params);
 
-    const result = await this.callBroker<T>("telegramMcp.gatewaySocket.requestClientAction", {
-      clientUuid: target.clientUuid,
-      actionName,
-      params: {
-        ...params,
-        session_id: target.localSessionId,
+    const result = await this.callBroker<T>(
+      "telegramMcp.gatewaySocket.requestClientAction",
+      {
+        clientUuid: target.clientUuid,
+        actionName,
+        params: {
+          ...params,
+          session_id: target.localSessionId,
+        },
       },
-    });
+    );
 
     if (isBackendErrorLike(result)) {
       throw new Error(formatBackendErrorLike(result));

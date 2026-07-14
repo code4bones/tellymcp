@@ -14,7 +14,7 @@ import { TELEGRAM_MCP_ENSUREDB_SERVICE_NAME } from "./ensuredb.service";
 
 export const TELEGRAM_MCP_GATEWAY_SERVICE_NAME = "telegramMcp.gateway";
 
-const MCP_SCHEMA = process.env.DB_SCHEME || "mcp";
+const MCP_SCHEMA = process.env.DB_SCHEMA || "mcp";
 const DISTRIBUTED_MODE = process.env.DISTRIBUTED_MODE || "client";
 const GATEWAY_ENABLED =
   DISTRIBUTED_MODE === "gateway" || DISTRIBUTED_MODE === "both";

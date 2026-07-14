@@ -113,8 +113,8 @@ export class TransportProjectState {
         this.host.config.telegram.botUsername ||
         "telegram-mcp client",
       bot_username: this.host.config.telegram.botUsername,
-      ...(this.host.config.distributed.gatewayToken
-        ? { gateway_token: this.host.config.distributed.gatewayToken }
+      ...(this.host.config.distributed.gatewayScopeToken
+        ? { gateway_token: this.host.config.distributed.gatewayScopeToken }
         : {}),
       meta: {
         telegram_chat_id: principal.telegramChatId,

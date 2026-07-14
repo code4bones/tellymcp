@@ -64,7 +64,7 @@ DB_PASSWORD=
 DB_NAME=
 GATEWAY_PUBLIC_URL=https://your-domain.example/api/gateway
 GATEWAY_WS_URL=wss://your-domain.example/api/gateway/ws
-GATEWAY_TOKEN=change_me_gateway_token
+GATEWAY_SCOPE_TOKEN=change_me_scope_token
 GATEWAY_AUTH_TOKEN=put_strong_shared_transport_token_here
 ROOT_PREFIX=/api
 PORT=8080
@@ -83,13 +83,16 @@ DISTRIBUTED_MODE=gateway
 DISTRIBUTED_MODE=client
 GATEWAY_PUBLIC_URL=https://your-domain.example/api/gateway
 GATEWAY_WS_URL=wss://your-domain.example/api/gateway/ws
-GATEWAY_TOKEN=change_me_gateway_token
+GATEWAY_SCOPE_TOKEN=change_me_scope_token
 GATEWAY_AUTH_TOKEN=put_strong_shared_transport_token_here
 GATEWAY_USER_UUID=put_owner_uuid_here
 ```
 
+На машине agent/client Redis не нужен. Временное runtime-состояние хранится
+локально, а стабильный gateway client UUID — в `.mcpsession.json`.
+
 Используйте один и тот же стойкий `GATEWAY_AUTH_TOKEN` на gateway и всех клиентах.
-Не смешивайте его с `GATEWAY_TOKEN`: последний разделяет данные gateway по scope,
+Не смешивайте его с `GATEWAY_SCOPE_TOKEN`: последний разделяет данные gateway по scope,
 но не аутентифицирует HTTP- или WebSocket-транспорт. Сгенерируйте токен один раз,
 например командой `openssl rand -hex 32`, и не используйте пример значения выше.
 
@@ -192,8 +195,20 @@ http://127.0.0.1:8787/mcp
 
 ## 9. Проверки
 
+Настройка dotenv через локальный web-конфигуратор:
+
+```bash
+tellymcp configure
+```
+
 ```bash
 tellymcp doctor --env .env
+```
+
+Перед запуском старый env можно нормализовать командой:
+
+```bash
+tellymcp migrate-env ./old.env > ./.migrated-env
 ```
 
 Разрушительная очистка:

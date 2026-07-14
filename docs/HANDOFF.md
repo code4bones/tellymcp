@@ -10,6 +10,8 @@ Last updated: `2026-07-14`
 - runtime model: gateway-first
 - terminal model: built-in PTY only
 - workspace marker: `.mcpsession.json` only
+- persistence split: Redis is gateway-only; clients use process-local transient
+  state and keep their stable gateway client UUID in `.mcpsession.json`
 - browser attach: Firefox + Chrome local extensions are implemented and exported through CLI
 - browser recording: structured bundles under `.mcp-xchange/web/<tab-title>-<timestamp>/`
 

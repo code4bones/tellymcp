@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import * as z from "zod/v4";
 
 import type { QueueMode } from "../../shared/types/common";
+import { assertNoLegacyEnvironmentVariables } from "./environmentContract";
 
 const emptyStringToUndefined = (value: unknown): unknown => {
   if (typeof value !== "string") {
@@ -60,13 +61,12 @@ const envSchema = z.object({
     emptyStringToUndefined,
     z.enum(["en", "ru"]).optional(),
   ),
-  REDIS_HOST: z.string().min(1),
-  REDIS_PORT: z.coerce.number().int().positive(),
-  REDIS_DB: z.coerce.number().int().nonnegative(),
+  REDIS_HOST: z.string().min(1).default("127.0.0.1"),
+  REDIS_PORT: z.coerce.number().int().positive().default(6379),
+  REDIS_DB: z.coerce.number().int().nonnegative().default(1),
   REDIS_USERNAME: optionalNonEmptyString,
   REDIS_PASSWORD: optionalNonEmptyString,
-  MODE: z.enum(["queue", "reject"]).default("queue"),
-  PAIR_CODE_TTL_SECONDS: z.coerce.number().int().positive().default(600),
+  TELEGRAM_REQUEST_MODE: z.enum(["queue", "reject"]).default("queue"),
   PROJECT_NAME: optionalNonEmptyString,
   TELLYMCP_SESSION_ID: optionalNonEmptyString,
   TELLYMCP_SESSION_LABEL: optionalNonEmptyString,
@@ -98,24 +98,16 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((value) => value === "true"),
-  MCP_VFS_SCOPE: z.string().min(1).default("mcp"),
   DISTRIBUTED_MODE: z.enum(["client", "gateway", "both"]).default("client"),
   GATEWAY_PUBLIC_URL: optionalUrlString,
-  GATEWAY_BIND_HOST: z.string().min(1).default("127.0.0.1"),
-  GATEWAY_BIND_PORT: z.coerce.number().int().positive().default(8790),
   GATEWAY_WS_URL: optionalUrlString,
   GATEWAY_WS_PATH: z
     .string()
     .min(1)
     .default(`${(process.env.ROOT_PREFIX || "/api").replace(/\/+$/u, "")}/gateway/ws`),
-  GATEWAY_TOKEN: optionalNonEmptyString,
+  GATEWAY_SCOPE_TOKEN: optionalNonEmptyString,
   GATEWAY_USER_UUID: optionalNonEmptyString,
   GATEWAY_AUTH_TOKEN: optionalNonEmptyString,
-  GATEWAY_DATABASE_URL: optionalNonEmptyString,
-  GATEWAY_S3_ENDPOINT: optionalNonEmptyString,
-  GATEWAY_S3_BUCKET: optionalNonEmptyString,
-  GATEWAY_S3_ACCESS_KEY: optionalNonEmptyString,
-  GATEWAY_S3_SECRET_KEY: optionalNonEmptyString,
   RMQ_HOST: optionalNonEmptyString,
   RMQ_PORT: z.coerce.number().int().positive().optional(),
   RMQ_USER: optionalNonEmptyString,
@@ -281,12 +273,10 @@ export type AppConfig = {
     password?: string;
   };
   mode: QueueMode;
-  pairCodeTtlSeconds: number;
   mcp: {
     httpHost: string;
     httpPort: number;
     httpPath: string;
-    vfsScope: string;
     bearerToken?: string;
     enableDebugRoutes: boolean;
     enablePruneRoute: boolean;
@@ -308,18 +298,11 @@ export type AppConfig = {
   distributed: {
     mode: "client" | "gateway" | "both";
     gatewayPublicUrl?: string;
-    gatewayBindHost: string;
-    gatewayBindPort: number;
     gatewayWsUrl?: string;
     gatewayWsPath: string;
-    gatewayToken?: string;
+    gatewayScopeToken?: string;
     gatewayUserUuid?: string;
     gatewayAuthToken?: string;
-    gatewayDatabaseUrl?: string;
-    gatewayS3Endpoint?: string;
-    gatewayS3Bucket?: string;
-    gatewayS3AccessKey?: string;
-    gatewayS3SecretKey?: string;
     rmq?: {
       host: string;
       port: number;
@@ -400,6 +383,8 @@ export function loadConfig(): AppConfig {
   } else if (existsSync(".env")) {
     process.loadEnvFile(".env");
   }
+
+  assertNoLegacyEnvironmentVariables(process.env);
 
   const parsed = envSchema.parse(process.env);
 
@@ -591,13 +576,11 @@ export function loadConfig(): AppConfig {
       ...(parsed.REDIS_USERNAME ? { username: parsed.REDIS_USERNAME } : {}),
       ...(parsed.REDIS_PASSWORD ? { password: parsed.REDIS_PASSWORD } : {}),
     },
-    mode: parsed.MODE,
-    pairCodeTtlSeconds: parsed.PAIR_CODE_TTL_SECONDS,
+    mode: parsed.TELEGRAM_REQUEST_MODE,
     mcp: {
       httpHost: parsed.MCP_HTTP_HOST,
       httpPort: parsed.MCP_HTTP_PORT,
       httpPath: parsed.MCP_HTTP_PATH,
-      vfsScope: parsed.MCP_VFS_SCOPE,
       ...(parsed.MCP_HTTP_BEARER_TOKEN
         ? { bearerToken: parsed.MCP_HTTP_BEARER_TOKEN }
         : {}),
@@ -646,35 +629,18 @@ export function loadConfig(): AppConfig {
       ...(parsed.GATEWAY_PUBLIC_URL
         ? { gatewayPublicUrl: parsed.GATEWAY_PUBLIC_URL }
         : {}),
-      gatewayBindHost: parsed.GATEWAY_BIND_HOST,
-      gatewayBindPort: parsed.GATEWAY_BIND_PORT,
       ...(parsed.GATEWAY_WS_URL
         ? { gatewayWsUrl: parsed.GATEWAY_WS_URL }
         : {}),
       gatewayWsPath: parsed.GATEWAY_WS_PATH,
-      ...(parsed.GATEWAY_TOKEN
-        ? { gatewayToken: parsed.GATEWAY_TOKEN }
+      ...(parsed.GATEWAY_SCOPE_TOKEN
+        ? { gatewayScopeToken: parsed.GATEWAY_SCOPE_TOKEN }
         : {}),
       ...(parsed.GATEWAY_USER_UUID
         ? { gatewayUserUuid: parsed.GATEWAY_USER_UUID }
         : {}),
       ...(parsed.GATEWAY_AUTH_TOKEN
         ? { gatewayAuthToken: parsed.GATEWAY_AUTH_TOKEN }
-        : {}),
-      ...(parsed.GATEWAY_DATABASE_URL
-        ? { gatewayDatabaseUrl: parsed.GATEWAY_DATABASE_URL }
-        : {}),
-      ...(parsed.GATEWAY_S3_ENDPOINT
-        ? { gatewayS3Endpoint: parsed.GATEWAY_S3_ENDPOINT }
-        : {}),
-      ...(parsed.GATEWAY_S3_BUCKET
-        ? { gatewayS3Bucket: parsed.GATEWAY_S3_BUCKET }
-        : {}),
-      ...(parsed.GATEWAY_S3_ACCESS_KEY
-        ? { gatewayS3AccessKey: parsed.GATEWAY_S3_ACCESS_KEY }
-        : {}),
-      ...(parsed.GATEWAY_S3_SECRET_KEY
-        ? { gatewayS3SecretKey: parsed.GATEWAY_S3_SECRET_KEY }
         : {}),
       ...(parsed.RMQ_HOST
         ? {

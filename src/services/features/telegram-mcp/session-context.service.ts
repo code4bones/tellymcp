@@ -8,10 +8,15 @@ import { RemoteConsoleActionClient } from "./src/features/distributed-gateway/mo
 import { SessionContextService } from "./src/features/session-context/model/sessionContextService";
 import type {
   ClearSessionContextInput,
+  GetRuntimeDiagnosticsInput,
   GetSessionContextInput,
   RenameSessionInput,
   SetSessionContextInput,
 } from "./src/entities/session/model/types";
+import {
+  TELLYMCP_PROTOCOL_VERSION,
+  getTellyMcpPackageVersion,
+} from "./src/shared/lib/version/versionHandshake";
 
 export const TELEGRAM_MCP_SESSION_CONTEXT_SERVICE_NAME =
   "telegramMcp.sessionContext";
@@ -38,6 +43,17 @@ const TelegramMcpSessionContextService: ServiceSchema = {
         ctx: { params: GetSessionContextInput },
       ) {
         return this.getSessionContextService!().getContext(ctx.params);
+      },
+    },
+    getRuntimeDiagnosticsRemote: {
+      params: { $$strict: false },
+      async handler(
+        this: SessionContextServiceCarrier,
+        ctx: { params: GetRuntimeDiagnosticsInput },
+      ) {
+        return this.getSessionContextService!().getRuntimeDiagnostics(
+          ctx.params,
+        );
       },
     },
     setContextRemote: {
@@ -108,9 +124,31 @@ const TelegramMcpSessionContextService: ServiceSchema = {
       runtime.stateStore,
       runtime.logger,
       runtime.projectIdentityResolver,
-      new RemoteConsoleActionClient((actionName, params) =>
-        this.broker.call(actionName, params, { meta: { internal_call: true } }),
-      ),
+      runtime.config.distributed.mode === "client"
+        ? undefined
+        : new RemoteConsoleActionClient((actionName, params) =>
+            this.broker.call(actionName, params, {
+              meta: { internal_call: true },
+            }),
+          ),
+      {
+        mode: runtime.config.distributed.mode,
+        packageVersion: getTellyMcpPackageVersion(__dirname),
+        protocolVersion: TELLYMCP_PROTOCOL_VERSION,
+        ...(process.env.NODE_ID?.trim()
+          ? { nodeId: process.env.NODE_ID.trim() }
+          : {}),
+        gatewayWsUrlConfigured: Boolean(
+          runtime.config.distributed.gatewayWsUrl,
+        ),
+        gatewayAuthConfigured: Boolean(
+          runtime.config.distributed.gatewayAuthToken ||
+          runtime.config.distributed.gatewayScopeToken,
+        ),
+        ...(runtime.redis
+          ? { pingRedis: async () => await runtime.redis!.ping() }
+          : {}),
+      },
     );
     this.logger.info("telegram_mcp session-context service is ready");
   },

@@ -2428,8 +2428,8 @@ for (const __tellyKey of Object.getOwnPropertyNames(window)) {
       ...(this.config.distributed.gatewayAuthToken
         ? { gatewayAuthToken: this.config.distributed.gatewayAuthToken }
         : {}),
-      ...(this.config.distributed.gatewayToken
-        ? { gatewayToken: this.config.distributed.gatewayToken }
+      ...(this.config.distributed.gatewayScopeToken
+        ? { gatewayScopeToken: this.config.distributed.gatewayScopeToken }
         : {}),
       ...(this.config.project.name
         ? { projectName: this.config.project.name }

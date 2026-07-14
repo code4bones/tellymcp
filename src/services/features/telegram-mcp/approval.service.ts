@@ -58,7 +58,7 @@ const TelegramMcpApprovalService: ServiceSchema = {
     this.logger.info("Starting telegram_mcp approval service");
     this.approvalOrchestrator = new HumanApprovalOrchestrator(
       runtime.config,
-      runtime.stateStore,
+      runtime.sessionStore,
       runtime.stateStore,
       runtime.stateStore,
       runtime.telegramTransport,

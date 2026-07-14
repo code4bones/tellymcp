@@ -92,7 +92,7 @@ Utility tools:
 Gateway-first runtime model:
 
 - agents authenticate the gateway HTTP/WS transport through `GATEWAY_AUTH_TOKEN`
-  and register into their gateway scope through `GATEWAY_TOKEN`
+  and register into their gateway scope through `GATEWAY_SCOPE_TOKEN`
 - Telegram no longer links sessions with pair codes
 - `/menu` in the gateway bot shows available remote consoles directly
 - one running agent console is one logical session/console target
@@ -206,6 +206,42 @@ Output:
   Legacy field name. If present, this is the current Telegram route metadata for the console.
 - `terminal?`
   Terminal runtime metadata for the console.
+
+## `get_runtime_diagnostics`
+
+Purpose:
+
+- Run safe, read-only health checks for one console through the same gateway route used by normal tools.
+- Diagnose configuration, runtime state storage, PTY state, version/protocol metadata, and gateway-to-client relay without returning secrets or raw connection strings.
+- Redis is probed only for gateway/`both` runtimes. On a client, the `redis` compatibility check reports that Redis is not required and process-local state is active.
+- Return a structured degraded result when relay fails instead of a deeply nested backend exception.
+
+Input:
+
+- `session_id?`
+  In gateway mode, use the canonical `session_id` returned by `list_gateway_sessions`.
+
+Output:
+
+- `status`
+  - `ok`
+  - `degraded`
+- `checked_at`
+- `session_id`
+- `runtime`
+  - `mode`
+  - `package_version`
+  - `protocol_version`
+  - `node_id?`
+- `checks`
+  - `configuration`
+  - `redis`
+  - `session_store`
+  - `terminal`
+  - `gateway_configuration`
+  - `relay`
+
+Each check contains only `status` and a redacted human-readable `message`.
 
 ## `get_file_list`
 

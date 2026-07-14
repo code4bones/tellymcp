@@ -17,6 +17,8 @@ The project has already moved to the gateway-first model. This document now trac
 - a chat host connects to the concrete `/api/mcp` endpoint; `/api` remains the
   OAuth issuer/audience base
 - chat-host file reads use `get_file`; text mode returns exact UTF-8 project files, URL mode creates a bounded short-lived gateway copy, and base64 remains an explicit fallback
+- Redis is gateway-only; clients use process-local transient state and persist
+  only stable gateway identity in `.mcpsession.json`
 
 ## Invariants
 
@@ -30,6 +32,8 @@ Do not regress these:
 6. `.mcpsession.json` is the workspace-level startup marker
 7. `.mcpsession.json` also stores per-console tools hash state
 8. gateway-routed file reads must use canonical session ids and remain confined to the selected console workspace
+9. client startup, configuration, diagnostics, and migration must not require or
+   silently reconnect to Redis
 
 ## Active Roadmap
 
@@ -38,6 +42,7 @@ Do not regress these:
 - keep all GitHub/npm docs aligned with the current gateway-first model
 - remove stale pairing/inbox/local-linking instructions
 - keep samples/templates trimmed to actually used env keys
+- keep `docs/ENVIRONMENT.md`, runtime validation, and production role files on one env contract
 
 ### Browser Reliability
 

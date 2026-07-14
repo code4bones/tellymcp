@@ -11,7 +11,7 @@ type EnsureDbServiceCarrier = Service & {
   ensureGatewaySchema?: () => Promise<void>;
 };
 
-const MCP_SCHEMA = process.env.DB_SCHEME || "mcp";
+const MCP_SCHEMA = process.env.DB_SCHEMA || "mcp";
 
 const TelegramMcpEnsureDbService: ServiceSchema = {
   name: TELEGRAM_MCP_ENSUREDB_SERVICE_NAME,

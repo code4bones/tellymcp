@@ -71,10 +71,9 @@ const logger: any = [
 const metricsEnabled = process.env.MOLECULER_METRICS === "true";
 const metricsPort = +(process.env.METRICS_PORT || 3030);
 const metricsPath = process.env.METRICS_PATH || "/metrics";
-const logFeedEnabled =
-	process.env.ENABLE_LOGFEED != null
-		? !["0", "false", "no", "off"].includes(process.env.ENABLE_LOGFEED.toLowerCase())
-		: process.env.LOGFEED_ENABLED !== "false";
+const logFeedEnabled = !["0", "false", "no", "off"].includes(
+	(process.env.LOGFEED_ENABLED ?? "true").toLowerCase(),
+);
 
 if (logFeedEnabled) {
 	logger.push(

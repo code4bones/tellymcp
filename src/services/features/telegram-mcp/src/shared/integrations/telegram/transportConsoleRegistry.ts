@@ -69,8 +69,8 @@ export class TransportConsoleRegistry {
       ...(input?.principal
         ? { telegram_user_id: input.principal.telegramUserId }
         : {}),
-      ...(this.host.config.distributed.gatewayToken
-        ? { gateway_token: this.host.config.distributed.gatewayToken }
+      ...(this.host.config.distributed.gatewayScopeToken
+        ? { gateway_token: this.host.config.distributed.gatewayScopeToken }
         : {}),
     });
 

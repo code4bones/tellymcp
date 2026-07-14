@@ -67,6 +67,7 @@ import { GetFileListTool } from "./src/features/file-content/model/getFileListTo
 import { SendFileToTelegramTool } from "./src/features/notify/model/sendFileToTelegramTool";
 import { NotifyTelegramTool } from "./src/features/notify/model/notifyTelegramTool";
 import { ClearSessionContextTool } from "./src/features/session-context/model/clearSessionContextTool";
+import { GetRuntimeDiagnosticsTool } from "./src/features/session-context/model/getRuntimeDiagnosticsTool";
 import { GetSessionContextTool } from "./src/features/session-context/model/getSessionContextTool";
 import { RenameSessionTool } from "./src/features/session-context/model/renameSessionTool";
 import { SetSessionContextTool } from "./src/features/session-context/model/setSessionContextTool";
@@ -145,6 +146,9 @@ const TelegramMcpMcpServerService: ServiceSchema = {
         ),
         new RenameSessionTool(sessionContextService.getSessionContextService()),
         new GetSessionContextTool(
+          sessionContextService.getSessionContextService(),
+        ),
+        new GetRuntimeDiagnosticsTool(
           sessionContextService.getSessionContextService(),
         ),
         new ClearSessionContextTool(

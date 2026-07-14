@@ -2,8 +2,25 @@
 
 ## Unreleased
 
+### Changed
+
+- Redis теперь используется только в режимах gateway и `both`. Client runtime
+  больше не подключается к Redis и не требует `REDIS_*`; временное состояние
+  хранится локально в процессе, а стабильный `gateway_client_uuid` — в
+  `.mcpsession.json`. Клиентские шаблоны, migration, configure, doctor, prune и
+  runtime diagnostics приведены к этой модели.
+
 ### Added
 
+- Добавлен локальный web-конфигуратор `tellymcp configure`: browser wizard
+  предлагает выбрать Client или Gateway, показывает role-specific поля,
+  формирует HTTP/WS/WebApp/webhook/OAuth URL из одного Public base URL,
+  показывает русские hints и примеры, выполняет role-specific live-check
+  Telegram, Redis, PostgreSQL, gateway HTTP/WS и RabbitMQ, затем скачивает
+  `.env-client` либо `.env-gateway`.
+- Добавлен безопасный MCP tool `get_runtime_diagnostics` для end-to-end проверки
+  версии/protocol, принятой env-схемы, runtime state store, PTY, gateway config и
+  gateway-to-client relay без вывода секретов; Redis проверяется только на gateway.
 - Добавлены связанные MCP tools `get_file_list` и `get_file` для получения
   файлов из workspace выбранной live-консоли через gateway. Первый возвращает
   список managed files и точные пути, второй принимает `file_path` либо
@@ -146,6 +163,9 @@
 
 ### Fixed
 
+- Remote session-context actions больше не пытаются повторно уйти с client node
+  обратно в gateway без `clientUuid`; backend error payload дополнительно
+  ограничен по размеру, чтобы relay-сбой не создавал рекурсивный exception.
 - Исправлен `Headers have already sent` при работе MCP/WebApp через общий HTTP runtime.
 - Исправлены route/alias проблемы после перехода под `${ROOT_PREFIX}`.
 - Исправлены зависания Mini App bootstrap и проблемы с relative WebApp routes.

@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
@@ -23,11 +30,15 @@ import {
   isForegroundPtyClientMode,
   runForegroundPtyRuntime,
 } from "./services/features/telegram-mcp/src/features/foreground-terminal/model/foregroundTerminalRuntime";
+import { migrateEnvironmentContent } from "./envMigration";
+import { startConfigureServer } from "./configureServer";
 
 type InitMode = "client" | "gateway" | "both";
 type CliCommand =
   | "help"
   | "init"
+  | "configure"
+  | "migrate-env"
   | "run"
   | "mcp"
   | "oauth"
@@ -101,6 +112,8 @@ function printHelp(): void {
   printBanner("CLI", "Telegram control plane for MCP-connected coding agents");
   printSection("Usage", [
     "  tellymcp init <client|gateway|both> [directory]",
+    "  tellymcp configure [--no-open]",
+    "  tellymcp migrate-env <input.env> > .migrated-env",
     "  tellymcp run [--env <file>]",
     "  tellymcp run --env=<file>",
     "  tellymcp run --env .env-client -s backendDev",
@@ -119,6 +132,8 @@ function printHelp(): void {
   printSection("Examples", [
     "  tellymcp init client",
     "  tellymcp init gateway ./gateway-node",
+    "  tellymcp configure",
+    "  tellymcp migrate-env ./old.env > ./new.env",
     "  tellymcp run",
     "  tellymcp run --env .env.client",
     "  tellymcp run --env .env-client -s backendDev",
@@ -152,7 +167,9 @@ function formatMarkerEnvPath(envPath: string, cwd: string): string {
   const resolvedCwd = path.resolve(cwd);
   const resolvedEnvPath = path.resolve(envPath);
   const relativePath = path.relative(resolvedCwd, resolvedEnvPath);
-  return relativePath && !relativePath.startsWith("..") && !path.isAbsolute(relativePath)
+  return relativePath &&
+    !relativePath.startsWith("..") &&
+    !path.isAbsolute(relativePath)
     ? relativePath
     : resolvedEnvPath;
 }
@@ -203,7 +220,7 @@ function persistCliSessionMarker(input: {
         ? { sessionLabel: current.sessionLabel }
         : resolved?.sessionLabel
           ? { sessionLabel: resolved.sessionLabel }
-        : {}),
+          : {}),
     envFile: formatMarkerEnvPath(input.envPath, input.cwd),
   });
 }
@@ -213,10 +230,11 @@ function loadCliEnv(args: string[]): LoadedCliEnv {
   const marker = getSessionMarkerForCwd(process.cwd());
   const explicitSessionOverride =
     readFlagValue(args, "-s") ?? readFlagValue(args, "--session");
-  const sessionOverride = explicitSessionOverride ?? marker?.localSessionId ?? null;
+  const sessionOverride =
+    explicitSessionOverride ?? marker?.localSessionId ?? null;
   const sessionLabelOverride = explicitSessionOverride
     ? explicitSessionOverride
-    : marker?.sessionLabel ?? sessionOverride ?? null;
+    : (marker?.sessionLabel ?? sessionOverride ?? null);
   if (!existsSync(envPath)) {
     fail(`Missing env file: ${envPath}`);
   }
@@ -224,7 +242,9 @@ function loadCliEnv(args: string[]): LoadedCliEnv {
   const envContent = readFileSync(envPath, "utf8");
   const fileEnv = parseDotenv(envContent);
   const runtimeEnvOverrides = Object.fromEntries(
-    Object.entries(process.env).filter(([, value]) => typeof value === "string"),
+    Object.entries(process.env).filter(
+      ([, value]) => typeof value === "string",
+    ),
   ) as Record<string, string>;
 
   return {
@@ -243,7 +263,10 @@ function loadCliEnv(args: string[]): LoadedCliEnv {
 }
 
 function printMcpHelp(): void {
-  printBanner("MCP helper", "Prints JSON snippets for Claude, Codex, and other MCP clients");
+  printBanner(
+    "MCP helper",
+    "Prints JSON snippets for Claude, Codex, and other MCP clients",
+  );
   printSection("Usage", [
     "  tellymcp mcp --help",
     "  tellymcp mcp --url <url>",
@@ -329,10 +352,11 @@ function runOAuthCommand(args: string[]): void {
 }
 
 function printBrowserHelp(): void {
-  printBanner("browser helper", "Manage Playwright browser binaries used by browser_* tools");
-  printSection("Usage", [
-    "  tellymcp browser install",
-  ]);
+  printBanner(
+    "browser helper",
+    "Manage Playwright browser binaries used by browser_* tools",
+  );
+  printSection("Usage", ["  tellymcp browser install"]);
   printSection("What this command does", [
     "  Installs the bundled Playwright Chromium browser.",
     "  Uses the Playwright dependency shipped with TellyMCP.",
@@ -341,7 +365,10 @@ function printBrowserHelp(): void {
 }
 
 function printExtensionHelp(): void {
-  printBanner("extension helper", "Export bundled browser attach extensions into a local directory");
+  printBanner(
+    "extension helper",
+    "Export bundled browser attach extensions into a local directory",
+  );
   printSection("Usage", [
     "  tellymcp extension firefox [output-directory]",
     "  tellymcp extension ff [output-directory]",
@@ -363,7 +390,10 @@ function printExtensionHelp(): void {
 }
 
 function printCodexPluginHelp(): void {
-  printBanner("codex plugin", "Install or inspect the bundled Codex workflow plugin");
+  printBanner(
+    "codex plugin",
+    "Install or inspect the bundled Codex workflow plugin",
+  );
   printSection("Usage", [
     "  tellymcp codex-plugin install",
     "  tellymcp codex-plugin status",
@@ -396,13 +426,84 @@ function loadTemplate(mode: InitMode): string {
         ? "env.gateway.template"
         : "env.both.template";
   const templatePath = path.join(packageRoot, templateName);
-  const nestedTemplatePath = path.join(packageRoot, "config", "templates", templateName);
-  const resolvedTemplatePath = existsSync(templatePath) ? templatePath : nestedTemplatePath;
+  const nestedTemplatePath = path.join(
+    packageRoot,
+    "config",
+    "templates",
+    templateName,
+  );
+  const resolvedTemplatePath = existsSync(templatePath)
+    ? templatePath
+    : nestedTemplatePath;
   if (!existsSync(resolvedTemplatePath)) {
     fail(`Missing packaged template: ${templateName}`);
   }
 
   return readFileSync(resolvedTemplatePath, "utf8");
+}
+
+async function runConfigure(args: string[]): Promise<void> {
+  if (args.includes("--help") || args.includes("-h")) {
+    printBanner(
+      "configure",
+      "Local web configurator for a TellyMCP dotenv file",
+    );
+    printSection("Usage", [
+      "  tellymcp configure [--no-open]",
+      "  tellymcp configure [--port 8790] [--no-open]",
+    ]);
+    printSection("Safety", [
+      "  The configurator binds only to 127.0.0.1 on a random free port.",
+      "  Its URL contains a one-time access token.",
+      "  The browser downloads .env-client or .env-gateway after validation.",
+    ]);
+    return;
+  }
+
+  for (let index = 0; index < args.length; index += 1) {
+    const value = args[index];
+    if (value === "--no-open" || value?.startsWith("--port=")) {
+      continue;
+    }
+    if (value === "--port") {
+      index += 1;
+      continue;
+    }
+    fail(
+      "configure does not accept a role or output path; choose Client or Gateway in the browser wizard.",
+    );
+  }
+
+  const portArg = readFlagValue(args, "--port");
+  const port = portArg === null ? 0 : Number(portArg);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    fail("--port must be an integer between 0 and 65535.");
+  }
+  printBanner(
+    "configure",
+    "Choose Client or Gateway in the local browser wizard",
+  );
+  await startConfigureServer({
+    templates: {
+      client: loadTemplate("client"),
+      gateway: loadTemplate("gateway"),
+    },
+    port,
+    open: !args.includes("--no-open"),
+    onListening(url) {
+      printSection("Configurator", [
+        `  ${pc.green("OPEN")} ${url}`,
+        "  Keep this terminal open until the file is saved.",
+        "  Press Ctrl+C to cancel.",
+      ]);
+    },
+    onDownloaded(filename) {
+      printSection("Download", [
+        `  ${pc.green("OK")} ${filename} sent to the browser`,
+        `  next: chmod 600 ${filename}`,
+      ]);
+    },
+  });
 }
 
 function initWorkspace(mode: InitMode, directoryArg?: string): void {
@@ -433,6 +534,46 @@ function initWorkspace(mode: InitMode, directoryArg?: string): void {
     `  2. cd ${targetDir}`,
     "  3. tellymcp run",
   ]);
+}
+
+function runMigrateEnv(args: string[]): void {
+  const [inputArg, extraArg] = args;
+  if (!inputArg || extraArg || inputArg === "--help" || inputArg === "-h") {
+    printBanner("migrate-env", "Normalize a legacy TellyMCP environment file");
+    printSection("Usage", [
+      "  tellymcp migrate-env <input.env> > .migrated-env",
+      "  The role is read from DISTRIBUTED_MODE or inferred from gateway-only keys.",
+      "  Normalized dotenv is written to stdout; migration notes go to stderr.",
+    ]);
+    if (!inputArg || inputArg === "--help" || inputArg === "-h") {
+      return;
+    }
+    fail("migrate-env expects exactly one input env file.");
+  }
+
+  const inputPath = path.resolve(process.cwd(), inputArg);
+  if (!existsSync(inputPath)) {
+    fail(`Missing input env file: ${inputPath}`);
+  }
+
+  const result = migrateEnvironmentContent(readFileSync(inputPath, "utf8"));
+  process.stdout.write(result.content);
+
+  const notes = [
+    `migrate-env: role=${result.role}`,
+    `migrate-env: kept ${result.keptKeys.length} keys from ${inputPath}`,
+  ];
+  if (result.renamedKeys.length > 0) {
+    notes.push(
+      `migrate-env: renamed ${result.renamedKeys
+        .map(({ from, to }) => `${from}->${to}`)
+        .join(", ")}`,
+    );
+  }
+  if (result.droppedKeys.length > 0) {
+    notes.push(`migrate-env: dropped ${result.droppedKeys.join(", ")}`);
+  }
+  process.stderr.write(`${notes.join("\n")}\n`);
 }
 
 function resolveRunEnvPath(args: string[]): string {
@@ -518,18 +659,16 @@ function readFlagValue(args: string[], flagName: string): string | null {
 }
 
 function printMcpConfig(args: string[]): void {
-  if (
-    args.length === 0 ||
-    args.includes("--help") ||
-    args.includes("-h")
-  ) {
+  if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
     printMcpHelp();
     return;
   }
 
   const url = readFlagValue(args, "--url");
   if (!url) {
-    fail("Missing --url <mcp-endpoint>. Run 'tellymcp mcp --help' for examples.");
+    fail(
+      "Missing --url <mcp-endpoint>. Run 'tellymcp mcp --help' for examples.",
+    );
   }
 
   const bearer = readFlagValue(args, "--bearer");
@@ -659,9 +798,15 @@ async function checkWebSocketUrl(
       finish(true, `${url} accepted a WebSocket connection`);
     });
 
-    socket.once("unexpected-response", (_req: unknown, response: { statusCode?: number }) => {
-      finish(false, `${url} returned HTTP ${response.statusCode ?? "unknown"} during WebSocket upgrade`);
-    });
+    socket.once(
+      "unexpected-response",
+      (_req: unknown, response: { statusCode?: number }) => {
+        finish(
+          false,
+          `${url} returned HTTP ${response.statusCode ?? "unknown"} during WebSocket upgrade`,
+        );
+      },
+    );
 
     socket.once("error", (error: Error) => {
       finish(false, `${url} failed: ${error.message}`);
@@ -753,15 +898,21 @@ async function runDoctor(args: string[]): Promise<void> {
     checks.push(
       `${pc.red("  ERROR")} playwright chromium: ${playwrightStatus.message}`,
     );
-    capabilities.push(`${pc.red("  ERROR")} browser tools: browsers are not installed`);
+    capabilities.push(
+      `${pc.red("  ERROR")} browser tools: browsers are not installed`,
+    );
   }
 
-  const redisHost = (parsed.REDIS_HOST || "127.0.0.1").trim();
-  const redisPort = Number(parsed.REDIS_PORT || 6379);
-  const redisCheck = await checkTcpPort(redisHost, redisPort);
-  checks.push(
-    `${redisCheck.ok ? pc.green("  OK") : pc.red("  ERROR")} redis: ${redisCheck.message}`,
-  );
+  if (mode === "client") {
+    checks.push(`${pc.green("  OK")} local state: process-local (Redis is not required)`);
+  } else {
+    const redisHost = (parsed.REDIS_HOST || "127.0.0.1").trim();
+    const redisPort = Number(parsed.REDIS_PORT || 6379);
+    const redisCheck = await checkTcpPort(redisHost, redisPort);
+    checks.push(
+      `${redisCheck.ok ? pc.green("  OK") : pc.red("  ERROR")} redis: ${redisCheck.message}`,
+    );
+  }
 
   if (mode === "client") {
     const gatewayPublicUrl = parsed.GATEWAY_PUBLIC_URL?.trim();
@@ -776,8 +927,12 @@ async function runDoctor(args: string[]): Promise<void> {
         `${gatewayHealth.ok ? pc.green("  OK") : pc.red("  ERROR")} remote collaboration API: ${gatewayHealth.ok ? "available" : "unavailable"}`,
       );
     } else {
-      checks.push(`${pc.yellow("  WARN")} gateway: GATEWAY_PUBLIC_URL is empty`);
-      capabilities.push(`${pc.yellow("  WARN")} remote collaboration API: not configured`);
+      checks.push(
+        `${pc.yellow("  WARN")} gateway: GATEWAY_PUBLIC_URL is empty`,
+      );
+      capabilities.push(
+        `${pc.yellow("  WARN")} remote collaboration API: not configured`,
+      );
     }
 
     if (gatewayWsUrl) {
@@ -790,7 +945,9 @@ async function runDoctor(args: string[]): Promise<void> {
       );
     } else {
       checks.push(`${pc.yellow("  WARN")} gateway ws: GATEWAY_WS_URL is empty`);
-      capabilities.push(`${pc.yellow("  WARN")} remote live relay: not configured`);
+      capabilities.push(
+        `${pc.yellow("  WARN")} remote live relay: not configured`,
+      );
     }
 
     if (publicWebappUrl) {
@@ -802,8 +959,12 @@ async function runDoctor(args: string[]): Promise<void> {
         `${publicWebapp.ok ? pc.green("  OK") : pc.red("  ERROR")} remote webapp launcher: ${publicWebapp.ok ? "available" : "unavailable"}`,
       );
     } else {
-      checks.push(`${pc.yellow("  WARN")} public webapp: WEBAPP_PUBLIC_URL is empty`);
-      capabilities.push(`${pc.yellow("  WARN")} remote webapp launcher: not configured`);
+      checks.push(
+        `${pc.yellow("  WARN")} public webapp: WEBAPP_PUBLIC_URL is empty`,
+      );
+      capabilities.push(
+        `${pc.yellow("  WARN")} remote webapp launcher: not configured`,
+      );
     }
   }
 
@@ -827,8 +988,12 @@ async function runDoctor(args: string[]): Promise<void> {
         `${externalHealth.ok ? pc.green("  OK") : pc.red("  ERROR")} public gateway api: ${externalHealth.ok ? "available" : "unavailable"}`,
       );
     } else {
-      checks.push(`${pc.yellow("  WARN")} public healthz: no public gateway/webapp URL is configured`);
-      capabilities.push(`${pc.yellow("  WARN")} public gateway api: not configured`);
+      checks.push(
+        `${pc.yellow("  WARN")} public healthz: no public gateway/webapp URL is configured`,
+      );
+      capabilities.push(
+        `${pc.yellow("  WARN")} public gateway api: not configured`,
+      );
     }
 
     if (gatewayWsUrl) {
@@ -841,7 +1006,9 @@ async function runDoctor(args: string[]): Promise<void> {
       );
     } else {
       checks.push(`${pc.yellow("  WARN")} public ws: GATEWAY_WS_URL is empty`);
-      capabilities.push(`${pc.yellow("  WARN")} public live relay: not configured`);
+      capabilities.push(
+        `${pc.yellow("  WARN")} public live relay: not configured`,
+      );
     }
 
     if (publicWebappUrl) {
@@ -853,8 +1020,12 @@ async function runDoctor(args: string[]): Promise<void> {
         `${publicWebapp.ok ? pc.green("  OK") : pc.red("  ERROR")} public webapp launcher: ${publicWebapp.ok ? "available" : "unavailable"}`,
       );
     } else {
-      checks.push(`${pc.yellow("  WARN")} public webapp: WEBAPP_PUBLIC_URL is empty`);
-      capabilities.push(`${pc.yellow("  WARN")} public webapp launcher: not configured`);
+      checks.push(
+        `${pc.yellow("  WARN")} public webapp: WEBAPP_PUBLIC_URL is empty`,
+      );
+      capabilities.push(
+        `${pc.yellow("  WARN")} public webapp launcher: not configured`,
+      );
     }
 
     const dbHost = parsed.DB_HOST?.trim();
@@ -893,19 +1064,28 @@ async function runDoctor(args: string[]): Promise<void> {
     );
   }
   if ((mode === "gateway" || mode === "both") && !parsed.ROOT_PREFIX?.trim()) {
-    notes.push(`${pc.yellow("  WARN")} ROOT_PREFIX is not set, default /api will be used`);
+    notes.push(
+      `${pc.yellow("  WARN")} ROOT_PREFIX is not set, default /api will be used`,
+    );
   }
   if ((mode === "gateway" || mode === "both") && !parsed.PORT?.trim()) {
-    notes.push(`${pc.yellow("  WARN")} PORT is not set, default bind port will be used`);
+    notes.push(
+      `${pc.yellow("  WARN")} PORT is not set, default bind port will be used`,
+    );
   }
 
   if (notes.length > 0) {
     printSection("notes", notes);
   } else {
-    printSection("notes", [`${pc.green("  OK")} No obvious local config issues detected.`]);
+    printSection("notes", [
+      `${pc.green("  OK")} No obvious local config issues detected.`,
+    ]);
   }
 
-  if (browserEnabled && (!playwrightStatus.enabled || !playwrightStatus.installed)) {
+  if (
+    browserEnabled &&
+    (!playwrightStatus.enabled || !playwrightStatus.installed)
+  ) {
     printSection("playwright", [
       `${pc.yellow("  ACTION")} Install browser binaries before using browser_* tools:`,
       "    tellymcp browser install",
@@ -919,7 +1099,9 @@ function hasFlag(args: string[], flagName: string): boolean {
 
 type ExtensionFlavor = "firefox" | "chrome";
 
-function normalizeExtensionFlavor(rawValue: string | undefined): ExtensionFlavor | null {
+function normalizeExtensionFlavor(
+  rawValue: string | undefined,
+): ExtensionFlavor | null {
   if (rawValue === "firefox" || rawValue === "ff") {
     return "firefox";
   }
@@ -933,7 +1115,9 @@ function getBundledExtensionDir(flavor: ExtensionFlavor): string {
   return path.join(
     packageRoot,
     "packages",
-    flavor === "firefox" ? "firefox-attach-extension" : "chrome-attach-extension",
+    flavor === "firefox"
+      ? "firefox-attach-extension"
+      : "chrome-attach-extension",
     "dist",
   );
 }
@@ -945,7 +1129,10 @@ function getDefaultExtensionTargetDir(flavor: ExtensionFlavor): string {
   );
 }
 
-function resolveExtensionTargetDir(args: string[], flavor: ExtensionFlavor): string {
+function resolveExtensionTargetDir(
+  args: string[],
+  flavor: ExtensionFlavor,
+): string {
   const explicitOutDir = readFlagValue(args, "--out-dir");
   if (explicitOutDir) {
     return path.resolve(process.cwd(), explicitOutDir);
@@ -985,8 +1172,11 @@ async function runSystemPrune(args: string[]): Promise<void> {
   const dbUser = parsed.DB_USER?.trim();
   const dbPassword = parsed.DB_PASSWORD?.trim();
   const dbName = parsed.DB_NAME?.trim();
-  const dbSchema = (parsed.DB_SCHEME || "mcp").trim();
-  const xchangeDir = path.resolve(process.cwd(), parsed.MCP_XCHANGE_DIR || ".mcp-xchange");
+  const dbSchema = (parsed.DB_SCHEMA || "mcp").trim();
+  const xchangeDir = path.resolve(
+    process.cwd(),
+    parsed.MCP_XCHANGE_DIR || ".mcp-xchange",
+  );
   const sessionMarkerPath = path.resolve(process.cwd(), ".mcpsession.json");
   const sqliteDbPath = path.join(xchangeDir, "xchange.sqlite3");
 
@@ -994,7 +1184,9 @@ async function runSystemPrune(args: string[]): Promise<void> {
   printSection("Target", [
     `  env: ${envPath}`,
     `  mode: ${mode}`,
-    `  redis: ${redisHost}:${redisPort}/${redisDb}`,
+    ...(mode === "client"
+      ? [`  state: process-local (Redis skipped)`]
+      : [`  redis: ${redisHost}:${redisPort}/${redisDb}`]),
     ...(dbHost && dbUser && dbName
       ? [`  postgres: ${dbHost}:${dbPort}/${dbName} schema ${dbSchema}`]
       : [`  postgres: ${pc.dim("skipped (not configured)")}`]),
@@ -1002,34 +1194,36 @@ async function runSystemPrune(args: string[]): Promise<void> {
     `  session marker: ${sessionMarkerPath}`,
   ]);
 
-  const redis = new Redis({
-    host: redisHost,
-    port: redisPort,
-    db: redisDb,
-    ...(redisUsername ? { username: redisUsername } : {}),
-    ...(redisPassword ? { password: redisPassword } : {}),
-    maxRetriesPerRequest: 1,
-    enableReadyCheck: true,
-  });
-
   let deletedRedisKeys = 0;
-  try {
-    let cursor = "0";
-    do {
-      const [nextCursor, keys] = await redis.scan(
-        cursor,
-        "MATCH",
-        "telegram-mcp:*",
-        "COUNT",
-        500,
-      );
-      cursor = nextCursor;
-      if (keys.length > 0) {
-        deletedRedisKeys += await redis.del(...keys);
-      }
-    } while (cursor !== "0");
-  } finally {
-    redis.disconnect();
+  if (mode !== "client") {
+    const redis = new Redis({
+      host: redisHost,
+      port: redisPort,
+      db: redisDb,
+      ...(redisUsername ? { username: redisUsername } : {}),
+      ...(redisPassword ? { password: redisPassword } : {}),
+      maxRetriesPerRequest: 1,
+      enableReadyCheck: true,
+    });
+
+    try {
+      let cursor = "0";
+      do {
+        const [nextCursor, keys] = await redis.scan(
+          cursor,
+          "MATCH",
+          "telegram-mcp:*",
+          "COUNT",
+          500,
+        );
+        cursor = nextCursor;
+        if (keys.length > 0) {
+          deletedRedisKeys += await redis.del(...keys);
+        }
+      } while (cursor !== "0");
+    } finally {
+      redis.disconnect();
+    }
   }
 
   let truncatedTables: string[] = [];
@@ -1108,7 +1302,12 @@ function runBrowserCommand(args: string[]): void {
     fail("Supported browser subcommands: install");
   }
 
-  const cliPath = path.join(packageRoot, "node_modules", "playwright", "cli.js");
+  const cliPath = path.join(
+    packageRoot,
+    "node_modules",
+    "playwright",
+    "cli.js",
+  );
   if (!existsSync(cliPath)) {
     fail(`Missing bundled Playwright CLI: ${cliPath}`);
   }
@@ -1153,7 +1352,9 @@ function runExtensionCommand(args: string[]): void {
   const force = hasFlag(args, "--force");
   if (existsSync(targetDir)) {
     if (!force) {
-      fail(`Refusing to overwrite existing directory: ${targetDir}. Re-run with --force.`);
+      fail(
+        `Refusing to overwrite existing directory: ${targetDir}. Re-run with --force.`,
+      );
     }
     rmSync(targetDir, { recursive: true, force: true });
   }
@@ -1326,18 +1527,44 @@ async function runRuntime(args: string[]): Promise<void> {
 
 async function main(argv: string[]): Promise<void> {
   const [rawCommand, firstArg, secondArg] = argv;
-  const command: CliCommand = rawCommand === "init" || rawCommand === "run" || rawCommand === "help" || rawCommand === "mcp" || rawCommand === "oauth" || rawCommand === "doctor" || rawCommand === "browser" || rawCommand === "system-prune"
-    || rawCommand === "codex-plugin" || rawCommand === "extension"
-    ? rawCommand
-    : "help";
+  const command: CliCommand =
+    rawCommand === "init" ||
+    rawCommand === "configure" ||
+    rawCommand === "migrate-env" ||
+    rawCommand === "run" ||
+    rawCommand === "help" ||
+    rawCommand === "mcp" ||
+    rawCommand === "oauth" ||
+    rawCommand === "doctor" ||
+    rawCommand === "browser" ||
+    rawCommand === "system-prune" ||
+    rawCommand === "codex-plugin" ||
+    rawCommand === "extension"
+      ? rawCommand
+      : "help";
 
-  if (command === "help" || !rawCommand || rawCommand === "--help" || rawCommand === "-h") {
+  if (
+    command === "help" ||
+    !rawCommand ||
+    rawCommand === "--help" ||
+    rawCommand === "-h"
+  ) {
     printHelp();
     return;
   }
 
   if (command === "init") {
     initWorkspace(ensureMode(firstArg), secondArg);
+    return;
+  }
+
+  if (command === "configure") {
+    await runConfigure(argv.slice(1));
+    return;
+  }
+
+  if (command === "migrate-env") {
+    runMigrateEnv(argv.slice(1));
     return;
   }
 

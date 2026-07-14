@@ -55,11 +55,11 @@ export type GetSessionContextOutput = {
   has_binding: boolean;
   status_message: string;
   context?: {
-      session_label?: string | undefined;
-      cwd?: string | undefined;
-      active_project_uuid?: string | undefined;
-      active_project_name?: string | undefined;
-      task?: string | undefined;
+    session_label?: string | undefined;
+    cwd?: string | undefined;
+    active_project_uuid?: string | undefined;
+    active_project_name?: string | undefined;
+    task?: string | undefined;
     summary?: string | undefined;
     files?: string[] | undefined;
     decisions?: string[] | undefined;
@@ -76,6 +76,35 @@ export type GetSessionContextOutput = {
     configured: boolean;
     terminal_target?: string | undefined;
     last_nudge_at?: string | undefined;
+  };
+};
+
+export type GetRuntimeDiagnosticsInput = {
+  session_id?: string | undefined;
+};
+
+export type RuntimeDiagnosticCheck = {
+  status: "ok" | "warn" | "error";
+  message: string;
+};
+
+export type GetRuntimeDiagnosticsOutput = {
+  status: "ok" | "degraded";
+  checked_at: string;
+  session_id: string;
+  runtime: {
+    mode: "client" | "gateway" | "both";
+    package_version: string;
+    protocol_version: string;
+    node_id?: string | undefined;
+  };
+  checks: {
+    configuration: RuntimeDiagnosticCheck;
+    redis: RuntimeDiagnosticCheck;
+    session_store: RuntimeDiagnosticCheck;
+    terminal: RuntimeDiagnosticCheck;
+    gateway_configuration: RuntimeDiagnosticCheck;
+    relay: RuntimeDiagnosticCheck;
   };
 };
 

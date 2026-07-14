@@ -2,7 +2,6 @@ import path from "node:path";
 import { access } from "node:fs/promises";
 
 import type { SessionContext } from "../../../entities/session/model/types";
-import type { SessionBindingStore } from "../../api/storage/contract";
 import type { Logger } from "../../lib/logger/logger";
 import { writeXchangeRelativeFile } from "../terminal/client";
 import type { TerminalRuntimeConfig } from "../terminal/client";
@@ -11,16 +10,6 @@ export type ExchangeFileSource =
   | "telegram-upload"
   | "browser-screenshot"
   | "partner-artifact";
-
-type BrokerCallOptions = {
-  meta?: Record<string, unknown>;
-};
-
-type BrokerCaller = <T>(
-  actionName: string,
-  params?: unknown,
-  options?: BrokerCallOptions,
-) => Promise<T>;
 
 function normalizeRelativePath(relativePath: string): string {
   const normalized = relativePath
@@ -49,15 +38,9 @@ function resolveWorkspaceDir(
 
 export class MinioExchangeStore {
   public constructor(
-    _callBroker: BrokerCaller,
-    _bindingStore: SessionBindingStore,
     private readonly terminalConfig: TerminalRuntimeConfig,
     private readonly exchangeDirName: string,
-    _vfsScope: string,
     private readonly logger: Logger,
-    _distributedMode: "client" | "gateway" | "both" = "client",
-    _gatewayPublicUrl?: string,
-    _gatewayAuthToken?: string,
   ) {}
 
   public resolveWorkspaceDir(session: SessionContext | null): string {

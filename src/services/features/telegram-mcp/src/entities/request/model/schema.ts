@@ -215,6 +215,35 @@ export const getSessionContextOutputSchema = z.object({
     .optional(),
 });
 
+const runtimeDiagnosticCheckSchema = z.object({
+  status: z.enum(["ok", "warn", "error"]),
+  message: z.string(),
+});
+
+export const getRuntimeDiagnosticsInputSchema = z.object({
+  session_id: z.string().trim().min(1).optional(),
+});
+
+export const getRuntimeDiagnosticsOutputSchema = z.object({
+  status: z.enum(["ok", "degraded"]),
+  checked_at: z.string(),
+  session_id: z.string(),
+  runtime: z.object({
+    mode: z.enum(["client", "gateway", "both"]),
+    package_version: z.string(),
+    protocol_version: z.string(),
+    node_id: z.string().optional(),
+  }),
+  checks: z.object({
+    configuration: runtimeDiagnosticCheckSchema,
+    redis: runtimeDiagnosticCheckSchema,
+    session_store: runtimeDiagnosticCheckSchema,
+    terminal: runtimeDiagnosticCheckSchema,
+    gateway_configuration: runtimeDiagnosticCheckSchema,
+    relay: runtimeDiagnosticCheckSchema,
+  }),
+});
+
 export const clearSessionContextInputSchema = z.object({
   session_id: z.string().trim().min(1).optional(),
 });

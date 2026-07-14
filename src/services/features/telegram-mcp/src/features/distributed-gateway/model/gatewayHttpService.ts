@@ -442,7 +442,6 @@ export class GatewayHttpService {
         service: "tellymcp-gateway",
         mode: this.config.distributed.mode,
         databaseConfigured: Boolean(process.env.DB_HOST && process.env.DB_NAME),
-        s3Configured: Boolean(this.config.distributed.gatewayS3Bucket),
       });
       return true;
     }

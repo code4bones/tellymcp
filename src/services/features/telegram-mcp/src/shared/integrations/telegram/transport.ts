@@ -302,7 +302,7 @@ export class TelegramTransport implements HumanTransport {
   private isAdminAuthEnabled(): boolean {
     return (
       this.isAdminBotProfile() &&
-      Boolean(this.config.distributed.gatewayToken?.trim())
+      Boolean(this.config.distributed.gatewayScopeToken?.trim())
     );
   }
 

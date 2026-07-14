@@ -32,6 +32,11 @@ Human-originated tasks are represented as structured `telegram_message` xchange 
 - `send_partner_note`
 - `send_partner_file`
 
+## Primary Diagnostic Tool
+
+- `get_runtime_diagnostics`
+  Runs redacted, read-only configuration, runtime-state, terminal, version, and gateway-to-client relay checks for a selected live console. Redis is checked only on a gateway.
+
 Cross-console work is based on:
 
 - canonical live console ids

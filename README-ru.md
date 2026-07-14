@@ -76,6 +76,10 @@ Gateway
 - `send_partner_file`
 - `list_gateway_sessions`
 
+Для диагностики:
+
+- `get_runtime_diagnostics` для безопасной end-to-end проверки gateway/client
+
 Для браузера:
 
 - `browser_open`
@@ -106,7 +110,7 @@ Gateway
 ## Требования
 
 - Node.js `>= 24`
-- Redis
+- Redis только для режимов gateway и `both`; клиент Redis не использует
 - PostgreSQL для gateway mode
 - опционально RabbitMQ для durable gateway fanout
 - Playwright browser binaries, если нужны browser tools
@@ -150,8 +154,19 @@ tellymcp codex-plugin install
 ```bash
 mkdir -p ~/telly-gateway
 cd ~/telly-gateway
-tellymcp init gateway
+tellymcp configure
 ```
+
+Команда открывает защищённую одноразовым токеном локальную страницу на
+`127.0.0.1`. Выбери в wizard роль `Gateway`, заполни и проверь настройки, затем
+сохрани `.env-gateway` обычным browser download. Перед использованием выставь
+файлу права `0600`. `tellymcp init gateway` остаётся вариантом для ручного
+редактирования шаблона.
+
+Публичный origin или API base вводится один раз. Wizard сам формирует gateway
+HTTP, WebSocket, Mini App, webhook, root-prefix и опциональные OAuth URL.
+На ключевых этапах доступны реальные проверки Telegram, Redis, PostgreSQL,
+gateway HTTP/WebSocket и опционального RabbitMQ.
 
 Или возьми sample:
 
@@ -167,7 +182,7 @@ tellymcp init gateway
 - `DB_NAME`
 - `GATEWAY_PUBLIC_URL`
 - `GATEWAY_WS_URL`
-- `GATEWAY_TOKEN`
+- `GATEWAY_SCOPE_TOKEN`
 - `GATEWAY_AUTH_TOKEN`
 
 Запуск:
@@ -183,8 +198,16 @@ tellymcp run --env .env
 ```bash
 mkdir -p ~/agent-a
 cd ~/agent-a
-tellymcp init client
+tellymcp configure
 ```
+
+Выбери в wizard роль `Client`. В форме есть подключение к gateway, identity
+консоли, terminal, browser, MCP и расширенные runtime-настройки. После
+валидации браузер скачает `.env-client`. Флаг `--no-open` выводит локальный URL
+без автоматического открытия браузера.
+
+Для клиента тот же Public base URL автоматически формирует
+`GATEWAY_PUBLIC_URL`, `GATEWAY_WS_URL` и `GATEWAY_WS_PATH`.
 
 Или используй sample:
 
@@ -194,7 +217,7 @@ tellymcp init client
 
 - `GATEWAY_PUBLIC_URL`
 - `GATEWAY_WS_URL`
-- `GATEWAY_TOKEN`
+- `GATEWAY_SCOPE_TOKEN`
 - `GATEWAY_AUTH_TOKEN` (тот же transport-токен, который задан на gateway)
 - `GATEWAY_USER_UUID`, если консоль должна быть видна конкретному владельцу в gateway-боте
 
@@ -214,6 +237,10 @@ tellymcp run --env .env -s NEW
 - `local_session_id`
 - `session_label`
 - `env_file`
+- `gateway_client_uuid`
+
+Runtime-состояние клиента локальное и не требует Redis. Сохранённый
+`gateway_client_uuid` обеспечивает стабильную идентичность после перезапуска.
 
 Поэтому дальше в том же каталоге обычно достаточно:
 
@@ -353,6 +380,7 @@ Gateway prompt scanner теперь живёт от live-client lifecycle:
 
 Канонические стартовые точки:
 
+- [Контракт env и руководство по миграции](./docs/ENVIRONMENT.md)
 - [.env.example.gateway](./.env.example.gateway)
 - [.env.example.client](./.env.example.client)
 
@@ -368,6 +396,8 @@ Samples уже вычищены под текущий runtime:
 - убраны obsolete pairing-oriented тексты
 - убраны неиспользуемые секреты вроде `SESSION_SECRET`
 - убран неиспользуемый `APP_NAME`
+- неоднозначные старые имена заменены на `TERMINAL_*`, `GATEWAY_SCOPE_TOKEN`,
+  `TELEGRAM_REQUEST_MODE`, `DB_SCHEMA` и `LOGFEED_ENABLED`
 
 ## Операционные команды
 
@@ -382,6 +412,15 @@ tellymcp doctor --env .env
 ```bash
 tellymcp system-prune --env .env --yes
 ```
+
+Миграция старого env в текущий ролевой контракт:
+
+```bash
+tellymcp migrate-env ./old.env > ./.migrated-env
+```
+
+Fallback на старую схему отсутствует. Если найдены legacy-ключи, запуск
+останавливается и выводит команду миграции.
 
 ## Карта документации
 

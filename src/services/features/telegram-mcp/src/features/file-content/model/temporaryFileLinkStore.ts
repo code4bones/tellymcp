@@ -44,10 +44,13 @@ export type TemporaryFileLink = {
 
 function sanitizeFilename(value: string | undefined): string {
   const basename = path.basename(value?.trim() || "file.bin");
-  const safe = basename
-    .replace(/[\u0000-\u001f\u007f]/gu, "-")
-    .replace(/[/\\<>:"|?*]/gu, "-")
-    .trim();
+  const withoutControlChars = Array.from(basename)
+    .map((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127 ? "-" : character;
+    })
+    .join("");
+  const safe = withoutControlChars.replace(/[/\\<>:"|?*]/gu, "-").trim();
   return safe || "file.bin";
 }
 
@@ -63,8 +66,9 @@ function decodeFilenameHeader(value: string | undefined): string | undefined {
 }
 
 function encodeContentDispositionFilename(filename: string): string {
-  return encodeURIComponent(filename).replace(/[!'()*]/gu, (character) =>
-    `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  return encodeURIComponent(filename).replace(
+    /[!'()*]/gu,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
   );
 }
 
@@ -98,7 +102,10 @@ function readSingleHeader(
 }
 
 export class TemporaryFileLinkStore {
-  private readonly recordsByUploadToken = new Map<string, TemporaryFileRecord>();
+  private readonly recordsByUploadToken = new Map<
+    string,
+    TemporaryFileRecord
+  >();
 
   private readonly recordsByDownloadToken = new Map<
     string,
@@ -182,10 +189,18 @@ export class TemporaryFileLinkStore {
 
   public getReadyLink(downloadToken: string): TemporaryFileLink {
     const record = this.recordsByDownloadToken.get(downloadToken);
-    if (!record || record.expiresAtMs <= Date.now() || record.status !== "ready") {
+    if (
+      !record ||
+      record.expiresAtMs <= Date.now() ||
+      record.status !== "ready"
+    ) {
       throw new Error("Temporary file upload did not complete.");
     }
-    if (!record.filename || !record.mimetype || record.sizeBytes === undefined) {
+    if (
+      !record.filename ||
+      !record.mimetype ||
+      record.sizeBytes === undefined
+    ) {
       throw new Error("Temporary file metadata is incomplete.");
     }
 
@@ -200,7 +215,10 @@ export class TemporaryFileLinkStore {
     };
   }
 
-  public async readCachedBase64(cacheKey: string, maxBytes: number): Promise<{
+  public async readCachedBase64(
+    cacheKey: string,
+    maxBytes: number,
+  ): Promise<{
     data: string;
     filename: string;
     mimetype: string;
@@ -271,13 +289,19 @@ export class TemporaryFileLinkStore {
     }
 
     const record = this.recordsByUploadToken.get(uploadToken);
-    if (!record || record.expiresAtMs <= Date.now() || record.status !== "pending") {
+    if (
+      !record ||
+      record.expiresAtMs <= Date.now() ||
+      record.status !== "pending"
+    ) {
       res.statusCode = 404;
       res.end("Upload ticket not found");
       return;
     }
 
-    const declaredLength = Number(readSingleHeader(req, "content-length") ?? "0");
+    const declaredLength = Number(
+      readSingleHeader(req, "content-length") ?? "0",
+    );
     if (
       !Number.isFinite(declaredLength) ||
       declaredLength < 0 ||

@@ -110,6 +110,7 @@ Gateway
 ## Требования
 
 - Node.js `>= 24`
+- Python 3, `make` и C/C++ toolchain на Linux для локальной сборки native addon `node-pty`; npm lifecycle scripts должны быть включены
 - Redis только для режимов gateway и `both`; клиент Redis не использует
 - PostgreSQL для gateway mode
 - опционально RabbitMQ для durable gateway fanout
@@ -117,9 +118,29 @@ Gateway
 
 ## Установка
 
+На Debian/Ubuntu сначала установи зависимости для сборки native PTY:
+
 ```bash
-npm install -g @deadragdoll/tellymcp
+sudo apt install -y python3 make g++
+npm config set ignore-scripts false
 ```
+
+```bash
+npm install -g @deadragdoll/tellymcp --foreground-scripts
+```
+
+Опубликованная зависимость `node-pty` не содержит готового Linux ARM64 binary,
+поэтому install lifecycle собирает `pty.node` локально. Если пакет ранее
+установился без него, восстанови глобальную установку:
+
+```bash
+npm rebuild -g @deadragdoll/tellymcp --foreground-scripts
+tellymcp doctor --env <file>
+```
+
+`tellymcp --help` и setup-команды не загружают native PTY. Runtime проверяет
+модуль перед запуском и вместо сырого stack trace выводит те же инструкции по
+восстановлению.
 
 Если нужны browser tools:
 

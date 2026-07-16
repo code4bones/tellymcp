@@ -26,10 +26,6 @@ import {
   resolveSessionDefaultsForCwd,
   writeSessionMarkerState,
 } from "./services/features/telegram-mcp/src/shared/lib/project-identity/projectIdentity";
-import {
-  isForegroundPtyClientMode,
-  runForegroundPtyRuntime,
-} from "./services/features/telegram-mcp/src/features/foreground-terminal/model/foregroundTerminalRuntime";
 import { migrateEnvironmentContent } from "./envMigration";
 import { startConfigureServer } from "./configureServer";
 
@@ -56,6 +52,45 @@ type PlaywrightBrowserStatus =
   | { enabled: false }
   | { enabled: true; installed: true; executablePath: string }
   | { enabled: true; installed: false; message: string };
+
+type NativePtyRuntimeStatus =
+  | { available: true }
+  | { available: false; message: string };
+
+function nativePtyRecoveryLines(): string[] {
+  return [
+    ...(process.platform === "linux"
+      ? [
+          "Install native build prerequisites (Debian/Ubuntu): sudo apt install -y python3 make g++",
+        ]
+      : []),
+    "Ensure npm lifecycle scripts are enabled: npm config set ignore-scripts false",
+    "Rebuild the global package: npm rebuild -g @deadragdoll/tellymcp --foreground-scripts",
+  ];
+}
+
+async function checkNativePtyRuntime(): Promise<NativePtyRuntimeStatus> {
+  try {
+    const nodePty = await import("node-pty");
+    if (typeof nodePty.spawn !== "function") {
+      return {
+        available: false,
+        message: "node-pty loaded without a spawn function.",
+      };
+    }
+    return { available: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      available: false,
+      message: message.split("\n", 1)[0] || "node-pty failed to load.",
+    };
+  }
+}
+
+function isForegroundPtyClientMode(parsed: Record<string, string>): boolean {
+  return (parsed.DISTRIBUTED_MODE || "client").trim() === "client";
+}
 
 function printBanner(title: string, subtitle?: string): void {
   process.stdout.write(
@@ -149,7 +184,7 @@ function printHelp(): void {
     "  tellymcp oauth key",
   ]);
   printSection("terminal", [
-    `${pc.green("  OK")} built-in PTY runtime`,
+    "  built-in PTY runtime (validated by tellymcp doctor and tellymcp run)",
     "  Live view, session nudges and browser flows use the built-in terminal runtime.",
   ]);
 }
@@ -822,13 +857,22 @@ async function checkWebSocketUrl(
 
 async function runDoctor(args: string[]): Promise<void> {
   const { envPath, parsed } = loadCliEnv(args);
+  const nativePtyStatus = await checkNativePtyRuntime();
 
   printBanner("doctor", "Local installation diagnostics");
 
   printSection("terminal", [
-    `${pc.green("  OK")} built-in PTY runtime`,
+    nativePtyStatus.available
+      ? `${pc.green("  OK")} built-in PTY runtime: native module loaded`
+      : `${pc.red("  ERROR")} built-in PTY runtime: ${nativePtyStatus.message}`,
+    `  platform: ${process.platform}-${process.arch}, Node ${process.versions.node}`,
     `  shell: ${parsed.TERMINAL_SHELL?.trim() || process.env.SHELL || "bash"}`,
     `  size:  ${parsed.TERMINAL_COLS?.trim() || "120"}x${parsed.TERMINAL_ROWS?.trim() || "40"}`,
+    ...(!nativePtyStatus.available
+      ? nativePtyRecoveryLines().map(
+          (line) => `${pc.yellow("  ACTION")} ${line}`,
+        )
+      : []),
   ]);
 
   const mode = (parsed.DISTRIBUTED_MODE || "client").trim();
@@ -904,7 +948,9 @@ async function runDoctor(args: string[]): Promise<void> {
   }
 
   if (mode === "client") {
-    checks.push(`${pc.green("  OK")} local state: process-local (Redis is not required)`);
+    checks.push(
+      `${pc.green("  OK")} local state: process-local (Redis is not required)`,
+    );
   } else {
     const redisHost = (parsed.REDIS_HOST || "127.0.0.1").trim();
     const redisPort = Number(parsed.REDIS_PORT || 6379);
@@ -1456,7 +1502,22 @@ async function runRuntime(args: string[]): Promise<void> {
     sessionLabel: parsed.TELLYMCP_SESSION_LABEL,
   });
 
+  const nativePtyStatus = await checkNativePtyRuntime();
+  if (!nativePtyStatus.available) {
+    fail(
+      [
+        `Built-in PTY runtime is unavailable on ${process.platform}-${process.arch} with Node ${process.versions.node}.`,
+        nativePtyStatus.message,
+        "",
+        ...nativePtyRecoveryLines(),
+        "Then rerun: tellymcp doctor --env <file>",
+      ].join("\n"),
+    );
+  }
+
   if (isForegroundPtyClientMode(parsed)) {
+    const { runForegroundPtyRuntime } =
+      await import("./services/features/telegram-mcp/src/features/foreground-terminal/model/foregroundTerminalRuntime.js");
     await runForegroundPtyRuntime({
       envPath,
       packageRoot,

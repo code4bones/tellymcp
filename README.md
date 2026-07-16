@@ -110,6 +110,7 @@ Tools sync:
 ## Requirements
 
 - Node.js `>= 24`
+- Python 3, `make`, and a C/C++ toolchain on Linux so `node-pty` can build its native addon; npm lifecycle scripts must be enabled
 - Redis for gateway and `both` modes only; clients do not use Redis
 - PostgreSQL for gateway mode
 - optional RabbitMQ for durable gateway fanout
@@ -117,9 +118,29 @@ Tools sync:
 
 ## Installation
 
+On Debian/Ubuntu, install the native PTY build prerequisites first:
+
 ```bash
-npm install -g @deadragdoll/tellymcp
+sudo apt install -y python3 make g++
+npm config set ignore-scripts false
 ```
+
+```bash
+npm install -g @deadragdoll/tellymcp --foreground-scripts
+```
+
+The published `node-pty` dependency does not provide a Linux ARM64 binary, so
+the install lifecycle builds `pty.node` locally. If a previous installation
+completed without it, repair the global package with:
+
+```bash
+npm rebuild -g @deadragdoll/tellymcp --foreground-scripts
+tellymcp doctor --env <file>
+```
+
+`tellymcp --help` and setup commands do not load the native PTY module. Runtime
+startup validates it and prints the same recovery instructions instead of a
+raw native-module stack trace.
 
 Optional browser runtime:
 

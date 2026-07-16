@@ -24,7 +24,17 @@
 ## 1. Установка
 
 ```bash
-npm install -g @deadragdoll/tellymcp
+sudo apt install -y python3 make g++
+npm config set ignore-scripts false
+npm install -g @deadragdoll/tellymcp --foreground-scripts
+```
+
+На Linux native addon `node-pty` собирается локально; для Linux ARM64 это
+обязательно, потому что зависимость не поставляет подходящий готовый binary.
+Если после предыдущей установки `pty.node` отсутствует, выполни:
+
+```bash
+npm rebuild -g @deadragdoll/tellymcp --foreground-scripts
 ```
 
 Опционально:

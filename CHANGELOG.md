@@ -4,6 +4,10 @@
 
 ### Changed
 
+- CLI больше не загружает `node-pty` до разбора команды: `tellymcp --help`,
+  setup и diagnostics остаются доступны при отсутствующем native addon.
+  `doctor`, `run` и postinstall теперь реально проверяют `pty.node` и выводят
+  platform-aware инструкции для Linux ARM64, npm lifecycle scripts и rebuild.
 - Redis теперь используется только в режимах gateway и `both`. Client runtime
   больше не подключается к Redis и не требует `REDIS_*`; временное состояние
   хранится локально в процессе, а стабильный `gateway_client_uuid` — в

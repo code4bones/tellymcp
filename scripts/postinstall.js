@@ -15,11 +15,43 @@ function line(value = "") {
   process.stdout.write(`${value}\n`);
 }
 
+function checkNativePty() {
+  try {
+    const nodePty = require("node-pty");
+    return typeof nodePty.spawn === "function"
+      ? { available: true }
+      : {
+          available: false,
+          message: "node-pty loaded without a spawn function.",
+        };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      available: false,
+      message: message.split("\n", 1)[0] || "node-pty failed to load.",
+    };
+  }
+}
+
 line();
 line(`${pc.bold(pc.cyan("TellyMCP"))} ${pc.dim("installed")}`);
 line();
 
-line(`${pc.green("OK")} Built-in PTY terminal runtime is enabled.`);
+const nativePty = checkNativePty();
+if (nativePty.available) {
+  line(`${pc.green("OK")} Built-in PTY native module loaded.`);
+} else {
+  line(`${pc.red("ERROR")} Built-in PTY native module is unavailable.`);
+  line(`  ${nativePty.message}`);
+  line(
+    `  Platform: ${process.platform}-${process.arch}, Node ${process.versions.node}`,
+  );
+  if (process.platform === "linux") {
+    line("  Debian/Ubuntu prerequisites: sudo apt install -y python3 make g++");
+  }
+  line("  Ensure scripts are enabled: npm config set ignore-scripts false");
+  line("  Rebuild: npm rebuild -g @deadragdoll/tellymcp --foreground-scripts");
+}
 
 line();
 line(`${pc.yellow("INFO")} Browser tools need Playwright browser binaries.`);

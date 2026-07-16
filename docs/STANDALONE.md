@@ -24,7 +24,17 @@ The recommended topology is:
 ## 1. Install
 
 ```bash
-npm install -g @deadragdoll/tellymcp
+sudo apt install -y python3 make g++
+npm config set ignore-scripts false
+npm install -g @deadragdoll/tellymcp --foreground-scripts
+```
+
+Linux installs compile the native `node-pty` addon locally; this is required on
+Linux ARM64 because the dependency does not ship a matching prebuilt binary.
+If `pty.node` is missing after an earlier install, run:
+
+```bash
+npm rebuild -g @deadragdoll/tellymcp --foreground-scripts
 ```
 
 Optional:

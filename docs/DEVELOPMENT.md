@@ -157,7 +157,7 @@ MCP chat-client file delivery:
 The runtime uses a built-in PTY-backed terminal layer.
 
 - `src/cli.ts` must not statically import the PTY runtime: help, setup, MCP config, and diagnostics must remain usable when the native addon is unavailable
-- `tellymcp run` validates `node-pty` before loading runtime services and reports platform, architecture, Node version, Linux build prerequisites, lifecycle-script configuration, and the global rebuild command
+- `tellymcp run` validates `node-pty` before loading runtime services and reports platform, architecture, Node version, Linux build prerequisites, lifecycle-script configuration, and clean global reinstall commands
 - `tellymcp doctor` performs the same native-module probe without crashing
 - the package postinstall probe reports whether `pty.node` can actually be loaded instead of assuming successful native compilation
 - Linux ARM64 installations compile `node-pty` locally and therefore require Python 3, `make`, and a C/C++ toolchain

@@ -34,7 +34,8 @@ npm install -g @deadragdoll/tellymcp --foreground-scripts
 Если после предыдущей установки `pty.node` отсутствует, выполни:
 
 ```bash
-npm rebuild -g @deadragdoll/tellymcp --foreground-scripts
+npm uninstall -g @deadragdoll/tellymcp
+npm install -g @deadragdoll/tellymcp@latest --foreground-scripts
 ```
 
 Опционально:

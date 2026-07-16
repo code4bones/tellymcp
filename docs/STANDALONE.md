@@ -34,7 +34,8 @@ Linux ARM64 because the dependency does not ship a matching prebuilt binary.
 If `pty.node` is missing after an earlier install, run:
 
 ```bash
-npm rebuild -g @deadragdoll/tellymcp --foreground-scripts
+npm uninstall -g @deadragdoll/tellymcp
+npm install -g @deadragdoll/tellymcp@latest --foreground-scripts
 ```
 
 Optional:

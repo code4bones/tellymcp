@@ -134,7 +134,8 @@ the install lifecycle builds `pty.node` locally. If a previous installation
 completed without it, repair the global package with:
 
 ```bash
-npm rebuild -g @deadragdoll/tellymcp --foreground-scripts
+npm uninstall -g @deadragdoll/tellymcp
+npm install -g @deadragdoll/tellymcp@latest --foreground-scripts
 tellymcp doctor --env <file>
 ```
 

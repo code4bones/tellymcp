@@ -134,7 +134,8 @@ npm install -g @deadragdoll/tellymcp --foreground-scripts
 установился без него, восстанови глобальную установку:
 
 ```bash
-npm rebuild -g @deadragdoll/tellymcp --foreground-scripts
+npm uninstall -g @deadragdoll/tellymcp
+npm install -g @deadragdoll/tellymcp@latest --foreground-scripts
 tellymcp doctor --env <file>
 ```
 

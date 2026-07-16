@@ -50,7 +50,10 @@ if (nativePty.available) {
     line("  Debian/Ubuntu prerequisites: sudo apt install -y python3 make g++");
   }
   line("  Ensure scripts are enabled: npm config set ignore-scripts false");
-  line("  Rebuild: npm rebuild -g @deadragdoll/tellymcp --foreground-scripts");
+  line("  Remove broken install: npm uninstall -g @deadragdoll/tellymcp");
+  line(
+    "  Reinstall: npm install -g @deadragdoll/tellymcp@latest --foreground-scripts",
+  );
 }
 
 line();

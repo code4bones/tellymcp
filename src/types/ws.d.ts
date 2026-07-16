@@ -1,5 +1,8 @@
 declare module "ws" {
   export default class WebSocket {
+    public static readonly CONNECTING: number;
+    public static readonly OPEN: number;
+    public readonly readyState: number;
     public constructor(
       url: string,
       options?: { headers?: Record<string, string> },
@@ -10,6 +13,7 @@ declare module "ws" {
       listener: (request: unknown, response: { statusCode?: number }) => void,
     ): this;
     public once(event: "error", listener: (error: Error) => void): this;
+    public on(event: "error", listener: (error: Error) => void): this;
     public once(event: "close", listener: (code: number) => void): this;
     public once(event: string, listener: (...args: unknown[]) => void): this;
     public removeAllListeners(): this;

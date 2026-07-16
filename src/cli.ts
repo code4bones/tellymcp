@@ -65,7 +65,8 @@ function nativePtyRecoveryLines(): string[] {
         ]
       : []),
     "Ensure npm lifecycle scripts are enabled: npm config set ignore-scripts false",
-    "Rebuild the global package: npm rebuild -g @deadragdoll/tellymcp --foreground-scripts",
+    "Remove the broken global package: npm uninstall -g @deadragdoll/tellymcp",
+    "Reinstall and compile native dependencies: npm install -g @deadragdoll/tellymcp@latest --foreground-scripts",
   ];
 }
 
@@ -814,13 +815,12 @@ async function checkWebSocketUrl(
       }
       settled = true;
       clearTimeout(timer);
-      socket.removeAllListeners();
-      try {
-        socket.close();
-      } catch {
-        // ignore
-      }
       resolve({ ok, message });
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.close();
+      } else if (socket.readyState === WebSocket.CONNECTING) {
+        socket.terminate();
+      }
     };
 
     const socket = new WebSocket(url);
@@ -843,7 +843,7 @@ async function checkWebSocketUrl(
       },
     );
 
-    socket.once("error", (error: Error) => {
+    socket.on("error", (error: Error) => {
       finish(false, `${url} failed: ${error.message}`);
     });
 
@@ -851,6 +851,7 @@ async function checkWebSocketUrl(
       if (!opened) {
         finish(false, `${url} closed before open (code ${code})`);
       }
+      socket.removeAllListeners();
     });
   });
 }

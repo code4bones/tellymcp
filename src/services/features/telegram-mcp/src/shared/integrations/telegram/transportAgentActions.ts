@@ -16,6 +16,20 @@ type AgentStatusResponse = {
   active_agent_id?: string | undefined;
   turn_in_progress?: boolean | undefined;
   active_turn_id?: string | undefined;
+  codex_runtime?:
+    | {
+        cli_version?: string | undefined;
+        approval_policy: string;
+        sandbox: string;
+        network_access: boolean;
+        last_turn?: {
+          status: string;
+          usage?: {
+            last: { inputTokens: number; outputTokens: number };
+          };
+        };
+      }
+    | undefined;
 };
 
 export interface TransportAgentActionsHost {
@@ -137,6 +151,32 @@ export class TransportAgentActions {
         state,
       });
     });
+    const runtimeLines = status.codex_runtime
+      ? [
+          this.host.t(active.locale, "menu:agents.screen.codex_policy", {
+            sandbox: status.codex_runtime.sandbox,
+            approvalPolicy: status.codex_runtime.approval_policy,
+            network: status.codex_runtime.network_access ? "on" : "off",
+          }),
+          ...(status.codex_runtime.cli_version
+            ? [
+                this.host.t(active.locale, "menu:agents.screen.codex_version", {
+                  version: status.codex_runtime.cli_version,
+                }),
+              ]
+            : []),
+          ...(status.codex_runtime.last_turn?.usage
+            ? [
+                this.host.t(active.locale, "menu:agents.screen.last_usage", {
+                  inputTokens:
+                    status.codex_runtime.last_turn.usage.last.inputTokens,
+                  outputTokens:
+                    status.codex_runtime.last_turn.usage.last.outputTokens,
+                }),
+              ]
+            : []),
+        ]
+      : [];
     const text = [
       this.host.t(active.locale, "menu:agents.screen.title"),
       "",
@@ -144,6 +184,7 @@ export class TransportAgentActions {
         sessionName: active.sessionName,
       }),
       ...lines,
+      ...runtimeLines,
       "",
       status.active_agent_id
         ? status.turn_in_progress

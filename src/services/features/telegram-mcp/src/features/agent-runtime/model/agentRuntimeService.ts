@@ -13,6 +13,7 @@ import {
   type TerminalExitInfo,
 } from "../../../shared/integrations/terminal/client";
 import type { Logger } from "../../../shared/lib/logger/logger";
+import { getTellyMcpPackageVersion } from "../../../shared/lib/version/versionHandshake";
 import {
   inspectAgentProviders,
   resolveAgentProvider,
@@ -25,7 +26,14 @@ import {
   type CodexApprovalDecision,
   type CodexApprovalHandler,
   type CodexApprovalRequest,
+  type CodexServerInfo,
+  type CodexTokenUsage,
 } from "./codexAppServerClient";
+import {
+  assertCodexRuntimeCompatible,
+  inspectCodexRuntime,
+  type CodexRuntimeDiagnostics,
+} from "./codexRuntimeDiagnostics";
 
 export type AgentProcessState = "idle" | "running";
 
@@ -45,6 +53,25 @@ export type ListAgentRuntimeOutput = {
   active_agent_id?: CodingAgentId | undefined;
   turn_in_progress?: boolean | undefined;
   active_turn_id?: string | undefined;
+  codex_runtime?:
+    | {
+        thread_id: string;
+        cwd: string;
+        cli_version?: string | undefined;
+        server_user_agent?: string | undefined;
+        approval_policy: "on-request";
+        sandbox: "workspace-write";
+        network_access: false;
+        last_turn?: AgentTurnCompletion | undefined;
+      }
+    | undefined;
+};
+
+export type AgentTurnCompletion = {
+  status: "completed" | "interrupted" | "failed";
+  finished_at: string;
+  usage?: CodexTokenUsage | undefined;
+  error?: string | undefined;
 };
 
 export type StartAgentRuntimeInput = {
@@ -99,7 +126,10 @@ type CodexTurnClient = Pick<
 export type ManagedAppServer = {
   endpoint: string;
   threadId: string;
+  cwd: string;
   client: CodexTurnClient;
+  diagnostics?: CodexRuntimeDiagnostics | undefined;
+  serverInfo?: CodexServerInfo | undefined;
   stop: () => void;
 };
 
@@ -114,6 +144,7 @@ type RunningAgent = {
   turnInProgress: boolean;
   activeTurnId?: string | undefined;
   cancelProgress?: (() => void) | undefined;
+  lastTurn?: AgentTurnCompletion | undefined;
 };
 
 type LastAgentExit = {
@@ -149,6 +180,7 @@ type AgentRuntimeDependencies = {
     cwd: string;
     logger: Logger;
     onApprovalRequest: CodexApprovalHandler;
+    clientVersion?: string | undefined;
   }) => Promise<ManagedAppServer>;
   requestApproval?: (input: {
     sessionId: string;
@@ -267,12 +299,20 @@ export async function startCodexAppServer(input: {
   cwd: string;
   logger: Logger;
   onApprovalRequest: CodexApprovalHandler;
+  clientVersion?: string | undefined;
+  socketDirectory?: string | undefined;
+  ephemeralThread?: boolean | undefined;
 }): Promise<ManagedAppServer> {
+  const diagnostics = inspectCodexRuntime(input.executablePath);
+  assertCodexRuntimeCompatible(diagnostics);
   const socketId = createHash("sha256")
     .update(`${process.pid}:${input.sessionId}:${randomUUID()}`)
     .digest("hex")
     .slice(0, 20);
-  const socketPath = path.join(os.tmpdir(), `tellymcp-codex-${socketId}.sock`);
+  const socketPath = path.join(
+    input.socketDirectory ?? os.tmpdir(),
+    `tellymcp-codex-${socketId}.sock`,
+  );
   const endpoint = `unix://${socketPath}`;
   const child = spawn(
     input.executablePath,
@@ -325,9 +365,28 @@ export async function startCodexAppServer(input: {
       endpoint,
       logger: input.logger,
       onApprovalRequest: input.onApprovalRequest,
+      clientVersion:
+        input.clientVersion ?? getTellyMcpPackageVersion(__dirname),
     });
-    const threadId = await client.startThread(input.cwd);
-    return { endpoint, threadId, client, stop };
+    try {
+      await client.listThreads(input.cwd);
+    } catch (error) {
+      throw new Error(
+        `Installed Codex app-server does not support the required thread/list contract: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    const threadId = await client.startThread(input.cwd, {
+      ...(input.ephemeralThread ? { ephemeral: true } : {}),
+    });
+    return {
+      endpoint,
+      threadId,
+      cwd: path.resolve(input.cwd),
+      client,
+      diagnostics,
+      serverInfo: client.getServerInfo(),
+      stop,
+    };
   } catch (error) {
     stop();
     throw error;
@@ -419,6 +478,27 @@ export class AgentRuntimeService {
             ...(running.activeTurnId
               ? { active_turn_id: running.activeTurnId }
               : {}),
+          }
+        : {}),
+      ...(running?.appServer
+        ? {
+            codex_runtime: {
+              thread_id: running.appServer.threadId,
+              cwd: running.appServer.cwd,
+              ...(running.appServer.diagnostics?.version
+                ? { cli_version: running.appServer.diagnostics.version }
+                : {}),
+              ...(running.appServer.serverInfo?.userAgent
+                ? {
+                    server_user_agent:
+                      running.appServer.serverInfo.userAgent,
+                  }
+                : {}),
+              approval_policy: "on-request" as const,
+              sandbox: "workspace-write" as const,
+              network_access: false as const,
+              ...(running.lastTurn ? { last_turn: running.lastTurn } : {}),
+            },
           }
         : {}),
     };
@@ -634,18 +714,24 @@ export class AgentRuntimeService {
     try {
       submission = await running.appServer.client.submitTurn({
         threadId: running.appServer.threadId,
+        cwd: running.appServer.cwd,
         text: message,
         onProgress: (event) => {
           progressRelay.push(event.message);
         },
-        onComplete: async (finalMessage) => {
+        onComplete: async (result) => {
           progressRelay.stop();
           if (this.runningBySessionId.get(sessionId) === running) {
             running.turnInProgress = false;
             running.activeTurnId = undefined;
             running.cancelProgress = undefined;
+            running.lastTurn = {
+              status: "completed",
+              finished_at: new Date().toISOString(),
+              ...(result.usage ? { usage: result.usage } : {}),
+            };
           }
-          await notify(finalMessage);
+          await notify(result.message);
         },
         onInterrupted: async () => {
           progressRelay.stop();
@@ -653,6 +739,10 @@ export class AgentRuntimeService {
             running.turnInProgress = false;
             running.activeTurnId = undefined;
             running.cancelProgress = undefined;
+            running.lastTurn = {
+              status: "interrupted",
+              finished_at: new Date().toISOString(),
+            };
           }
           await notify("Codex turn stopped.");
         },
@@ -662,6 +752,11 @@ export class AgentRuntimeService {
             running.turnInProgress = false;
             running.activeTurnId = undefined;
             running.cancelProgress = undefined;
+            running.lastTurn = {
+              status: "failed",
+              finished_at: new Date().toISOString(),
+              error: error.message.slice(0, 500),
+            };
           }
           await notify(`Codex turn failed: ${error.message}`);
         },

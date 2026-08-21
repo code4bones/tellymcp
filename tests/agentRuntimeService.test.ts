@@ -8,6 +8,7 @@ import {
   buildAgentLaunchCommand,
   createCodexProgressRelay,
 } from "../src/services/features/telegram-mcp/src/features/agent-runtime/model/agentRuntimeService";
+import type { CodexTurnResult } from "../src/services/features/telegram-mcp/src/features/agent-runtime/model/codexAppServerClient";
 
 describe("agent runtime service", () => {
   it("debounces, deduplicates, and bounds Codex progress notifications", async () => {
@@ -81,12 +82,14 @@ describe("agent runtime service", () => {
     const unsubscribe = vi.fn();
     const stopAppServer = vi.fn();
     const closeAppServerClient = vi.fn();
-    let completeTurn: ((message: string) => void | Promise<void>) | undefined;
+    let completeTurn:
+      | ((result: CodexTurnResult) => void | Promise<void>)
+      | undefined;
     let interruptTurnCallback: (() => void | Promise<void>) | undefined;
     const interruptTurn = vi.fn(async () => undefined);
     const submitTurn = vi.fn(
       async (input: {
-        onComplete: (message: string) => void | Promise<void>;
+        onComplete: (result: CodexTurnResult) => void | Promise<void>;
         onInterrupted?: (() => void | Promise<void>) | undefined;
       }) => {
         completeTurn = input.onComplete;
@@ -138,6 +141,20 @@ describe("agent runtime service", () => {
           return {
             endpoint: "unix:///tmp/tellymcp-codex-test.sock",
             threadId: "thread-1",
+            cwd: "/workspace",
+            diagnostics: {
+              status: "ready",
+              executablePath: "/bin/codex",
+              version: "0.147.0",
+              capabilities: {
+                appServer: true,
+                unixSocketListen: true,
+                remoteTui: true,
+                schemaGeneration: true,
+              },
+              message: "ready",
+            },
+            serverInfo: { userAgent: "codex-cli/0.147.0" },
             client: {
               submitTurn,
               interruptTurn,
@@ -256,10 +273,47 @@ describe("agent runtime service", () => {
       session_id: "workspace",
       message: "Continue after stop",
     });
-    await completeTurn?.("Done from Codex");
+    await completeTurn?.({
+      message: "Done from Codex",
+      usage: {
+        total: {
+          totalTokens: 18,
+          inputTokens: 10,
+          cachedInputTokens: 4,
+          cacheWriteInputTokens: 0,
+          outputTokens: 8,
+          reasoningOutputTokens: 2,
+        },
+        last: {
+          totalTokens: 18,
+          inputTokens: 10,
+          cachedInputTokens: 4,
+          cacheWriteInputTokens: 0,
+          outputTokens: 8,
+          reasoningOutputTokens: 2,
+        },
+        modelContextWindow: 200000,
+      },
+    });
     expect(notifyTelegram).toHaveBeenCalledWith({
       sessionId: "workspace",
       message: "Done from Codex",
+    });
+    await expect(
+      service.listAgents({ session_id: "workspace" }),
+    ).resolves.toMatchObject({
+      codex_runtime: {
+        cwd: "/workspace",
+        cli_version: "0.147.0",
+        server_user_agent: "codex-cli/0.147.0",
+        approval_policy: "on-request",
+        sandbox: "workspace-write",
+        network_access: false,
+        last_turn: {
+          status: "completed",
+          usage: { last: { inputTokens: 10, outputTokens: 8 } },
+        },
+      },
     });
     onData?.(`${sentinel}0\r\n`);
 

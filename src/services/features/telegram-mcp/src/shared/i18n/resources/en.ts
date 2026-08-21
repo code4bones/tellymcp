@@ -75,6 +75,11 @@ export const enMenu = {
       title: "🤖 Coding agent",
       active_session: "📌 Active session: {{sessionName}}",
       provider: "• {{agentName}} · {{providerName}} — {{state}}",
+      codex_policy:
+        "🔒 Codex: {{sandbox}}, approvals {{approvalPolicy}}, network {{network}}",
+      codex_version: "🧩 Codex CLI: {{version}}",
+      last_usage:
+        "📊 Last turn: {{inputTokens}} input / {{outputTokens}} output tokens",
       choose_hint:
         "Choose an available agent. It will start in this console, and new Telegram messages will continue the same terminal conversation.",
       running_hint:

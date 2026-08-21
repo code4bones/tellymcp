@@ -75,6 +75,11 @@ export const ruMenu = {
       title: "🤖 Coding agent",
       active_session: "📌 Активная сессия: {{sessionName}}",
       provider: "• {{agentName}} · {{providerName}} — {{state}}",
+      codex_policy:
+        "🔒 Codex: {{sandbox}}, approvals {{approvalPolicy}}, сеть {{network}}",
+      codex_version: "🧩 Codex CLI: {{version}}",
+      last_usage:
+        "📊 Последний turn: {{inputTokens}} входных / {{outputTokens}} выходных токенов",
       choose_hint:
         "Выбери доступного агента. Он запустится в этой консоли, а новые сообщения из Telegram продолжат тот же терминальный диалог.",
       running_hint:

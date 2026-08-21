@@ -44,6 +44,8 @@ describe("Codex app-server client", () => {
     });
     const methods: string[] = [];
     let approvalResponse: unknown;
+    let threadStartParams: unknown;
+    let turnStartParams: unknown;
     webSocketServer.on("connection", (socket) => {
       socket.on("message", (raw) => {
         const request = JSON.parse(String(raw)) as {
@@ -57,13 +59,46 @@ describe("Codex app-server client", () => {
             JSON.stringify({ id: request.id, result: { userAgent: "test" } }),
           );
         } else if (request.method === "thread/start") {
+          threadStartParams = (request as { params?: unknown }).params;
           socket.send(
             JSON.stringify({
               id: request.id,
               result: { thread: { id: "thread-1" } },
             }),
           );
+        } else if (request.method === "thread/list") {
+          socket.send(
+            JSON.stringify({
+              id: request.id,
+              result: {
+                data: [
+                  {
+                    id: "thread-existing",
+                    cwd: "/workspace",
+                    preview: "Existing work",
+                    cliVersion: "0.147.0",
+                    updatedAt: 123,
+                    status: { type: "idle" },
+                  },
+                  {
+                    id: "thread-other",
+                    cwd: "/other",
+                    preview: "Wrong project",
+                  },
+                ],
+                nextCursor: null,
+              },
+            }),
+          );
+        } else if (request.method === "thread/resume") {
+          socket.send(
+            JSON.stringify({
+              id: request.id,
+              result: { thread: { id: "thread-existing" } },
+            }),
+          );
         } else if (request.method === "turn/start") {
+          turnStartParams = (request as { params?: unknown }).params;
           socket.send(
             JSON.stringify({
               id: request.id,
@@ -138,6 +173,45 @@ describe("Codex app-server client", () => {
           );
           socket.send(
             JSON.stringify({
+              method: "thread/tokenUsage/updated",
+              params: {
+                threadId: "thread-1",
+                turnId: "turn-1",
+                tokenUsage: {
+                  total: {
+                    totalTokens: 18,
+                    inputTokens: 10,
+                    cachedInputTokens: 4,
+                    cacheWriteInputTokens: 0,
+                    outputTokens: 8,
+                    reasoningOutputTokens: 2,
+                  },
+                  last: {
+                    totalTokens: 18,
+                    inputTokens: 10,
+                    cachedInputTokens: 4,
+                    cacheWriteInputTokens: 0,
+                    outputTokens: 8,
+                    reasoningOutputTokens: 2,
+                  },
+                  modelContextWindow: 200000,
+                },
+              },
+            }),
+          );
+          socket.send(
+            JSON.stringify({
+              method: "turn/plan/updated",
+              params: {
+                threadId: "thread-1",
+                turnId: "turn-1",
+                explanation: "sensitive plan details",
+                plan: [{ step: "Finish", status: "completed" }],
+              },
+            }),
+          );
+          socket.send(
+            JSON.stringify({
               method: "turn/completed",
               params: {
                 threadId: "thread-1",
@@ -163,10 +237,30 @@ describe("Codex app-server client", () => {
       clientVersion: "test",
       onApprovalRequest,
     });
+    await expect(client.listThreads("/workspace")).resolves.toEqual([
+      {
+        id: "thread-existing",
+        cwd: "/workspace",
+        preview: "Existing work",
+        cliVersion: "0.147.0",
+        updatedAt: 123,
+        status: "idle",
+      },
+    ]);
+    await expect(
+      client.resumeThread({
+        threadId: "thread-existing",
+        cwd: "/workspace",
+      }),
+    ).resolves.toBe("thread-existing");
     const threadId = await client.startThread("/workspace");
-    const completed = new Promise<string>((resolve, reject) => {
+    const completed = new Promise<{
+      message: string;
+      usage?: { last: { totalTokens: number } };
+    }>((resolve, reject) => {
       void client.submitTurn({
         threadId,
+        cwd: "/workspace",
         text: "Continue",
         onComplete: resolve,
         onError: reject,
@@ -174,7 +268,10 @@ describe("Codex app-server client", () => {
       });
     });
 
-    await expect(completed).resolves.toBe("Final answer");
+    await expect(completed).resolves.toMatchObject({
+      message: "Final answer",
+      usage: { last: { totalTokens: 18 } },
+    });
     expect(onApprovalRequest).toHaveBeenCalledWith({
       requestId: "approval-1",
       kind: "command",
@@ -204,12 +301,43 @@ describe("Codex app-server client", () => {
       phase: "completed",
       message: "Codex finished a command.",
     });
+    expect(onProgress).toHaveBeenNthCalledWith(3, {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "plan-turn-1",
+      kind: "plan",
+      phase: "completed",
+      message: "Codex updated its plan.",
+    });
     expect(JSON.stringify(onProgress.mock.calls)).not.toContain(
       "secret.example",
     );
+    expect(JSON.stringify(onProgress.mock.calls)).not.toContain(
+      "sensitive plan details",
+    );
+    expect(threadStartParams).toEqual({
+      cwd: "/workspace",
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+      serviceName: "tellymcp",
+    });
+    expect(turnStartParams).toMatchObject({
+      threadId: "thread-1",
+      cwd: "/workspace",
+      approvalPolicy: "on-request",
+      sandboxPolicy: {
+        type: "workspaceWrite",
+        writableRoots: ["/workspace"],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+    });
     expect(methods).toEqual([
       "initialize",
       "initialized",
+      "thread/list",
+      "thread/resume",
       "thread/start",
       "turn/start",
     ]);
@@ -242,7 +370,17 @@ describe("Codex app-server client", () => {
           params?: unknown;
         };
         if (request.method === "initialize") {
-          socket.send(JSON.stringify({ id: request.id, result: {} }));
+          socket.send(
+            JSON.stringify({
+              id: request.id,
+              result: {
+                userAgent: "codex-cli/0.147.0",
+                codexHome: "/tmp/codex-home",
+                platformFamily: "unix",
+                platformOs: "linux",
+              },
+            }),
+          );
         } else if (request.method === "turn/start") {
           socket.send(
             JSON.stringify({
@@ -280,6 +418,7 @@ describe("Codex app-server client", () => {
     const onInterrupted = vi.fn();
     const submission = await client.submitTurn({
       threadId: "thread-7",
+      cwd: "/workspace",
       text: "Long task",
       onComplete,
       onInterrupted,

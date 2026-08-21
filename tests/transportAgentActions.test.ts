@@ -90,6 +90,35 @@ describe("TransportAgentActions", () => {
     });
   });
 
+  it("renders Codex policy, version, and bounded last-turn usage", async () => {
+    const callGatewayJson = vi.fn(async () => ({
+      session_id: "workspace",
+      active_agent_id: "codex",
+      turn_in_progress: false,
+      agents: [],
+      codex_runtime: {
+        cli_version: "0.147.0",
+        approval_policy: "on-request",
+        sandbox: "workspace-write",
+        network_access: false,
+        last_turn: {
+          status: "completed",
+          usage: { last: { inputTokens: 10, outputTokens: 8 } },
+        },
+      },
+    }));
+    const host = createHost(callGatewayJson);
+    const actions = new TransportAgentActions(host);
+
+    await actions.showAgentMenu(createContext());
+
+    const rendered = String(host.renderMenuScreen.mock.calls[0]?.[1]);
+    expect(rendered).toContain("menu:agents.screen.codex_policy");
+    expect(rendered).toContain("menu:agents.screen.codex_version");
+    expect(rendered).toContain("menu:agents.screen.last_usage");
+    expect(rendered).not.toContain("thread_id");
+  });
+
   it("requests stopping the active turn and refreshes the agent menu", async () => {
     const callGatewayJson = vi.fn(async (path: string) =>
       path === "/agent/stop"

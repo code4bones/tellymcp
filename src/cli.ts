@@ -32,6 +32,7 @@ import {
   inspectAgentProviders,
   resolveAgentProvider,
 } from "./services/features/telegram-mcp/src/features/agent-runtime/model/agentProviderRegistry";
+import { inspectCodexRuntime } from "./services/features/telegram-mcp/src/features/agent-runtime/model/codexRuntimeDiagnostics";
 
 type InitMode = "client" | "gateway" | "both";
 type CliCommand =
@@ -1110,6 +1111,23 @@ async function runDoctor(args: string[]): Promise<void> {
     }
   }
 
+  const codexProvider = inspectAgentProviders().find(
+    (provider) => provider.agentId === "codex",
+  );
+  if (!codexProvider?.executablePath) {
+    checks.push(`${pc.dim("  SKIP")} Codex structured chat: CLI not installed`);
+    capabilities.push(
+      `${pc.dim("  SKIP")} Codex Telegram continuation: unavailable`,
+    );
+  } else {
+    const codex = inspectCodexRuntime(codexProvider.executablePath);
+    const marker = codex.status === "ready" ? pc.green("  OK") : pc.red("  ERROR");
+    checks.push(`${marker} Codex structured chat: ${codex.message}`);
+    capabilities.push(
+      `${marker} Codex Telegram continuation: ${codex.status === "ready" ? "available" : "incompatible"}`,
+    );
+  }
+
   printSection("capabilities", capabilities);
   printSection("checks", checks);
 
@@ -1560,6 +1578,22 @@ function runProviderCommand(args: string[]): void {
   if (action === "status") {
     printBanner("provider status", "Coding-agent provider readiness");
     printSection("providers", statuses.map(formatProviderStatusLine));
+    const codex = statuses.find(
+      (provider) =>
+        provider.agentId === "codex" && provider.executablePath,
+    );
+    if (codex?.executablePath) {
+      const runtime = inspectCodexRuntime(codex.executablePath);
+      printSection("codex structured chat", [
+        `  status: ${runtime.status}`,
+        `  version: ${runtime.version ?? "unknown"}`,
+        `  app-server: ${runtime.capabilities.appServer ? "yes" : "no"}`,
+        `  unix socket: ${runtime.capabilities.unixSocketListen ? "yes" : "no"}`,
+        `  remote TUI: ${runtime.capabilities.remoteTui ? "yes" : "no"}`,
+        `  schema generation: ${runtime.capabilities.schemaGeneration ? "yes" : "no"}`,
+        `  diagnostic: ${runtime.message}`,
+      ]);
+    }
     return;
   }
 

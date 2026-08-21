@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 
 import WebSocket from "ws";
 
@@ -24,17 +25,61 @@ type PendingRequest = {
 };
 
 type PendingTurn = {
-  onComplete: (message: string) => void | Promise<void>;
+  onComplete: (result: CodexTurnResult) => void | Promise<void>;
   onError: (error: Error) => void | Promise<void>;
   onInterrupted?: (() => void | Promise<void>) | undefined;
   onProgress?: ((event: CodexProgressEvent) => void | Promise<void>) | undefined;
   finalMessage: string;
   fallbackMessage: string;
+  usage?: CodexTokenUsage | undefined;
 };
 
 export type CodexTurnSubmission = {
   threadId: string;
   turnId: string;
+};
+
+export type CodexTokenUsageBreakdown = {
+  totalTokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+};
+
+export type CodexTokenUsage = {
+  total: CodexTokenUsageBreakdown;
+  last: CodexTokenUsageBreakdown;
+  modelContextWindow: number | null;
+};
+
+export type CodexTurnResult = {
+  message: string;
+  usage?: CodexTokenUsage | undefined;
+};
+
+export type CodexServerInfo = {
+  userAgent: string;
+  codexHome?: string | undefined;
+  platformFamily?: string | undefined;
+  platformOs?: string | undefined;
+};
+
+export type CodexThreadSummary = {
+  id: string;
+  cwd: string;
+  preview: string;
+  name?: string | undefined;
+  cliVersion?: string | undefined;
+  updatedAt?: number | undefined;
+  status?: string | undefined;
+};
+
+export const TELLYMCP_CODEX_POLICY = {
+  approvalPolicy: "on-request" as const,
+  sandbox: "workspace-write" as const,
+  networkAccess: false,
 };
 
 export type CodexProgressEvent = {
@@ -87,6 +132,63 @@ function requireNestedString(
   return child;
 }
 
+function parseServerInfo(value: unknown): CodexServerInfo {
+  const record = asRecord(value);
+  if (typeof record?.userAgent !== "string" || !record.userAgent.trim()) {
+    throw new Error("Codex app-server initialize response is missing userAgent.");
+  }
+  return {
+    userAgent: record.userAgent,
+    ...(typeof record.codexHome === "string"
+      ? { codexHome: record.codexHome }
+      : {}),
+    ...(typeof record.platformFamily === "string"
+      ? { platformFamily: record.platformFamily }
+      : {}),
+    ...(typeof record.platformOs === "string"
+      ? { platformOs: record.platformOs }
+      : {}),
+  };
+}
+
+function parseUsageBreakdown(value: unknown): CodexTokenUsageBreakdown | null {
+  const record = asRecord(value);
+  const keys = [
+    "totalTokens",
+    "inputTokens",
+    "cachedInputTokens",
+    "cacheWriteInputTokens",
+    "outputTokens",
+    "reasoningOutputTokens",
+  ] as const;
+  if (!record || keys.some((key) => typeof record[key] !== "number")) {
+    return null;
+  }
+  return {
+    totalTokens: record.totalTokens as number,
+    inputTokens: record.inputTokens as number,
+    cachedInputTokens: record.cachedInputTokens as number,
+    cacheWriteInputTokens: record.cacheWriteInputTokens as number,
+    outputTokens: record.outputTokens as number,
+    reasoningOutputTokens: record.reasoningOutputTokens as number,
+  };
+}
+
+function parseTokenUsage(value: unknown): CodexTokenUsage | null {
+  const record = asRecord(value);
+  const total = parseUsageBreakdown(record?.total);
+  const last = parseUsageBreakdown(record?.last);
+  if (!total || !last) return null;
+  return {
+    total,
+    last,
+    modelContextWindow:
+      typeof record?.modelContextWindow === "number"
+        ? record.modelContextWindow
+        : null,
+  };
+}
+
 export function codexUnixEndpointToWebSocketUrl(endpoint: string): string {
   const prefix = "unix://";
   if (!endpoint.startsWith(prefix)) {
@@ -123,6 +225,7 @@ export class CodexAppServerClient {
   private readonly pendingTurns = new Map<string, PendingTurn>();
   private requestSequence = 0;
   private closed = false;
+  private serverInfo?: CodexServerInfo | undefined;
 
   private constructor(
     private readonly socket: WebSocket,
@@ -153,7 +256,7 @@ export class CodexAppServerClient {
       input.onApprovalRequest,
     );
     try {
-      await client.request("initialize", {
+      const initializeResult = await client.request("initialize", {
         clientInfo: {
           name: "tellymcp",
           title: "TellyMCP",
@@ -164,6 +267,7 @@ export class CodexAppServerClient {
           requestAttestation: false,
         },
       });
+      client.serverInfo = parseServerInfo(initializeResult);
       client.notify("initialized", {});
       return client;
     } catch (error) {
@@ -172,15 +276,94 @@ export class CodexAppServerClient {
     }
   }
 
-  public async startThread(cwd: string): Promise<string> {
-    const result = await this.request("thread/start", { cwd });
+  public getServerInfo(): CodexServerInfo {
+    if (!this.serverInfo) {
+      throw new Error("Codex app-server client is not initialized.");
+    }
+    return { ...this.serverInfo };
+  }
+
+  public async listThreads(cwd: string): Promise<CodexThreadSummary[]> {
+    const normalizedCwd = path.resolve(cwd);
+    const result = asRecord(
+      await this.request("thread/list", {
+        cwd: normalizedCwd,
+        limit: 50,
+        sortKey: "updated_at",
+        sortDirection: "desc",
+      }),
+    );
+    if (!Array.isArray(result?.data)) {
+      throw new Error("Codex app-server thread/list response is invalid.");
+    }
+    return result.data.flatMap((value) => {
+      const thread = asRecord(value);
+      if (
+        typeof thread?.id !== "string" ||
+        typeof thread.cwd !== "string" ||
+        path.resolve(thread.cwd) !== normalizedCwd
+      ) {
+        return [];
+      }
+      const status = asRecord(thread.status);
+      return [
+        {
+          id: thread.id,
+          cwd: thread.cwd,
+          preview: typeof thread.preview === "string" ? thread.preview : "",
+          ...(typeof thread.name === "string" ? { name: thread.name } : {}),
+          ...(typeof thread.cliVersion === "string"
+            ? { cliVersion: thread.cliVersion }
+            : {}),
+          ...(typeof thread.updatedAt === "number"
+            ? { updatedAt: thread.updatedAt }
+            : {}),
+          ...(typeof status?.type === "string"
+            ? { status: status.type }
+            : {}),
+        },
+      ];
+    });
+  }
+
+  public async startThread(
+    cwd: string,
+    options: { ephemeral?: boolean | undefined } = {},
+  ): Promise<string> {
+    const result = await this.request("thread/start", {
+      cwd: path.resolve(cwd),
+      approvalPolicy: TELLYMCP_CODEX_POLICY.approvalPolicy,
+      sandbox: TELLYMCP_CODEX_POLICY.sandbox,
+      serviceName: "tellymcp",
+      ...(options.ephemeral ? { ephemeral: true } : {}),
+    });
     return requireNestedString(result, "thread", "id");
+  }
+
+  public async resumeThread(input: {
+    threadId: string;
+    cwd: string;
+  }): Promise<string> {
+    const result = await this.request("thread/resume", {
+      threadId: input.threadId,
+      cwd: path.resolve(input.cwd),
+      approvalPolicy: TELLYMCP_CODEX_POLICY.approvalPolicy,
+      sandbox: TELLYMCP_CODEX_POLICY.sandbox,
+    });
+    const resumedThreadId = requireNestedString(result, "thread", "id");
+    if (resumedThreadId !== input.threadId) {
+      throw new Error(
+        `Codex resumed unexpected thread '${resumedThreadId}' instead of '${input.threadId}'.`,
+      );
+    }
+    return resumedThreadId;
   }
 
   public async submitTurn(input: {
     threadId: string;
+    cwd: string;
     text: string;
-    onComplete: (message: string) => void | Promise<void>;
+    onComplete: (result: CodexTurnResult) => void | Promise<void>;
     onError: (error: Error) => void | Promise<void>;
     onInterrupted?: (() => void | Promise<void>) | undefined;
     onProgress?: ((event: CodexProgressEvent) => void | Promise<void>) | undefined;
@@ -192,6 +375,15 @@ export class CodexAppServerClient {
         threadId: input.threadId,
         clientUserMessageId: randomUUID(),
         input: [{ type: "text", text: input.text, text_elements: [] }],
+        cwd: path.resolve(input.cwd),
+        approvalPolicy: TELLYMCP_CODEX_POLICY.approvalPolicy,
+        sandboxPolicy: {
+          type: "workspaceWrite",
+          writableRoots: [path.resolve(input.cwd)],
+          networkAccess: TELLYMCP_CODEX_POLICY.networkAccess,
+          excludeTmpdirEnvVar: false,
+          excludeSlashTmp: false,
+        },
       },
       (result) => {
         turnId = requireNestedString(result, "turn", "id");
@@ -303,6 +495,33 @@ export class CodexAppServerClient {
     const params = asRecord(message.params);
     const turnId = typeof params?.turnId === "string" ? params.turnId : null;
 
+    if (message.method === "thread/tokenUsage/updated" && turnId) {
+      const turn = this.pendingTurns.get(turnId);
+      const usage = parseTokenUsage(params?.tokenUsage);
+      if (turn && usage) turn.usage = usage;
+      return;
+    }
+
+    if (message.method === "turn/plan/updated" && turnId) {
+      const turn = this.pendingTurns.get(turnId);
+      const plan = Array.isArray(params?.plan) ? params.plan : [];
+      const completed =
+        plan.length > 0 &&
+        plan.every((entry) => asRecord(entry)?.status === "completed");
+      if (turn?.onProgress) {
+        void turn.onProgress({
+          threadId:
+            typeof params?.threadId === "string" ? params.threadId : "",
+          turnId,
+          itemId: `plan-${turnId}`,
+          kind: "plan",
+          phase: completed ? "completed" : "started",
+          message: "Codex updated its plan.",
+        });
+      }
+      return;
+    }
+
     if (
       (message.method === "item/started" ||
         message.method === "item/completed") &&
@@ -384,9 +603,11 @@ export class CodexAppServerClient {
         return;
       }
       const finalMessage = (turn.finalMessage || turn.fallbackMessage).trim();
-      void turn.onComplete(
-        finalMessage || "Codex completed the turn without a text response.",
-      );
+      void turn.onComplete({
+        message:
+          finalMessage || "Codex completed the turn without a text response.",
+        ...(turn.usage ? { usage: turn.usage } : {}),
+      });
     }
   }
 

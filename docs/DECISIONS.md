@@ -7,10 +7,7 @@ This file is a living source of truth.
 Rules:
 
 - keep only accepted decisions here
-- keep accepted but unstarted work in `docs/TODO.md`
-- keep only actively implemented work in `docs/DOING.md`
-- move completed work to `docs/DONE.md` with a date and commit or other evidence
-- keep architectural invariants here instead of duplicating them as tasks
+- keep open ideas and experiments in `docs/TODO.md`
 - when a decision changes, update this file instead of layering contradictory docs on top
 
 Last updated: `2026-08-21`

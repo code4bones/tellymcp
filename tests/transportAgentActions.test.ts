@@ -66,6 +66,27 @@ describe("TransportAgentActions", () => {
     );
   });
 
+  it("renders an unavailable menu when the gateway returns no agent list", async () => {
+    const callGatewayJson = vi.fn(async () => ({
+      ok: false,
+      error: "Remote agent runtime failed",
+    }));
+    const host = createHost(callGatewayJson);
+    const actions = new TransportAgentActions(host);
+
+    await expect(
+      actions.showAgentMenu(createContext()),
+    ).resolves.toBeUndefined();
+
+    expect(host.renderMenuScreen).toHaveBeenCalledOnce();
+    expect(String(host.renderMenuScreen.mock.calls[0]?.[1])).toContain(
+      "menu:agents.screen.unavailable",
+    );
+    expect(String(host.renderMenuScreen.mock.calls[0]?.[1])).toContain(
+      "Remote agent runtime failed",
+    );
+  });
+
   it("starts the selected agent on the active console", async () => {
     const callGatewayJson = vi.fn(async (path: string) =>
       path === "/agent/start"

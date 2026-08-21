@@ -38,7 +38,7 @@ const TelegramMcpAgentRuntimeService: ServiceSchema = {
 
   actions: {
     listRemote: {
-      params: { type: "object" },
+      params: { session_id: "string" },
       async handler(
         this: AgentRuntimeServiceCarrier,
         ctx: { params: ListAgentRuntimeInput },
@@ -47,7 +47,10 @@ const TelegramMcpAgentRuntimeService: ServiceSchema = {
       },
     },
     startRemote: {
-      params: { type: "object" },
+      params: {
+        session_id: "string",
+        agent_id: "string",
+      },
       async handler(
         this: AgentRuntimeServiceCarrier,
         ctx: { params: StartAgentRuntimeInput },
@@ -56,7 +59,10 @@ const TelegramMcpAgentRuntimeService: ServiceSchema = {
       },
     },
     submitRemote: {
-      params: { type: "object" },
+      params: {
+        session_id: "string",
+        message: "string",
+      },
       async handler(
         this: AgentRuntimeServiceCarrier,
         ctx: { params: SubmitAgentMessageInput },
@@ -65,7 +71,7 @@ const TelegramMcpAgentRuntimeService: ServiceSchema = {
       },
     },
     stopRemote: {
-      params: { type: "object" },
+      params: { session_id: "string" },
       async handler(
         this: AgentRuntimeServiceCarrier,
         ctx: { params: StopAgentTurnInput },

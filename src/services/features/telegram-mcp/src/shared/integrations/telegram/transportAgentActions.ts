@@ -32,6 +32,20 @@ type AgentStatusResponse = {
     | undefined;
 };
 
+function getInvalidStatusMessage(value: unknown): string {
+  if (
+    value &&
+    typeof value === "object" &&
+    "error" in value &&
+    typeof value.error === "string" &&
+    value.error.trim()
+  ) {
+    return value.error.trim().slice(0, 400);
+  }
+
+  return "Invalid agent status response from gateway.";
+}
+
 export interface TransportAgentActionsHost {
   bindingStore: {
     getActiveSessionIdForPrincipal(principal: {
@@ -114,10 +128,19 @@ export class TransportAgentActions {
 
     let status: AgentStatusResponse;
     try {
-      status = await this.host.callGatewayJson<AgentStatusResponse>(
+      const response = await this.host.callGatewayJson<unknown>(
         "/agent/status",
         { session_id: active.sessionId },
       );
+      if (
+        !response ||
+        typeof response !== "object" ||
+        !("agents" in response) ||
+        !Array.isArray(response.agents)
+      ) {
+        throw new Error(getInvalidStatusMessage(response));
+      }
+      status = response as AgentStatusResponse;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await this.host.renderMenuScreen(

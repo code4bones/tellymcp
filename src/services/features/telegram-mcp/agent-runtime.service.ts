@@ -188,6 +188,26 @@ const TelegramMcpAgentRuntimeService: ServiceSchema = {
             : "decline";
         },
         notifyTelegram: async ({ sessionId, message }) => {
+          try {
+            await this.broker.call(
+              "telegramMcp.gatewaySocket.publishAgentNotification",
+              { session_id: sessionId, message },
+              { meta: { internal_call: true } },
+            );
+            this.logger.info("Codex response delivered through Gateway WS", {
+              sessionId,
+            });
+            return;
+          } catch (error) {
+            this.logger.warn(
+              "Gateway WS agent notification failed; falling back to notify service",
+              {
+                sessionId,
+                error:
+                  error instanceof Error ? error.message : String(error),
+              },
+            );
+          }
           await notifyService.getNotifyService().send({
             session_id: sessionId,
             message,

@@ -195,6 +195,21 @@ type GatewaySocketActionResponse = {
   error?: string;
 };
 
+type GatewaySocketAgentNotificationRequest = {
+  type: "agent_notification_request";
+  request_id: string;
+  local_session_id: string;
+  message: string;
+};
+
+type GatewaySocketAgentNotificationResponse = {
+  type: "agent_notification_response";
+  request_id: string;
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+};
+
 type GatewaySocketProjectEvent = {
   type: "project_event";
   event: "member_joined" | "member_left" | "project_deleted";
@@ -334,6 +349,8 @@ type GatewaySocketMessage =
   | GatewaySocketLiveResponse
   | GatewaySocketActionRequest
   | GatewaySocketActionResponse
+  | GatewaySocketAgentNotificationRequest
+  | GatewaySocketAgentNotificationResponse
   | GatewaySocketLiveEvent
   | GatewaySocketLiveStreamEvent
   | GatewaySocketTransportEvent
@@ -353,6 +370,12 @@ type LiveRequestPending = {
 
 type ActionRequestPending = {
   clientUuid: string;
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  timeout: NodeJS.Timeout;
+};
+
+type AgentNotificationPending = {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
@@ -391,6 +414,7 @@ type GatewaySocketCarrier = Service & {
   connectedClientToolsAlerts?: Map<any, Map<string, string>>;
   pendingLiveRequests?: Map<string, LiveRequestPending>;
   pendingActionRequests?: Map<string, ActionRequestPending>;
+  pendingAgentNotifications?: Map<string, AgentNotificationPending>;
   liveStreamHandlers?: Map<string, LiveStreamHandler>;
   localLiveStreamSubscriptions?: Map<string, () => void>;
   getRuntimeOrThrow?: () => ReturnType<TelegramMcpRuntimeServiceInstance["getRuntime"]>;
@@ -478,6 +502,10 @@ type GatewaySocketCarrier = Service & {
     clientUuid: string;
     actionName: string;
     payload: Record<string, unknown>;
+  }) => Promise<unknown>;
+  publishAgentNotification?: (params: {
+    localSessionId: string;
+    message: string;
   }) => Promise<unknown>;
   resolveConnectedSessionTarget?: (params: {
     sessionId: string;
@@ -809,6 +837,18 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         });
       },
     },
+    publishAgentNotification: {
+      params: {
+        session_id: "string",
+        message: "string",
+      },
+      async handler(this: GatewaySocketCarrier, ctx) {
+        return await this.publishAgentNotification?.({
+          localSessionId: String(ctx.params.session_id),
+          message: String(ctx.params.message),
+        });
+      },
+    },
     resolveConnectedSessionTarget: {
       params: {
         sessionId: "string",
@@ -1016,6 +1056,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
     this.connectedClientToolsAlerts = new Map();
     this.pendingLiveRequests = new Map();
     this.pendingActionRequests = new Map();
+    this.pendingAgentNotifications = new Map();
     this.liveStreamHandlers = new Map();
     this.localLiveStreamSubscriptions = new Map();
   },
@@ -2476,6 +2517,75 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         return;
       }
 
+      if (parsed.type === "agent_notification_request") {
+        const requestId =
+          typeof parsed.request_id === "string" ? parsed.request_id.trim() : "";
+        const localSessionId =
+          typeof parsed.local_session_id === "string"
+            ? parsed.local_session_id.trim()
+            : "";
+        const message =
+          typeof parsed.message === "string" ? parsed.message.trim() : "";
+        const hello = this.connectedClients?.get(socket);
+        const clientUuid = hello?.client_uuid?.trim() ?? "";
+        const hasSession = Boolean(
+          localSessionId &&
+            hello?.session_tools?.some(
+              (session) => session.local_session_id === localSessionId,
+            ),
+        );
+        if (!requestId) {
+          return;
+        }
+
+        try {
+          if (!clientUuid || !localSessionId || !message || !hasSession) {
+            throw new Error(
+              "Agent notification requires an identified client, an advertised local_session_id, and message.",
+            );
+          }
+          const result = await this.broker.call(
+            "telegramMcp.notify.sendForGatewaySession",
+            {
+              client_uuid: clientUuid,
+              local_session_id: localSessionId,
+              message,
+            },
+            { meta: { internal_call: true } },
+          );
+          socket.send(
+            JSON.stringify({
+              type: "agent_notification_response",
+              request_id: requestId,
+              ok: true,
+              result,
+            } satisfies GatewaySocketAgentNotificationResponse),
+          );
+          runtime.logger.info("Gateway WS agent notification delivered", {
+            requestId,
+            clientUuid,
+            localSessionId,
+          });
+        } catch (error) {
+          const formattedError = formatRemoteActionError(error);
+          socket.send(
+            JSON.stringify({
+              type: "agent_notification_response",
+              request_id: requestId,
+              ok: false,
+              error: formattedError,
+            } satisfies GatewaySocketAgentNotificationResponse),
+          );
+          runtime.logger.error("Gateway WS agent notification failed", {
+            requestId,
+            clientUuid: clientUuid || null,
+            localSessionId: localSessionId || null,
+            error: formattedError,
+          });
+        }
+        return;
+      }
+
       if (parsed.type === "delivery_ack" || parsed.type === "delivery_fail") {
         const hello = this.connectedClients?.get(socket);
         const clientUuid = hello?.client_uuid?.trim();
@@ -2700,6 +2810,32 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
               ok: false,
               error: formattedError,
             } satisfies GatewaySocketActionResponse),
+          );
+        }
+        return;
+      }
+
+      if (parsed.type === "agent_notification_response") {
+        const requestId =
+          typeof parsed.request_id === "string" ? parsed.request_id.trim() : "";
+        if (!requestId) {
+          return;
+        }
+        const pending = this.pendingAgentNotifications?.get(requestId);
+        if (!pending) {
+          return;
+        }
+        clearTimeout(pending.timeout);
+        this.pendingAgentNotifications?.delete(requestId);
+        if (parsed.ok === true) {
+          pending.resolve(parsed.result);
+        } else {
+          pending.reject(
+            new Error(
+              typeof parsed.error === "string" && parsed.error.trim()
+                ? parsed.error
+                : "Gateway agent notification failed",
+            ),
           );
         }
         return;
@@ -2996,6 +3132,41 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             action_name: params.actionName,
             payload: params.payload ?? {},
           } satisfies GatewaySocketActionRequest),
+        );
+      });
+    },
+
+    async publishAgentNotification(
+      this: GatewaySocketCarrier,
+      params: { localSessionId: string; message: string },
+    ): Promise<unknown> {
+      const localSessionId = params.localSessionId.trim();
+      const message = params.message.trim();
+      if (!localSessionId || !message) {
+        throw new Error("session_id and message are required");
+      }
+      if (!this.wsClient || this.wsClient.readyState !== 1) {
+        throw new Error("Gateway WS connection is unavailable");
+      }
+
+      const requestId = randomUUID();
+      return await new Promise<unknown>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          this.pendingAgentNotifications?.delete(requestId);
+          reject(new Error("Gateway agent notification timed out"));
+        }, LIVE_REQUEST_TIMEOUT_MS);
+        this.pendingAgentNotifications?.set(requestId, {
+          resolve,
+          reject,
+          timeout,
+        });
+        this.wsClient?.send(
+          JSON.stringify({
+            type: "agent_notification_request",
+            request_id: requestId,
+            local_session_id: localSessionId,
+            message,
+          } satisfies GatewaySocketAgentNotificationRequest),
         );
       });
     },
@@ -3632,6 +3803,11 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         pending.reject(new Error("Gateway WS transport is shutting down"));
       }
       this.pendingActionRequests?.clear();
+      for (const pending of this.pendingAgentNotifications?.values() ?? []) {
+        clearTimeout(pending.timeout);
+        pending.reject(new Error("Gateway WS transport is shutting down"));
+      }
+      this.pendingAgentNotifications?.clear();
       for (const unsubscribe of this.localLiveStreamSubscriptions?.values() ?? []) {
         unsubscribe();
       }

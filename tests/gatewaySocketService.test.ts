@@ -31,7 +31,15 @@ type GatewaySocketDeliveryStatus = {
 
 type GatewaySocketMethods = {
   fetchGatewayToolsHashForClient: () => Promise<string | null>;
+  handleGatewayWsServerMessage: (
+    socket: { readyState: number; send: MockFn },
+    raw: unknown,
+  ) => Promise<void>;
   handleGatewayWsClientMessage: (raw: unknown) => Promise<void>;
+  publishAgentNotification: (params: {
+    localSessionId: string;
+    message: string;
+  }) => Promise<unknown>;
   notifyProjectMemberJoined: (params: {
     clientUuids: string[];
     projectUuid: string;
@@ -75,6 +83,7 @@ type GatewaySocketHarness = {
     call: MockFn;
   };
   wsClient: {
+    readyState: number;
     send: MockFn;
   } | null;
   connectedClients: Map<
@@ -85,9 +94,18 @@ type GatewaySocketHarness = {
     }
   >;
   connectedClientsByUuid: Map<string, { readyState: number; send: MockFn }>;
+  pendingAgentNotifications: Map<
+    string,
+    {
+      resolve: (value: unknown) => void;
+      reject: (error: Error) => void;
+      timeout: NodeJS.Timeout;
+    }
+  >;
   getRuntimeOrThrow: () => {
     logger: {
       debug: MockFn;
+      error: MockFn;
       info: MockFn;
       warn: MockFn;
     };
@@ -105,7 +123,9 @@ type GatewaySocketHarness = {
   handleLocalIncomingDelivery: MockFn;
   handleLocalDeliveryStatus: MockFn;
   fetchGatewayToolsHashForClient: GatewaySocketMethods["fetchGatewayToolsHashForClient"];
+  handleGatewayWsServerMessage: GatewaySocketMethods["handleGatewayWsServerMessage"];
   handleGatewayWsClientMessage: GatewaySocketMethods["handleGatewayWsClientMessage"];
+  publishAgentNotification: GatewaySocketMethods["publishAgentNotification"];
   notifyProjectMemberJoined: GatewaySocketMethods["notifyProjectMemberJoined"];
   notifyProjectMemberLeft: GatewaySocketMethods["notifyProjectMemberLeft"];
   notifyProjectDeleted: GatewaySocketMethods["notifyProjectDeleted"];
@@ -156,6 +176,7 @@ function createHarness(): GatewaySocketHarness {
   const runtime = {
     logger: {
       debug: vi.fn(),
+      error: vi.fn(),
       info: vi.fn(),
       warn: vi.fn(),
     },
@@ -175,16 +196,20 @@ function createHarness(): GatewaySocketHarness {
       call: vi.fn(),
     },
     wsClient: {
+      readyState: 1,
       send: vi.fn(),
     },
     connectedClients: new Map(),
     connectedClientsByUuid: new Map(),
+    pendingAgentNotifications: new Map(),
     getRuntimeOrThrow: () => runtime,
     isLocalGatewayClientUuid: vi.fn(async () => false),
     handleLocalIncomingDelivery: vi.fn(async () => false),
     handleLocalDeliveryStatus: vi.fn(async () => false),
     fetchGatewayToolsHashForClient: methods.fetchGatewayToolsHashForClient,
+    handleGatewayWsServerMessage: methods.handleGatewayWsServerMessage,
     handleGatewayWsClientMessage: methods.handleGatewayWsClientMessage,
+    publishAgentNotification: methods.publishAgentNotification,
     notifyProjectMemberJoined: methods.notifyProjectMemberJoined,
     notifyProjectMemberLeft: methods.notifyProjectMemberLeft,
     notifyProjectDeleted: methods.notifyProjectDeleted,
@@ -196,6 +221,94 @@ function createHarness(): GatewaySocketHarness {
 }
 
 describe("gatewaySocket service", () => {
+  it("delivers a client agent notification through the gateway Telegram route", async () => {
+    const harness = createHarness();
+    const socket = { readyState: 1, send: vi.fn() };
+    harness.connectedClients.set(socket, {
+      client_uuid: "client-1",
+      session_tools: [{ local_session_id: "workspace" }],
+    });
+    harness.broker.call.mockResolvedValue({ sent: true, message_id: 77 });
+
+    await harness.handleGatewayWsServerMessage(
+      socket,
+      JSON.stringify({
+        type: "agent_notification_request",
+        request_id: "notification-1",
+        local_session_id: "workspace",
+        message: "Done from Codex",
+      }),
+    );
+
+    expect(harness.broker.call).toHaveBeenCalledWith(
+      "telegramMcp.notify.sendForGatewaySession",
+      {
+        client_uuid: "client-1",
+        local_session_id: "workspace",
+        message: "Done from Codex",
+      },
+      { meta: { internal_call: true } },
+    );
+    expect(socket.send).toHaveBeenCalledWith(
+      JSON.stringify({
+        type: "agent_notification_response",
+        request_id: "notification-1",
+        ok: true,
+        result: { sent: true, message_id: 77 },
+      }),
+    );
+  });
+
+  it("waits for gateway acknowledgement when publishing an agent response", async () => {
+    const harness = createHarness();
+    const published = harness.publishAgentNotification({
+      localSessionId: "workspace",
+      message: "Done from Codex",
+    });
+    const sent = JSON.parse(
+      String(harness.wsClient?.send.mock.calls[0]?.[0]),
+    ) as { request_id: string };
+
+    await harness.handleGatewayWsClientMessage(
+      JSON.stringify({
+        type: "agent_notification_response",
+        request_id: sent.request_id,
+        ok: true,
+        result: { sent: true, message_id: 77 },
+      }),
+    );
+
+    await expect(published).resolves.toEqual({ sent: true, message_id: 77 });
+    expect(harness.pendingAgentNotifications.size).toBe(0);
+  });
+
+  it("rejects agent notifications for sessions not advertised by the client", async () => {
+    const harness = createHarness();
+    const socket = { readyState: 1, send: vi.fn() };
+    harness.connectedClients.set(socket, {
+      client_uuid: "client-1",
+      session_tools: [{ local_session_id: "workspace" }],
+    });
+
+    await harness.handleGatewayWsServerMessage(
+      socket,
+      JSON.stringify({
+        type: "agent_notification_request",
+        request_id: "notification-2",
+        local_session_id: "other-session",
+        message: "Do not route this",
+      }),
+    );
+
+    expect(harness.broker.call).not.toHaveBeenCalled();
+    expect(JSON.parse(String(socket.send.mock.calls[0]?.[0]))).toMatchObject({
+      type: "agent_notification_response",
+      request_id: "notification-2",
+      ok: false,
+      error: expect.stringContaining("advertised local_session_id"),
+    });
+  });
+
   it("dispatches member_joined project events to telegram transport", async () => {
     const harness = createHarness();
 

@@ -247,6 +247,33 @@ describe("Codex app-server client", () => {
         status: "idle",
       },
     ]);
+    const remoteTuiThread = client.waitForThreadStarted({
+      cwd: "/workspace",
+      excludeThreadIds: ["thread-existing"],
+    });
+    for (const socket of webSocketServer.clients) {
+      socket.send(
+        JSON.stringify({
+          method: "thread/started",
+          params: {
+            thread: { id: "thread-existing", cwd: "/workspace" },
+          },
+        }),
+      );
+      socket.send(
+        JSON.stringify({
+          method: "thread/started",
+          params: { thread: { id: "thread-other", cwd: "/other" } },
+        }),
+      );
+      socket.send(
+        JSON.stringify({
+          method: "thread/started",
+          params: { thread: { id: "thread-from-tui", cwd: "/workspace" } },
+        }),
+      );
+    }
+    await expect(remoteTuiThread).resolves.toBe("thread-from-tui");
     await expect(
       client.resumeThread({
         threadId: "thread-existing",

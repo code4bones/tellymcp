@@ -34,6 +34,14 @@ type PendingTurn = {
   usage?: CodexTokenUsage | undefined;
 };
 
+type PendingThreadStart = {
+  cwd: string;
+  excludedThreadIds: ReadonlySet<string>;
+  resolve: (threadId: string) => void;
+  reject: (error: Error) => void;
+  timeout: NodeJS.Timeout;
+};
+
 export type CodexTurnSubmission = {
   threadId: string;
   turnId: string;
@@ -223,6 +231,7 @@ async function openSocket(endpoint: string): Promise<WebSocket> {
 export class CodexAppServerClient {
   private readonly pendingRequests = new Map<JsonRpcId, PendingRequest>();
   private readonly pendingTurns = new Map<string, PendingTurn>();
+  private readonly pendingThreadStarts = new Set<PendingThreadStart>();
   private requestSequence = 0;
   private closed = false;
   private serverInfo?: CodexServerInfo | undefined;
@@ -357,6 +366,36 @@ export class CodexAppServerClient {
       );
     }
     return resumedThreadId;
+  }
+
+  public waitForThreadStarted(input: {
+    cwd: string;
+    excludeThreadIds?: Iterable<string> | undefined;
+    timeoutMs?: number | undefined;
+  }): Promise<string> {
+    if (this.closed || this.socket.readyState !== WebSocket.OPEN) {
+      return Promise.reject(
+        new Error("Codex app-server connection is not available."),
+      );
+    }
+    const timeoutMs = input.timeoutMs ?? 10_000;
+    return new Promise((resolve, reject) => {
+      const pending: PendingThreadStart = {
+        cwd: path.resolve(input.cwd),
+        excludedThreadIds: new Set(input.excludeThreadIds ?? []),
+        resolve,
+        reject,
+        timeout: setTimeout(() => {
+          this.pendingThreadStarts.delete(pending);
+          reject(
+            new Error(
+              "Timed out waiting for the remote Codex TUI to start its thread.",
+            ),
+          );
+        }, timeoutMs),
+      };
+      this.pendingThreadStarts.add(pending);
+    });
   }
 
   public async submitTurn(input: {
@@ -494,6 +533,27 @@ export class CodexAppServerClient {
     if (!message.method) return;
     const params = asRecord(message.params);
     const turnId = typeof params?.turnId === "string" ? params.turnId : null;
+
+    if (message.method === "thread/started") {
+      const thread = asRecord(params?.thread);
+      const threadId =
+        typeof thread?.id === "string" ? thread.id.trim() : "";
+      const cwd = typeof thread?.cwd === "string" ? path.resolve(thread.cwd) : "";
+      if (threadId && cwd) {
+        for (const pending of [...this.pendingThreadStarts]) {
+          if (
+            pending.cwd !== cwd ||
+            pending.excludedThreadIds.has(threadId)
+          ) {
+            continue;
+          }
+          this.pendingThreadStarts.delete(pending);
+          clearTimeout(pending.timeout);
+          pending.resolve(threadId);
+        }
+      }
+      return;
+    }
 
     if (message.method === "thread/tokenUsage/updated" && turnId) {
       const turn = this.pendingTurns.get(turnId);
@@ -790,5 +850,10 @@ export class CodexAppServerClient {
       void turn.onError(error);
     }
     this.pendingTurns.clear();
+    for (const pending of this.pendingThreadStarts) {
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+    }
+    this.pendingThreadStarts.clear();
   }
 }

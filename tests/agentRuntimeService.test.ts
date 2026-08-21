@@ -125,6 +125,7 @@ describe("agent runtime service", () => {
     );
     const notifyTelegram = vi.fn(async () => undefined);
     const requestApproval = vi.fn(async () => "accept" as const);
+    const waitForThread = vi.fn(async () => "thread-1");
     let onApprovalRequest:
       | ((input: {
           requestId: string;
@@ -166,7 +167,6 @@ describe("agent runtime service", () => {
           onApprovalRequest = input.onApprovalRequest;
           return {
             endpoint: "unix:///tmp/tellymcp-codex-test.sock",
-            threadId: "thread-1",
             cwd: "/workspace",
             diagnostics: {
               status: "ready",
@@ -186,6 +186,7 @@ describe("agent runtime service", () => {
               interruptTurn,
               close: closeAppServerClient,
             },
+            waitForThread,
             stop: stopAppServer,
           };
         },
@@ -217,6 +218,10 @@ describe("agent runtime service", () => {
       thread_id: "thread-1",
     });
     expect(sendLine).toHaveBeenCalledOnce();
+    expect(waitForThread).toHaveBeenCalledOnce();
+    expect(waitForThread.mock.invocationCallOrder[0]).toBeLessThan(
+      sendLine.mock.invocationCallOrder[0]!,
+    );
     const approvalRequest = {
       requestId: "approval-1",
       kind: "command" as const,
@@ -241,8 +246,12 @@ describe("agent runtime service", () => {
 
     const command = String(sendLine.mock.calls[0]?.[2]);
     expect(command).toContain(
-      "'/bin/codex' '--remote' 'unix:///tmp/tellymcp-codex-test.sock' '-C' '/workspace' 'resume' 'thread-1'",
+      "'/bin/codex' '--remote' 'unix:///tmp/tellymcp-codex-test.sock' '-C' '/workspace'",
     );
+    expect(command).toContain(
+      "'--ask-for-approval' 'on-request' '--sandbox' 'workspace-write'",
+    );
+    expect(command).not.toContain("'resume'");
     const sentinel = command.match(/(__TELLYMCP_AGENT_EXIT_[a-f0-9]+__)/u)?.[1];
     expect(sentinel).toBeTruthy();
     onData?.(command);

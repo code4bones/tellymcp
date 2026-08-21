@@ -19,7 +19,7 @@ describe("Codex runtime diagnostics", () => {
           stderr: "",
         };
       }
-      return { status: 0, stdout: "--remote resume", stderr: "" };
+      return { status: 0, stdout: "--remote", stderr: "" };
     });
 
     const result = inspectCodexRuntime("/bin/codex", runCommand);

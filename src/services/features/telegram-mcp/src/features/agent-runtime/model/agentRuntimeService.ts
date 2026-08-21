@@ -23,6 +23,7 @@ import {
 } from "./agentProviderRegistry";
 import {
   CodexAppServerClient,
+  TELLYMCP_CODEX_POLICY,
   type CodexApprovalDecision,
   type CodexApprovalHandler,
   type CodexApprovalRequest,
@@ -148,6 +149,10 @@ export type ManagedAppServer = {
   stop: () => void;
 };
 
+export type ManagedAppServerBootstrap = Omit<ManagedAppServer, "threadId"> & {
+  waitForThread: () => Promise<string>;
+};
+
 type RunningAgent = {
   agentId: CodingAgentId;
   startedAt: string;
@@ -196,7 +201,7 @@ type AgentRuntimeDependencies = {
     logger: Logger;
     onApprovalRequest: CodexApprovalHandler;
     clientVersion?: string | undefined;
-  }) => Promise<ManagedAppServer>;
+  }) => Promise<ManagedAppServerBootstrap>;
   requestApproval?: (input: {
     sessionId: string;
     request: CodexApprovalRequest;
@@ -374,8 +379,7 @@ export async function startCodexAppServer(input: {
   onApprovalRequest: CodexApprovalHandler;
   clientVersion?: string | undefined;
   socketDirectory?: string | undefined;
-  ephemeralThread?: boolean | undefined;
-}): Promise<ManagedAppServer> {
+}): Promise<ManagedAppServerBootstrap> {
   const diagnostics = inspectCodexRuntime(input.executablePath);
   assertCodexRuntimeCompatible(diagnostics);
   const socketLocation = createCodexSocketLocation({
@@ -440,23 +444,25 @@ export async function startCodexAppServer(input: {
       clientVersion:
         input.clientVersion ?? getTellyMcpPackageVersion(__dirname),
     });
+    let existingThreads: Awaited<ReturnType<CodexAppServerClient["listThreads"]>>;
     try {
-      await client.listThreads(input.cwd);
+      existingThreads = await client.listThreads(input.cwd);
     } catch (error) {
       throw new Error(
         `Installed Codex app-server does not support the required thread/list contract: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-    const threadId = await client.startThread(input.cwd, {
-      ...(input.ephemeralThread ? { ephemeral: true } : {}),
-    });
     return {
       endpoint,
-      threadId,
       cwd: path.resolve(input.cwd),
       client,
       diagnostics,
       serverInfo: client.getServerInfo(),
+      waitForThread: () =>
+        client!.waitForThreadStarted({
+          cwd: input.cwd,
+          excludeThreadIds: existingThreads.map((thread) => thread.id),
+        }),
       stop,
     };
   } catch (error) {
@@ -629,7 +635,7 @@ export class AgentRuntimeService {
 
     const startedAt = new Date().toISOString();
     const sentinel = `__TELLYMCP_AGENT_EXIT_${randomUUID().replaceAll("-", "")}__`;
-    let backend: ManagedAppServer | null = null;
+    let backend: ManagedAppServerBootstrap | null = null;
     if (definition.transport === "app-server") {
       backend = await this.startAppServer({
         executablePath: provider.executablePath,
@@ -646,8 +652,10 @@ export class AgentRuntimeService {
           backend.endpoint,
           "-C",
           session.cwd || process.cwd(),
-          "resume",
-          backend.threadId,
+          "--ask-for-approval",
+          TELLYMCP_CODEX_POLICY.approvalPolicy,
+          "--sandbox",
+          TELLYMCP_CODEX_POLICY.sandbox,
         ]
       : provider.launchArgs;
     const command = buildAgentLaunchCommand({
@@ -664,7 +672,6 @@ export class AgentRuntimeService {
       unsubscribe: () => unsubscribe(),
       stopBackend: () => backend?.stop(),
       turnInProgress: false,
-      ...(backend ? { appServer: backend } : {}),
     };
 
     const finish = (exitCode: number) => {
@@ -705,9 +712,30 @@ export class AgentRuntimeService {
     });
     this.runningBySessionId.set(sessionId, record);
 
+    let appServer: ManagedAppServer | null = null;
+    const threadStarted = backend?.waitForThread();
     try {
       await this.sendLine(this.config.terminal, terminalTarget, command);
+      if (backend && threadStarted) {
+        const threadId = await threadStarted;
+        if (this.runningBySessionId.get(sessionId) !== record) {
+          throw new Error(
+            "Codex TUI exited before its app-server thread became available.",
+          );
+        }
+        appServer = {
+          endpoint: backend.endpoint,
+          threadId,
+          cwd: backend.cwd,
+          client: backend.client,
+          ...(backend.diagnostics ? { diagnostics: backend.diagnostics } : {}),
+          ...(backend.serverInfo ? { serverInfo: backend.serverInfo } : {}),
+          stop: backend.stop,
+        };
+        record.appServer = appServer;
+      }
     } catch (error) {
+      void threadStarted?.catch(() => undefined);
       this.runningBySessionId.delete(sessionId);
       record.unsubscribe();
       record.stopBackend();
@@ -721,7 +749,7 @@ export class AgentRuntimeService {
       providerId: definition.providerId,
       executablePath: provider.executablePath,
       transport: definition.transport,
-      ...(backend ? { appServerEndpoint: backend.endpoint } : {}),
+      ...(appServer ? { appServerEndpoint: appServer.endpoint } : {}),
       startedAt,
     });
 
@@ -733,7 +761,7 @@ export class AgentRuntimeService {
       provider_id: definition.providerId,
       transport: definition.transport,
       started_at: startedAt,
-      ...(backend ? { thread_id: backend.threadId } : {}),
+      ...(appServer ? { thread_id: appServer.threadId } : {}),
     };
   }
 

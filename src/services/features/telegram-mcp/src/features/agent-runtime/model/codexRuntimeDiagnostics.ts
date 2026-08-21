@@ -65,10 +65,7 @@ export function inspectCodexRuntime(
       appServerResult.status === 0 &&
       appServerHelp.includes("--listen") &&
       appServerHelp.includes("unix://"),
-    remoteTui:
-      rootHelpResult.status === 0 &&
-      rootHelp.includes("--remote") &&
-      rootHelp.includes("resume"),
+    remoteTui: rootHelpResult.status === 0 && rootHelp.includes("--remote"),
     schemaGeneration:
       appServerResult.status === 0 &&
       appServerHelp.includes("generate-ts") &&
@@ -104,7 +101,7 @@ export function inspectCodexRuntime(
     executablePath,
     version,
     capabilities,
-    message: `Codex CLI ${version} supports app-server, Unix sockets, and remote TUI resume.`,
+    message: `Codex CLI ${version} supports app-server, Unix sockets, and remote TUI.`,
   };
 }
 

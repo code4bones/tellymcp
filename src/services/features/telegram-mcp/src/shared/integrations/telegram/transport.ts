@@ -58,6 +58,7 @@ import { TransportMenuFingerprints } from "./transportMenuFingerprints";
 import { TransportMenuFlow } from "./transportMenuFlow";
 import { TransportMenuShell } from "./transportMenuShell";
 import { TransportGatewayActions } from "./transportGatewayActions";
+import { TransportAgentActions } from "./transportAgentActions";
 import { TransportMessageFlow } from "./transportMessageFlow";
 import { TransportMenuState } from "./transportMenuState";
 import { TransportPayloadState } from "./transportPayloadState";
@@ -84,6 +85,7 @@ export class TelegramTransport implements HumanTransport {
   private readonly telegramFetch: TelegramClientFetch;
   private readonly bot: Bot<TelegramMenuContext>;
   private readonly mainMenu: Menu<TelegramMenuContext>;
+  private readonly agentMenu: Menu<TelegramMenuContext>;
   private readonly storageMenu: Menu<TelegramMenuContext>;
   private readonly browserMenu: Menu<TelegramMenuContext>;
   private readonly projectsMenu: Menu<TelegramMenuContext>;
@@ -99,6 +101,7 @@ export class TelegramTransport implements HumanTransport {
   private readonly storageMessageMenu: Menu<TelegramMenuContext>;
   private readonly screenshotMessageMenu: Menu<TelegramMenuContext>;
   private readonly terminalActions: TransportTerminalActions;
+  private readonly agentActions: TransportAgentActions;
   private readonly liveActions: TransportLiveActions;
   private readonly lifecycleActions: TransportLifecycleActions;
   private readonly attachmentStore: TransportAttachmentStore;
@@ -250,6 +253,7 @@ export class TelegramTransport implements HumanTransport {
     this.telegramFetch = composition.telegramFetch;
     this.bot = composition.bot;
     this.mainMenu = composition.mainMenu;
+    this.agentMenu = composition.agentMenu;
     this.storageMenu = composition.storageMenu;
     this.browserMenu = composition.browserMenu;
     this.projectsMenu = composition.projectsMenu;
@@ -265,6 +269,7 @@ export class TelegramTransport implements HumanTransport {
     this.storageMessageMenu = composition.storageMessageMenu;
     this.screenshotMessageMenu = composition.screenshotMessageMenu;
     this.terminalActions = composition.terminalActions;
+    this.agentActions = composition.agentActions;
     this.liveActions = composition.liveActions;
     this.lifecycleActions = composition.lifecycleActions;
     this.attachmentStore = composition.attachmentStore;

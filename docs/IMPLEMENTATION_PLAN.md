@@ -19,6 +19,8 @@ The project has already moved to the gateway-first model. This document now trac
 - chat-host file reads use `get_file`; text mode returns exact UTF-8 project files, URL mode creates a bounded short-lived gateway copy, and base64 remains an explicit fallback
 - Redis is gateway-only; clients use process-local transient state and persist
   only stable gateway identity in `.mcpsession.json`
+- coding-agent providers are detected and executed on the selected client; the
+  gateway remains independent of Codex, Claude Code, and vendor SDK installs
 
 ## Invariants
 
@@ -34,6 +36,8 @@ Do not regress these:
 8. gateway-routed file reads must use canonical session ids and remain confined to the selected console workspace
 9. client startup, configuration, diagnostics, and migration must not require or
    silently reconnect to Redis
+10. Telegram agent selection must route to the selected client console and must
+    not launch a second agent into an already occupied PTY
 
 ## Active Roadmap
 
@@ -58,8 +62,17 @@ Do not regress these:
 
 ### Packaging
 
-- keep `tellymcp run`, `doctor`, `browser install`, and `codex-plugin install` documented and stable
+- keep `tellymcp run`, `run --agent`, `provider`, `doctor`, `browser install`,
+  and `codex-plugin install` documented and stable
 - keep bundled plugin installation idempotent
+
+### Managed Agent Providers
+
+- keep the built-in PTY provider adapter as the console-compatible baseline
+- add structured SDK adapters behind the same provider contract only when they
+  preserve client-side execution and optional vendor dependencies
+- keep provider/model arguments allowlisted; Telegram callbacks must never
+  become an arbitrary shell-command surface
 
 ### Chat Connector Continuity
 

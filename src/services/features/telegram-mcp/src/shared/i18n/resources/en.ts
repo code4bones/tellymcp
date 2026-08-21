@@ -24,6 +24,7 @@ export const enMenu = {
       live: "🖥 Live",
       content: "📄 Content",
       browser: "🌐 Browser",
+      agents: "🤖 Agent",
       local: "🏠 Local",
       collab: "👥 Collab",
       storage: "📦 Storage",
@@ -33,6 +34,7 @@ export const enMenu = {
     actions: {
       open_content: "Opening content menu.",
       open_browser: "Opening browser menu.",
+      open_agents: "Opening agent menu.",
       open_inbox: "Opening inbox.",
       open_storage: "Opening storage.",
       open_settings: "Opening settings.",
@@ -48,6 +50,28 @@ export const enMenu = {
       link_hint:
         "🔗 Link a partner session to coordinate through shared notes and files.",
       terminal_mode_direct: "🖧 Terminal mode: direct",
+    },
+  },
+  agents: {
+    actions: {
+      started: "Started {{agentName}}.",
+      back_to_session: "Back to session menu.",
+    },
+    states: {
+      running: "running",
+      ready: "ready",
+      missing: "CLI missing",
+    },
+    screen: {
+      title: "🤖 Coding agent",
+      active_session: "📌 Active session: {{sessionName}}",
+      provider: "• {{agentName}} · {{providerName}} — {{state}}",
+      choose_hint:
+        "Choose an available agent. It will start in this console, and new Telegram messages will continue the same terminal conversation.",
+      running_hint:
+        "An agent is already running. Exit it in the console before starting another one.",
+      unavailable: "Agent runtime is unavailable: {{message}}",
+      started: "Started {{agentName}} in the selected console.",
     },
   },
   sessions: {

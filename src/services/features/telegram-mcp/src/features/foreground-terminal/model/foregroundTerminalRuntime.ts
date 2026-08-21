@@ -26,6 +26,7 @@ type RunForegroundPtyRuntimeInput = {
   envPath: string;
   packageRoot: string;
   printBanner: (title: string, subtitle?: string) => void;
+  agentId?: "codex" | "claude" | undefined;
 };
 
 async function createForegroundBroker(
@@ -235,6 +236,21 @@ export async function runForegroundPtyRuntime(
           sessionId: session.sessionId,
         });
       });
+    if (input.agentId) {
+      const started = (await handle.broker.call(
+        "telegramMcp.agentRuntime.startRemote",
+        {
+          session_id: session.sessionId,
+          agent_id: input.agentId,
+        },
+      )) as {
+        agent_id?: string;
+        provider_id?: string;
+      };
+      process.stdout.write(
+        `Agent: ${started.agent_id ?? input.agentId} (${started.provider_id ?? "provider"})\n`,
+      );
+    }
     process.stdout.write(
       `Attached session: ${session.sessionLabel} (${session.sessionId})\n`,
     );

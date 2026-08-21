@@ -392,6 +392,28 @@ export class GatewayHttpService {
     };
   }
 
+  private async requestAgentRuntimeAction<T>(input: {
+    sessionId: string;
+    actionName:
+      | "telegramMcp.agentRuntime.listRemote"
+      | "telegramMcp.agentRuntime.startRemote";
+    params?: Record<string, unknown>;
+  }): Promise<T> {
+    const target = await this.resolveConnectedConsoleTarget(input.sessionId);
+    return await this.callBroker<T>(
+      "telegramMcp.gatewaySocket.requestClientAction",
+      {
+        clientUuid: target.clientUuid,
+        actionName: input.actionName,
+        params: {
+          ...(input.params ?? {}),
+          session_id: target.localSessionId,
+        },
+      },
+      { meta: { internal_call: true } },
+    );
+  }
+
   private async readJsonBody(req: IncomingMessage): Promise<unknown> {
     const cachedRequest = req as CachedBodyRequest;
     if (cachedRequest.limitedJsonBodyRead) {
@@ -1020,6 +1042,69 @@ export class GatewayHttpService {
         console.error("Gateway live action request failed", {
           error: error instanceof Error ? (error.stack ?? error.message) : String(error),
         });
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/agent/status") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const sessionId =
+          typeof body.session_id === "string" ? body.session_id.trim() : "";
+        if (!sessionId) {
+          writeJson(res, 400, { error: "session_id is required" });
+          return true;
+        }
+
+        const result = await this.requestAgentRuntimeAction({
+          sessionId,
+          actionName: "telegramMcp.agentRuntime.listRemote",
+        });
+        writeJson(res, 200, result);
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/agent/start") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const sessionId =
+          typeof body.session_id === "string" ? body.session_id.trim() : "";
+        const agentId =
+          typeof body.agent_id === "string" ? body.agent_id.trim() : "";
+        if (!sessionId || !agentId) {
+          writeJson(res, 400, {
+            error: "session_id and agent_id are required",
+          });
+          return true;
+        }
+
+        const result = await this.requestAgentRuntimeAction({
+          sessionId,
+          actionName: "telegramMcp.agentRuntime.startRemote",
+          params: { agent_id: agentId },
+        });
+        writeJson(res, 200, result);
+        return true;
+      } catch (error) {
         writeJson(res, 400, {
           error: error instanceof Error ? error.message : String(error),
         });

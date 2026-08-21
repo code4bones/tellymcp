@@ -43,6 +43,7 @@ Responsibilities:
 - direct MCP endpoint for the agent
 - gateway registration and hello/refresh
 - process-local transient runtime state; no Redis connection
+- provider detection and coding-agent lifecycle inside the console PTY
 
 Key runtime entrypoints:
 
@@ -50,6 +51,7 @@ Key runtime entrypoints:
 - `foregroundTerminalRuntime.ts`
 - `browserService.ts`
 - `xchangeService.ts`
+- `agent-runtime.service.ts`
 
 ## Persistence Model
 
@@ -161,6 +163,16 @@ The runtime uses a built-in PTY-backed terminal layer.
 - `tellymcp doctor` performs the same native-module probe without crashing
 - the package postinstall probe reports whether `pty.node` can actually be loaded instead of assuming successful native compilation
 - Linux ARM64 installations compile `node-pty` locally and therefore require Python 3, `make`, and a C/C++ toolchain
+
+### Managed coding agents
+
+- provider adapters are built into TellyMCP; Codex and Claude Code are the first allowlisted agents
+- availability is resolved from `PATH` on the client that owns the selected console
+- `tellymcp run --agent codex|claude` and the Telegram `Agent` menu call the same client-side `telegramMcp.agentRuntime` service
+- the gateway only relays provider status/start actions and never imports a vendor SDK or requires a vendor CLI
+- the runtime wraps the allowlisted launch command with a unique exit sentinel, tracks its lifecycle, and rejects a second launch while an agent is running
+- arbitrary command names or arguments must not be accepted from Telegram callbacks
+- future SDK-native Codex or Claude providers belong behind this same contract and must remain optional
 
 Prompt scan model:
 

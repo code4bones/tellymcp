@@ -10,7 +10,7 @@ Rules:
 - keep open ideas and experiments in `docs/TODO.md`
 - when a decision changes, update this file instead of layering contradictory docs on top
 
-Last updated: `2026-08-07`
+Last updated: `2026-08-21`
 
 ## Core Architecture
 
@@ -322,6 +322,17 @@ Status: accepted
   runtime diagnostics must reflect that Redis is not a client dependency
 - `REDIS_*` remains part of gateway and `both` configuration and must not be
   reintroduced into client examples as a compatibility fallback
+
+### D-032 — Agent selection is provider-neutral and executes on the client
+
+Status: accepted
+
+- the gateway and Telegram bot must not require Codex, Claude Code, or a vendor SDK
+- provider availability is detected on the selected client console, never inferred from the gateway host
+- `tellymcp run --agent <agent>` and the Telegram agent menu launch the same provider adapter in the console-owned PTY
+- only one TellyMCP-managed coding agent may run in a console at a time; switching agents requires the current process to exit first
+- vendor SDK-backed providers may be added behind the same contract, but must not make another provider a transitive runtime requirement
+- the existing `tellymcp codex-plugin` command remains supported; `tellymcp provider install codex` is the provider-oriented entry point for the same workflow integration
 
 ## Deferred Or Not Yet Accepted
 

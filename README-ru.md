@@ -270,6 +270,39 @@ Runtime-состояние клиента локальное и не требу�
 tellymcp run
 ```
 
+### Запуск и продолжение coding agent
+
+В TellyMCP встроены provider adapters для Codex и Claude Code. Vendor CLI
+остаётся опциональным: на client-машине можно использовать любой из них, а на
+gateway не требуется устанавливать ни Codex, ни Claude.
+
+Проверить client-машину:
+
+```bash
+tellymcp provider list
+tellymcp provider status codex
+tellymcp provider status claude
+```
+
+Подготовить интеграцию и сразу запустить агента вместе с консолью:
+
+```bash
+tellymcp provider install codex
+tellymcp run --env .env-client --agent codex
+```
+
+`provider install codex` также подготавливает встроенный workflow plugin
+TellyMCP для Codex. Для Claude Code используется встроенный adapter и
+существующий helper `tellymcp mcp --format claude`; сам vendor CLI нужно
+установить отдельно.
+
+После выбора консоли в Telegram открой `🤖 Агент`: меню покажет доступные на
+этой client-машине providers и позволит запустить Codex или Claude Code в том же
+PTY. Следующие сообщения из Telegram попадут в тот же терминальный диалог.
+TellyMCP не позволит случайно запустить второго агента, пока первый ещё работает.
+Оставь MCP endpoint TellyMCP подключённым к выбранному агенту: тогда его workflow
+сможет возвращать финальные ответы и файлы в Telegram существующими notify-tools.
+
 ## Webhook
 
 Gateway умеет работать через Telegram webhook.

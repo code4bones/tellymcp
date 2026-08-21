@@ -20,6 +20,11 @@ the connection was established` на HTTP reject, timeout или раннем cl
 
 ### Added
 
+- Добавлен provider-neutral managed agent runtime: `tellymcp provider
+  list|status|install`, `tellymcp run --agent codex|claude` и Telegram-меню
+  `🤖 Агент`. Codex и Claude Code обнаруживаются на client-машине через `PATH`,
+  запускаются в PTY выбранной консоли и защищены от двойного запуска; gateway не
+  требует установленного vendor CLI.
 - Добавлен локальный web-конфигуратор `tellymcp configure`: browser wizard
   предлагает выбрать Client или Gateway, показывает role-specific поля,
   формирует HTTP/WS/WebApp/webhook/OAuth URL из одного Public base URL,

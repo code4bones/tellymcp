@@ -24,6 +24,7 @@ export const ruMenu = {
       live: "🖥 Live",
       content: "📄 Content",
       browser: "🌐 Browser",
+      agents: "🤖 Агент",
       local: "🏠 Local",
       collab: "👥 Collab",
       storage: "📦 Storage",
@@ -33,6 +34,7 @@ export const ruMenu = {
     actions: {
       open_content: "Открываю меню content.",
       open_browser: "Открываю browser.",
+      open_agents: "Открываю меню агентов.",
       open_inbox: "Открываю inbox.",
       open_storage: "Открываю storage.",
       open_settings: "Открываю настройки.",
@@ -48,6 +50,28 @@ export const ruMenu = {
       link_hint:
         "🔗 Свяжи напарника, чтобы координироваться через общие заметки и файлы.",
       terminal_mode_direct: "🖧 Режим терминала: direct",
+    },
+  },
+  agents: {
+    actions: {
+      started: "Запущен {{agentName}}.",
+      back_to_session: "Назад в меню сессии.",
+    },
+    states: {
+      running: "запущен",
+      ready: "готов",
+      missing: "CLI не найден",
+    },
+    screen: {
+      title: "🤖 Coding agent",
+      active_session: "📌 Активная сессия: {{sessionName}}",
+      provider: "• {{agentName}} · {{providerName}} — {{state}}",
+      choose_hint:
+        "Выбери доступного агента. Он запустится в этой консоли, а новые сообщения из Telegram продолжат тот же терминальный диалог.",
+      running_hint:
+        "Агент уже запущен. Заверши его в консоли, прежде чем запускать другого.",
+      unavailable: "Agent runtime недоступен: {{message}}",
+      started: "{{agentName}} запущен в выбранной консоли.",
     },
   },
   sessions: {

@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { describe, expect, it, vi } from "vitest";
 
 import { GatewayHttpService } from "../src/services/features/telegram-mcp/src/features/distributed-gateway/model/gatewayHttpService";
+import { buildLiveRelaySessionId } from "../src/services/features/telegram-mcp/src/app/webapp/relay";
 import { MAX_BODY_SIZE_BYTES } from "../src/services/features/telegram-mcp/src/shared/lib/bodyLimits";
 
 function makeService(
@@ -186,6 +187,73 @@ describe("GatewayHttpService live relay bootstrap", () => {
         clientUuid: "source-client-uuid",
         requestType: "bootstrap_validate",
       }),
+      { meta: { internal_call: true } },
+    );
+  });
+});
+
+describe("GatewayHttpService agent runtime relay", () => {
+  it("requests provider status from the selected client console", async () => {
+    const callBroker = vi.fn(async () => ({
+      session_id: "workspace",
+      agents: [{ agentId: "codex", state: "idle", available: true }],
+    }));
+    const service = makeService(callBroker, "transport-secret");
+    const response = makeResponse();
+    const request = makeRequest("Bearer transport-secret") as IncomingMessage & {
+      body: unknown;
+    };
+    request.body = {
+      session_id: buildLiveRelaySessionId("client-1", "workspace"),
+    };
+
+    await service.handleRequest(request, response, "/gateway/agent/status");
+
+    expect(response.statusCode).toBe(200);
+    expect(callBroker).toHaveBeenCalledWith(
+      "telegramMcp.gatewaySocket.requestClientAction",
+      {
+        clientUuid: "client-1",
+        actionName: "telegramMcp.agentRuntime.listRemote",
+        params: { session_id: "workspace" },
+      },
+      { meta: { internal_call: true } },
+    );
+  });
+
+  it("resolves a canonical session before starting its agent", async () => {
+    const callBroker = vi.fn(async (actionName: string) => {
+      if (actionName === "telegramMcp.gatewaySocket.resolveConnectedSessionTarget") {
+        return {
+          client_uuid: "client-2",
+          local_session_id: "workspace-2",
+        };
+      }
+      return { ok: true, agent_id: "claude", provider_id: "anthropic" };
+    });
+    const service = makeService(callBroker, "transport-secret");
+    const response = makeResponse();
+    const request = makeRequest("Bearer transport-secret") as IncomingMessage & {
+      body: unknown;
+    };
+    request.body = {
+      session_id: "client-2:workspace-2",
+      agent_id: "claude",
+    };
+
+    await service.handleRequest(request, response, "/gateway/agent/start");
+
+    expect(response.statusCode).toBe(200);
+    expect(callBroker).toHaveBeenLastCalledWith(
+      "telegramMcp.gatewaySocket.requestClientAction",
+      {
+        clientUuid: "client-2",
+        actionName: "telegramMcp.agentRuntime.startRemote",
+        params: {
+          agent_id: "claude",
+          session_id: "workspace-2",
+        },
+      },
       { meta: { internal_call: true } },
     );
   });

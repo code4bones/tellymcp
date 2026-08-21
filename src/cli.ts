@@ -28,6 +28,10 @@ import {
 } from "./services/features/telegram-mcp/src/shared/lib/project-identity/projectIdentity";
 import { migrateEnvironmentContent } from "./envMigration";
 import { startConfigureServer } from "./configureServer";
+import {
+  inspectAgentProviders,
+  resolveAgentProvider,
+} from "./services/features/telegram-mcp/src/features/agent-runtime/model/agentProviderRegistry";
 
 type InitMode = "client" | "gateway" | "both";
 type CliCommand =
@@ -42,6 +46,7 @@ type CliCommand =
   | "browser"
   | "extension"
   | "codex-plugin"
+  | "provider"
   | "system-prune";
 
 const distDir = __dirname;
@@ -151,6 +156,7 @@ function printHelp(): void {
     "  tellymcp configure [--no-open]",
     "  tellymcp migrate-env <input.env> > .migrated-env",
     "  tellymcp run [--env <file>]",
+    "  tellymcp run [--env <file>] [--agent codex|claude]",
     "  tellymcp run --env=<file>",
     "  tellymcp run --env .env-client -s backendDev",
     "  tellymcp run              # if .mcpsession.json already stores env_file + local_session_id",
@@ -161,6 +167,9 @@ function printHelp(): void {
     "  tellymcp extension chrome",
     "  tellymcp codex-plugin install",
     "  tellymcp codex-plugin status",
+    "  tellymcp provider list",
+    "  tellymcp provider status [codex|claude]",
+    "  tellymcp provider install <codex|claude>",
     "  tellymcp mcp [--url <url>] [--bearer <token>] [--format claude|legacy]",
     "  tellymcp oauth key",
     "  tellymcp help",
@@ -173,6 +182,7 @@ function printHelp(): void {
     "  tellymcp run",
     "  tellymcp run --env .env.client",
     "  tellymcp run --env .env-client -s backendDev",
+    "  tellymcp run --env .env-client --agent codex",
     "  tellymcp run              # reuses .mcpsession.json in the current workspace",
     "  tellymcp doctor --env .env.client",
     "  tellymcp system-prune --env .env.gateway --yes",
@@ -181,6 +191,8 @@ function printHelp(): void {
     "  tellymcp extension chrome ./tellymcp-chrome-attach",
     "  tellymcp codex-plugin install",
     "  tellymcp codex-plugin status",
+    "  tellymcp provider list",
+    "  tellymcp provider status claude",
     "  tellymcp mcp --help",
     "  tellymcp oauth key",
   ]);
@@ -1488,8 +1500,115 @@ function runCodexPluginCommand(args: string[]): void {
   }
 }
 
+function printProviderHelp(): void {
+  printBanner("provider", "Inspect and prepare coding-agent providers");
+  printSection("Usage", [
+    "  tellymcp provider list",
+    "  tellymcp provider status [codex|claude]",
+    "  tellymcp provider install <codex|claude>",
+  ]);
+  printSection("Notes", [
+    "  Provider adapters are built into TellyMCP.",
+    "  Vendor CLIs remain optional and are detected from PATH.",
+    "  The Codex setup also installs the bundled TellyMCP workflow plugin.",
+  ]);
+}
+
+function formatProviderStatusLine(
+  provider: ReturnType<typeof inspectAgentProviders>[number],
+): string {
+  const state = provider.available ? pc.green("ready") : pc.yellow("missing");
+  const executable = provider.executablePath ?? provider.executable;
+  return `  ${provider.agentId.padEnd(7)} ${state}  ${provider.providerName} (${executable})`;
+}
+
+function runProviderCommand(args: string[]): void {
+  const [rawAction, rawProvider] = args;
+  const action = rawAction?.trim().toLowerCase();
+  if (!action || action === "--help" || action === "-h") {
+    printProviderHelp();
+    return;
+  }
+
+  if (action === "list") {
+    printBanner("provider list", "Built-in coding-agent adapters");
+    printSection("providers", inspectAgentProviders().map(formatProviderStatusLine));
+    return;
+  }
+
+  if (action !== "status" && action !== "install") {
+    fail("Provider action must be one of: list, status, install");
+  }
+
+  const definitions = inspectAgentProviders();
+  const selected = rawProvider
+    ? resolveAgentProvider(rawProvider)
+    : action === "status"
+      ? null
+      : undefined;
+  if (selected === undefined) {
+    fail("Provider name is required. Supported providers: codex, claude");
+  }
+  if (rawProvider && !selected) {
+    fail(`Unsupported provider: ${rawProvider}`);
+  }
+
+  const statuses = selected
+    ? definitions.filter((provider) => provider.agentId === selected.agentId)
+    : definitions;
+
+  if (action === "status") {
+    printBanner("provider status", "Coding-agent provider readiness");
+    printSection("providers", statuses.map(formatProviderStatusLine));
+    return;
+  }
+
+  if (!selected) {
+    fail("Provider name is required. Supported providers: codex, claude");
+  }
+
+  printBanner(`provider install ${selected.agentId}`, "Preparing provider integration");
+  if (selected.agentId === "codex") {
+    const pluginStatus = installCodexPlugin(packageRoot);
+    printSection("integration", [
+      `  adapter: built in`,
+      `  workflow plugin: ${pluginStatus.installedVersion ? "installed" : "synced"}`,
+      `  plugin version: ${pluginStatus.bundledVersion}`,
+    ]);
+  } else {
+    printSection("integration", [
+      "  adapter: built in",
+      "  workflow plugin: not required",
+      "  MCP helper: tellymcp mcp --format claude",
+    ]);
+  }
+
+  const refreshed = inspectAgentProviders().find(
+    (provider) => provider.agentId === selected.agentId,
+  );
+  if (refreshed) {
+    printSection("runtime", [formatProviderStatusLine(refreshed)]);
+    if (!refreshed.available) {
+      printSection("next", [
+        `  Install ${refreshed.agentName} separately and ensure '${refreshed.executable}' is in PATH.`,
+        `  Then verify with: tellymcp provider status ${refreshed.agentId}`,
+      ]);
+    }
+  }
+}
+
 async function runRuntime(args: string[]): Promise<void> {
   const { envPath, parsed } = loadCliEnv(args);
+  const requestedAgent = readFlagValue(args, "--agent");
+  const agentProvider = requestedAgent
+    ? resolveAgentProvider(requestedAgent)
+    : null;
+  if (requestedAgent && !agentProvider) {
+    fail(`Unsupported agent: ${requestedAgent}. Supported agents: codex, claude`);
+  }
+  if (agentProvider && !isForegroundPtyClientMode(parsed)) {
+    fail("--agent is supported only when DISTRIBUTED_MODE=client");
+  }
   if (parsed.TELLYMCP_SESSION_ID) {
     process.env.TELLYMCP_SESSION_ID = parsed.TELLYMCP_SESSION_ID;
   }
@@ -1523,6 +1642,7 @@ async function runRuntime(args: string[]): Promise<void> {
       envPath,
       packageRoot,
       printBanner,
+      ...(agentProvider ? { agentId: agentProvider.agentId } : {}),
     });
     return;
   }
@@ -1601,6 +1721,7 @@ async function main(argv: string[]): Promise<void> {
     rawCommand === "browser" ||
     rawCommand === "system-prune" ||
     rawCommand === "codex-plugin" ||
+    rawCommand === "provider" ||
     rawCommand === "extension"
       ? rawCommand
       : "help";
@@ -1657,6 +1778,11 @@ async function main(argv: string[]): Promise<void> {
 
   if (command === "codex-plugin") {
     runCodexPluginCommand(argv.slice(1));
+    return;
+  }
+
+  if (command === "provider") {
+    runProviderCommand(argv.slice(1));
     return;
   }
 

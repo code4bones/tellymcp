@@ -46,6 +46,7 @@ import {
   formatStorageDetail,
 } from "./transportContent";
 import { TransportAttachmentStore } from "./transportAttachmentStore";
+import { TransportAgentActions } from "./transportAgentActions";
 import { TransportBroadcastActions } from "./transportBroadcastActions";
 import { TransportContext } from "./transportContext";
 import { TransportConsoleRegistry } from "./transportConsoleRegistry";
@@ -139,6 +140,7 @@ export interface TransportConstructorWiringResult {
   telegramFetch: TelegramClientFetch;
   bot: Bot<TelegramMenuContext>;
   mainMenu: Menu<TelegramMenuContext>;
+  agentMenu: Menu<TelegramMenuContext>;
   storageMenu: Menu<TelegramMenuContext>;
   browserMenu: Menu<TelegramMenuContext>;
   projectsMenu: Menu<TelegramMenuContext>;
@@ -154,6 +156,7 @@ export interface TransportConstructorWiringResult {
   storageMessageMenu: Menu<TelegramMenuContext>;
   screenshotMessageMenu: Menu<TelegramMenuContext>;
   terminalActions: TransportTerminalActions;
+  agentActions: TransportAgentActions;
   liveActions: TransportLiveActions;
   lifecycleActions: TransportLifecycleActions;
   attachmentStore: TransportAttachmentStore;
@@ -226,6 +229,28 @@ export function buildTransportConstructorWiring(
     config: host.config,
     logger: host.logger,
     bot,
+  });
+  const agentMenuRef: { current?: Menu<TelegramMenuContext> } = {};
+  const agentActions = new TransportAgentActions({
+    bindingStore: host.bindingStore,
+    sessionStore: host.sessionStore,
+    resolveLocaleForContext: (ctx) => context.resolveLocaleForContext(ctx),
+    getPrincipalFromContext: (ctx) => context.getPrincipalFromContext(ctx),
+    t: (locale, key, vars) => context.t(locale, key, vars),
+    callGatewayJson: (path, payload) => host.callGatewayJson(path, payload),
+    renderMenuScreen: (ctx, text, meta, menu) =>
+      menuFlow.renderMenuScreen(
+        ctx,
+        text,
+        meta,
+        menu as Menu<TelegramMenuContext>,
+      ),
+    getAgentMenu: () => {
+      if (!agentMenuRef.current) {
+        throw new Error("Telegram agent menu is not initialized yet");
+      }
+      return agentMenuRef.current;
+    },
   });
   const consoleRegistry = new TransportConsoleRegistry({
     config: host.config,
@@ -345,6 +370,7 @@ export function buildTransportConstructorWiring(
     showLiveViewLauncher: (ctx) => menuFlow.showLiveViewLauncher(ctx),
     showBufferMenu: (ctx) => menuFlow.showBufferMenu(ctx),
     showBrowserMenu: (ctx) => menuFlow.showBrowserMenu(ctx),
+    showAgentMenu: (ctx) => agentActions.showAgentMenu(ctx),
     showMainMenu: (ctx) => menuState.showMainMenu(ctx),
     showProjectsEntryPoint: (ctx) => menuFlow.showProjectsMenu(ctx),
     showStorageMenu: (ctx) => menuFlow.showStorageMenu(ctx),
@@ -358,6 +384,7 @@ export function buildTransportConstructorWiring(
     showDeveloperInfo: (ctx) => menuFlow.showDeveloperInfo(ctx),
     showPruneConfirmMenu: (ctx) => menuFlow.showPruneConfirmMenu(ctx),
     showActiveSessionInfo: (ctx) => menuFlow.showActiveSessionInfo(ctx),
+    startAgent: (ctx, agentId) => agentActions.startAgent(ctx, agentId),
     beginRenameActiveSession: (ctx) =>
       sessionActions.beginRenameActiveSession(ctx),
     beginBroadcast: (ctx) => broadcastActions.beginBroadcast(ctx),
@@ -397,6 +424,8 @@ export function buildTransportConstructorWiring(
   });
 
   const mainMenu: Menu<TelegramMenuContext> = menuFactories.createMainMenu();
+  const agentMenu = menuFactories.createAgentMenu();
+  agentMenuRef.current = agentMenu;
   const storageMenu: Menu<TelegramMenuContext> = menuFactories.createStorageMenu();
   const browserMenu: Menu<TelegramMenuContext> = menuFactories.createBrowserMenu();
   const screenshotsMenu: Menu<TelegramMenuContext> = menuFactories.createScreenshotsMenu();
@@ -922,6 +951,7 @@ export function buildTransportConstructorWiring(
   });
 
   mainMenu.register([
+    agentMenu,
     storageMenu,
     browserMenu,
     projectsMenu,
@@ -942,6 +972,7 @@ export function buildTransportConstructorWiring(
     telegramFetch,
     bot,
     mainMenu,
+    agentMenu,
     storageMenu,
     browserMenu,
     projectsMenu,
@@ -957,6 +988,7 @@ export function buildTransportConstructorWiring(
     storageMessageMenu,
     screenshotMessageMenu,
     terminalActions,
+    agentActions,
     liveActions,
     lifecycleActions,
     attachmentStore,

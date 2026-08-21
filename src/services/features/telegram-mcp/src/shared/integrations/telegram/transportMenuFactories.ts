@@ -61,6 +61,7 @@ export interface TransportMenuFactoriesHost {
   showLiveViewLauncher(ctx: TelegramMenuContext): Promise<void>;
   showBufferMenu(ctx: TelegramMenuContext): Promise<void>;
   showBrowserMenu(ctx: TelegramMenuContext): Promise<void>;
+  showAgentMenu(ctx: TelegramMenuContext): Promise<void>;
   showMainMenu(ctx: TelegramMenuContext): Promise<void>;
   showProjectsEntryPoint(ctx: TelegramMenuContext): Promise<void>;
   showStorageMenu(ctx: TelegramMenuContext): Promise<void>;
@@ -76,6 +77,10 @@ export interface TransportMenuFactoriesHost {
   showDeveloperInfo(ctx: TelegramMenuContext): Promise<void>;
   showPruneConfirmMenu(ctx: TelegramMenuContext): Promise<void>;
   showActiveSessionInfo(ctx: TelegramMenuContext): Promise<void>;
+  startAgent(
+    ctx: TelegramMenuContext,
+    agentId: "codex" | "claude",
+  ): Promise<void>;
   beginRenameActiveSession(ctx: TelegramMenuContext): Promise<void>;
   beginBroadcast(ctx: TelegramMenuContext): Promise<void>;
   pruneAllSessions(ctx: TelegramMenuContext): Promise<void>;
@@ -177,6 +182,18 @@ export class TransportMenuFactories {
       )
       .row()
       .text(
+        async (ctx) => this.host.tForContext(ctx, "menu:main.buttons.agents"),
+        async (ctx) => {
+          await ctx.answerCallbackQuery({
+            text: await this.host.tForContext(
+              ctx,
+              "menu:main.actions.open_agents",
+            ),
+          });
+          await this.host.showAgentMenu(ctx);
+        },
+      )
+      .text(
         async (ctx) => this.host.tForContext(ctx, "menu:main.buttons.collab"),
         async (ctx) => {
           await this.host.showProjectsEntryPoint(ctx);
@@ -191,6 +208,7 @@ export class TransportMenuFactories {
           await this.host.showStorageMenu(ctx);
         },
       )
+      .row()
       .text(
         async (ctx) => this.host.tForContext(ctx, "menu:main.buttons.settings"),
         async (ctx) => {
@@ -215,6 +233,33 @@ export class TransportMenuFactories {
             ),
           });
           await this.host.showSessionsMenu(ctx);
+        },
+      );
+  }
+
+  public createAgentMenu(): Menu<TelegramMenuContext> {
+    return new Menu<TelegramMenuContext>(
+      "telegram-agent-menu",
+      this.host.createMenuOptions((ctx) => this.host.showAgentMenu(ctx)),
+    )
+      .text("Codex · OpenAI", async (ctx) => {
+        await this.host.startAgent(ctx, "codex");
+      })
+      .row()
+      .text("Claude Code · Anthropic", async (ctx) => {
+        await this.host.startAgent(ctx, "claude");
+      })
+      .row()
+      .text(
+        async (ctx) => this.host.tForContext(ctx, "common:menu.back"),
+        async (ctx) => {
+          await ctx.answerCallbackQuery({
+            text: await this.host.tForContext(
+              ctx,
+              "menu:agents.actions.back_to_session",
+            ),
+          });
+          await this.host.showMainMenu(ctx);
         },
       );
   }

@@ -28,6 +28,18 @@ Current focus areas after the gateway-first refactor:
 - verify browser relay stability under repeated gateway-routed actions
 - keep project binding and live console binding paths explicit and observable
 
+## Managed Agent Providers
+
+- add an SDK-native Codex adapter behind the provider contract when structured
+  thread ids and streamed final responses are needed; keep the PTY adapter as
+  the console-compatible default
+- evaluate the equivalent supported Claude SDK surface before adding a
+  structured Claude adapter
+- decide whether the selected agent/provider should persist in
+  `.mcpsession.json` and auto-start on subsequent plain `tellymcp run`
+- add provider-specific model/profile selection without exposing arbitrary shell
+  command injection through Telegram callbacks
+
 ## Docs
 
 - keep `TOOLS.md` aligned with the actual MCP surface

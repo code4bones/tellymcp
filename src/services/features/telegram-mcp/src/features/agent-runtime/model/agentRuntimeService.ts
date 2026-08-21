@@ -35,6 +35,11 @@ import {
   inspectCodexRuntime,
   type CodexRuntimeDiagnostics,
 } from "./codexRuntimeDiagnostics";
+import {
+  ClaudeAgentClient,
+  type ClaudeTokenUsage,
+  type ClaudeTurnResult,
+} from "./claudeAgentClient";
 
 export type AgentProcessState = "idle" | "running";
 
@@ -66,12 +71,21 @@ export type ListAgentRuntimeOutput = {
         last_turn?: AgentTurnCompletion | undefined;
       }
     | undefined;
+  claude_runtime?:
+    | {
+        session_id: string;
+        cwd: string;
+        permission_mode: "dontAsk";
+        last_turn?: AgentTurnCompletion | undefined;
+      }
+    | undefined;
 };
 
 export type AgentTurnCompletion = {
   status: "completed" | "interrupted" | "failed";
   finished_at: string;
   usage?: CodexTokenUsage | undefined;
+  claude_usage?: ClaudeTokenUsage | undefined;
   error?: string | undefined;
 };
 
@@ -117,7 +131,7 @@ export type SubmitAgentMessageOutput =
   | {
       handled: true;
       session_id: string;
-      agent_id: "codex";
+      agent_id: CodingAgentId;
       thread_id: string;
       turn_id: string;
     };
@@ -129,7 +143,7 @@ export type StopAgentTurnInput = {
 export type StopAgentTurnOutput = {
   ok: true;
   session_id: string;
-  agent_id: "codex";
+  agent_id: CodingAgentId;
   thread_id: string;
   turn_id: string;
   status: "interrupt_requested";
@@ -138,6 +152,16 @@ export type StopAgentTurnOutput = {
 type CodexTurnClient = Pick<
   CodexAppServerClient,
   "submitTurn" | "interruptTurn" | "close"
+>;
+
+type ClaudeTurnClient = Pick<
+  ClaudeAgentClient,
+  | "attach"
+  | "getCwd"
+  | "getSessionId"
+  | "submitTurn"
+  | "interruptTurn"
+  | "close"
 >;
 
 export type ManagedAppServer = {
@@ -162,6 +186,7 @@ type RunningAgent = {
   unsubscribe: () => void;
   stopBackend: () => void;
   appServer?: ManagedAppServer | undefined;
+  claudeClient?: ClaudeTurnClient | undefined;
   turnInProgress: boolean;
   activeTurnId?: string | undefined;
   cancelProgress?: (() => void) | undefined;
@@ -203,6 +228,12 @@ type AgentRuntimeDependencies = {
     onApprovalRequest: CodexApprovalHandler;
     clientVersion?: string | undefined;
   }) => Promise<ManagedAppServerBootstrap>;
+  prepareClaudeClient?: (input: {
+    executablePath: string;
+    sessionId: string;
+    cwd: string;
+    logger: Logger;
+  }) => Promise<ClaudeTurnClient>;
   requestApproval?: (input: {
     sessionId: string;
     request: CodexApprovalRequest;
@@ -238,12 +269,7 @@ export function createCodexProgressRelay(input: {
   };
 
   const schedule = () => {
-    if (
-      stopped ||
-      timer ||
-      !pendingMessage ||
-      deliveredUpdates >= maxUpdates
-    ) {
+    if (stopped || timer || !pendingMessage || deliveredUpdates >= maxUpdates) {
       return;
     }
     timer = setTimeout(() => {
@@ -445,7 +471,9 @@ export async function startCodexAppServer(input: {
       clientVersion:
         input.clientVersion ?? getTellyMcpPackageVersion(__dirname),
     });
-    let existingThreads: Awaited<ReturnType<CodexAppServerClient["listThreads"]>>;
+    let existingThreads: Awaited<
+      ReturnType<CodexAppServerClient["listThreads"]>
+    >;
     try {
       existingThreads = await client.listThreads(input.cwd);
     } catch (error) {
@@ -509,6 +537,9 @@ export class AgentRuntimeService {
   private readonly requestApproval: NonNullable<
     AgentRuntimeDependencies["requestApproval"]
   >;
+  private readonly prepareClaudeClient: NonNullable<
+    AgentRuntimeDependencies["prepareClaudeClient"]
+  >;
   private readonly notifyTelegram?: AgentRuntimeDependencies["notifyTelegram"];
 
   public constructor(
@@ -524,6 +555,14 @@ export class AgentRuntimeService {
     this.ensureTarget =
       dependencies.ensureTarget ?? ensureTerminalTargetForSession;
     this.startAppServer = dependencies.startAppServer ?? startCodexAppServer;
+    this.prepareClaudeClient =
+      dependencies.prepareClaudeClient ??
+      ((input) =>
+        ClaudeAgentClient.prepare({
+          cwd: input.cwd,
+          executablePath: input.executablePath,
+          logger: input.logger,
+        }));
     this.requestApproval =
       dependencies.requestApproval ?? (async () => "decline");
     this.notifyTelegram = dependencies.notifyTelegram;
@@ -551,7 +590,7 @@ export class AgentRuntimeService {
             : {}),
       })),
       ...(running ? { active_agent_id: running.agentId } : {}),
-      ...(running?.appServer
+      ...(running?.appServer || running?.claudeClient?.getSessionId()
         ? {
             turn_in_progress: running.turnInProgress,
             ...(running.activeTurnId
@@ -569,13 +608,22 @@ export class AgentRuntimeService {
                 : {}),
               ...(running.appServer.serverInfo?.userAgent
                 ? {
-                    server_user_agent:
-                      running.appServer.serverInfo.userAgent,
+                    server_user_agent: running.appServer.serverInfo.userAgent,
                   }
                 : {}),
               approval_policy: "on-request" as const,
               sandbox: "workspace-write" as const,
               network_access: false as const,
+              ...(running.lastTurn ? { last_turn: running.lastTurn } : {}),
+            },
+          }
+        : {}),
+      ...(running?.agentId === "claude" && running.claudeClient?.getSessionId()
+        ? {
+            claude_runtime: {
+              session_id: running.claudeClient.getSessionId()!,
+              cwd: running.claudeClient.getCwd(),
+              permission_mode: "dontAsk" as const,
               ...(running.lastTurn ? { last_turn: running.lastTurn } : {}),
             },
           }
@@ -637,6 +685,7 @@ export class AgentRuntimeService {
     const startedAt = new Date().toISOString();
     const sentinel = `__TELLYMCP_AGENT_EXIT_${randomUUID().replaceAll("-", "")}__`;
     let backend: ManagedAppServerBootstrap | null = null;
+    let claudeClient: ClaudeTurnClient | null = null;
     if (definition.transport === "app-server") {
       backend = await this.startAppServer({
         executablePath: provider.executablePath,
@@ -645,6 +694,13 @@ export class AgentRuntimeService {
         logger: this.logger,
         onApprovalRequest: (request) =>
           this.requestApproval({ sessionId, request }),
+      });
+    } else if (definition.transport === "agent-sdk") {
+      claudeClient = await this.prepareClaudeClient({
+        executablePath: provider.executablePath,
+        sessionId,
+        cwd: session.cwd || process.cwd(),
+        logger: this.logger,
       });
     }
     const launchArgs = backend
@@ -671,7 +727,11 @@ export class AgentRuntimeService {
       sentinel,
       outputTail: "",
       unsubscribe: () => unsubscribe(),
-      stopBackend: () => backend?.stop(),
+      stopBackend: () => {
+        backend?.stop();
+        claudeClient?.close();
+      },
+      ...(claudeClient ? { claudeClient } : {}),
       turnInProgress: false,
     };
 
@@ -766,7 +826,9 @@ export class AgentRuntimeService {
     };
   }
 
-  public attachAgent(input: AttachAgentRuntimeInput): AttachAgentRuntimeOutput {
+  public async attachAgent(
+    input: AttachAgentRuntimeInput,
+  ): Promise<AttachAgentRuntimeOutput> {
     const sessionId = input.session_id.trim();
     if (!sessionId) {
       throw new Error("session_id is required");
@@ -793,12 +855,22 @@ export class AgentRuntimeService {
         `Cannot attach ${definition.agentName}: its Telly-managed app-server is unavailable.`,
       );
     }
+    if (definition.transport === "agent-sdk" && !running.claudeClient) {
+      throw new Error(
+        `Cannot attach ${definition.agentName}: its Telly-managed Agent SDK runtime is unavailable.`,
+      );
+    }
+    const claudeSessionId =
+      definition.transport === "agent-sdk"
+        ? await running.claudeClient!.attach()
+        : undefined;
 
     this.logger.info("Telegram attached to Telly-managed coding agent", {
       sessionId,
       agentId: definition.agentId,
       providerId: definition.providerId,
       ...(running.appServer ? { threadId: running.appServer.threadId } : {}),
+      ...(claudeSessionId ? { claudeSessionId } : {}),
     });
 
     return {
@@ -809,6 +881,7 @@ export class AgentRuntimeService {
       transport: definition.transport,
       started_at: running.startedAt,
       ...(running.appServer ? { thread_id: running.appServer.threadId } : {}),
+      ...(claudeSessionId ? { thread_id: claudeSessionId } : {}),
     };
   }
 
@@ -824,6 +897,9 @@ export class AgentRuntimeService {
     const running = this.runningBySessionId.get(sessionId);
     if (input.agent_id && running?.agentId !== input.agent_id.trim()) {
       return { handled: false, session_id: sessionId };
+    }
+    if (running?.agentId === "claude" && running.claudeClient) {
+      return this.submitClaudeMessage({ sessionId, message, running });
     }
     if (!running?.appServer || running.agentId !== "codex") {
       return { handled: false, session_id: sessionId };
@@ -934,6 +1010,104 @@ export class AgentRuntimeService {
     };
   }
 
+  private async submitClaudeMessage(input: {
+    sessionId: string;
+    message: string;
+    running: RunningAgent;
+  }): Promise<SubmitAgentMessageOutput> {
+    const { sessionId, message, running } = input;
+    const client = running.claudeClient!;
+    const claudeSessionId = client.getSessionId();
+    if (!claudeSessionId) {
+      throw new Error(
+        "Claude session is not attached. Select Claude in the Telegram agent menu first.",
+      );
+    }
+    if (running.turnInProgress) {
+      throw new Error(
+        `A Claude turn is still running for this session${running.activeTurnId ? ` (${running.activeTurnId})` : ""}.`,
+      );
+    }
+    running.turnInProgress = true;
+
+    const notify = async (text: string) => {
+      if (!this.notifyTelegram) {
+        this.logger.warn("Claude final response has no Telegram notifier", {
+          sessionId,
+        });
+        return;
+      }
+      try {
+        await this.notifyTelegram({ sessionId, message: text });
+      } catch (error) {
+        this.logger.error("Failed to deliver Claude response to Telegram", {
+          sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
+
+    let submission: ReturnType<ClaudeTurnClient["submitTurn"]>;
+    try {
+      submission = client.submitTurn({
+        text: message,
+        onComplete: async (result: ClaudeTurnResult) => {
+          if (this.runningBySessionId.get(sessionId) === running) {
+            running.turnInProgress = false;
+            running.activeTurnId = undefined;
+            running.lastTurn = {
+              status: "completed",
+              finished_at: new Date().toISOString(),
+              claude_usage: result.usage,
+            };
+          }
+          await notify(result.message);
+        },
+        onInterrupted: async () => {
+          if (this.runningBySessionId.get(sessionId) === running) {
+            running.turnInProgress = false;
+            running.activeTurnId = undefined;
+            running.lastTurn = {
+              status: "interrupted",
+              finished_at: new Date().toISOString(),
+            };
+          }
+          await notify("Claude turn stopped.");
+        },
+        onError: async (error: Error) => {
+          if (this.runningBySessionId.get(sessionId) === running) {
+            running.turnInProgress = false;
+            running.activeTurnId = undefined;
+            running.lastTurn = {
+              status: "failed",
+              finished_at: new Date().toISOString(),
+              error: error.message.slice(0, 500),
+            };
+          }
+          await notify(`Claude turn failed: ${error.message}`);
+        },
+      });
+    } catch (error) {
+      running.turnInProgress = false;
+      throw error;
+    }
+    if (running.turnInProgress) {
+      running.activeTurnId = submission.turnId;
+    }
+    this.logger.info("Telegram message submitted to Claude Agent SDK", {
+      sessionId,
+      claudeSessionId: submission.sessionId,
+      turnId: submission.turnId,
+    });
+    return {
+      handled: true,
+      session_id: sessionId,
+      agent_id: "claude",
+      thread_id: submission.sessionId,
+      turn_id: submission.turnId,
+    };
+  }
+
   public async stopTurn(
     input: StopAgentTurnInput,
   ): Promise<StopAgentTurnOutput> {
@@ -944,12 +1118,36 @@ export class AgentRuntimeService {
 
     const running = this.runningBySessionId.get(sessionId);
     if (
+      running?.agentId === "claude" &&
+      running.claudeClient &&
+      running.turnInProgress &&
+      running.activeTurnId &&
+      running.claudeClient.getSessionId()
+    ) {
+      const claudeSessionId = running.claudeClient.getSessionId()!;
+      const turnId = running.activeTurnId;
+      running.claudeClient.interruptTurn(turnId);
+      this.logger.info("Claude Agent SDK turn interrupt requested", {
+        sessionId,
+        claudeSessionId,
+        turnId,
+      });
+      return {
+        ok: true,
+        session_id: sessionId,
+        agent_id: "claude",
+        thread_id: claudeSessionId,
+        turn_id: turnId,
+        status: "interrupt_requested",
+      };
+    }
+    if (
       !running?.appServer ||
       running.agentId !== "codex" ||
       !running.turnInProgress ||
       !running.activeTurnId
     ) {
-      throw new Error(`No active Codex turn for session '${sessionId}'.`);
+      throw new Error(`No active agent turn for session '${sessionId}'.`);
     }
 
     const threadId = running.appServer.threadId;

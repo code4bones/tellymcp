@@ -23,7 +23,7 @@ describe("agent provider registry", () => {
     expect(resolveAgentProvider("codex")?.providerId).toBe("openai");
     expect(resolveAgentProvider("codex")?.transport).toBe("app-server");
     expect(resolveAgentProvider("claude-code")?.agentId).toBe("claude");
-    expect(resolveAgentProvider("claude")?.transport).toBe("pty");
+    expect(resolveAgentProvider("claude")?.transport).toBe("agent-sdk");
     expect(resolveAgentProvider("unknown")).toBeNull();
   });
 

@@ -30,6 +30,19 @@ type AgentStatusResponse = {
         };
       }
     | undefined;
+  claude_runtime?:
+    | {
+        session_id: string;
+        permission_mode: string;
+        last_turn?: {
+          status: string;
+          claude_usage?: {
+            inputTokens: number;
+            outputTokens: number;
+          };
+        };
+      }
+    | undefined;
 };
 
 function getInvalidStatusMessage(value: unknown): string {
@@ -61,9 +74,7 @@ export interface TransportAgentActionsHost {
     setConsoleDeliveryRoute(
       principal: { telegramChatId: number; telegramUserId: number },
       sessionId: string,
-      route:
-        | { mode: "pty" }
-        | { mode: "agent"; agentId: "codex" | "claude" },
+      route: { mode: "pty" } | { mode: "agent"; agentId: "codex" | "claude" },
     ): Promise<void>;
   };
   sessionStore: {
@@ -141,11 +152,10 @@ export class TransportAgentActions {
       return;
     }
 
-    const deliveryRoute =
-      await this.host.bindingStore.getConsoleDeliveryRoute(
-        active.principal,
-        active.sessionId,
-      );
+    const deliveryRoute = await this.host.bindingStore.getConsoleDeliveryRoute(
+      active.principal,
+      active.sessionId,
+    );
 
     let status: AgentStatusResponse;
     try {
@@ -195,7 +205,7 @@ export class TransportAgentActions {
         state,
       });
     });
-    const runtimeLines = status.codex_runtime
+    const codexRuntimeLines = status.codex_runtime
       ? [
           this.host.t(active.locale, "menu:agents.screen.codex_policy", {
             sandbox: status.codex_runtime.sandbox,
@@ -221,6 +231,23 @@ export class TransportAgentActions {
             : []),
         ]
       : [];
+    const claudeRuntimeLines = status.claude_runtime
+      ? [
+          this.host.t(active.locale, "menu:agents.screen.claude_policy", {
+            permissionMode: status.claude_runtime.permission_mode,
+          }),
+          ...(status.claude_runtime.last_turn?.claude_usage
+            ? [
+                this.host.t(active.locale, "menu:agents.screen.last_usage", {
+                  inputTokens:
+                    status.claude_runtime.last_turn.claude_usage.inputTokens,
+                  outputTokens:
+                    status.claude_runtime.last_turn.claude_usage.outputTokens,
+                }),
+              ]
+            : []),
+        ]
+      : [];
     const text = [
       this.host.t(active.locale, "menu:agents.screen.title"),
       "",
@@ -233,7 +260,8 @@ export class TransportAgentActions {
           })
         : this.host.t(active.locale, "menu:agents.screen.route_pty"),
       ...lines,
-      ...runtimeLines,
+      ...codexRuntimeLines,
+      ...claudeRuntimeLines,
       "",
       status.active_agent_id
         ? status.turn_in_progress

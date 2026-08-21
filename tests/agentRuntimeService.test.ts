@@ -207,9 +207,9 @@ describe("agent runtime service", () => {
       transport: "app-server",
       thread_id: "thread-1",
     });
-    expect(
+    await expect(
       service.attachAgent({ session_id: "workspace", agent_id: "codex" }),
-    ).toMatchObject({
+    ).resolves.toMatchObject({
       ok: true,
       session_id: "workspace",
       agent_id: "codex",
@@ -371,6 +371,185 @@ describe("agent runtime service", () => {
     expect(stopAppServer).toHaveBeenCalledOnce();
   });
 
+  it("attaches a Claude CLI session and routes Telegram turns through the Agent SDK", async () => {
+    const claudeSessionId = "11111111-1111-4111-8111-111111111111";
+    const sessionStore = {
+      getSession: vi.fn(async () => ({
+        sessionId: "workspace",
+        cwd: "/workspace",
+        terminalTarget: "pty:workspace",
+        updatedAt: "2026-08-21T00:00:00.000Z",
+      })),
+      listSessions: vi.fn(async () => []),
+      setSession: vi.fn(async () => undefined),
+      clearSession: vi.fn(async () => undefined),
+    } satisfies SessionStore;
+    let attachedSessionId: string | undefined;
+    let completeTurn:
+      | ((result: {
+          message: string;
+          usage: {
+            inputTokens: number;
+            outputTokens: number;
+            cacheCreationInputTokens: number;
+            cacheReadInputTokens: number;
+            totalCostUsd: number;
+          };
+        }) => void | Promise<void>)
+      | undefined;
+    let interruptTurnCallback: (() => void | Promise<void>) | undefined;
+    const attach = vi.fn(async () => {
+      attachedSessionId = claudeSessionId;
+      return claudeSessionId;
+    });
+    const submitTurn = vi.fn(
+      (input: {
+        onComplete: NonNullable<typeof completeTurn>;
+        onInterrupted?: (() => void | Promise<void>) | undefined;
+      }) => {
+        completeTurn = input.onComplete;
+        interruptTurnCallback = input.onInterrupted;
+        return { sessionId: claudeSessionId, turnId: "claude-turn-1" };
+      },
+    );
+    const interruptTurn = vi.fn();
+    const close = vi.fn();
+    const sendLine = vi.fn(async () => undefined);
+    const notifyTelegram = vi.fn(async () => undefined);
+    let onData: ((data: string) => void) | undefined;
+    const service = new AgentRuntimeService(
+      { terminal: {} } as AppConfig,
+      sessionStore,
+      {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      } as unknown as Logger,
+      {
+        inspectProviders: () => [
+          {
+            providerId: "anthropic",
+            providerName: "Anthropic",
+            agentId: "claude",
+            agentName: "Claude Code",
+            executable: "claude",
+            executablePath: "/bin/claude",
+            transport: "agent-sdk",
+            launchArgs: [],
+            aliases: ["claude"],
+            available: true,
+          },
+        ],
+        ensureTarget: () => "pty:workspace",
+        sendLine,
+        subscribe: (_target, input) => {
+          onData = input.onData;
+          return vi.fn();
+        },
+        prepareClaudeClient: async () => ({
+          attach,
+          getCwd: () => "/workspace",
+          getSessionId: () => attachedSessionId,
+          submitTurn,
+          interruptTurn,
+          close,
+        }),
+        notifyTelegram,
+      },
+    );
+
+    await expect(
+      service.startAgent({ session_id: "workspace", agent_id: "claude" }),
+    ).resolves.toMatchObject({
+      ok: true,
+      agent_id: "claude",
+      provider_id: "anthropic",
+      transport: "agent-sdk",
+    });
+    expect(String(sendLine.mock.calls[0]?.[2])).toContain("'/bin/claude'");
+    await expect(
+      service.attachAgent({ session_id: "workspace", agent_id: "claude" }),
+    ).resolves.toMatchObject({
+      agent_id: "claude",
+      thread_id: claudeSessionId,
+    });
+    await expect(
+      service.submitMessage({
+        session_id: "workspace",
+        agent_id: "claude",
+        message: "Continue through Telegram",
+      }),
+    ).resolves.toEqual({
+      handled: true,
+      session_id: "workspace",
+      agent_id: "claude",
+      thread_id: claudeSessionId,
+      turn_id: "claude-turn-1",
+    });
+    await expect(
+      service.listAgents({ session_id: "workspace" }),
+    ).resolves.toMatchObject({
+      active_agent_id: "claude",
+      turn_in_progress: true,
+      active_turn_id: "claude-turn-1",
+      claude_runtime: {
+        session_id: claudeSessionId,
+        cwd: "/workspace",
+        permission_mode: "dontAsk",
+      },
+    });
+    await expect(
+      service.stopTurn({ session_id: "workspace" }),
+    ).resolves.toMatchObject({
+      agent_id: "claude",
+      thread_id: claudeSessionId,
+      turn_id: "claude-turn-1",
+      status: "interrupt_requested",
+    });
+    expect(interruptTurn).toHaveBeenCalledWith("claude-turn-1");
+    await interruptTurnCallback?.();
+    expect(notifyTelegram).toHaveBeenCalledWith({
+      sessionId: "workspace",
+      message: "Claude turn stopped.",
+    });
+
+    await service.submitMessage({
+      session_id: "workspace",
+      message: "Continue after stop",
+    });
+    await completeTurn?.({
+      message: "Done from Claude",
+      usage: {
+        inputTokens: 20,
+        outputTokens: 10,
+        cacheCreationInputTokens: 2,
+        cacheReadInputTokens: 5,
+        totalCostUsd: 0.02,
+      },
+    });
+    expect(notifyTelegram).toHaveBeenCalledWith({
+      sessionId: "workspace",
+      message: "Done from Claude",
+    });
+    await expect(
+      service.listAgents({ session_id: "workspace" }),
+    ).resolves.toMatchObject({
+      turn_in_progress: false,
+      claude_runtime: {
+        last_turn: {
+          status: "completed",
+          claude_usage: { inputTokens: 20, outputTokens: 10 },
+        },
+      },
+    });
+
+    const sentinel = String(sendLine.mock.calls[0]?.[2]).match(
+      /(__TELLYMCP_AGENT_EXIT_[a-f0-9]+__)/u,
+    )?.[1];
+    onData?.(`${sentinel}0\r\n`);
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it("rejects a provider whose CLI is missing", async () => {
     const service = new AgentRuntimeService(
       { terminal: {} } as AppConfig,
@@ -386,7 +565,7 @@ describe("agent runtime service", () => {
             agentId: "claude",
             agentName: "Claude Code",
             executable: "claude",
-            transport: "pty",
+            transport: "agent-sdk",
             launchArgs: [],
             aliases: ["claude"],
             available: false,
@@ -400,7 +579,7 @@ describe("agent runtime service", () => {
     ).rejects.toThrow("not installed");
   });
 
-  it("refuses Telegram attach when no Telly-managed agent exists", () => {
+  it("refuses Telegram attach when no Telly-managed agent exists", async () => {
     const service = new AgentRuntimeService(
       { terminal: {} } as AppConfig,
       {} as SessionStore,
@@ -410,8 +589,8 @@ describe("agent runtime service", () => {
       },
     );
 
-    expect(() =>
+    await expect(
       service.attachAgent({ session_id: "workspace", agent_id: "codex" }),
-    ).toThrow("tellymcp run --agent codex");
+    ).rejects.toThrow("tellymcp run --agent codex");
   });
 });

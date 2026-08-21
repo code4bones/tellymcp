@@ -3,7 +3,8 @@ export const ruCommon = {
     no_telegram_identity: "Для этого чата недоступна Telegram-идентичность.",
     no_active_session:
       "Активная сессия ещё не привязана. Привяжи её через /start <code>.",
-    missing_telegram_context: "Не удалось определить Telegram-пользователя или чат.",
+    missing_telegram_context:
+      "Не удалось определить Telegram-пользователя или чат.",
   },
   menu: {
     refreshed: "Меню обновлено.",
@@ -82,6 +83,8 @@ export const ruMenu = {
       codex_policy:
         "🔒 Codex: {{sandbox}}, approvals {{approvalPolicy}}, сеть {{network}}",
       codex_version: "🧩 Codex CLI: {{version}}",
+      claude_policy:
+        "🔒 Claude Agent SDK: подключён, permissions {{permissionMode}}",
       last_usage:
         "📊 Последний turn: {{inputTokens}} входных / {{outputTokens}} выходных токенов",
       choose_hint:
@@ -91,11 +94,12 @@ export const ruMenu = {
       chat_ready_hint:
         "💬 Отправь следующее сообщение обычным текстом прямо в этот чат. Оно продолжит текущий диалог, а ответ агента придёт сюда.",
       turn_running_hint:
-        "Codex выполняет turn. Его можно остановить, не закрывая сессию агента.",
+        "Агент выполняет turn. Его можно остановить, не закрывая сессию агента.",
       unavailable: "Agent runtime недоступен: {{message}}",
       attached: "Подключено к {{agentName}} в выбранной консоли.",
-      terminal_selected: "Сообщения из Telegram теперь идут в терминал выбранной консоли.",
-      stop_requested: "Для активного Codex-turn запрошена остановка.",
+      terminal_selected:
+        "Сообщения из Telegram теперь идут в терминал выбранной консоли.",
+      stop_requested: "Для активного turn агента запрошена остановка.",
     },
   },
   sessions: {
@@ -231,8 +235,7 @@ export const ruMenu = {
     screen: {
       title: "⚙ Settings",
       active_session: "📌 Активная сессия: {{sessionName}}",
-      hint:
-        "Открой информацию о сессии, переименуй её или отвяжи от Telegram.",
+      hint: "Открой информацию о сессии, переименуй её или отвяжи от Telegram.",
     },
   },
   local: {
@@ -251,8 +254,7 @@ export const ruMenu = {
       link_status: "🤝 Связь: {{linkedSessionName}}",
       link_status_none: "🤝 Связь: не настроена",
       hint_title: "Здесь живёт локальная работа в одном боте:",
-      hint_body:
-        "связка сессий, обмен note и файлами без gateway.",
+      hint_body: "связка сессий, обмен note и файлами без gateway.",
       unavailable: "Локальное взаимодействие недоступно для этого чата.",
       no_active_session:
         "Активная сессия не выбрана. Сначала привяжи её через /start.",
@@ -277,8 +279,7 @@ export const ruMenu = {
       title: "🔗 Связать напарника",
       active_session: "📌 Активная сессия: {{sessionName}}",
       choose_partner: "Выбери другую сессию, чтобы связать её как напарника.",
-      hint:
-        "Используй эту связку, чтобы делиться API summary, изменениями, ошибками и важным git-контекстом через .mcp-xchange заметки и файлы.",
+      hint: "Используй эту связку, чтобы делиться API summary, изменениями, ошибками и важным git-контекстом через .mcp-xchange заметки и файлы.",
     },
   },
   partner: {
@@ -301,8 +302,7 @@ export const ruMenu = {
       active_session: "📌 Активная сессия: {{sessionName}}",
       linked_partner: "👥 Связанный напарник: {{partnerName}}",
       no_partner: "Напарник пока не связан.",
-      use_link_first:
-        "Сначала используй Link в меню сессии.",
+      use_link_first: "Сначала используй Link в меню сессии.",
       prompt_hint: "Задай вопрос по API или поделись изменениями.",
       prompt_format:
         "Формат prompt: первая строка — summary. При необходимости добавь пустую строку и основной текст ниже.",
@@ -371,8 +371,7 @@ export const ruMenu = {
     step_inbox: "- обычные Telegram-сообщения попадают в inbox этой сессии",
     step_nudge:
       "- если настроен terminal target, сервис автоматически будит агента",
-    step_tools:
-      "- затем агент читает batch inbox через MCP tools",
+    step_tools: "- затем агент читает batch inbox через MCP tools",
   },
   live: {
     buttons: {
@@ -414,8 +413,10 @@ export const ruMenu = {
   },
   notices: {
     admin: {
-      gateway_client_registered_title: "🆕 Зарегистрирован новый gateway client",
-      gateway_session_registered_title: "🆕 Зарегистрирована новая gateway session",
+      gateway_client_registered_title:
+        "🆕 Зарегистрирован новый gateway client",
+      gateway_session_registered_title:
+        "🆕 Зарегистрирована новая gateway session",
       gateway_client_uuid: "Client UUID: {{value}}",
       gateway_node_id: "Node: {{value}}",
       gateway_package_version: "Package: {{value}}",
@@ -443,14 +444,18 @@ export const ruMenu = {
       hint: "Напиши /menu, чтобы открыть меню сессий.",
     },
     project: {
-      member_joined: "В проект «{{projectName}}» вошёл участник: {{memberLabel}}.",
-      member_left: "Из проекта «{{projectName}}» вышел участник: {{memberLabel}}.",
-      deleted: "Проект «{{projectName}}» удалён. Локальные project bindings очищены.",
+      member_joined:
+        "В проект «{{projectName}}» вошёл участник: {{memberLabel}}.",
+      member_left:
+        "Из проекта «{{projectName}}» вышел участник: {{memberLabel}}.",
+      deleted:
+        "Проект «{{projectName}}» удалён. Локальные project bindings очищены.",
       new_member: "Новый участник",
       member: "Участник",
     },
     tools: {
-      changed: "TOOLS.md обновлён на шлюзе или хэш текущей сессии ещё неизвестен.",
+      changed:
+        "TOOLS.md обновлён на шлюзе или хэш текущей сессии ещё неизвестен.",
       session: "Сессия: {{sessionName}}",
       action_required:
         "Действие обязательно: вызови refresh_tools_markdown с текущим known hash. Если changed=true, прочитай и примени возвращённый content перед продолжением работы.",
@@ -471,14 +476,14 @@ export const ruMenu = {
       target_invalid_action: "Перепривяжи terminal target для этой сессии.",
       unavailable_title:
         "⚠ Автоматический nudge терминала для сессии {{sessionName}} пропущен.",
-      unavailable_body: "Терминальный runtime сейчас недоступен на этой машине.",
+      unavailable_body:
+        "Терминальный runtime сейчас недоступен на этой машине.",
       unavailable_target: "terminal target: {{terminalTarget}}",
       unavailable_reason:
         "Обычно это значит, что терминальный runtime не запущен или недоступен для текущего target.",
       unavailable_action:
         "Перезапусти терминальный runtime для этой консоли или обнови/сними terminal target для этой сессии.",
-      prompt_detected_title:
-        "🛎 Возможный блокер в {{sessionName}}",
+      prompt_detected_title: "🛎 Возможный блокер в {{sessionName}}",
       prompt_detected_score: "Сила срабатывания: {{score}}",
       prompt_detected_target: "terminal target: {{terminalTarget}}",
       prompt_detected_hint:
@@ -494,10 +499,8 @@ export const ruMenu = {
     auth: {
       prompt:
         "Доступ к gateway-боту закрыт. Отправь /auth <token>, чтобы продолжить.",
-      help:
-        "Этот gateway-бот требует предварительную admin-аутентификацию. Отправь /auth <token>.",
-      required_callback:
-        "Сначала авторизуйся через /auth <token>.",
+      help: "Этот gateway-бот требует предварительную admin-аутентификацию. Отправь /auth <token>.",
+      required_callback: "Сначала авторизуйся через /auth <token>.",
       invalid: "Admin token неверный.",
       success:
         "Admin-аутентификация шлюза принята. Теперь можно пользоваться командами и меню.",
@@ -519,8 +522,7 @@ export const ruMenu = {
     },
     screen: {
       title: "🛡 Gateway Admin",
-      help:
-        "Используй admin-меню, чтобы смотреть клиентов шлюза и экспортировать клиентский .env.",
+      help: "Используй admin-меню, чтобы смотреть клиентов шлюза и экспортировать клиентский .env.",
       gateway_clients: "Известных клиентов: {{count}}",
       gateway_clients_connected: "Подключены по gateway WS: {{count}}",
       gateway_clients_registered: "Зарегистрированы active sessions: {{count}}",
@@ -533,7 +535,8 @@ export const ruMenu = {
       unavailable: "Список клиентов шлюза сейчас недоступен.",
       connected_count: "Подключены по gateway WS: {{count}}",
       registered_count: "Зарегистрированы active sessions: {{count}}",
-      legend: "Легенда: 🟢 сейчас подключён, 🗂 есть зарегистрированные active sessions.",
+      legend:
+        "Легенда: 🟢 сейчас подключён, 🗂 есть зарегистрированные active sessions.",
       item: "• {{label}}",
       bot: "  Бот: {{botUsername}}",
       sessions: "  Сессий: {{count}}",
@@ -629,10 +632,8 @@ export const ruMenu = {
   broadcast: {
     begin: "Broadcast в {{count}} сессий.",
     title: "📣 Broadcast",
-    body:
-      "Отправь следующее текстовое сообщение, чтобы разослать его всем {{count}} видимым сессиям.",
-    hint:
-      "Сообщение будет сохранено в inbox каждой сессии, а сервис разбудит все настроенные terminal target.",
+    body: "Отправь следующее текстовое сообщение, чтобы разослать его всем {{count}} видимым сессиям.",
+    hint: "Сообщение будет сохранено в inbox каждой сессии, а сервис разбудит все настроенные terminal target.",
     cancel_hint: "Команды вроде /menu или /help отменят режим broadcast.",
     collab_begin: "Broadcast в {{count}} Collab-сессий.",
     collab_title: "📣 Collab Broadcast",

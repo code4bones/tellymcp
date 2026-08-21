@@ -1121,10 +1121,29 @@ async function runDoctor(args: string[]): Promise<void> {
     );
   } else {
     const codex = inspectCodexRuntime(codexProvider.executablePath);
-    const marker = codex.status === "ready" ? pc.green("  OK") : pc.red("  ERROR");
+    const marker =
+      codex.status === "ready" ? pc.green("  OK") : pc.red("  ERROR");
     checks.push(`${marker} Codex structured chat: ${codex.message}`);
     capabilities.push(
       `${marker} Codex Telegram continuation: ${codex.status === "ready" ? "available" : "incompatible"}`,
+    );
+  }
+  const claudeProvider = inspectAgentProviders().find(
+    (provider) => provider.agentId === "claude",
+  );
+  if (!claudeProvider?.executablePath) {
+    checks.push(
+      `${pc.dim("  SKIP")} Claude structured chat: CLI not installed`,
+    );
+    capabilities.push(
+      `${pc.dim("  SKIP")} Claude Telegram continuation: unavailable`,
+    );
+  } else {
+    checks.push(
+      `${pc.green("  OK")} Claude structured chat: Agent SDK session discovery and exact resume are bundled`,
+    );
+    capabilities.push(
+      `${pc.green("  OK")} Claude Telegram continuation: available`,
     );
   }
 
@@ -1550,7 +1569,10 @@ function runProviderCommand(args: string[]): void {
 
   if (action === "list") {
     printBanner("provider list", "Built-in coding-agent adapters");
-    printSection("providers", inspectAgentProviders().map(formatProviderStatusLine));
+    printSection(
+      "providers",
+      inspectAgentProviders().map(formatProviderStatusLine),
+    );
     return;
   }
 
@@ -1579,8 +1601,7 @@ function runProviderCommand(args: string[]): void {
     printBanner("provider status", "Coding-agent provider readiness");
     printSection("providers", statuses.map(formatProviderStatusLine));
     const codex = statuses.find(
-      (provider) =>
-        provider.agentId === "codex" && provider.executablePath,
+      (provider) => provider.agentId === "codex" && provider.executablePath,
     );
     if (codex?.executablePath) {
       const runtime = inspectCodexRuntime(codex.executablePath);
@@ -1594,6 +1615,19 @@ function runProviderCommand(args: string[]): void {
         `  diagnostic: ${runtime.message}`,
       ]);
     }
+    const claude = statuses.find(
+      (provider) => provider.agentId === "claude" && provider.executablePath,
+    );
+    if (claude?.executablePath) {
+      printSection("claude structured chat", [
+        "  status: ready",
+        "  Agent SDK: bundled",
+        "  local session discovery: yes",
+        "  exact session resume: yes",
+        "  turn cancellation: yes",
+        "  permissions: dontAsk (fail closed)",
+      ]);
+    }
     return;
   }
 
@@ -1601,7 +1635,10 @@ function runProviderCommand(args: string[]): void {
     fail("Provider name is required. Supported providers: codex, claude");
   }
 
-  printBanner(`provider install ${selected.agentId}`, "Preparing provider integration");
+  printBanner(
+    `provider install ${selected.agentId}`,
+    "Preparing provider integration",
+  );
   if (selected.agentId === "codex") {
     const pluginStatus = installCodexPlugin(packageRoot);
     printSection("integration", [
@@ -1612,6 +1649,7 @@ function runProviderCommand(args: string[]): void {
   } else {
     printSection("integration", [
       "  adapter: built in",
+      "  Agent SDK: bundled",
       "  workflow plugin: not required",
       "  MCP helper: tellymcp mcp --format claude",
     ]);
@@ -1638,7 +1676,9 @@ async function runRuntime(args: string[]): Promise<void> {
     ? resolveAgentProvider(requestedAgent)
     : null;
   if (requestedAgent && !agentProvider) {
-    fail(`Unsupported agent: ${requestedAgent}. Supported agents: codex, claude`);
+    fail(
+      `Unsupported agent: ${requestedAgent}. Supported agents: codex, claude`,
+    );
   }
   if (agentProvider && !isForegroundPtyClientMode(parsed)) {
     fail("--agent is supported only when DISTRIBUTED_MODE=client");

@@ -2,6 +2,73 @@
 # yarn lockfile v1
 
 
+"@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.238":
+  version "0.3.238"
+  resolved "https://registry.yarnpkg.com/@anthropic-ai/claude-agent-sdk-darwin-arm64/-/claude-agent-sdk-darwin-arm64-0.3.238.tgz#3e850c91e15d22979caad6ff29433fdb2ef6faf3"
+  integrity sha512-7KctNItTzHRiDg+jFxTM46o+Y/YS52V6HSopaWPggO6BbR+3MV/rKMmq+zP93If7eVwadW9Yg9vHLjXDKIw9OQ==
+
+"@anthropic-ai/claude-agent-sdk-darwin-x64@0.3.238":
+  version "0.3.238"
+  resolved "https://registry.yarnpkg.com/@anthropic-ai/claude-agent-sdk-darwin-x64/-/claude-agent-sdk-darwin-x64-0.3.238.tgz#db843a1b09b401b3045c2e06ef2ed8370d7ac97e"
+  integrity sha512-aDt8LXjWISwLzqeCBHxJC5AR1iVYlY5UYIm2VLztjI1U0PCb1BiH/IfyyjjizqRhhEwyQp9YAJeZZq8n/2vQEA==
+
+"@anthropic-ai/claude-agent-sdk-linux-arm64-musl@0.3.238":
+  version "0.3.238"
+  resolved "https://registry.yarnpkg.com/@anthropic-ai/claude-agent-sdk-linux-arm64-musl/-/claude-agent-sdk-linux-arm64-musl-0.3.238.tgz#50c31407fe1837bb0037639fdeb6ac03e68aa138"
+  integrity sha512-ankSEMAMTVulKYg0NT8fZ7a5+q+aIzfiqhcrLe9zYPeuhE+lpNeq0JPMcHyOtUAENxVI0/2J2q5OXGl9O0qWcg==
+
+"@anthropic-ai/claude-agent-sdk-linux-arm64@0.3.238":
+  version "0.3.238"
+  resolved "https://registry.yarnpkg.com/@anthropic-ai/claude-agent-sdk-linux-arm64/-/claude-agent-sdk-linux-arm64-0.3.238.tgz#f7d964669946dfa7347249c036898bcc04c75d14"
+  integrity sha512-P7V9TFokcNRdIJPUzDQ0GLBfMuoewWEH4rh6U3e7RaEAxzdeUcdS9P0N4arXqK2YAOtK1o93QSEtiGUF1fTfWw==
+
+"@anthropic-ai/claude-agent-sdk-linux-x64-musl@0.3.238":
+  version "0.3.238"
+  resolved "https://registry.yarnpkg.com/@anthropic-ai/claude-agent-sdk-linux-x64-musl/-/claude-agent-sdk-linux-x64-musl-0.3.238.tgz#e19368fd131d0815267383f75d3f63dd36b27633"
+  integrity sha512-buo3IBSd7EmYcQsH+OKARgNNbSF1+l/+z1hDXSXGKzwD1LFioJZ/k9FWWWC166SoQ93jPmN+G/ksTzEUB3zRGQ==
+
+"@anthropic-ai/claude-agent-sdk-linux-x64@0.3.238":
+  version "0.3.238"
+  resolved "https://registry.yarnpkg.com/@anthropic-ai/claude-agent-sdk-linux-x64/-/claude-agent-sdk-linux-x64-0.3.238.tgz#3bdf2b0510c19ea1fb69fddc8ae27dde6d3b9794"
+  integrity sha512-/arAOSqtIAWDu7Z4Uf2Un3n+/5Zg3NpxZKzMQEDnYNkbJRhr44sM59TFaEOiWq1FqlUJKi6wHjgm+TW5B8DWWg==
+
+"@anthropic-ai/claude-agent-sdk-win32-arm64@0.3.238":
+  version "0.3.238"
+  resolved "https://registry.yarnpkg.com/@anthropic-ai/claude-agent-sdk-win32-arm64/-/claude-agent-sdk-win32-arm64-0.3.238.tgz#d78486af7fc68a02097dedf48f70807fd9979833"
+  integrity sha512-yW8lhV7QgYiNu3NatjgmkhUspgJsG2N2N6lmm/7B99sWFobKTbVLMLsXxj6A46R6qE2C4Zzm6PjxgGaMYOMn0g==
+
+"@anthropic-ai/claude-agent-sdk-win32-x64@0.3.238":
+  version "0.3.238"
+  resolved "https://registry.yarnpkg.com/@anthropic-ai/claude-agent-sdk-win32-x64/-/claude-agent-sdk-win32-x64-0.3.238.tgz#fe320008705034ef7952fd672ea8f64850b87758"
+  integrity sha512-6Fb2JRrBci282fBfhCGB0Tpq7N8V5HMMqsO3YGFkc9hhbn/y9G7glNKSNgRtxD5Ujjxj8rhiaYstXW2DJzanzw==
+
+"@anthropic-ai/claude-agent-sdk@0.3.238":
+  version "0.3.238"
+  resolved "https://registry.yarnpkg.com/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.238.tgz#4d2ee153837d6745ac9d229f93e83cee4f4b0964"
+  integrity sha512-ppRfbAflZuV7HPqr8BkHPEk8c7gih3PK+GHnZq6zP0Uo7bJHXAJwc4Za8LJRm4hXMixBNMjK1cU/VWfQ9fE2sg==
+  optionalDependencies:
+    "@anthropic-ai/claude-agent-sdk-darwin-arm64" "0.3.238"
+    "@anthropic-ai/claude-agent-sdk-darwin-x64" "0.3.238"
+    "@anthropic-ai/claude-agent-sdk-linux-arm64" "0.3.238"
+    "@anthropic-ai/claude-agent-sdk-linux-arm64-musl" "0.3.238"
+    "@anthropic-ai/claude-agent-sdk-linux-x64" "0.3.238"
+    "@anthropic-ai/claude-agent-sdk-linux-x64-musl" "0.3.238"
+    "@anthropic-ai/claude-agent-sdk-win32-arm64" "0.3.238"
+    "@anthropic-ai/claude-agent-sdk-win32-x64" "0.3.238"
+
+"@anthropic-ai/sdk@0.120.0":
+  version "0.120.0"
+  resolved "https://registry.yarnpkg.com/@anthropic-ai/sdk/-/sdk-0.120.0.tgz#3304ad822cd57a764dc081bcd66e44999ec1be5d"
+  integrity sha512-ZlvmNFT/iIF6JD13rxbbMWD8nvGR0RaUp6yMQnoc+4Af0YjVVe/bIdW1XSQQsoxXAtg1NaT6Vak0LKFlJ4d37Q==
+  dependencies:
+    json-schema-to-ts "^3.1.1"
+    standardwebhooks "^1.0.0"
+
+"@babel/runtime@^7.18.3":
+  version "7.29.7"
+  resolved "https://registry.yarnpkg.com/@babel/runtime/-/runtime-7.29.7.tgz#12022450c45a4da6d8d8287b18a4ff2ddb23f768"
+  integrity sha512-Nq8OhGWiZIZGV6hLHoyAKLLcJihP/xFeBMGJoUrxTX2psI8dCifzLhZISFb+VWS3wFMRDmCGw5R+dOySCqPLhw==
+
 "@cspotcode/source-map-support@^0.8.0":
   version "0.8.1"
   resolved "https://registry.yarnpkg.com/@cspotcode/source-map-support/-/source-map-support-0.8.1.tgz#00629c35a688e05a88b1cda684fb9d5e73f000a1"
@@ -461,6 +528,11 @@
   version "1.1.0"
   resolved "https://registry.yarnpkg.com/@rtsao/scc/-/scc-1.1.0.tgz#927dd2fae9bc3361403ac2c7a00c32ddce9ad7e8"
   integrity sha512-zt6OdqaDoOnJ1ZYsCYGt9YmWzDXl4vQdKTyJev62gFhRGKdx7mcT54V9KIjg+d2wi9EXsPvAPKe7i7WjfVWB8g==
+
+"@stablelib/base64@^1.0.0":
+  version "1.0.1"
+  resolved "https://registry.yarnpkg.com/@stablelib/base64/-/base64-1.0.1.tgz#bdfc1c6d3a62d7a3b7bbc65b6cce1bb4561641be"
+  integrity sha512-1bnPQqSxSuc3Ii6MhBysoWCg58j97aUjuCSZrGSmDxNqtytIi0k8utUenAwTZN4V5mXXYGsVUI9zeBqy+jBOSQ==
 
 "@standard-schema/spec@^1.1.0":
   version "1.1.0"
@@ -1855,6 +1927,11 @@ fast-safe-stringify@^2.1.1:
   resolved "https://registry.npmjs.org/fast-safe-stringify/-/fast-safe-stringify-2.1.1.tgz"
   integrity sha512-W+KJc2dmILlPplD/H4K9l9LcAHAfPtP6BY84uVLXQ6Evcz9Lcg33Y2z1IVblT6xdY54PXYVHEv+0Wpq8Io6zkA==
 
+fast-sha256@^1.3.0:
+  version "1.3.0"
+  resolved "https://registry.yarnpkg.com/fast-sha256/-/fast-sha256-1.3.0.tgz#7916ba2054eeb255982608cccd0f6660c79b7ae6"
+  integrity sha512-n11RGP/lrWEFI/bWdygLxhI+pVeo1ZYIVwvvPkW7azl/rOy+F3HYRZ2K5zeE9mmkhQppyv9sQFx0JM9UabnpPQ==
+
 fast-uri@^3.0.1:
   version "3.1.2"
   resolved "https://registry.npmjs.org/fast-uri/-/fast-uri-3.1.2.tgz"
@@ -2495,6 +2572,14 @@ json-buffer@3.0.1:
   version "3.0.1"
   resolved "https://registry.npmjs.org/json-buffer/-/json-buffer-3.0.1.tgz"
   integrity sha512-4bV5BfR2mqfQTJm+V5tPPdf+ZpuhiIvTuAB5g8kcrXOZpTT/QwwVRWBywX1ozr6lEuPdbHxwaJlm9G6mI2sfSQ==
+
+json-schema-to-ts@^3.1.1:
+  version "3.1.1"
+  resolved "https://registry.yarnpkg.com/json-schema-to-ts/-/json-schema-to-ts-3.1.1.tgz#81f3acaf5a34736492f6f5f51870ef9ece1ca853"
+  integrity sha512-+DWg8jCJG2TEnpy7kOm/7/AxaYoaRbjVB4LFZLySZlWn8exGs3A4OLJR966cVvU26N7X9TWxl+Jsw7dzAqKT6g==
+  dependencies:
+    "@babel/runtime" "^7.18.3"
+    ts-algebra "^2.0.0"
 
 json-schema-traverse@^0.4.1:
   version "0.4.1"
@@ -3683,6 +3768,14 @@ standard-as-callback@^2.1.0:
   resolved "https://registry.npmjs.org/standard-as-callback/-/standard-as-callback-2.1.0.tgz"
   integrity sha512-qoRRSyROncaz1z0mvYqIE4lCd9p2R90i6GxW3uZv5ucSu8tU7B5HXUP1gG8pVZsYNVaXjk8ClXHPttLyxAL48A==
 
+standardwebhooks@^1.0.0:
+  version "1.0.0"
+  resolved "https://registry.yarnpkg.com/standardwebhooks/-/standardwebhooks-1.0.0.tgz#5faa23ceacbf9accd344361101d9e3033b64324f"
+  integrity sha512-BbHGOQK9olHPMvQNHWul6MYlrRTAOKn03rOe4A8O3CLWhNf4YHBqq2HJKKC+sfqpxiBY52pNeesD6jIiLDz8jg==
+  dependencies:
+    "@stablelib/base64" "^1.0.0"
+    fast-sha256 "^1.3.0"
+
 statuses@^2.0.1, statuses@^2.0.2, statuses@~2.0.2:
   version "2.0.2"
   resolved "https://registry.npmjs.org/statuses/-/statuses-2.0.2.tgz"
@@ -3823,6 +3916,11 @@ tr46@~0.0.3:
   version "0.0.3"
   resolved "https://registry.npmjs.org/tr46/-/tr46-0.0.3.tgz"
   integrity sha512-N3WMsuqV66lT30CrXNbEjx4GEwlow3v6rr4mCcv6prnfwhS01rkgyFdjPNBYd9br7LpXV1+Emh01fHnq2Gdgrw==
+
+ts-algebra@^2.0.0:
+  version "2.0.0"
+  resolved "https://registry.yarnpkg.com/ts-algebra/-/ts-algebra-2.0.0.tgz#4e3e0953878f26518fce7f6bb115064a65388b7a"
+  integrity sha512-FPAhNPFMrkwz76P7cdjdmiShwMynZYN6SgOujD1urY4oNm80Ou9oMdmbR45LotcKOXoy7wSmHkRFE6Mxbrhefw==
 
 ts-api-utils@^2.5.0:
   version "2.5.0"

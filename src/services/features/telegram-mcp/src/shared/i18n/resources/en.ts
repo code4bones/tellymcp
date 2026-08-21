@@ -82,6 +82,8 @@ export const enMenu = {
       codex_policy:
         "🔒 Codex: {{sandbox}}, approvals {{approvalPolicy}}, network {{network}}",
       codex_version: "🧩 Codex CLI: {{version}}",
+      claude_policy:
+        "🔒 Claude Agent SDK: attached, permissions {{permissionMode}}",
       last_usage:
         "📊 Last turn: {{inputTokens}} input / {{outputTokens}} output tokens",
       choose_hint:
@@ -91,11 +93,12 @@ export const enMenu = {
       chat_ready_hint:
         "💬 Send your next message as plain text in this chat. It will continue the current conversation, and the agent response will appear here.",
       turn_running_hint:
-        "A Codex turn is running. You can stop this turn without closing the agent session.",
+        "An agent turn is running. You can stop it without closing the agent session.",
       unavailable: "Agent runtime is unavailable: {{message}}",
       attached: "Attached to {{agentName}} in the selected console.",
-      terminal_selected: "Telegram messages now go to the selected console's terminal.",
-      stop_requested: "Codex stop was requested for the active turn.",
+      terminal_selected:
+        "Telegram messages now go to the selected console's terminal.",
+      stop_requested: "Stop was requested for the active agent turn.",
     },
   },
   sessions: {
@@ -104,7 +107,8 @@ export const enMenu = {
       last_worked: "🕘 Last worked: <i>{{sessionName}}</i>",
       updated: "⏱ Updated: <i>{{timestamp}}</i>",
       current_active: "📌 Current active: <b>{{sessionName}}</b>",
-      no_linked_sessions: "No visible sessions found for this Telegram identity.",
+      no_linked_sessions:
+        "No visible sessions found for this Telegram identity.",
     },
     labels: {
       no_linked_sessions: "🫥 No visible sessions",
@@ -148,8 +152,7 @@ export const enMenu = {
       title: "📄 Content",
       active_session: "📌 Active session: {{sessionName}}",
       terminal_target: "🖥 terminal target: {{terminalTarget}}",
-      export_hint:
-        "Choose how much pane history to export as a Markdown file.",
+      export_hint: "Choose how much pane history to export as a Markdown file.",
       export_modes:
         "Visible is the current terminal viewport. Full exports the whole available terminal history.",
     },
@@ -204,8 +207,7 @@ export const enMenu = {
       title: "📦 Storage",
       active_session: "📌 Active session: {{sessionName}}",
       stored_files: "📦 Stored files: {{count}}",
-      choose_file:
-        "Choose a file below to inspect it or send it to Telegram.",
+      choose_file: "Choose a file below to inspect it or send it to Telegram.",
       empty: "No .mcp-xchange files are stored for this session.",
     },
     labels: {
@@ -229,8 +231,7 @@ export const enMenu = {
     screen: {
       title: "⚙ Settings",
       active_session: "📌 Active session: {{sessionName}}",
-      hint:
-        "Open console info, rename it, or remove its Telegram route.",
+      hint: "Open console info, rename it, or remove its Telegram route.",
     },
   },
   local: {
@@ -249,9 +250,11 @@ export const enMenu = {
       link_status: "🤝 Link: {{linkedSessionName}}",
       link_status_none: "🤝 Link: not configured",
       hint_title: "Local collaboration inside one bot lives here:",
-      hint_body: "console linking, note exchange, and file handoff without a gateway.",
+      hint_body:
+        "console linking, note exchange, and file handoff without a gateway.",
       unavailable: "Local collaboration is unavailable for this chat.",
-      no_active_session: "No active console is selected. Open /menu and choose one first.",
+      no_active_session:
+        "No active console is selected. Open /menu and choose one first.",
     },
   },
   link: {
@@ -273,8 +276,7 @@ export const enMenu = {
       title: "🔗 Link partner",
       active_session: "📌 Active session: {{sessionName}}",
       choose_partner: "Choose another session to link as a teammate.",
-      hint:
-        "Use this partnership to share API summaries, what's new, errors, and relevant git changes through .mcp-xchange notes and files.",
+      hint: "Use this partnership to share API summaries, what's new, errors, and relevant git changes through .mcp-xchange notes and files.",
     },
   },
   partner: {
@@ -339,8 +341,7 @@ export const enMenu = {
     screen: {
       title: "👥 Collab",
       gateway_not_configured: "Gateway is not configured for this runtime.",
-      use_local_instead:
-        "Use Local for collaboration inside one bot.",
+      use_local_instead: "Use Local for collaboration inside one bot.",
       unavailable: "Collab is unavailable for the current session.",
       active_session: "📌 Active session: {{sessionName}}",
       open_project: "📦 Open project: {{projectName}}",
@@ -366,8 +367,7 @@ export const enMenu = {
     step_inbox: "- ordinary Telegram messages go to that session inbox",
     step_nudge:
       "- if a terminal target is configured, the service nudges the agent automatically",
-    step_tools:
-      "- the agent then reads the inbox batch through MCP tools",
+    step_tools: "- the agent then reads the inbox batch through MCP tools",
   },
   live: {
     buttons: {
@@ -379,7 +379,8 @@ export const enMenu = {
       opening: "Opening Live View.",
       choose_mode: "Choose a launch mode:",
       opened_info: "Live view opened.",
-      approval_unavailable: "This session is unavailable for approval right now.",
+      approval_unavailable:
+        "This session is unavailable for approval right now.",
     },
     errors: {
       identity_unavailable: "Telegram identity is unavailable.",
@@ -438,14 +439,18 @@ export const enMenu = {
       hint: "Send /menu to open the session menu.",
     },
     project: {
-      member_joined: "A participant joined project “{{projectName}}”: {{memberLabel}}.",
-      member_left: "A participant left project “{{projectName}}”: {{memberLabel}}.",
-      deleted: "Project “{{projectName}}” was deleted. Local project bindings were cleared.",
+      member_joined:
+        "A participant joined project “{{projectName}}”: {{memberLabel}}.",
+      member_left:
+        "A participant left project “{{projectName}}”: {{memberLabel}}.",
+      deleted:
+        "Project “{{projectName}}” was deleted. Local project bindings were cleared.",
       new_member: "New participant",
       member: "Participant",
     },
     tools: {
-      changed: "Gateway TOOLS.md changed or the current session hash is unknown.",
+      changed:
+        "Gateway TOOLS.md changed or the current session hash is unknown.",
       session: "Session: {{sessionName}}",
       action_required:
         "Action required: call refresh_tools_markdown with the current known hash. If changed=true, read and apply the returned content before continuing work.",
@@ -461,18 +466,19 @@ export const enMenu = {
     terminal: {
       target_invalid_title:
         "⚠ Automatic terminal nudge failed for session {{sessionName}}.",
-      target_invalid_target: "Saved terminal target is no longer valid: {{terminalTarget}}",
+      target_invalid_target:
+        "Saved terminal target is no longer valid: {{terminalTarget}}",
       target_invalid_action: "Rebind the terminal target for this session.",
       unavailable_title:
         "⚠ Automatic terminal nudge was skipped for session {{sessionName}}.",
-      unavailable_body: "Terminal runtime is unavailable on this machine right now.",
+      unavailable_body:
+        "Terminal runtime is unavailable on this machine right now.",
       unavailable_target: "terminal target: {{terminalTarget}}",
       unavailable_reason:
         "This usually means the terminal runtime is not running or is unreachable for the current target.",
       unavailable_action:
         "Restart the terminal runtime for this console, or update/remove the terminal target for this session.",
-      prompt_detected_title:
-        "🛎 Possible blocker in {{sessionName}}",
+      prompt_detected_title: "🛎 Possible blocker in {{sessionName}}",
       prompt_detected_score: "Detection score: {{score}}",
       prompt_detected_target: "terminal target: {{terminalTarget}}",
       prompt_detected_hint:
@@ -486,12 +492,9 @@ export const enMenu = {
   },
   admin: {
     auth: {
-      prompt:
-        "Gateway admin access is locked. Send /auth <token> to continue.",
-      help:
-        "This gateway bot requires admin authentication first. Send /auth <token>.",
-      required_callback:
-        "Authenticate first with /auth <token>.",
+      prompt: "Gateway admin access is locked. Send /auth <token> to continue.",
+      help: "This gateway bot requires admin authentication first. Send /auth <token>.",
+      required_callback: "Authenticate first with /auth <token>.",
       invalid: "Admin token is invalid.",
       success:
         "Gateway admin authentication accepted. You can continue with commands and menus.",
@@ -526,7 +529,8 @@ export const enMenu = {
       unavailable: "The gateway client list is unavailable right now.",
       connected_count: "Connected via gateway WS: {{count}}",
       registered_count: "Registered active sessions: {{count}}",
-      legend: "Legend: 🟢 connected right now, 🗂 has registered active sessions.",
+      legend:
+        "Legend: 🟢 connected right now, 🗂 has registered active sessions.",
       item: "• {{label}}",
       bot: "  Bot: {{botUsername}}",
       sessions: "  Sessions: {{count}}",
@@ -566,7 +570,8 @@ export const enMenu = {
       title: "🛠 Admin Tools",
       client_env_help:
         "Export a ready-to-edit .env-client built from the current gateway URLs and runtime settings.",
-      client_env_caption: "Generated .env-client from current gateway settings.",
+      client_env_caption:
+        "Generated .env-client from current gateway settings.",
       client_env_sent: "Client .env sent.",
     },
   },
@@ -621,10 +626,8 @@ export const enMenu = {
   broadcast: {
     begin: "Broadcast to {{count}} sessions.",
     title: "📣 Broadcast",
-    body:
-      "Send the next text message to broadcast it to all {{count}} visible sessions.",
-    hint:
-      "The message will be stored in every session inbox and the service will nudge every configured terminal target.",
+    body: "Send the next text message to broadcast it to all {{count}} visible sessions.",
+    hint: "The message will be stored in every session inbox and the service will nudge every configured terminal target.",
     cancel_hint: "Commands like /menu or /help cancel broadcast mode.",
     collab_begin: "Broadcast to {{count}} collab sessions.",
     collab_title: "📣 Collab Broadcast",

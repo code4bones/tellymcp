@@ -3,7 +3,7 @@ import path from "node:path";
 
 export type AgentProviderId = "openai" | "anthropic";
 export type CodingAgentId = "codex" | "claude";
-export type AgentTransportKind = "app-server" | "pty";
+export type AgentTransportKind = "app-server" | "agent-sdk" | "pty";
 
 export type AgentProviderDefinition = {
   providerId: AgentProviderId;
@@ -38,7 +38,7 @@ const BUILTIN_AGENT_PROVIDERS: readonly AgentProviderDefinition[] = [
     agentId: "claude",
     agentName: "Claude Code",
     executable: "claude",
-    transport: "pty",
+    transport: "agent-sdk",
     launchArgs: [],
     aliases: ["anthropic", "claude", "claude-code"],
   },

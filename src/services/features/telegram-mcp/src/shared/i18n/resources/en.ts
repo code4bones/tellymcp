@@ -84,6 +84,8 @@ export const enMenu = {
         "Choose an agent already started by Telly in this console. Telegram never launches an agent.",
       running_hint:
         "A Telly-managed agent is active. Choose it to attach Telegram to its current conversation.",
+      chat_ready_hint:
+        "💬 Send your next message as plain text in this chat. It will continue the current conversation, and the agent response will appear here.",
       turn_running_hint:
         "A Codex turn is running. You can stop this turn without closing the agent session.",
       unavailable: "Agent runtime is unavailable: {{message}}",

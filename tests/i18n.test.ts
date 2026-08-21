@@ -19,4 +19,13 @@ describe("i18n", () => {
     expect(translate("en", "menu:local.buttons.partner")).toBe("🤝 Partner");
     expect(translate("de", "common:menu.refresh")).toBe("🔄 Refresh");
   });
+
+  it("explains how to continue an attached agent chat", () => {
+    expect(translate("ru", "menu:agents.screen.chat_ready_hint")).toContain(
+      "обычным текстом прямо в этот чат",
+    );
+    expect(translate("en", "menu:agents.screen.chat_ready_hint")).toContain(
+      "plain text in this chat",
+    );
+  });
 });

@@ -120,6 +120,7 @@ export class TransportAgentActions {
   public async showAgentMenu(
     ctx: TelegramMenuContext,
     introText?: string,
+    chatReady = false,
   ): Promise<void> {
     const active = await this.getActiveSession(ctx);
     if (!active) {
@@ -212,7 +213,12 @@ export class TransportAgentActions {
       status.active_agent_id
         ? status.turn_in_progress
           ? this.host.t(active.locale, "menu:agents.screen.turn_running_hint")
-          : this.host.t(active.locale, "menu:agents.screen.running_hint")
+          : this.host.t(
+              active.locale,
+              chatReady
+                ? "menu:agents.screen.chat_ready_hint"
+                : "menu:agents.screen.running_hint",
+            )
         : this.host.t(active.locale, "menu:agents.screen.choose_hint"),
     ].join("\n");
 
@@ -251,6 +257,7 @@ export class TransportAgentActions {
         this.host.t(active.locale, "menu:agents.screen.attached", {
           agentName: result.agent_id,
         }),
+        true,
       );
     } catch (error) {
       await ctx.answerCallbackQuery({

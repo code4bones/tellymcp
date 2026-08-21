@@ -109,6 +109,9 @@ describe("TransportAgentActions", () => {
     expect(callGatewayJson).toHaveBeenNthCalledWith(2, "/agent/status", {
       session_id: "relay-session",
     });
+    const rendered = String(host.renderMenuScreen.mock.calls[0]?.[1]);
+    expect(rendered).toContain("menu:agents.screen.chat_ready_hint");
+    expect(rendered).not.toContain("menu:agents.screen.running_hint");
   });
 
   it("does not fall back to launching an unmanaged agent", async () => {

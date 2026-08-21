@@ -26,6 +26,7 @@ type PendingRequest = {
 type PendingTurn = {
   onComplete: (message: string) => void | Promise<void>;
   onError: (error: Error) => void | Promise<void>;
+  onProgress?: ((event: CodexProgressEvent) => void | Promise<void>) | undefined;
   finalMessage: string;
   fallbackMessage: string;
 };
@@ -33,6 +34,15 @@ type PendingTurn = {
 export type CodexTurnSubmission = {
   threadId: string;
   turnId: string;
+};
+
+export type CodexProgressEvent = {
+  threadId: string;
+  turnId: string;
+  itemId: string;
+  kind: "command" | "file-change" | "plan" | "mcp-tool" | "web-search";
+  phase: "started" | "completed";
+  message: string;
 };
 
 export type CodexApprovalDecision = "accept" | "decline";
@@ -171,6 +181,7 @@ export class CodexAppServerClient {
     text: string;
     onComplete: (message: string) => void | Promise<void>;
     onError: (error: Error) => void | Promise<void>;
+    onProgress?: ((event: CodexProgressEvent) => void | Promise<void>) | undefined;
   }): Promise<CodexTurnSubmission> {
     let turnId = "";
     await this.request(
@@ -185,6 +196,7 @@ export class CodexAppServerClient {
         this.pendingTurns.set(turnId, {
           onComplete: input.onComplete,
           onError: input.onError,
+          ...(input.onProgress ? { onProgress: input.onProgress } : {}),
           finalMessage: "",
           fallbackMessage: "",
         });
@@ -276,6 +288,38 @@ export class CodexAppServerClient {
     const params = asRecord(message.params);
     const turnId = typeof params?.turnId === "string" ? params.turnId : null;
 
+    if (
+      (message.method === "item/started" ||
+        message.method === "item/completed") &&
+      turnId
+    ) {
+      const turn = this.pendingTurns.get(turnId);
+      const item = asRecord(params?.item);
+      const itemId = typeof item?.id === "string" ? item.id : "";
+      const itemType = typeof item?.type === "string" ? item.type : "";
+      const phase =
+        message.method === "item/started" ? "started" : "completed";
+      const progress = this.normalizeProgressEvent({
+        threadId:
+          typeof params?.threadId === "string" ? params.threadId : "",
+        turnId,
+        itemId,
+        itemType,
+        phase,
+      });
+      if (turn?.onProgress && progress) {
+        void Promise.resolve(turn.onProgress(progress)).catch((error) => {
+          this.logger.warn("Codex progress callback failed", {
+            threadId: progress.threadId,
+            turnId: progress.turnId,
+            itemId: progress.itemId,
+            kind: progress.kind,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+    }
+
     if (message.method === "item/agentMessage/delta" && turnId) {
       const turn = this.pendingTurns.get(turnId);
       if (turn && typeof params?.delta === "string") {
@@ -325,6 +369,69 @@ export class CodexAppServerClient {
         finalMessage || "Codex completed the turn without a text response.",
       );
     }
+  }
+
+  private normalizeProgressEvent(input: {
+    threadId: string;
+    turnId: string;
+    itemId: string;
+    itemType: string;
+    phase: "started" | "completed";
+  }): CodexProgressEvent | null {
+    const common = {
+      threadId: input.threadId,
+      turnId: input.turnId,
+      itemId: input.itemId,
+      phase: input.phase,
+    };
+    if (input.itemType === "commandExecution") {
+      return {
+        ...common,
+        kind: "command",
+        message:
+          input.phase === "started"
+            ? "Codex is running a command."
+            : "Codex finished a command.",
+      };
+    }
+    if (input.itemType === "fileChange") {
+      return {
+        ...common,
+        kind: "file-change",
+        message:
+          input.phase === "started"
+            ? "Codex is preparing file changes."
+            : "Codex finished applying file changes.",
+      };
+    }
+    if (input.itemType === "plan") {
+      return {
+        ...common,
+        kind: "plan",
+        message: "Codex updated its plan.",
+      };
+    }
+    if (input.itemType === "mcpToolCall") {
+      return {
+        ...common,
+        kind: "mcp-tool",
+        message:
+          input.phase === "started"
+            ? "Codex is using an MCP tool."
+            : "Codex finished using an MCP tool.",
+      };
+    }
+    if (input.itemType === "webSearch") {
+      return {
+        ...common,
+        kind: "web-search",
+        message:
+          input.phase === "started"
+            ? "Codex is searching the web."
+            : "Codex finished searching the web.",
+      };
+    }
+    return null;
   }
 
   private async handleServerRequest(message: JsonRpcMessage): Promise<void> {

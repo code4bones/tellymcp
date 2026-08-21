@@ -95,6 +95,7 @@ type RunningAgent = {
   appServer?: ManagedAppServer | undefined;
   turnInProgress: boolean;
   activeTurnId?: string | undefined;
+  cancelProgress?: (() => void) | undefined;
 };
 
 type LastAgentExit = {
@@ -140,6 +141,71 @@ type AgentRuntimeDependencies = {
     message: string;
   }) => Promise<void>;
 };
+
+const CODEX_PROGRESS_DEBOUNCE_MS = 1_500;
+const CODEX_PROGRESS_MAX_UPDATES = 3;
+
+export function createCodexProgressRelay(input: {
+  notify: (message: string) => void | Promise<void>;
+  isActive: () => boolean;
+  debounceMs?: number;
+  maxUpdates?: number;
+}): { push: (message: string) => void; stop: () => void } {
+  const debounceMs = input.debounceMs ?? CODEX_PROGRESS_DEBOUNCE_MS;
+  const maxUpdates = input.maxUpdates ?? CODEX_PROGRESS_MAX_UPDATES;
+  let timer: NodeJS.Timeout | undefined;
+  let pendingMessage = "";
+  let lastDeliveredMessage = "";
+  let deliveredUpdates = 0;
+  let stopped = false;
+
+  const stop = () => {
+    stopped = true;
+    pendingMessage = "";
+    if (timer) clearTimeout(timer);
+    timer = undefined;
+  };
+
+  const schedule = () => {
+    if (
+      stopped ||
+      timer ||
+      !pendingMessage ||
+      deliveredUpdates >= maxUpdates
+    ) {
+      return;
+    }
+    timer = setTimeout(() => {
+      timer = undefined;
+      if (stopped || !input.isActive()) {
+        stop();
+        return;
+      }
+      const message = pendingMessage;
+      pendingMessage = "";
+      if (!message || message === lastDeliveredMessage) return;
+      lastDeliveredMessage = message;
+      deliveredUpdates += 1;
+      void Promise.resolve()
+        .then(() => input.notify(`⏳ ${message}`))
+        .catch(() => undefined)
+        .finally(() => {
+          schedule();
+        });
+    }, debounceMs);
+  };
+
+  return {
+    push: (message) => {
+      if (stopped || deliveredUpdates >= maxUpdates) return;
+      const normalized = message.trim().slice(0, 300);
+      if (!normalized || normalized === lastDeliveredMessage) return;
+      pendingMessage = normalized;
+      schedule();
+    },
+    stop,
+  };
+}
 
 function waitForSocket(input: {
   socketPath: string;
@@ -433,6 +499,7 @@ export class AgentRuntimeService {
         exitCode,
       });
       record.unsubscribe();
+      record.cancelProgress?.();
       record.stopBackend();
       this.logger.info("Coding agent exited", {
         sessionId,
@@ -528,29 +595,46 @@ export class AgentRuntimeService {
         });
       }
     };
+    const progressRelay = createCodexProgressRelay({
+      notify,
+      isActive: () =>
+        this.runningBySessionId.get(sessionId) === running &&
+        running.turnInProgress,
+    });
+    running.cancelProgress?.();
+    running.cancelProgress = progressRelay.stop;
 
     let submission: Awaited<ReturnType<CodexTurnClient["submitTurn"]>>;
     try {
       submission = await running.appServer.client.submitTurn({
         threadId: running.appServer.threadId,
         text: message,
+        onProgress: (event) => {
+          progressRelay.push(event.message);
+        },
         onComplete: async (finalMessage) => {
+          progressRelay.stop();
           if (this.runningBySessionId.get(sessionId) === running) {
             running.turnInProgress = false;
             running.activeTurnId = undefined;
+            running.cancelProgress = undefined;
           }
           await notify(finalMessage);
         },
         onError: async (error) => {
+          progressRelay.stop();
           if (this.runningBySessionId.get(sessionId) === running) {
             running.turnInProgress = false;
             running.activeTurnId = undefined;
+            running.cancelProgress = undefined;
           }
           await notify(`Codex turn failed: ${error.message}`);
         },
       });
     } catch (error) {
+      progressRelay.stop();
       running.turnInProgress = false;
+      running.cancelProgress = undefined;
       throw error;
     }
     if (running.turnInProgress) {
@@ -573,6 +657,7 @@ export class AgentRuntimeService {
   public stopTracking(): void {
     for (const record of this.runningBySessionId.values()) {
       record.unsubscribe();
+      record.cancelProgress?.();
       record.stopBackend();
     }
     this.runningBySessionId.clear();

@@ -6,9 +6,47 @@ import type { Logger } from "../src/services/features/telegram-mcp/src/shared/li
 import {
   AgentRuntimeService,
   buildAgentLaunchCommand,
+  createCodexProgressRelay,
 } from "../src/services/features/telegram-mcp/src/features/agent-runtime/model/agentRuntimeService";
 
 describe("agent runtime service", () => {
+  it("debounces, deduplicates, and bounds Codex progress notifications", async () => {
+    vi.useFakeTimers();
+    try {
+      const notify = vi.fn(async () => undefined);
+      const relay = createCodexProgressRelay({
+        notify,
+        isActive: () => true,
+        debounceMs: 100,
+        maxUpdates: 2,
+      });
+
+      relay.push("Codex is running a command.");
+      relay.push("Codex is preparing file changes.");
+      await vi.advanceTimersByTimeAsync(100);
+      expect(notify).toHaveBeenCalledWith(
+        "⏳ Codex is preparing file changes.",
+      );
+
+      relay.push("Codex is preparing file changes.");
+      await vi.advanceTimersByTimeAsync(100);
+      expect(notify).toHaveBeenCalledTimes(1);
+
+      relay.push("Codex updated its plan.");
+      await vi.advanceTimersByTimeAsync(100);
+      relay.push("Codex is searching the web.");
+      await vi.advanceTimersByTimeAsync(100);
+      expect(notify).toHaveBeenCalledTimes(2);
+
+      relay.stop();
+      relay.push("Codex finished a command.");
+      await vi.advanceTimersByTimeAsync(100);
+      expect(notify).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("builds a quoted command with an exit sentinel", () => {
     expect(
       buildAgentLaunchCommand({

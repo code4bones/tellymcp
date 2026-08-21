@@ -73,6 +73,21 @@ describe("Codex app-server client", () => {
           setImmediate(() => {
             socket.send(
               JSON.stringify({
+                method: "item/started",
+                params: {
+                  threadId: "thread-1",
+                  turnId: "turn-1",
+                  item: {
+                    id: "command-1",
+                    type: "commandExecution",
+                    command: "curl https://secret.example/token",
+                    status: "inProgress",
+                  },
+                },
+              }),
+            );
+            socket.send(
+              JSON.stringify({
                 id: "approval-1",
                 method: "item/commandExecution/requestApproval",
                 params: {
@@ -92,6 +107,21 @@ describe("Codex app-server client", () => {
           });
         } else if (request.id === "approval-1") {
           approvalResponse = request.result;
+          socket.send(
+            JSON.stringify({
+              method: "item/completed",
+              params: {
+                threadId: "thread-1",
+                turnId: "turn-1",
+                item: {
+                  id: "command-1",
+                  type: "commandExecution",
+                  command: "curl https://secret.example/token",
+                  status: "completed",
+                },
+              },
+            }),
+          );
           socket.send(
             JSON.stringify({
               method: "item/completed",
@@ -124,6 +154,7 @@ describe("Codex app-server client", () => {
     });
 
     const onApprovalRequest = vi.fn(async () => "accept" as const);
+    const onProgress = vi.fn();
     const client = await CodexAppServerClient.connect({
       endpoint: `unix://${socketPath}`,
       logger: {
@@ -139,6 +170,7 @@ describe("Codex app-server client", () => {
         text: "Continue",
         onComplete: resolve,
         onError: reject,
+        onProgress,
       });
     });
 
@@ -156,6 +188,25 @@ describe("Codex app-server client", () => {
       networkProtocol: "https",
     });
     expect(approvalResponse).toEqual({ decision: "accept" });
+    expect(onProgress).toHaveBeenNthCalledWith(1, {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "command-1",
+      kind: "command",
+      phase: "started",
+      message: "Codex is running a command.",
+    });
+    expect(onProgress).toHaveBeenNthCalledWith(2, {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "command-1",
+      kind: "command",
+      phase: "completed",
+      message: "Codex finished a command.",
+    });
+    expect(JSON.stringify(onProgress.mock.calls)).not.toContain(
+      "secret.example",
+    );
     expect(methods).toEqual([
       "initialize",
       "initialized",

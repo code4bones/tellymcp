@@ -297,11 +297,18 @@ TellyMCP для Codex. Для Claude Code используется встрое�
 установить отдельно.
 
 После выбора консоли в Telegram открой `🤖 Агент`: меню покажет доступные на
-этой client-машине providers и позволит запустить Codex или Claude Code в том же
-PTY. Следующие сообщения из Telegram попадут в тот же терминальный диалог.
-TellyMCP не позволит случайно запустить второго агента, пока первый ещё работает.
+этой client-машине providers и позволит запустить Codex или Claude Code. Для
+Codex TellyMCP поднимает локальный `codex app-server` на приватном Unix socket и
+подключает консольный TUI через `codex --remote`; Claude Code пока использует
+прямой PTY adapter. Следующие сообщения из Telegram попадут в тот же
+терминальный диалог, а на gateway по-прежнему не нужен ни один vendor CLI.
+TellyMCP не позволит случайно запустить второго агента, пока первый ещё работает,
+и остановит managed app-server после выхода из Codex TUI.
+
 Оставь MCP endpoint TellyMCP подключённым к выбранному агенту: тогда его workflow
 сможет возвращать финальные ответы и файлы в Telegram существующими notify-tools.
+Прямая маршрутизация app-server thread/turn и Telegram UI для approvals будут
+добавлены за тем же provider contract.
 
 ## Webhook
 

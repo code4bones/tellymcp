@@ -41,6 +41,7 @@ describe("agent runtime service", () => {
     } satisfies SessionStore;
     let onData: ((data: string) => void) | undefined;
     const unsubscribe = vi.fn();
+    const stopAppServer = vi.fn();
     const sendLine = vi.fn(async () => undefined);
     const service = new AgentRuntimeService(
       { terminal: {} } as AppConfig,
@@ -57,6 +58,7 @@ describe("agent runtime service", () => {
             agentName: "Codex",
             executable: "codex",
             executablePath: "/bin/codex",
+            transport: "app-server",
             launchArgs: [],
             aliases: ["codex"],
             available: true,
@@ -68,6 +70,10 @@ describe("agent runtime service", () => {
           onData = input.onData;
           return unsubscribe;
         },
+        startAppServer: async () => ({
+          endpoint: "unix:///tmp/tellymcp-codex-test.sock",
+          stop: stopAppServer,
+        }),
       },
     );
 
@@ -80,6 +86,7 @@ describe("agent runtime service", () => {
       agent_id: "codex",
       provider_id: "openai",
       terminal_target: "pty:workspace",
+      transport: "app-server",
     });
     expect(sendLine).toHaveBeenCalledOnce();
     await expect(
@@ -93,6 +100,9 @@ describe("agent runtime service", () => {
     });
 
     const command = String(sendLine.mock.calls[0]?.[2]);
+    expect(command).toContain(
+      "'/bin/codex' '--remote' 'unix:///tmp/tellymcp-codex-test.sock' '-C' '/workspace'",
+    );
     const sentinel = command.match(/(__TELLYMCP_AGENT_EXIT_[a-f0-9]+__)/u)?.[1];
     expect(sentinel).toBeTruthy();
     onData?.(command);
@@ -109,6 +119,7 @@ describe("agent runtime service", () => {
       agents: [{ agentId: "codex", state: "idle", lastExitCode: 0 }],
     });
     expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(stopAppServer).toHaveBeenCalledOnce();
   });
 
   it("rejects a provider whose CLI is missing", async () => {
@@ -126,6 +137,7 @@ describe("agent runtime service", () => {
             agentId: "claude",
             agentName: "Claude Code",
             executable: "claude",
+            transport: "pty",
             launchArgs: [],
             aliases: ["claude"],
             available: false,

@@ -21,7 +21,9 @@ describe("agent provider registry", () => {
   it("resolves provider and agent aliases", () => {
     expect(resolveAgentProvider("openai")?.agentId).toBe("codex");
     expect(resolveAgentProvider("codex")?.providerId).toBe("openai");
+    expect(resolveAgentProvider("codex")?.transport).toBe("app-server");
     expect(resolveAgentProvider("claude-code")?.agentId).toBe("claude");
+    expect(resolveAgentProvider("claude")?.transport).toBe("pty");
     expect(resolveAgentProvider("unknown")).toBeNull();
   });
 

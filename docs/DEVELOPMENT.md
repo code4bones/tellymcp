@@ -169,10 +169,11 @@ The runtime uses a built-in PTY-backed terminal layer.
 - provider adapters are built into TellyMCP; Codex and Claude Code are the first allowlisted agents
 - availability is resolved from `PATH` on the client that owns the selected console
 - `tellymcp run --agent codex|claude` and the Telegram `Agent` menu call the same client-side `telegramMcp.agentRuntime` service
-- the gateway only relays provider status/start actions and never imports a vendor SDK or requires a vendor CLI
-- the runtime wraps the allowlisted launch command with a unique exit sentinel, tracks its lifecycle, and rejects a second launch while an agent is running
+- the gateway only relays provider status/start actions and never starts an app-server or requires a vendor CLI
+- Codex uses a client-owned `codex app-server` on a private Unix socket and a console TUI attached with `codex --remote`; Claude Code uses the direct PTY adapter
+- the runtime wraps the allowlisted TUI launch command with a unique exit sentinel, tracks the TUI and app-server lifecycle, and rejects a second launch while an agent is running
 - arbitrary command names or arguments must not be accepted from Telegram callbacks
-- future SDK-native Codex or Claude providers belong behind this same contract and must remain optional
+- direct Codex app-server thread/turn, event streaming, and approval handling belong behind this same contract; an equivalent Claude adapter must remain optional
 
 Prompt scan model:
 

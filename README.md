@@ -297,12 +297,18 @@ plugin. Claude Code uses the built-in adapter and the existing
 itself separately.
 
 After selecting a console in Telegram, open `🤖 Agent` to see which providers
-are available on that client and start Codex or Claude Code in the same PTY.
-Telegram messages then go to that same terminal conversation. TellyMCP prevents
-a second agent from being launched into a console while the first one is still
-running. Keep the TellyMCP MCP endpoint configured in the selected agent so its
-workflow can return final answers and files to Telegram with the existing notify
-tools.
+are available on that client and start Codex or Claude Code. For Codex, TellyMCP
+starts a local `codex app-server` on a private Unix socket and connects the
+console TUI with `codex --remote`; Claude Code currently uses the direct PTY
+adapter. Telegram messages then go to that same terminal conversation. The
+gateway never needs either vendor CLI. TellyMCP prevents a second agent from
+being launched into a console while the first one is still running and stops
+the managed Codex app-server when its TUI exits.
+
+Keep the TellyMCP MCP endpoint configured in the selected agent so its workflow
+can return final answers and files to Telegram with the existing notify tools.
+Direct app-server thread/turn routing and Telegram-rendered approval requests
+will be added behind the same provider contract.
 
 ## Webhook Mode
 

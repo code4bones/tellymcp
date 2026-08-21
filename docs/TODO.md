@@ -30,9 +30,11 @@ Current focus areas after the gateway-first refactor:
 
 ## Managed Agent Providers
 
-- add an SDK-native Codex adapter behind the provider contract when structured
-  thread ids and streamed final responses are needed; keep the PTY adapter as
-  the console-compatible default
+- connect TellyMCP to its managed Codex app-server and persist the active thread
+  id so Telegram can submit `turn/start` directly instead of typing through the
+  TUI
+- render Codex app-server streamed final responses and approval requests in
+  Telegram while keeping the Unix socket private to the client
 - evaluate the equivalent supported Claude SDK surface before adding a
   structured Claude adapter
 - decide whether the selected agent/provider should persist in

@@ -329,9 +329,10 @@ Status: accepted
 
 - the gateway and Telegram bot must not require Codex, Claude Code, or a vendor SDK
 - provider availability is detected on the selected client console, never inferred from the gateway host
-- `tellymcp run --agent <agent>` and the Telegram agent menu launch the same provider adapter in the console-owned PTY
+- `tellymcp run --agent <agent>` and the Telegram agent menu launch the same client-owned provider adapter
+- Codex runs through a local app-server on a private Unix socket with its TUI connected via `codex --remote`; providers without a supported structured server use the PTY adapter
 - only one TellyMCP-managed coding agent may run in a console at a time; switching agents requires the current process to exit first
-- vendor SDK-backed providers may be added behind the same contract, but must not make another provider a transitive runtime requirement
+- direct structured thread/turn providers may be added behind the same contract, but must not make another provider a transitive runtime requirement
 - the existing `tellymcp codex-plugin` command remains supported; `tellymcp provider install codex` is the provider-oriented entry point for the same workflow integration
 
 ## Deferred Or Not Yet Accepted

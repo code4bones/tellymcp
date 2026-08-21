@@ -68,9 +68,12 @@ Do not regress these:
 
 ### Managed Agent Providers
 
-- keep the built-in PTY provider adapter as the console-compatible baseline
-- add structured SDK adapters behind the same provider contract only when they
-  preserve client-side execution and optional vendor dependencies
+- use a client-owned Codex app-server on a private Unix socket, with the local
+  console attached through `codex --remote`
+- keep the built-in PTY provider adapter as the Claude-compatible baseline and
+  fallback for providers without a supported structured local server
+- add direct app-server thread/turn and approval routing behind the same provider
+  contract while preserving client-side execution and optional vendor dependencies
 - keep provider/model arguments allowlisted; Telegram callbacks must never
   become an arbitrary shell-command surface
 

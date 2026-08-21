@@ -25,6 +25,7 @@ type PendingRequest = {
 };
 
 type PendingTurn = {
+  threadId: string;
   onComplete: (result: CodexTurnResult) => void | Promise<void>;
   onError: (error: Error) => void | Promise<void>;
   onInterrupted?: (() => void | Promise<void>) | undefined;
@@ -32,6 +33,11 @@ type PendingTurn = {
   finalMessage: string;
   fallbackMessage: string;
   usage?: CodexTokenUsage | undefined;
+  pollTimer?: NodeJS.Timeout | undefined;
+  pollFailures: number;
+  pollInFlight: boolean;
+  emptyCompletedPolls: number;
+  terminalRecord?: Record<string, unknown> | undefined;
 };
 
 type PendingThreadStart = {
@@ -240,6 +246,7 @@ export class CodexAppServerClient {
     private readonly socket: WebSocket,
     private readonly logger: Logger,
     private readonly onApprovalRequest?: CodexApprovalHandler,
+    private readonly turnPollIntervalMs = 1_000,
   ) {
     socket.on("message", (data) => this.handleMessage(String(data)));
     socket.on("error", (error) => this.handleDisconnect(error));
@@ -257,12 +264,14 @@ export class CodexAppServerClient {
     logger: Logger;
     clientVersion?: string | undefined;
     onApprovalRequest?: CodexApprovalHandler | undefined;
+    turnPollIntervalMs?: number | undefined;
   }): Promise<CodexAppServerClient> {
     const socket = await openSocket(input.endpoint);
     const client = new CodexAppServerClient(
       socket,
       input.logger,
       input.onApprovalRequest,
+      input.turnPollIntervalMs,
     );
     try {
       const initializeResult = await client.request("initialize", {
@@ -427,6 +436,7 @@ export class CodexAppServerClient {
       (result) => {
         turnId = requireNestedString(result, "turn", "id");
         this.pendingTurns.set(turnId, {
+          threadId: input.threadId,
           onComplete: input.onComplete,
           onError: input.onError,
           ...(input.onInterrupted
@@ -435,7 +445,11 @@ export class CodexAppServerClient {
           ...(input.onProgress ? { onProgress: input.onProgress } : {}),
           finalMessage: "",
           fallbackMessage: "",
+          pollFailures: 0,
+          pollInFlight: false,
+          emptyCompletedPolls: 0,
         });
+        this.scheduleTurnPoll(turnId);
       },
     );
     return { threadId: input.threadId, turnId };
@@ -646,29 +660,153 @@ export class CodexAppServerClient {
       if (!completedTurnId) return;
       const turn = this.pendingTurns.get(completedTurnId);
       if (!turn) return;
-      this.pendingTurns.delete(completedTurnId);
-      if (turnRecord?.status === "interrupted") {
-        void turn.onInterrupted?.();
+      this.captureTurnMessages(turn, turnRecord);
+      if (
+        turnRecord?.status === "completed" &&
+        !turn.finalMessage.trim() &&
+        !turn.fallbackMessage.trim()
+      ) {
+        turn.terminalRecord = turnRecord;
+        this.scheduleTurnPoll(completedTurnId, 0);
         return;
       }
-      if (turnRecord?.status === "failed") {
-        const errorRecord = asRecord(turnRecord.error);
-        void turn.onError(
-          new Error(
-            typeof errorRecord?.message === "string"
-              ? errorRecord.message
-              : "Codex turn failed.",
-          ),
-        );
-        return;
-      }
-      const finalMessage = (turn.finalMessage || turn.fallbackMessage).trim();
-      void turn.onComplete({
-        message:
-          finalMessage || "Codex completed the turn without a text response.",
-        ...(turn.usage ? { usage: turn.usage } : {}),
-      });
+      this.settleTurn(completedTurnId, turnRecord);
     }
+  }
+
+  private scheduleTurnPoll(
+    turnId: string,
+    delayMs = this.turnPollIntervalMs,
+  ): void {
+    const turn = this.pendingTurns.get(turnId);
+    if (!turn || this.closed) return;
+    clearTimeout(turn.pollTimer);
+    turn.pollTimer = setTimeout(() => {
+      void this.pollTurn(turnId);
+    }, delayMs);
+  }
+
+  private async pollTurn(turnId: string): Promise<void> {
+    const turn = this.pendingTurns.get(turnId);
+    if (!turn || turn.pollInFlight || this.closed) return;
+    turn.pollInFlight = true;
+    try {
+      const result = asRecord(
+        await this.request("thread/read", {
+          threadId: turn.threadId,
+          includeTurns: true,
+        }),
+      );
+      const threadRecord = asRecord(result?.thread);
+      const turns = Array.isArray(threadRecord?.turns)
+        ? threadRecord.turns
+        : [];
+      const turnRecord = turns
+        .map(asRecord)
+        .find((candidate) => candidate?.id === turnId);
+      const current = this.pendingTurns.get(turnId);
+      if (!current) return;
+      current.pollInFlight = false;
+      turn.pollFailures = 0;
+      if (
+        !turnRecord ||
+        !["completed", "failed", "interrupted"].includes(
+          String(turnRecord.status),
+        )
+      ) {
+        this.scheduleTurnPoll(turnId);
+        return;
+      }
+      this.captureTurnMessages(turn, turnRecord);
+      if (
+        turnRecord.status === "completed" &&
+        !turn.finalMessage.trim() &&
+        !turn.fallbackMessage.trim() &&
+        turn.emptyCompletedPolls < 5
+      ) {
+        turn.emptyCompletedPolls += 1;
+        this.scheduleTurnPoll(turnId);
+        return;
+      }
+      this.logger.debug("Codex turn completion recovered through thread/read", {
+        threadId: turn.threadId,
+        turnId,
+        status: turnRecord.status,
+      });
+      this.settleTurn(turnId, turnRecord);
+    } catch (error) {
+      const current = this.pendingTurns.get(turnId);
+      if (!current || this.closed) return;
+      current.pollInFlight = false;
+      current.pollFailures += 1;
+      if (current.pollFailures === 1 || current.pollFailures % 30 === 0) {
+        this.logger.warn("Codex turn completion polling failed", {
+          threadId: current.threadId,
+          turnId,
+          failures: current.pollFailures,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      if (current.terminalRecord && current.pollFailures >= 5) {
+        this.settleTurn(turnId, current.terminalRecord);
+        return;
+      }
+      this.scheduleTurnPoll(turnId);
+    }
+  }
+
+  private captureTurnMessages(
+    pending: PendingTurn,
+    turnRecord: Record<string, unknown> | null,
+  ): void {
+    const items = Array.isArray(turnRecord?.items) ? turnRecord.items : [];
+    const agentMessages = items.flatMap((value) => {
+      const item = asRecord(value);
+      return item?.type === "agentMessage" && typeof item.text === "string"
+        ? [{ text: item.text, phase: item.phase }]
+        : [];
+    });
+    const finalMessages = agentMessages
+      .filter((item) => item.phase === "final_answer")
+      .map((item) => item.text.trim())
+      .filter(Boolean);
+    if (finalMessages.length > 0) {
+      pending.finalMessage = finalMessages.join("\n\n");
+      return;
+    }
+    const fallback = agentMessages.at(-1)?.text.trim();
+    if (fallback && !pending.finalMessage) pending.fallbackMessage = fallback;
+  }
+
+  private settleTurn(
+    turnId: string,
+    turnRecord: Record<string, unknown> | null,
+  ): void {
+    const turn = this.pendingTurns.get(turnId);
+    if (!turn) return;
+    this.pendingTurns.delete(turnId);
+    clearTimeout(turn.pollTimer);
+    if (turnRecord?.status === "interrupted") {
+      void turn.onInterrupted?.();
+      return;
+    }
+    if (turnRecord?.status === "failed") {
+      const errorRecord = asRecord(turnRecord.error);
+      void turn.onError(
+        new Error(
+          typeof errorRecord?.message === "string"
+            ? errorRecord.message
+            : "Codex turn failed.",
+        ),
+      );
+      return;
+    }
+    const finalMessage = (turn.finalMessage || turn.fallbackMessage).trim();
+    void turn.onComplete({
+      message:
+        finalMessage || "Codex completed the turn without a text response.",
+      ...(turn.usage ? { usage: turn.usage } : {}),
+    });
   }
 
   private normalizeProgressEvent(input: {
@@ -847,6 +985,7 @@ export class CodexAppServerClient {
     }
     this.pendingRequests.clear();
     for (const turn of this.pendingTurns.values()) {
+      clearTimeout(turn.pollTimer);
       void turn.onError(error);
     }
     this.pendingTurns.clear();

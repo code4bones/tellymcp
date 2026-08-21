@@ -466,4 +466,123 @@ describe("Codex app-server client", () => {
     );
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));
   });
+
+  it("recovers agent text from thread/read when item notifications are not delivered", async () => {
+    const socketPath = path.join(
+      os.tmpdir(),
+      `tellymcp-codex-poll-${process.pid}-${Date.now()}.sock`,
+    );
+    socketPaths.push(socketPath);
+    const httpServer = http.createServer();
+    const webSocketServer = new WebSocketServer({
+      server: httpServer,
+      path: "/rpc",
+      perMessageDeflate: false,
+    });
+    let reads = 0;
+    webSocketServer.on("connection", (socket) => {
+      socket.on("message", (raw) => {
+        const request = JSON.parse(String(raw)) as {
+          id?: string;
+          method?: string;
+        };
+        if (request.method === "initialize") {
+          socket.send(
+            JSON.stringify({ id: request.id, result: { userAgent: "test" } }),
+          );
+        } else if (request.method === "turn/start") {
+          socket.send(
+            JSON.stringify({
+              id: request.id,
+              result: { turn: { id: "turn-polled" } },
+            }),
+          );
+        } else if (request.method === "thread/read") {
+          reads += 1;
+          const completed = reads >= 2;
+          socket.send(
+            JSON.stringify({
+              id: request.id,
+              result: {
+                thread: {
+                  id: "thread-polled",
+                  turns: [
+                    {
+                      id: "turn-polled",
+                      status: completed ? "completed" : "inProgress",
+                      items: completed
+                        ? [
+                            {
+                              id: "message-commentary",
+                              type: "agentMessage",
+                              text: "Working on it",
+                              phase: "commentary",
+                            },
+                            {
+                              id: "message-final",
+                              type: "agentMessage",
+                              text: "Recovered final answer",
+                              phase: "final_answer",
+                            },
+                          ]
+                        : [],
+                    },
+                  ],
+                },
+              },
+            }),
+          );
+          if (completed) {
+            setImmediate(() => {
+              socket.send(
+                JSON.stringify({
+                  method: "turn/completed",
+                  params: {
+                    threadId: "thread-polled",
+                    turn: { id: "turn-polled", status: "completed" },
+                  },
+                }),
+              );
+            });
+          }
+        }
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      httpServer.once("error", reject);
+      httpServer.listen(socketPath, resolve);
+    });
+
+    const onComplete = vi.fn();
+    const client = await CodexAppServerClient.connect({
+      endpoint: `unix://${socketPath}`,
+      logger: {
+        debug: vi.fn(),
+        warn: vi.fn(),
+      } as unknown as Logger,
+      turnPollIntervalMs: 5,
+    });
+    await client.submitTurn({
+      threadId: "thread-polled",
+      cwd: "/workspace",
+      text: "Continue",
+      onComplete,
+      onError: vi.fn(),
+    });
+
+    await vi.waitFor(() =>
+      expect(onComplete).toHaveBeenCalledWith({
+        message: "Recovered final answer",
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(reads).toBe(2);
+
+    client.close();
+    await new Promise<void>((resolve) =>
+      webSocketServer.close(() => resolve()),
+    );
+    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+  });
 });

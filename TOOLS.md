@@ -1573,7 +1573,7 @@ Distributed mode scaffold:
   - `Delete`
 - `History` sends a markdown export of the last 5 Collab events for the current active console
 
-Current remaining operational gaps are tracked in [docs/TODO.md](./docs/TODO.md).
+Current work and operational gaps are tracked in Marrow project `tellymcp`.
 
 ## `ask_user_telegram`
 

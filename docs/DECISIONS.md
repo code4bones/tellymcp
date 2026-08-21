@@ -7,7 +7,7 @@ This file is a living source of truth.
 Rules:
 
 - keep only accepted decisions here
-- keep open ideas and experiments in `docs/TODO.md`
+- track open work and implementation status in Marrow project `tellymcp`
 - when a decision changes, update this file instead of layering contradictory docs on top
 
 Last updated: `2026-08-21`

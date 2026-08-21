@@ -26,7 +26,9 @@ list|status|install`, `tellymcp run --agent codex|claude` и Telegram-меню
   защищены от двойного запуска, а gateway не требует установленного vendor CLI.
   Codex запускается через client-owned `codex app-server` на приватном Unix
   socket с TUI через `codex --remote`; Claude Code пока использует прямой PTY
-  adapter.
+  adapter. TellyMCP создаёт общий Codex thread до запуска TUI, подключает консоль
+  через `resume`, отправляет Telegram-сообщения напрямую как app-server turns и
+  возвращает завершённый final message через существующий Telegram notify route.
 - Добавлен локальный web-конфигуратор `tellymcp configure`: browser wizard
   предлагает выбрать Client или Gateway, показывает role-specific поля,
   формирует HTTP/WS/WebApp/webhook/OAuth URL из одного Public base URL,

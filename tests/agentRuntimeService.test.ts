@@ -42,6 +42,17 @@ describe("agent runtime service", () => {
     let onData: ((data: string) => void) | undefined;
     const unsubscribe = vi.fn();
     const stopAppServer = vi.fn();
+    const closeAppServerClient = vi.fn();
+    let completeTurn: ((message: string) => void | Promise<void>) | undefined;
+    const submitTurn = vi.fn(
+      async (input: {
+        onComplete: (message: string) => void | Promise<void>;
+      }) => {
+        completeTurn = input.onComplete;
+        return { threadId: "thread-1", turnId: "turn-1" };
+      },
+    );
+    const notifyTelegram = vi.fn(async () => undefined);
     const sendLine = vi.fn(async () => undefined);
     const service = new AgentRuntimeService(
       { terminal: {} } as AppConfig,
@@ -72,8 +83,14 @@ describe("agent runtime service", () => {
         },
         startAppServer: async () => ({
           endpoint: "unix:///tmp/tellymcp-codex-test.sock",
+          threadId: "thread-1",
+          client: {
+            submitTurn,
+            close: closeAppServerClient,
+          },
           stop: stopAppServer,
         }),
+        notifyTelegram,
       },
     );
 
@@ -87,6 +104,7 @@ describe("agent runtime service", () => {
       provider_id: "openai",
       terminal_target: "pty:workspace",
       transport: "app-server",
+      thread_id: "thread-1",
     });
     expect(sendLine).toHaveBeenCalledOnce();
     await expect(
@@ -101,7 +119,7 @@ describe("agent runtime service", () => {
 
     const command = String(sendLine.mock.calls[0]?.[2]);
     expect(command).toContain(
-      "'/bin/codex' '--remote' 'unix:///tmp/tellymcp-codex-test.sock' '-C' '/workspace'",
+      "'/bin/codex' '--remote' 'unix:///tmp/tellymcp-codex-test.sock' '-C' '/workspace' 'resume' 'thread-1'",
     );
     const sentinel = command.match(/(__TELLYMCP_AGENT_EXIT_[a-f0-9]+__)/u)?.[1];
     expect(sentinel).toBeTruthy();
@@ -110,6 +128,29 @@ describe("agent runtime service", () => {
       service.listAgents({ session_id: "workspace" }),
     ).resolves.toMatchObject({
       active_agent_id: "codex",
+    });
+    await expect(
+      service.submitMessage({
+        session_id: "workspace",
+        message: "Continue from Telegram",
+      }),
+    ).resolves.toEqual({
+      handled: true,
+      session_id: "workspace",
+      agent_id: "codex",
+      thread_id: "thread-1",
+      turn_id: "turn-1",
+    });
+    await expect(
+      service.submitMessage({
+        session_id: "workspace",
+        message: "Second message",
+      }),
+    ).rejects.toThrow("still running");
+    await completeTurn?.("Done from Codex");
+    expect(notifyTelegram).toHaveBeenCalledWith({
+      sessionId: "workspace",
+      message: "Done from Codex",
     });
     onData?.(`${sentinel}0\r\n`);
 

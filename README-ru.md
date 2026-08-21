@@ -306,9 +306,13 @@ TellyMCP не позволит случайно запустить второг�
 и остановит managed app-server после выхода из Codex TUI.
 
 Оставь MCP endpoint TellyMCP подключённым к выбранному агенту: тогда его workflow
-сможет возвращать финальные ответы и файлы в Telegram существующими notify-tools.
-Прямая маршрутизация app-server thread/turn и Telegram UI для approvals будут
-добавлены за тем же provider contract.
+сможет возвращать файлы в Telegram существующими notify-tools. Текстовые
+Telegram-сообщения для Codex отправляются напрямую через app-server `turn/start`,
+а финальный ответ агента возвращается через Telegram route выбранной консоли.
+Keyboard relay остаётся fallback для Claude Code и других неструктурированных
+providers. Пока один Telegram turn выполняется, второй будет отклонён;
+app-server approvals сейчас безопасно отклоняются до подключения Telegram UI к
+этому provider adapter.
 
 ## Webhook
 

@@ -396,7 +396,8 @@ export class GatewayHttpService {
     sessionId: string;
     actionName:
       | "telegramMcp.agentRuntime.listRemote"
-      | "telegramMcp.agentRuntime.startRemote";
+      | "telegramMcp.agentRuntime.startRemote"
+      | "telegramMcp.agentRuntime.submitRemote";
     params?: Record<string, unknown>;
   }): Promise<T> {
     const target = await this.resolveConnectedConsoleTarget(input.sessionId);
@@ -1244,6 +1245,42 @@ export class GatewayHttpService {
           attachments.length > 0
             ? `${text} [attachments saved: ${attachments.join(", ")}]`.trim()
             : text;
+
+        const agentResult = await this.callBroker<{
+          handled?: boolean;
+          thread_id?: string;
+          turn_id?: string;
+        }>(
+          "telegramMcp.gatewaySocket.requestClientAction",
+          {
+            clientUuid: targetClientUuid,
+            actionName: "telegramMcp.agentRuntime.submitRemote",
+            params: {
+              session_id: targetLocalSessionId,
+              message: submittedText,
+            },
+          },
+          { meta: { internal_call: true } },
+        );
+
+        if (agentResult.handled) {
+          writeJson(res, 200, {
+            ok: true,
+            session_id: targetLocalSessionId,
+            submitted_text: submittedText,
+            route: "agent",
+            ...(agentResult.thread_id
+              ? { thread_id: agentResult.thread_id }
+              : {}),
+            ...(agentResult.turn_id ? { turn_id: agentResult.turn_id } : {}),
+            ...(sourceLabel ? { source_label: sourceLabel } : {}),
+          } satisfies RelayConsoleMessageResult & {
+            route: "agent";
+            thread_id?: string;
+            turn_id?: string;
+          });
+          return true;
+        }
 
         await this.requestLiveRelayAction({
           clientUuid: targetClientUuid,

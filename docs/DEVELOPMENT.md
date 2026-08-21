@@ -171,9 +171,12 @@ The runtime uses a built-in PTY-backed terminal layer.
 - `tellymcp run --agent codex|claude` and the Telegram `Agent` menu call the same client-side `telegramMcp.agentRuntime` service
 - the gateway only relays provider status/start actions and never starts an app-server or requires a vendor CLI
 - Codex uses a client-owned `codex app-server` on a private Unix socket and a console TUI attached with `codex --remote`; Claude Code uses the direct PTY adapter
+- TellyMCP initializes its own app-server JSON-RPC connection, creates the thread before launching the TUI, and attaches the TUI with `resume <thread-id>`
+- Telegram inbox text uses app-server `turn/start` for an active Codex provider; final `agentMessage` text is delivered through the existing gateway-bound notify route
+- only one direct Telegram turn is accepted at a time; common app-server approval requests are denied until the Telegram approval callback is implemented
 - the runtime wraps the allowlisted TUI launch command with a unique exit sentinel, tracks the TUI and app-server lifecycle, and rejects a second launch while an agent is running
 - arbitrary command names or arguments must not be accepted from Telegram callbacks
-- direct Codex app-server thread/turn, event streaming, and approval handling belong behind this same contract; an equivalent Claude adapter must remain optional
+- Telegram approval handling and richer progress streaming belong behind this same contract; an equivalent Claude adapter must remain optional
 
 Prompt scan model:
 

@@ -200,7 +200,9 @@ describe("GatewayHttpService agent runtime relay", () => {
     }));
     const service = makeService(callBroker, "transport-secret");
     const response = makeResponse();
-    const request = makeRequest("Bearer transport-secret") as IncomingMessage & {
+    const request = makeRequest(
+      "Bearer transport-secret",
+    ) as IncomingMessage & {
       body: unknown;
     };
     request.body = {
@@ -223,7 +225,9 @@ describe("GatewayHttpService agent runtime relay", () => {
 
   it("resolves a canonical session before starting its agent", async () => {
     const callBroker = vi.fn(async (actionName: string) => {
-      if (actionName === "telegramMcp.gatewaySocket.resolveConnectedSessionTarget") {
+      if (
+        actionName === "telegramMcp.gatewaySocket.resolveConnectedSessionTarget"
+      ) {
         return {
           client_uuid: "client-2",
           local_session_id: "workspace-2",
@@ -233,7 +237,9 @@ describe("GatewayHttpService agent runtime relay", () => {
     });
     const service = makeService(callBroker, "transport-secret");
     const response = makeResponse();
-    const request = makeRequest("Bearer transport-secret") as IncomingMessage & {
+    const request = makeRequest(
+      "Bearer transport-secret",
+    ) as IncomingMessage & {
       body: unknown;
     };
     request.body = {
@@ -254,6 +260,91 @@ describe("GatewayHttpService agent runtime relay", () => {
           session_id: "workspace-2",
         },
       },
+      { meta: { internal_call: true } },
+    );
+  });
+
+  it("submits Telegram text through the active structured agent", async () => {
+    const callBroker = vi.fn(async () => ({
+      handled: true,
+      thread_id: "thread-1",
+      turn_id: "turn-1",
+    }));
+    const service = makeService(callBroker, "transport-secret");
+    const response = makeResponse();
+    const request = makeRequest(
+      "Bearer transport-secret",
+    ) as IncomingMessage & {
+      body: unknown;
+    };
+    request.body = {
+      target_client_uuid: "client-1",
+      target_local_session_id: "workspace",
+      message: "Continue from Telegram",
+    };
+
+    await service.handleRequest(
+      request,
+      response,
+      "/gateway/relay/console-message",
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toMatchObject({
+      ok: true,
+      route: "agent",
+      thread_id: "thread-1",
+      turn_id: "turn-1",
+    });
+    expect(callBroker).toHaveBeenCalledOnce();
+    expect(callBroker).toHaveBeenCalledWith(
+      "telegramMcp.gatewaySocket.requestClientAction",
+      {
+        clientUuid: "client-1",
+        actionName: "telegramMcp.agentRuntime.submitRemote",
+        params: {
+          session_id: "workspace",
+          message: "Continue from Telegram",
+        },
+      },
+      { meta: { internal_call: true } },
+    );
+  });
+
+  it("keeps the PTY relay fallback when no structured agent is active", async () => {
+    const callBroker = vi.fn(async (actionName: string) =>
+      actionName === "telegramMcp.gatewaySocket.requestClientAction"
+        ? { handled: false }
+        : { ok: true },
+    );
+    const service = makeService(callBroker, "transport-secret");
+    const response = makeResponse();
+    const request = makeRequest(
+      "Bearer transport-secret",
+    ) as IncomingMessage & {
+      body: unknown;
+    };
+    request.body = {
+      target_client_uuid: "client-1",
+      target_local_session_id: "workspace",
+      message: "Continue in PTY",
+    };
+
+    await service.handleRequest(
+      request,
+      response,
+      "/gateway/relay/console-message",
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(callBroker).toHaveBeenCalledTimes(3);
+    expect(callBroker).toHaveBeenNthCalledWith(
+      2,
+      "telegramMcp.gatewaySocket.requestLiveRelay",
+      expect.objectContaining({
+        requestType: "action",
+        payload: { action: "text", text: "Continue in PTY" },
+      }),
       { meta: { internal_call: true } },
     );
   });

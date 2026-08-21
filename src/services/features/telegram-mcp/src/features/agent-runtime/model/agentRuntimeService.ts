@@ -20,6 +20,7 @@ import {
   type AgentTransportKind,
   type CodingAgentId,
 } from "./agentProviderRegistry";
+import { CodexAppServerClient } from "./codexAppServerClient";
 
 export type AgentProcessState = "idle" | "running";
 
@@ -52,10 +53,30 @@ export type StartAgentRuntimeOutput = {
   provider_id: string;
   transport: AgentTransportKind;
   started_at: string;
+  thread_id?: string | undefined;
 };
+
+export type SubmitAgentMessageInput = {
+  session_id: string;
+  message: string;
+};
+
+export type SubmitAgentMessageOutput =
+  | { handled: false; session_id: string }
+  | {
+      handled: true;
+      session_id: string;
+      agent_id: "codex";
+      thread_id: string;
+      turn_id: string;
+    };
+
+type CodexTurnClient = Pick<CodexAppServerClient, "submitTurn" | "close">;
 
 export type ManagedAppServer = {
   endpoint: string;
+  threadId: string;
+  client: CodexTurnClient;
   stop: () => void;
 };
 
@@ -66,6 +87,9 @@ type RunningAgent = {
   outputTail: string;
   unsubscribe: () => void;
   stopBackend: () => void;
+  appServer?: ManagedAppServer | undefined;
+  turnInProgress: boolean;
+  activeTurnId?: string | undefined;
 };
 
 type LastAgentExit = {
@@ -101,6 +125,10 @@ type AgentRuntimeDependencies = {
     cwd: string;
     logger: Logger;
   }) => Promise<ManagedAppServer>;
+  notifyTelegram?: (input: {
+    sessionId: string;
+    message: string;
+  }) => Promise<void>;
 };
 
 function waitForSocket(input: {
@@ -162,6 +190,7 @@ export async function startCodexAppServer(input: {
   let exited = false;
   let stopped = false;
   let errorTail = "";
+  let client: CodexAppServerClient | null = null;
 
   child.stderr?.on("data", (chunk: Buffer | string) => {
     errorTail = `${errorTail}${String(chunk)}`.trim().slice(-1_024);
@@ -186,6 +215,7 @@ export async function startCodexAppServer(input: {
   const stop = () => {
     if (stopped) return;
     stopped = true;
+    client?.close();
     if (!exited) child.kill("SIGTERM");
     rmSync(socketPath, { force: true });
   };
@@ -196,12 +226,16 @@ export async function startCodexAppServer(input: {
       isExited: () => exited,
       readError: () => errorTail,
     });
+    client = await CodexAppServerClient.connect({
+      endpoint,
+      logger: input.logger,
+    });
+    const threadId = await client.startThread(input.cwd);
+    return { endpoint, threadId, client, stop };
   } catch (error) {
     stop();
     throw error;
   }
-
-  return { endpoint, stop };
 }
 
 function shellSingleQuote(value: string): string {
@@ -238,6 +272,7 @@ export class AgentRuntimeService {
   private readonly startAppServer: NonNullable<
     AgentRuntimeDependencies["startAppServer"]
   >;
+  private readonly notifyTelegram?: AgentRuntimeDependencies["notifyTelegram"];
 
   public constructor(
     private readonly config: AppConfig,
@@ -252,6 +287,7 @@ export class AgentRuntimeService {
     this.ensureTarget =
       dependencies.ensureTarget ?? ensureTerminalTargetForSession;
     this.startAppServer = dependencies.startAppServer ?? startCodexAppServer;
+    this.notifyTelegram = dependencies.notifyTelegram;
   }
 
   public async listAgents(
@@ -342,7 +378,14 @@ export class AgentRuntimeService {
       });
     }
     const launchArgs = backend
-      ? ["--remote", backend.endpoint, "-C", session.cwd || process.cwd()]
+      ? [
+          "--remote",
+          backend.endpoint,
+          "-C",
+          session.cwd || process.cwd(),
+          "resume",
+          backend.threadId,
+        ]
       : provider.launchArgs;
     const command = buildAgentLaunchCommand({
       executablePath: provider.executablePath,
@@ -357,6 +400,8 @@ export class AgentRuntimeService {
       outputTail: "",
       unsubscribe: () => unsubscribe(),
       stopBackend: () => backend?.stop(),
+      turnInProgress: false,
+      ...(backend ? { appServer: backend } : {}),
     };
 
     const finish = (exitCode: number) => {
@@ -424,6 +469,85 @@ export class AgentRuntimeService {
       provider_id: definition.providerId,
       transport: definition.transport,
       started_at: startedAt,
+      ...(backend ? { thread_id: backend.threadId } : {}),
+    };
+  }
+
+  public async submitMessage(
+    input: SubmitAgentMessageInput,
+  ): Promise<SubmitAgentMessageOutput> {
+    const sessionId = input.session_id.trim();
+    const message = input.message.trim();
+    if (!sessionId || !message) {
+      throw new Error("session_id and message are required");
+    }
+
+    const running = this.runningBySessionId.get(sessionId);
+    if (!running?.appServer || running.agentId !== "codex") {
+      return { handled: false, session_id: sessionId };
+    }
+    if (running.turnInProgress) {
+      throw new Error(
+        `A Codex turn is still running for this session${running.activeTurnId ? ` (${running.activeTurnId})` : ""}.`,
+      );
+    }
+    running.turnInProgress = true;
+
+    const notify = async (text: string) => {
+      if (!this.notifyTelegram) {
+        this.logger.warn("Codex final response has no Telegram notifier", {
+          sessionId,
+        });
+        return;
+      }
+      try {
+        await this.notifyTelegram({ sessionId, message: text });
+      } catch (error) {
+        this.logger.error("Failed to deliver Codex response to Telegram", {
+          sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
+
+    let submission: Awaited<ReturnType<CodexTurnClient["submitTurn"]>>;
+    try {
+      submission = await running.appServer.client.submitTurn({
+        threadId: running.appServer.threadId,
+        text: message,
+        onComplete: async (finalMessage) => {
+          if (this.runningBySessionId.get(sessionId) === running) {
+            running.turnInProgress = false;
+            running.activeTurnId = undefined;
+          }
+          await notify(finalMessage);
+        },
+        onError: async (error) => {
+          if (this.runningBySessionId.get(sessionId) === running) {
+            running.turnInProgress = false;
+            running.activeTurnId = undefined;
+          }
+          await notify(`Codex turn failed: ${error.message}`);
+        },
+      });
+    } catch (error) {
+      running.turnInProgress = false;
+      throw error;
+    }
+    if (running.turnInProgress) {
+      running.activeTurnId = submission.turnId;
+    }
+    this.logger.info("Telegram message submitted to Codex app-server", {
+      sessionId,
+      threadId: submission.threadId,
+      turnId: submission.turnId,
+    });
+    return {
+      handled: true,
+      session_id: sessionId,
+      agent_id: "codex",
+      thread_id: submission.threadId,
+      turn_id: submission.turnId,
     };
   }
 

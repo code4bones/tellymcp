@@ -306,9 +306,13 @@ being launched into a console while the first one is still running and stops
 the managed Codex app-server when its TUI exits.
 
 Keep the TellyMCP MCP endpoint configured in the selected agent so its workflow
-can return final answers and files to Telegram with the existing notify tools.
-Direct app-server thread/turn routing and Telegram-rendered approval requests
-will be added behind the same provider contract.
+can return files to Telegram with the existing notify tools. Codex text messages
+from Telegram are submitted directly with app-server `turn/start`, and the final
+agent message is delivered back through the selected console's Telegram route.
+The PTY keyboard relay remains the fallback for Claude Code and other
+non-structured providers. A second Telegram turn is rejected while the first is
+still running; app-server approval requests are currently denied safely until
+the Telegram approval UI is connected to this provider adapter.
 
 ## Webhook Mode
 

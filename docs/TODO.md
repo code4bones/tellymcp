@@ -30,11 +30,13 @@ Current focus areas after the gateway-first refactor:
 
 ## Managed Agent Providers
 
-- connect TellyMCP to its managed Codex app-server and persist the active thread
-  id so Telegram can submit `turn/start` directly instead of typing through the
-  TUI
-- render Codex app-server streamed final responses and approval requests in
-  Telegram while keeping the Unix socket private to the client
+- connect Codex app-server command/file approval requests to the existing
+  Telegram approval UI and send the matching JSON-RPC decision back to the
+  originating request
+- add optional progress rendering from app-server item/turn events without
+  flooding Telegram; completed final messages are already delivered
+- decide whether active Codex thread ids should persist across a TellyMCP client
+  restart or whether a new managed thread per launch remains the safer default
 - evaluate the equivalent supported Claude SDK surface before adding a
   structured Claude adapter
 - decide whether the selected agent/provider should persist in

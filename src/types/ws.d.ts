@@ -5,8 +5,13 @@ declare module "ws" {
     public readonly readyState: number;
     public constructor(
       url: string,
-      options?: { headers?: Record<string, string> },
+      options?: {
+        headers?: Record<string, string>;
+        handshakeTimeout?: number;
+        perMessageDeflate?: boolean;
+      },
     );
+    public send(data: string): void;
     public once(event: "open", listener: () => void): this;
     public once(
       event: "unexpected-response",
@@ -14,6 +19,11 @@ declare module "ws" {
     ): this;
     public once(event: "error", listener: (error: Error) => void): this;
     public on(event: "error", listener: (error: Error) => void): this;
+    public on(event: "message", listener: (data: unknown) => void): this;
+    public on(
+      event: "close",
+      listener: (code: number, reason: unknown) => void,
+    ): this;
     public once(event: "close", listener: (code: number) => void): this;
     public once(event: string, listener: (...args: unknown[]) => void): this;
     public removeAllListeners(): this;

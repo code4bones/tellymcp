@@ -331,6 +331,8 @@ Status: accepted
 - provider availability is detected on the selected client console, never inferred from the gateway host
 - `tellymcp run --agent <agent>` and the Telegram agent menu launch the same client-owned provider adapter
 - Codex runs through a local app-server on a private Unix socket with its TUI connected via `codex --remote`; providers without a supported structured server use the PTY adapter
+- TellyMCP creates the Codex thread before the TUI starts, attaches the TUI with `resume`, and routes Telegram text through `turn/start`; completed final text uses the existing gateway-bound Telegram notify path
+- structured providers may accept only one Telegram turn at a time; provider approval requests must fail closed until an explicit Telegram approval route is available
 - only one TellyMCP-managed coding agent may run in a console at a time; switching agents requires the current process to exit first
 - direct structured thread/turn providers may be added behind the same contract, but must not make another provider a transitive runtime requirement
 - the existing `tellymcp codex-plugin` command remains supported; `tellymcp provider install codex` is the provider-oriented entry point for the same workflow integration

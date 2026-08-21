@@ -70,10 +70,13 @@ Do not regress these:
 
 - use a client-owned Codex app-server on a private Unix socket, with the local
   console attached through `codex --remote`
+- create and retain the Codex thread through app-server, submit Telegram text as
+  turns, and deliver the completed final message through the gateway-bound
+  Telegram notifier
 - keep the built-in PTY provider adapter as the Claude-compatible baseline and
   fallback for providers without a supported structured local server
-- add direct app-server thread/turn and approval routing behind the same provider
-  contract while preserving client-side execution and optional vendor dependencies
+- add Telegram approval routing and richer progress rendering behind the same
+  provider contract while preserving client-side execution and optional vendor dependencies
 - keep provider/model arguments allowlisted; Telegram callbacks must never
   become an arbitrary shell-command surface
 

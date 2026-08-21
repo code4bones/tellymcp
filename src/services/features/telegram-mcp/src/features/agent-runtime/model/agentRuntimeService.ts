@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -293,6 +293,64 @@ function waitForSocket(input: {
   });
 }
 
+const UNIX_SOCKET_PATH_MAX_BYTES = 100;
+
+function canUseCodexSocketDirectory(directory: string): boolean {
+  try {
+    const stats = statSync(directory);
+    const ownedByCurrentUser =
+      typeof process.getuid !== "function" || stats.uid === process.getuid();
+    return (
+      stats.isDirectory() && ownedByCurrentUser && (stats.mode & 0o022) === 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function createCodexSocketLocation(input: {
+  cwd: string;
+  socketDirectory?: string | undefined;
+}): {
+  socketPath: string;
+  cleanup: () => void;
+} {
+  const socketId = createHash("sha256")
+    .update(`${process.pid}:${randomUUID()}`)
+    .digest("hex")
+    .slice(0, 12);
+  const projectSocketDirectory = path.resolve(
+    input.socketDirectory ?? path.join(input.cwd, ".tellymcp"),
+  );
+  mkdirSync(projectSocketDirectory, { recursive: true, mode: 0o700 });
+  const projectSocketPath = path.join(
+    projectSocketDirectory,
+    `codex-${socketId}.sock`,
+  );
+  const useProjectDirectory =
+    canUseCodexSocketDirectory(projectSocketDirectory) &&
+    Buffer.byteLength(projectSocketPath) <= UNIX_SOCKET_PATH_MAX_BYTES;
+  const privateDirectory = useProjectDirectory
+    ? null
+    : mkdtempSync(path.join(os.tmpdir(), "tellymcp-codex-"));
+  const socketPath = useProjectDirectory
+    ? projectSocketPath
+    : path.join(privateDirectory!, `c-${socketId}.sock`);
+  let cleaned = false;
+
+  return {
+    socketPath,
+    cleanup: () => {
+      if (cleaned) return;
+      cleaned = true;
+      rmSync(socketPath, { force: true });
+      if (privateDirectory) {
+        rmSync(privateDirectory, { force: true, recursive: true });
+      }
+    },
+  };
+}
+
 export async function startCodexAppServer(input: {
   executablePath: string;
   sessionId: string;
@@ -305,14 +363,13 @@ export async function startCodexAppServer(input: {
 }): Promise<ManagedAppServer> {
   const diagnostics = inspectCodexRuntime(input.executablePath);
   assertCodexRuntimeCompatible(diagnostics);
-  const socketId = createHash("sha256")
-    .update(`${process.pid}:${input.sessionId}:${randomUUID()}`)
-    .digest("hex")
-    .slice(0, 20);
-  const socketPath = path.join(
-    input.socketDirectory ?? os.tmpdir(),
-    `tellymcp-codex-${socketId}.sock`,
-  );
+  const socketLocation = createCodexSocketLocation({
+    cwd: input.cwd,
+    ...(input.socketDirectory
+      ? { socketDirectory: input.socketDirectory }
+      : {}),
+  });
+  const { socketPath } = socketLocation;
   const endpoint = `unix://${socketPath}`;
   const child = spawn(
     input.executablePath,
@@ -344,7 +401,7 @@ export async function startCodexAppServer(input: {
         errorTail,
       });
     }
-    rmSync(socketPath, { force: true });
+    socketLocation.cleanup();
   });
 
   const stop = () => {
@@ -352,7 +409,7 @@ export async function startCodexAppServer(input: {
     stopped = true;
     client?.close();
     if (!exited) child.kill("SIGTERM");
-    rmSync(socketPath, { force: true });
+    socketLocation.cleanup();
   };
 
   try {

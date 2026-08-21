@@ -18,7 +18,6 @@ smoke("connects to the installed Codex app-server contract", async () => {
       logger: { warn: vi.fn() } as unknown as Logger,
       clientVersion: "smoke",
       onApprovalRequest: async () => "decline",
-      socketDirectory: process.cwd(),
       ephemeralThread: true,
     });
     stop = server.stop;

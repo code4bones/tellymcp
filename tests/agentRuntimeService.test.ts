@@ -1,3 +1,7 @@
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "../src/services/features/telegram-mcp/src/app/config/env";
@@ -6,11 +10,33 @@ import type { Logger } from "../src/services/features/telegram-mcp/src/shared/li
 import {
   AgentRuntimeService,
   buildAgentLaunchCommand,
+  createCodexSocketLocation,
   createCodexProgressRelay,
 } from "../src/services/features/telegram-mcp/src/features/agent-runtime/model/agentRuntimeService";
 import type { CodexTurnResult } from "../src/services/features/telegram-mcp/src/features/agent-runtime/model/codexAppServerClient";
 
 describe("agent runtime service", () => {
+  it("creates the default Codex socket inside the project runtime directory", () => {
+    const workspaceDirectory = mkdtempSync(
+      path.join(os.tmpdir(), "tellymcp-codex-workspace-"),
+    );
+    const location = createCodexSocketLocation({ cwd: workspaceDirectory });
+    const socketDirectory = path.dirname(location.socketPath);
+
+    try {
+      expect(statSync(socketDirectory).mode & 0o777).toBe(0o700);
+      expect(socketDirectory).toBe(path.join(workspaceDirectory, ".tellymcp"));
+      expect(path.basename(location.socketPath)).toMatch(
+        /^codex-[a-f0-9]{12}\.sock$/u,
+      );
+    } finally {
+      location.cleanup();
+      rmSync(workspaceDirectory, { recursive: true, force: true });
+    }
+
+    expect(existsSync(workspaceDirectory)).toBe(false);
+  });
+
   it("debounces, deduplicates, and bounds Codex progress notifications", async () => {
     vi.useFakeTimers();
     try {

@@ -20,7 +20,12 @@ import {
   type AgentTransportKind,
   type CodingAgentId,
 } from "./agentProviderRegistry";
-import { CodexAppServerClient } from "./codexAppServerClient";
+import {
+  CodexAppServerClient,
+  type CodexApprovalDecision,
+  type CodexApprovalHandler,
+  type CodexApprovalRequest,
+} from "./codexAppServerClient";
 
 export type AgentProcessState = "idle" | "running";
 
@@ -124,7 +129,12 @@ type AgentRuntimeDependencies = {
     sessionId: string;
     cwd: string;
     logger: Logger;
+    onApprovalRequest: CodexApprovalHandler;
   }) => Promise<ManagedAppServer>;
+  requestApproval?: (input: {
+    sessionId: string;
+    request: CodexApprovalRequest;
+  }) => Promise<CodexApprovalDecision>;
   notifyTelegram?: (input: {
     sessionId: string;
     message: string;
@@ -172,6 +182,7 @@ export async function startCodexAppServer(input: {
   sessionId: string;
   cwd: string;
   logger: Logger;
+  onApprovalRequest: CodexApprovalHandler;
 }): Promise<ManagedAppServer> {
   const socketId = createHash("sha256")
     .update(`${process.pid}:${input.sessionId}:${randomUUID()}`)
@@ -229,6 +240,7 @@ export async function startCodexAppServer(input: {
     client = await CodexAppServerClient.connect({
       endpoint,
       logger: input.logger,
+      onApprovalRequest: input.onApprovalRequest,
     });
     const threadId = await client.startThread(input.cwd);
     return { endpoint, threadId, client, stop };
@@ -272,6 +284,9 @@ export class AgentRuntimeService {
   private readonly startAppServer: NonNullable<
     AgentRuntimeDependencies["startAppServer"]
   >;
+  private readonly requestApproval: NonNullable<
+    AgentRuntimeDependencies["requestApproval"]
+  >;
   private readonly notifyTelegram?: AgentRuntimeDependencies["notifyTelegram"];
 
   public constructor(
@@ -287,6 +302,8 @@ export class AgentRuntimeService {
     this.ensureTarget =
       dependencies.ensureTarget ?? ensureTerminalTargetForSession;
     this.startAppServer = dependencies.startAppServer ?? startCodexAppServer;
+    this.requestApproval =
+      dependencies.requestApproval ?? (async () => "decline");
     this.notifyTelegram = dependencies.notifyTelegram;
   }
 
@@ -375,6 +392,8 @@ export class AgentRuntimeService {
         sessionId,
         cwd: session.cwd || process.cwd(),
         logger: this.logger,
+        onApprovalRequest: (request) =>
+          this.requestApproval({ sessionId, request }),
       });
     }
     const launchArgs = backend

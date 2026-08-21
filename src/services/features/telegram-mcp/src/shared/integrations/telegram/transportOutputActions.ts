@@ -32,6 +32,7 @@ export class TransportOutputActions {
       sessionId: string;
       requestId?: string;
     },
+    finalChunkOptions: TelegramSendMessageOptions = {},
   ): Promise<SentChunk[]> {
     const safeLimit = Math.min(this.host.config.telegram.maxMessageChars, 3900);
     const { title, body } = splitTitleAndBody(text);
@@ -68,7 +69,10 @@ export class TransportOutputActions {
         const response = await this.sendTelegramMessageWithRetry(
           telegramChatId,
           chunk,
-          { parse_mode: "MarkdownV2" },
+          {
+            parse_mode: "MarkdownV2",
+            ...(index === chunks.length - 1 ? finalChunkOptions : {}),
+          },
           {
             kind: meta.kind,
             sessionId: meta.sessionId,

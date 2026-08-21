@@ -16,6 +16,11 @@ export const ruCommon = {
     delete: "🗑 Удалить",
     get: "📥 Получить",
   },
+  request: {
+    answer_recorded: "Ответ принят.",
+    stale: "Запрос устарел или на него уже ответили.",
+    not_allowed: "Этот запрос подтверждения предназначен другому пользователю.",
+  },
 } as const;
 
 export const ruMenu = {

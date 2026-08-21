@@ -10,8 +10,11 @@ import type {
 import type {
   AdminGatewayRegistrationSessionRecord,
   SentChunk,
+  TelegramMenuContext,
+  TelegramSendMessageOptions,
   WaiterRecord,
 } from "./transportTypes";
+import { InlineKeyboard } from "grammy";
 import type { AppConfig } from "../../../app/config/env";
 import type { MaintenanceStore, TelegramAdminAuthStore } from "../../api/storage/contract";
 import type { Logger } from "../../lib/logger/logger";
@@ -30,6 +33,11 @@ export interface TransportRequestFlowHost {
     telegramLanguageCode?: string | null,
   ): Promise<SupportedLocale>;
   t(locale: SupportedLocale, key: string, options?: Record<string, unknown>): string;
+  tForContext(
+    ctx: TelegramMenuContext,
+    key: string,
+    options?: Record<string, unknown>,
+  ): Promise<string>;
   sendTextChunks(
     chatId: number,
     body: string,
@@ -38,6 +46,7 @@ export interface TransportRequestFlowHost {
       requestId?: string;
       kind: "request" | "notification" | "transport";
     },
+    finalChunkOptions?: TelegramSendMessageOptions,
   ): Promise<SentChunk[]>;
   callGatewayJson<T>(path: string, payload?: Record<string, unknown>): Promise<T>;
 }
@@ -160,6 +169,24 @@ export class TransportRequestFlow {
       maxContextChars: this.host.config.telegram.maxContextChars,
       maxMessageChars: this.host.config.telegram.maxMessageChars,
     });
+    const optionKeyboard =
+      input.options &&
+      input.options.length > 0 &&
+      input.options.length <= 5 &&
+      Buffer.byteLength(
+        `request-option:${input.options.length - 1}:${input.requestId}`,
+        "utf8",
+      ) <= 64
+        ? new InlineKeyboard()
+        : null;
+    input.options?.forEach((option, index) => {
+      if (!optionKeyboard) return;
+      optionKeyboard.text(
+        option.slice(0, 40),
+        `request-option:${index}:${input.requestId}`,
+      );
+      if (index < (input.options?.length ?? 0) - 1) optionKeyboard.row();
+    });
     const sentChunks = await this.host.sendTextChunks(
       input.recipient.telegramChatId,
       text,
@@ -168,6 +195,7 @@ export class TransportRequestFlow {
         requestId: input.requestId,
         kind: "request",
       },
+      optionKeyboard ? { reply_markup: optionKeyboard } : {},
     );
     const response = sentChunks.at(-1);
     if (!response) {
@@ -180,9 +208,79 @@ export class TransportRequestFlow {
       telegramUserId: input.recipient.telegramUserId,
       telegramMessageId: response.messageId,
       sentAtMs: Date.now(),
+      ...(input.options ? { options: [...input.options] } : {}),
     });
 
     return { externalMessageId: response.messageId };
+  }
+
+  public async handleRequestOptionCallback(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
+    const data = ctx.callbackQuery?.data ?? "";
+    const match = data.match(/^request-option:(\d+):(.+)$/u);
+    const optionIndex = match?.[1] ? Number.parseInt(match[1], 10) : -1;
+    const requestId = match?.[2]?.trim() ?? "";
+    const waiter = requestId ? this.host.waiters.get(requestId) : undefined;
+    const answer = waiter?.options?.[optionIndex];
+
+    if (!waiter || !answer) {
+      await ctx.answerCallbackQuery({
+        text: await this.host.tForContext(ctx, "common:request.stale"),
+        show_alert: true,
+      });
+      return;
+    }
+    if (
+      ctx.chat?.id !== waiter.telegramChatId ||
+      ctx.from?.id !== waiter.telegramUserId
+    ) {
+      await ctx.answerCallbackQuery({
+        text: await this.host.tForContext(ctx, "common:request.not_allowed"),
+        show_alert: true,
+      });
+      return;
+    }
+
+    const reply: HumanTransportReply = {
+      requestId,
+      answer,
+      receivedAt: new Date().toISOString(),
+    };
+
+    if (waiter.sourceClientUuid && this.host.config.distributed.gatewayPublicUrl) {
+      try {
+        await this.host.callGatewayJson("/transport/reply", {
+          client_uuid: waiter.sourceClientUuid,
+          request_id: requestId,
+          answer,
+          received_at: reply.receivedAt,
+        });
+      } catch (error) {
+        this.host.logger.error("Failed to forward Telegram option reply to client", {
+          requestId,
+          sourceClientUuid: waiter.sourceClientUuid,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        await ctx.answerCallbackQuery({
+          text: await this.host.tForContext(ctx, "common:menu.gateway_unavailable"),
+          show_alert: true,
+        });
+        return;
+      }
+      this.clearWaiter(requestId);
+    } else if (waiter.resolve) {
+      waiter.resolve(reply);
+    } else {
+      waiter.reply = reply;
+    }
+
+    await ctx.answerCallbackQuery({
+      text: await this.host.tForContext(ctx, "common:request.answer_recorded"),
+    });
+    await ctx
+      .editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } })
+      .catch(() => undefined);
   }
 
   public async sendRequestForGatewayBoundSession(

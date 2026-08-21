@@ -1,6 +1,10 @@
 import type { Service, ServiceSchema } from "moleculer";
 
 import {
+  TELEGRAM_MCP_APPROVAL_SERVICE_NAME,
+  type TelegramMcpApprovalServiceInstance,
+} from "./approval.service";
+import {
   TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
   type TelegramMcpRuntimeServiceInstance,
 } from "./runtime.service";
@@ -28,6 +32,7 @@ const TelegramMcpAgentRuntimeService: ServiceSchema = {
   dependencies: [
     TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
     TELEGRAM_MCP_NOTIFY_SERVICE_NAME,
+    TELEGRAM_MCP_APPROVAL_SERVICE_NAME,
   ],
 
   actions: {
@@ -97,11 +102,61 @@ const TelegramMcpAgentRuntimeService: ServiceSchema = {
         `Local Moleculer service '${TELEGRAM_MCP_NOTIFY_SERVICE_NAME}' is unavailable`,
       );
     }
+    const approvalService = this.broker.getLocalService(
+      TELEGRAM_MCP_APPROVAL_SERVICE_NAME,
+    ) as TelegramMcpApprovalServiceInstance | null;
+    if (!approvalService) {
+      throw new Error(
+        `Local Moleculer service '${TELEGRAM_MCP_APPROVAL_SERVICE_NAME}' is unavailable`,
+      );
+    }
     this.agentRuntimeService = new AgentRuntimeService(
       runtime.config,
       runtime.sessionStore,
       runtime.logger,
       {
+        requestApproval: async ({ sessionId, request }) => {
+          const details = [
+            `Thread: ${request.threadId}`,
+            `Turn: ${request.turnId}`,
+            ...(request.reason ? [`Reason: ${request.reason}`] : []),
+            ...(request.command ? [`Command: ${request.command}`] : []),
+            ...(request.cwd ? [`Working directory: ${request.cwd}`] : []),
+            ...(request.grantRoot
+              ? [`Requested file root: ${request.grantRoot}`]
+              : []),
+            ...(request.networkHost
+              ? [
+                  `Network destination: ${request.networkProtocol ? `${request.networkProtocol}://` : ""}${request.networkHost}`,
+                ]
+              : []),
+          ]
+            .join("\n")
+            .slice(0, 3_000);
+          const result = await approvalService
+            .getApprovalOrchestrator()
+            .submit({
+              session_id: sessionId,
+              question:
+                request.kind === "command"
+                  ? "Codex requests permission to run this command."
+                  : "Codex requests permission to apply file changes.",
+              task: "Codex approval",
+              context: details,
+              ...(request.grantRoot
+                ? { affected_files: [request.grantRoot] }
+                : {}),
+              options: ["✅ Разрешить / Approve", "❌ Отклонить / Deny"],
+              recommended_option: "❌ Отклонить / Deny",
+              risk_level: request.kind === "command" ? "high" : "medium",
+              fallback_if_timeout: "❌ Отклонить / Deny",
+              use_saved_context: false,
+            });
+          const answer = result.answer?.trim().toLocaleLowerCase() ?? "";
+          return answer.includes("разрешить") || answer.includes("approve")
+            ? "accept"
+            : "decline";
+        },
         notifyTelegram: async ({ sessionId, message }) => {
           await notifyService.getNotifyService().send({
             session_id: sessionId,

@@ -26,6 +26,7 @@ type TransportMenuShellHost = {
     ctx: TelegramMenuContext,
   ) => Promise<void>;
   handleLiveApprovalCallback: (ctx: TelegramMenuContext) => Promise<void>;
+  handleRequestOptionCallback: (ctx: TelegramMenuContext) => Promise<void>;
   handleTerminalPromptActionCallback: (
     ctx: TelegramMenuContext,
   ) => Promise<void>;
@@ -75,6 +76,9 @@ export class TransportMenuShell {
     });
     bot.callbackQuery(/^live-approval:(approve|deny):(.+)$/u, async (ctx) => {
       await this.host.handleLiveApprovalCallback(ctx);
+    });
+    bot.callbackQuery(/^request-option:(\d+):(.+)$/u, async (ctx) => {
+      await this.host.handleRequestOptionCallback(ctx);
     });
     bot.callbackQuery(
       /^terminal-prompt-action:(\d+|enter|escape):(.+)$/u,

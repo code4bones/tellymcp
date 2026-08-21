@@ -16,6 +16,11 @@ export const enCommon = {
     delete: "🗑 Delete",
     get: "📥 Get",
   },
+  request: {
+    answer_recorded: "Answer recorded.",
+    stale: "This request has expired or was already answered.",
+    not_allowed: "This approval request belongs to another Telegram user.",
+  },
 } as const;
 
 export const enMenu = {

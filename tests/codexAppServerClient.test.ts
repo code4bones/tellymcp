@@ -43,13 +43,15 @@ describe("Codex app-server client", () => {
       perMessageDeflate: false,
     });
     const methods: string[] = [];
+    let approvalResponse: unknown;
     webSocketServer.on("connection", (socket) => {
       socket.on("message", (raw) => {
         const request = JSON.parse(String(raw)) as {
           id?: string;
-          method: string;
+          method?: string;
+          result?: unknown;
         };
-        methods.push(request.method);
+        if (request.method) methods.push(request.method);
         if (request.method === "initialize") {
           socket.send(
             JSON.stringify({ id: request.id, result: { userAgent: "test" } }),
@@ -71,28 +73,48 @@ describe("Codex app-server client", () => {
           setImmediate(() => {
             socket.send(
               JSON.stringify({
-                method: "item/completed",
+                id: "approval-1",
+                method: "item/commandExecution/requestApproval",
                 params: {
                   threadId: "thread-1",
                   turnId: "turn-1",
-                  item: {
-                    type: "agentMessage",
-                    text: "Final answer",
-                    phase: "final_answer",
+                  itemId: "command-1",
+                  reason: "Needs network access",
+                  command: "curl https://example.com",
+                  cwd: "/workspace",
+                  networkApprovalContext: {
+                    host: "example.com",
+                    protocol: "https",
                   },
                 },
               }),
             );
-            socket.send(
-              JSON.stringify({
-                method: "turn/completed",
-                params: {
-                  threadId: "thread-1",
-                  turn: { id: "turn-1", status: "completed" },
-                },
-              }),
-            );
           });
+        } else if (request.id === "approval-1") {
+          approvalResponse = request.result;
+          socket.send(
+            JSON.stringify({
+              method: "item/completed",
+              params: {
+                threadId: "thread-1",
+                turnId: "turn-1",
+                item: {
+                  type: "agentMessage",
+                  text: "Final answer",
+                  phase: "final_answer",
+                },
+              },
+            }),
+          );
+          socket.send(
+            JSON.stringify({
+              method: "turn/completed",
+              params: {
+                threadId: "thread-1",
+                turn: { id: "turn-1", status: "completed" },
+              },
+            }),
+          );
         }
       });
     });
@@ -101,12 +123,14 @@ describe("Codex app-server client", () => {
       httpServer.listen(socketPath, resolve);
     });
 
+    const onApprovalRequest = vi.fn(async () => "accept" as const);
     const client = await CodexAppServerClient.connect({
       endpoint: `unix://${socketPath}`,
       logger: {
         warn: vi.fn(),
       } as unknown as Logger,
       clientVersion: "test",
+      onApprovalRequest,
     });
     const threadId = await client.startThread("/workspace");
     const completed = new Promise<string>((resolve, reject) => {
@@ -119,6 +143,19 @@ describe("Codex app-server client", () => {
     });
 
     await expect(completed).resolves.toBe("Final answer");
+    expect(onApprovalRequest).toHaveBeenCalledWith({
+      requestId: "approval-1",
+      kind: "command",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "command-1",
+      reason: "Needs network access",
+      command: "curl https://example.com",
+      cwd: "/workspace",
+      networkHost: "example.com",
+      networkProtocol: "https",
+    });
+    expect(approvalResponse).toEqual({ decision: "accept" });
     expect(methods).toEqual([
       "initialize",
       "initialized",

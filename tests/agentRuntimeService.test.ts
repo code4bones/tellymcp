@@ -53,6 +53,16 @@ describe("agent runtime service", () => {
       },
     );
     const notifyTelegram = vi.fn(async () => undefined);
+    const requestApproval = vi.fn(async () => "accept" as const);
+    let onApprovalRequest:
+      | ((input: {
+          requestId: string;
+          kind: "command";
+          threadId: string;
+          turnId: string;
+          itemId: string;
+        }) => Promise<"accept" | "decline"> | "accept" | "decline")
+      | undefined;
     const sendLine = vi.fn(async () => undefined);
     const service = new AgentRuntimeService(
       { terminal: {} } as AppConfig,
@@ -81,15 +91,19 @@ describe("agent runtime service", () => {
           onData = input.onData;
           return unsubscribe;
         },
-        startAppServer: async () => ({
-          endpoint: "unix:///tmp/tellymcp-codex-test.sock",
-          threadId: "thread-1",
-          client: {
-            submitTurn,
-            close: closeAppServerClient,
-          },
-          stop: stopAppServer,
-        }),
+        startAppServer: async (input) => {
+          onApprovalRequest = input.onApprovalRequest;
+          return {
+            endpoint: "unix:///tmp/tellymcp-codex-test.sock",
+            threadId: "thread-1",
+            client: {
+              submitTurn,
+              close: closeAppServerClient,
+            },
+            stop: stopAppServer,
+          };
+        },
+        requestApproval,
         notifyTelegram,
       },
     );
@@ -107,6 +121,18 @@ describe("agent runtime service", () => {
       thread_id: "thread-1",
     });
     expect(sendLine).toHaveBeenCalledOnce();
+    const approvalRequest = {
+      requestId: "approval-1",
+      kind: "command" as const,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "command-1",
+    };
+    await expect(onApprovalRequest?.(approvalRequest)).resolves.toBe("accept");
+    expect(requestApproval).toHaveBeenCalledWith({
+      sessionId: "workspace",
+      request: approvalRequest,
+    });
     await expect(
       service.startAgent({ session_id: "workspace", agent_id: "codex" }),
     ).rejects.toThrow("already running");

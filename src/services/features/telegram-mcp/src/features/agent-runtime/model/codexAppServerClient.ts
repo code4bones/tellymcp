@@ -35,6 +35,26 @@ export type CodexTurnSubmission = {
   turnId: string;
 };
 
+export type CodexApprovalDecision = "accept" | "decline";
+
+export type CodexApprovalRequest = {
+  requestId: JsonRpcId;
+  kind: "command" | "file-change";
+  threadId: string;
+  turnId: string;
+  itemId: string;
+  reason?: string | undefined;
+  command?: string | undefined;
+  cwd?: string | undefined;
+  grantRoot?: string | undefined;
+  networkHost?: string | undefined;
+  networkProtocol?: string | undefined;
+};
+
+export type CodexApprovalHandler = (
+  request: CodexApprovalRequest,
+) => CodexApprovalDecision | Promise<CodexApprovalDecision>;
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object"
     ? (value as Record<string, unknown>)
@@ -96,6 +116,7 @@ export class CodexAppServerClient {
   private constructor(
     private readonly socket: WebSocket,
     private readonly logger: Logger,
+    private readonly onApprovalRequest?: CodexApprovalHandler,
   ) {
     socket.on("message", (data) => this.handleMessage(String(data)));
     socket.on("error", (error) => this.handleDisconnect(error));
@@ -112,9 +133,14 @@ export class CodexAppServerClient {
     endpoint: string;
     logger: Logger;
     clientVersion?: string | undefined;
+    onApprovalRequest?: CodexApprovalHandler | undefined;
   }): Promise<CodexAppServerClient> {
     const socket = await openSocket(input.endpoint);
-    const client = new CodexAppServerClient(socket, input.logger);
+    const client = new CodexAppServerClient(
+      socket,
+      input.logger,
+      input.onApprovalRequest,
+    );
     try {
       await client.request("initialize", {
         clientInfo: {
@@ -242,7 +268,7 @@ export class CodexAppServerClient {
     }
 
     if (message.id !== undefined && message.method) {
-      this.handleServerRequest(message);
+      void this.handleServerRequest(message);
       return;
     }
 
@@ -301,15 +327,80 @@ export class CodexAppServerClient {
     }
   }
 
-  private handleServerRequest(message: JsonRpcMessage): void {
+  private async handleServerRequest(message: JsonRpcMessage): Promise<void> {
     const method = message.method ?? "";
     if (
       method === "item/commandExecution/requestApproval" ||
       method === "item/fileChange/requestApproval"
     ) {
-      this.socket.send(
-        JSON.stringify({ id: message.id, result: { decision: "decline" } }),
-      );
+      const params = asRecord(message.params);
+      const threadId =
+        typeof params?.threadId === "string" ? params.threadId : "";
+      const turnId =
+        typeof params?.turnId === "string" ? params.turnId : "";
+      const itemId =
+        typeof params?.itemId === "string" ? params.itemId : "";
+      let decision: CodexApprovalDecision = "decline";
+
+      if (!threadId || !turnId || !itemId) {
+        this.logger.warn("Declining malformed Codex approval request", {
+          method,
+          hasThreadId: Boolean(threadId),
+          hasTurnId: Boolean(turnId),
+          hasItemId: Boolean(itemId),
+        });
+      } else if (!this.onApprovalRequest) {
+        this.logger.warn("Declining Codex approval without a configured handler", {
+          method,
+          threadId,
+          turnId,
+          itemId,
+        });
+      } else {
+        try {
+          const networkContext = asRecord(params?.networkApprovalContext);
+          decision = await this.onApprovalRequest({
+            requestId: message.id!,
+            kind:
+              method === "item/commandExecution/requestApproval"
+                ? "command"
+                : "file-change",
+            threadId,
+            turnId,
+            itemId,
+            ...(typeof params?.reason === "string"
+              ? { reason: params.reason }
+              : {}),
+            ...(typeof params?.command === "string"
+              ? { command: params.command }
+              : {}),
+            ...(typeof params?.cwd === "string" ? { cwd: params.cwd } : {}),
+            ...(typeof params?.grantRoot === "string"
+              ? { grantRoot: params.grantRoot }
+              : {}),
+            ...(typeof networkContext?.host === "string"
+              ? { networkHost: networkContext.host }
+              : {}),
+            ...(typeof networkContext?.protocol === "string"
+              ? { networkProtocol: networkContext.protocol }
+              : {}),
+          });
+        } catch (error) {
+          this.logger.warn("Codex approval handler failed; declining request", {
+            method,
+            threadId,
+            turnId,
+            itemId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      if (!this.closed && this.socket.readyState === WebSocket.OPEN) {
+        this.socket.send(
+          JSON.stringify({ id: message.id, result: { decision } }),
+        );
+      }
       return;
     }
     if (method === "execCommandApproval" || method === "applyPatchApproval") {

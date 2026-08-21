@@ -751,8 +751,10 @@ export function buildTransportConstructorWiring(
     resolveLocaleForTelegramUserId: (telegramUserId, telegramLanguageCode) =>
       context.resolveLocaleForTelegramUserId(telegramUserId, telegramLanguageCode),
     t: (locale, key, options) => context.t(locale, key, options),
-    sendTextChunks: (chatId, body, meta) =>
-      outputActions.sendTextChunks(chatId, body, meta),
+    tForContext: (ctx, key, options) =>
+      context.tForContext(ctx, key, options),
+    sendTextChunks: (chatId, body, meta, finalChunkOptions) =>
+      outputActions.sendTextChunks(chatId, body, meta, finalChunkOptions),
     callGatewayJson: (path, payload) => host.callGatewayJson(path, payload),
   });
 
@@ -940,6 +942,8 @@ export function buildTransportConstructorWiring(
       projectActions.handleProjectMemberLiveCallback(ctx),
     handleLiveApprovalCallback: (ctx) =>
       projectActions.handleLiveApprovalCallback(ctx),
+    handleRequestOptionCallback: (ctx) =>
+      requestFlow.handleRequestOptionCallback(ctx),
     handleTerminalPromptActionCallback: (ctx) =>
       terminalActions.handlePromptActionCallback(ctx),
     handleProjectDetailCallback: (ctx) =>

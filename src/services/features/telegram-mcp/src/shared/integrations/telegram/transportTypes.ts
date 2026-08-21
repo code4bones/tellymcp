@@ -11,6 +11,7 @@ export type WaiterRecord = {
   telegramMessageId: number;
   sentAtMs: number;
   sourceClientUuid?: string;
+  options?: string[];
   reply?: HumanTransportReply;
   resolve?: (reply: HumanTransportReply | null) => void;
   timeout?: NodeJS.Timeout;

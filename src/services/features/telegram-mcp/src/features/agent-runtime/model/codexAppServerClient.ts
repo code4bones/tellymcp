@@ -26,6 +26,7 @@ type PendingRequest = {
 type PendingTurn = {
   onComplete: (message: string) => void | Promise<void>;
   onError: (error: Error) => void | Promise<void>;
+  onInterrupted?: (() => void | Promise<void>) | undefined;
   onProgress?: ((event: CodexProgressEvent) => void | Promise<void>) | undefined;
   finalMessage: string;
   fallbackMessage: string;
@@ -181,6 +182,7 @@ export class CodexAppServerClient {
     text: string;
     onComplete: (message: string) => void | Promise<void>;
     onError: (error: Error) => void | Promise<void>;
+    onInterrupted?: (() => void | Promise<void>) | undefined;
     onProgress?: ((event: CodexProgressEvent) => void | Promise<void>) | undefined;
   }): Promise<CodexTurnSubmission> {
     let turnId = "";
@@ -196,6 +198,9 @@ export class CodexAppServerClient {
         this.pendingTurns.set(turnId, {
           onComplete: input.onComplete,
           onError: input.onError,
+          ...(input.onInterrupted
+            ? { onInterrupted: input.onInterrupted }
+            : {}),
           ...(input.onProgress ? { onProgress: input.onProgress } : {}),
           finalMessage: "",
           fallbackMessage: "",
@@ -203,6 +208,16 @@ export class CodexAppServerClient {
       },
     );
     return { threadId: input.threadId, turnId };
+  }
+
+  public async interruptTurn(input: {
+    threadId: string;
+    turnId: string;
+  }): Promise<void> {
+    await this.request("turn/interrupt", {
+      threadId: input.threadId,
+      turnId: input.turnId,
+    });
   }
 
   public close(): void {
@@ -353,6 +368,10 @@ export class CodexAppServerClient {
       const turn = this.pendingTurns.get(completedTurnId);
       if (!turn) return;
       this.pendingTurns.delete(completedTurnId);
+      if (turnRecord?.status === "interrupted") {
+        void turn.onInterrupted?.();
+        return;
+      }
       if (turnRecord?.status === "failed") {
         const errorRecord = asRecord(turnRecord.error);
         void turn.onError(

@@ -16,6 +16,7 @@ import {
   AgentRuntimeService,
   type ListAgentRuntimeInput,
   type StartAgentRuntimeInput,
+  type StopAgentTurnInput,
   type SubmitAgentMessageInput,
 } from "./src/features/agent-runtime/model/agentRuntimeService";
 
@@ -61,6 +62,15 @@ const TelegramMcpAgentRuntimeService: ServiceSchema = {
         ctx: { params: SubmitAgentMessageInput },
       ) {
         return this.getAgentRuntimeService!().submitMessage(ctx.params);
+      },
+    },
+    stopRemote: {
+      params: { type: "object" },
+      async handler(
+        this: AgentRuntimeServiceCarrier,
+        ctx: { params: StopAgentTurnInput },
+      ) {
+        return this.getAgentRuntimeService!().stopTurn(ctx.params);
       },
     },
   },

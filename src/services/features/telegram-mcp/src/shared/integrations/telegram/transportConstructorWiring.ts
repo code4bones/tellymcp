@@ -385,6 +385,7 @@ export function buildTransportConstructorWiring(
     showPruneConfirmMenu: (ctx) => menuFlow.showPruneConfirmMenu(ctx),
     showActiveSessionInfo: (ctx) => menuFlow.showActiveSessionInfo(ctx),
     startAgent: (ctx, agentId) => agentActions.startAgent(ctx, agentId),
+    stopAgentTurn: (ctx) => agentActions.stopTurn(ctx),
     beginRenameActiveSession: (ctx) =>
       sessionActions.beginRenameActiveSession(ctx),
     beginBroadcast: (ctx) => broadcastActions.beginBroadcast(ctx),

@@ -81,6 +81,7 @@ export interface TransportMenuFactoriesHost {
     ctx: TelegramMenuContext,
     agentId: "codex" | "claude",
   ): Promise<void>;
+  stopAgentTurn(ctx: TelegramMenuContext): Promise<void>;
   beginRenameActiveSession(ctx: TelegramMenuContext): Promise<void>;
   beginBroadcast(ctx: TelegramMenuContext): Promise<void>;
   pruneAllSessions(ctx: TelegramMenuContext): Promise<void>;
@@ -249,6 +250,13 @@ export class TransportMenuFactories {
       .text("Claude Code · Anthropic", async (ctx) => {
         await this.host.startAgent(ctx, "claude");
       })
+      .row()
+      .text(
+        async (ctx) => this.host.tForContext(ctx, "menu:agents.buttons.stop"),
+        async (ctx) => {
+          await this.host.stopAgentTurn(ctx);
+        },
+      )
       .row()
       .text(
         async (ctx) => this.host.tForContext(ctx, "common:menu.back"),

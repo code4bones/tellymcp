@@ -89,4 +89,32 @@ describe("TransportAgentActions", () => {
       session_id: "relay-session",
     });
   });
+
+  it("requests stopping the active turn and refreshes the agent menu", async () => {
+    const callGatewayJson = vi.fn(async (path: string) =>
+      path === "/agent/stop"
+        ? { ok: true, status: "interrupt_requested" }
+        : {
+            session_id: "workspace",
+            active_agent_id: "codex",
+            turn_in_progress: true,
+            agents: [],
+          },
+    );
+    const host = createHost(callGatewayJson);
+    const actions = new TransportAgentActions(host);
+    const ctx = createContext();
+
+    await actions.stopTurn(ctx);
+
+    expect(callGatewayJson).toHaveBeenNthCalledWith(1, "/agent/stop", {
+      session_id: "relay-session",
+    });
+    expect(callGatewayJson).toHaveBeenNthCalledWith(2, "/agent/status", {
+      session_id: "relay-session",
+    });
+    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({
+      text: "menu:agents.actions.stop_requested",
+    });
+  });
 });

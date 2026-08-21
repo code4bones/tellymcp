@@ -397,7 +397,8 @@ export class GatewayHttpService {
     actionName:
       | "telegramMcp.agentRuntime.listRemote"
       | "telegramMcp.agentRuntime.startRemote"
-      | "telegramMcp.agentRuntime.submitRemote";
+      | "telegramMcp.agentRuntime.submitRemote"
+      | "telegramMcp.agentRuntime.stopRemote";
     params?: Record<string, unknown>;
   }): Promise<T> {
     const target = await this.resolveConnectedConsoleTarget(input.sessionId);
@@ -1102,6 +1103,35 @@ export class GatewayHttpService {
           sessionId,
           actionName: "telegramMcp.agentRuntime.startRemote",
           params: { agent_id: agentId },
+        });
+        writeJson(res, 200, result);
+        return true;
+      } catch (error) {
+        writeJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+
+    if (pathname === "/gateway/agent/stop") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      try {
+        const body = (await this.readJsonBody(req)) as Record<string, unknown>;
+        const sessionId =
+          typeof body.session_id === "string" ? body.session_id.trim() : "";
+        if (!sessionId) {
+          writeJson(res, 400, { error: "session_id is required" });
+          return true;
+        }
+
+        const result = await this.requestAgentRuntimeAction({
+          sessionId,
+          actionName: "telegramMcp.agentRuntime.stopRemote",
         });
         writeJson(res, 200, result);
         return true;

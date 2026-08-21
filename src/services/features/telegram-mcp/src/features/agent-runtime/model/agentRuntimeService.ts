@@ -43,6 +43,8 @@ export type ListAgentRuntimeOutput = {
   session_id: string;
   agents: AgentRuntimeStatus[];
   active_agent_id?: CodingAgentId | undefined;
+  turn_in_progress?: boolean | undefined;
+  active_turn_id?: string | undefined;
 };
 
 export type StartAgentRuntimeInput = {
@@ -76,7 +78,23 @@ export type SubmitAgentMessageOutput =
       turn_id: string;
     };
 
-type CodexTurnClient = Pick<CodexAppServerClient, "submitTurn" | "close">;
+export type StopAgentTurnInput = {
+  session_id: string;
+};
+
+export type StopAgentTurnOutput = {
+  ok: true;
+  session_id: string;
+  agent_id: "codex";
+  thread_id: string;
+  turn_id: string;
+  status: "interrupt_requested";
+};
+
+type CodexTurnClient = Pick<
+  CodexAppServerClient,
+  "submitTurn" | "interruptTurn" | "close"
+>;
 
 export type ManagedAppServer = {
   endpoint: string;
@@ -395,6 +413,14 @@ export class AgentRuntimeService {
             : {}),
       })),
       ...(running ? { active_agent_id: running.agentId } : {}),
+      ...(running?.appServer
+        ? {
+            turn_in_progress: running.turnInProgress,
+            ...(running.activeTurnId
+              ? { active_turn_id: running.activeTurnId }
+              : {}),
+          }
+        : {}),
     };
   }
 
@@ -621,6 +647,15 @@ export class AgentRuntimeService {
           }
           await notify(finalMessage);
         },
+        onInterrupted: async () => {
+          progressRelay.stop();
+          if (this.runningBySessionId.get(sessionId) === running) {
+            running.turnInProgress = false;
+            running.activeTurnId = undefined;
+            running.cancelProgress = undefined;
+          }
+          await notify("Codex turn stopped.");
+        },
         onError: async (error) => {
           progressRelay.stop();
           if (this.runningBySessionId.get(sessionId) === running) {
@@ -651,6 +686,42 @@ export class AgentRuntimeService {
       agent_id: "codex",
       thread_id: submission.threadId,
       turn_id: submission.turnId,
+    };
+  }
+
+  public async stopTurn(
+    input: StopAgentTurnInput,
+  ): Promise<StopAgentTurnOutput> {
+    const sessionId = input.session_id.trim();
+    if (!sessionId) {
+      throw new Error("session_id is required");
+    }
+
+    const running = this.runningBySessionId.get(sessionId);
+    if (
+      !running?.appServer ||
+      running.agentId !== "codex" ||
+      !running.turnInProgress ||
+      !running.activeTurnId
+    ) {
+      throw new Error(`No active Codex turn for session '${sessionId}'.`);
+    }
+
+    const threadId = running.appServer.threadId;
+    const turnId = running.activeTurnId;
+    await running.appServer.client.interruptTurn({ threadId, turnId });
+    this.logger.info("Codex app-server turn interrupt requested", {
+      sessionId,
+      threadId,
+      turnId,
+    });
+    return {
+      ok: true,
+      session_id: sessionId,
+      agent_id: "codex",
+      thread_id: threadId,
+      turn_id: turnId,
+      status: "interrupt_requested",
     };
   }
 

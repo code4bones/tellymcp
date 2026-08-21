@@ -60,7 +60,11 @@ export const ruMenu = {
   agents: {
     actions: {
       started: "Запущен {{agentName}}.",
+      stop_requested: "Остановка запрошена.",
       back_to_session: "Назад в меню сессии.",
+    },
+    buttons: {
+      stop: "⏹ Остановить активный turn",
     },
     states: {
       running: "запущен",
@@ -75,8 +79,11 @@ export const ruMenu = {
         "Выбери доступного агента. Он запустится в этой консоли, а новые сообщения из Telegram продолжат тот же терминальный диалог.",
       running_hint:
         "Агент уже запущен. Заверши его в консоли, прежде чем запускать другого.",
+      turn_running_hint:
+        "Codex выполняет turn. Его можно остановить, не закрывая сессию агента.",
       unavailable: "Agent runtime недоступен: {{message}}",
       started: "{{agentName}} запущен в выбранной консоли.",
+      stop_requested: "Для активного Codex-turn запрошена остановка.",
     },
   },
   sessions: {

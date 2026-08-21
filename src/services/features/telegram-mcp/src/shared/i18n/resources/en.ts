@@ -60,7 +60,11 @@ export const enMenu = {
   agents: {
     actions: {
       started: "Started {{agentName}}.",
+      stop_requested: "Stop requested.",
       back_to_session: "Back to session menu.",
+    },
+    buttons: {
+      stop: "⏹ Stop active turn",
     },
     states: {
       running: "running",
@@ -75,8 +79,11 @@ export const enMenu = {
         "Choose an available agent. It will start in this console, and new Telegram messages will continue the same terminal conversation.",
       running_hint:
         "An agent is already running. Exit it in the console before starting another one.",
+      turn_running_hint:
+        "A Codex turn is running. You can stop this turn without closing the agent session.",
       unavailable: "Agent runtime is unavailable: {{message}}",
       started: "Started {{agentName}} in the selected console.",
+      stop_requested: "Codex stop was requested for the active turn.",
     },
   },
   sessions: {

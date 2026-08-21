@@ -220,4 +220,84 @@ describe("Codex app-server client", () => {
     );
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));
   });
+
+  it("interrupts the exact active turn and reports interrupted completion", async () => {
+    const socketPath = path.join(
+      os.tmpdir(),
+      `tellymcp-codex-interrupt-${process.pid}-${Date.now()}.sock`,
+    );
+    socketPaths.push(socketPath);
+    const httpServer = http.createServer();
+    const webSocketServer = new WebSocketServer({
+      server: httpServer,
+      path: "/rpc",
+      perMessageDeflate: false,
+    });
+    let interruptParams: unknown;
+    webSocketServer.on("connection", (socket) => {
+      socket.on("message", (raw) => {
+        const request = JSON.parse(String(raw)) as {
+          id?: string;
+          method?: string;
+          params?: unknown;
+        };
+        if (request.method === "initialize") {
+          socket.send(JSON.stringify({ id: request.id, result: {} }));
+        } else if (request.method === "turn/start") {
+          socket.send(
+            JSON.stringify({
+              id: request.id,
+              result: { turn: { id: "turn-9" } },
+            }),
+          );
+        } else if (request.method === "turn/interrupt") {
+          interruptParams = request.params;
+          socket.send(JSON.stringify({ id: request.id, result: {} }));
+          setImmediate(() => {
+            socket.send(
+              JSON.stringify({
+                method: "turn/completed",
+                params: {
+                  threadId: "thread-7",
+                  turn: { id: "turn-9", status: "interrupted" },
+                },
+              }),
+            );
+          });
+        }
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      httpServer.once("error", reject);
+      httpServer.listen(socketPath, resolve);
+    });
+
+    const client = await CodexAppServerClient.connect({
+      endpoint: `unix://${socketPath}`,
+      logger: { warn: vi.fn() } as unknown as Logger,
+    });
+    const onComplete = vi.fn();
+    const onInterrupted = vi.fn();
+    const submission = await client.submitTurn({
+      threadId: "thread-7",
+      text: "Long task",
+      onComplete,
+      onInterrupted,
+      onError: vi.fn(),
+    });
+
+    await client.interruptTurn(submission);
+    await vi.waitFor(() => expect(onInterrupted).toHaveBeenCalledOnce());
+    expect(interruptParams).toEqual({
+      threadId: "thread-7",
+      turnId: "turn-9",
+    });
+    expect(onComplete).not.toHaveBeenCalled();
+
+    client.close();
+    await new Promise<void>((resolve) =>
+      webSocketServer.close(() => resolve()),
+    );
+    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+  });
 });

@@ -82,11 +82,15 @@ describe("agent runtime service", () => {
     const stopAppServer = vi.fn();
     const closeAppServerClient = vi.fn();
     let completeTurn: ((message: string) => void | Promise<void>) | undefined;
+    let interruptTurnCallback: (() => void | Promise<void>) | undefined;
+    const interruptTurn = vi.fn(async () => undefined);
     const submitTurn = vi.fn(
       async (input: {
         onComplete: (message: string) => void | Promise<void>;
+        onInterrupted?: (() => void | Promise<void>) | undefined;
       }) => {
         completeTurn = input.onComplete;
+        interruptTurnCallback = input.onInterrupted;
         return { threadId: "thread-1", turnId: "turn-1" };
       },
     );
@@ -136,6 +140,7 @@ describe("agent runtime service", () => {
             threadId: "thread-1",
             client: {
               submitTurn,
+              interruptTurn,
               close: closeAppServerClient,
             },
             stop: stopAppServer,
@@ -211,6 +216,46 @@ describe("agent runtime service", () => {
         message: "Second message",
       }),
     ).rejects.toThrow("still running");
+    await expect(
+      service.listAgents({ session_id: "workspace" }),
+    ).resolves.toMatchObject({
+      active_agent_id: "codex",
+      turn_in_progress: true,
+      active_turn_id: "turn-1",
+    });
+    await expect(
+      service.stopTurn({ session_id: "workspace" }),
+    ).resolves.toMatchObject({
+      ok: true,
+      thread_id: "thread-1",
+      turn_id: "turn-1",
+      status: "interrupt_requested",
+    });
+    expect(interruptTurn).toHaveBeenCalledWith({
+      threadId: "thread-1",
+      turnId: "turn-1",
+    });
+    await expect(
+      service.submitMessage({
+        session_id: "workspace",
+        message: "Too early after stop request",
+      }),
+    ).rejects.toThrow("still running");
+    await interruptTurnCallback?.();
+    expect(notifyTelegram).toHaveBeenCalledWith({
+      sessionId: "workspace",
+      message: "Codex turn stopped.",
+    });
+    await expect(
+      service.listAgents({ session_id: "workspace" }),
+    ).resolves.toMatchObject({
+      active_agent_id: "codex",
+      turn_in_progress: false,
+    });
+    await service.submitMessage({
+      session_id: "workspace",
+      message: "Continue after stop",
+    });
     await completeTurn?.("Done from Codex");
     expect(notifyTelegram).toHaveBeenCalledWith({
       sessionId: "workspace",

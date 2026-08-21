@@ -264,6 +264,44 @@ describe("GatewayHttpService agent runtime relay", () => {
     );
   });
 
+  it("requests interruption of the active turn on the selected console", async () => {
+    const callBroker = vi.fn(async (actionName: string) => {
+      if (
+        actionName === "telegramMcp.gatewaySocket.resolveConnectedSessionTarget"
+      ) {
+        return {
+          client_uuid: "client-2",
+          local_session_id: "workspace-2",
+        };
+      }
+      return {
+        ok: true,
+        status: "interrupt_requested",
+        thread_id: "thread-1",
+        turn_id: "turn-1",
+      };
+    });
+    const service = makeService(callBroker, "transport-secret");
+    const response = makeResponse();
+    const request = makeRequest(
+      "Bearer transport-secret",
+    ) as IncomingMessage & { body: unknown };
+    request.body = { session_id: "client-2:workspace-2" };
+
+    await service.handleRequest(request, response, "/gateway/agent/stop");
+
+    expect(response.statusCode).toBe(200);
+    expect(callBroker).toHaveBeenLastCalledWith(
+      "telegramMcp.gatewaySocket.requestClientAction",
+      {
+        clientUuid: "client-2",
+        actionName: "telegramMcp.agentRuntime.stopRemote",
+        params: { session_id: "workspace-2" },
+      },
+      { meta: { internal_call: true } },
+    );
+  });
+
   it("submits Telegram text through the active structured agent", async () => {
     const callBroker = vi.fn(async () => ({
       handled: true,

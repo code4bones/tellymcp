@@ -9,6 +9,13 @@ packaging, deployment examples, and current tests.
 This review is a current-state snapshot. It supplements the existing browser-attach
 reviews rather than replacing them.
 
+Re-verified: `2026-08-07` — a read-only source audit (no build/lint/test re-run) checked
+whether each still-open finding (H-04, H-05, H-06, M-01, M-02, M-03, M-05) and the one
+most security-sensitive resolved finding (CR-01) still match the current code. Per-item
+`Status:` lines and updated file/line references were added below where the state
+changed or needed correction; findings already marked `Resolved` before this date were
+left as originally written unless noted otherwise.
+
 ## Remediation Status
 
 - `CR-01`: **Resolved** on `2026-07-13` in commit `d0f497d`.
@@ -325,12 +332,17 @@ Original recommended fix:
 
 ### H-04 - Gateway message enqueue is not transactional
 
-File: `src/services/features/telegram-mcp/gateway.service.ts:1946-2069`
+Status: **Confirmed still open** on `2026-08-07` (re-verified against current source).
 
-`sendPartnerNoteRecord()` independently inserts the message, then each artifact, then
-the delivery row. A failure at any later step leaves a committed message and possibly
-a subset of artifacts without a queued delivery. A caller retry generates new UUIDs,
-so it cannot safely complete or deduplicate the partial operation.
+File: `src/services/features/telegram-mcp/gateway.service.ts:1862-2128` (`sendPartnerNoteRecord`)
+
+`sendPartnerNoteRecord()` independently inserts the message (line 1978), then each
+artifact in a loop (line 2035), then the delivery row (line 2060). No transaction
+wraps these calls — the file's only `this.db.transaction(...)` usage, at line 1013,
+belongs to an unrelated function. `shareId`/`messageUuid`/`deliveryUuid` are freshly
+generated via `randomUUID()` at lines 1946-1948 on every call, so a retry after a
+partial failure still cannot deduplicate against the earlier attempt. Unchanged since
+the original review.
 
 Recommended fix:
 
@@ -340,23 +352,34 @@ Recommended fix:
 
 ### H-05 - Delivery consumption can duplicate notifications or acknowledge dropped work
 
+Status: **Confirmed still open** on `2026-08-07`, with one of two call sites now
+partially guarded.
+
 Files:
 
-- `src/services/features/telegram-mcp/gateway.service.ts:2130-2175`
-- `src/services/features/telegram-mcp/gateway-socket.service.ts:2259-2327`
-- `src/services/features/telegram-mcp/gateway-socket.service.ts:2745-2776`
-- `src/services/features/telegram-mcp/gateway-delivery.service.ts:456-477`
-- `src/services/features/telegram-mcp/gateway-delivery.service.ts:585-713`
+- `src/services/features/telegram-mcp/gateway.service.ts:2130-2264` (`pollDeliveriesRecord`
+  is a plain `SELECT ... WHERE status = 'queued'` at lines 2140-2175, no claim step;
+  `ackDeliveriesRecord` starts at line 2266)
+- `src/services/features/telegram-mcp/gateway-delivery.service.ts:460-481`
+  (`materializeIncomingDelivery` still `return`s without throwing when the target
+  session is missing)
+- `src/services/features/telegram-mcp/gateway-socket.service.ts:1576-1589`
+  (`handleLocalIncomingDelivery` — **guarded**: pre-checks `hasLocalTargetSession` and
+  returns `false`/no-ack when the target is absent)
+- `src/services/features/telegram-mcp/gateway-socket.service.ts:2782-2814`
+  (`delivery_event` WS handler — **not guarded**: calls `materializeIncomingDelivery`
+  directly at line 2789 and unconditionally sends `delivery_ack` at lines 2796-2801 on
+  its silent-success return)
 
-`pollDeliveriesRecord()` selects `queued` rows but does not claim them. Overlapping
-connections/hello handshakes can receive and materialize the same delivery. Local
-materialization overwrites the same files/record but still sends Telegram notification
-and terminal nudge again because there is no completed-delivery idempotency check.
+`pollDeliveriesRecord()` still selects `queued` rows without claiming them; no
+`FOR UPDATE SKIP LOCKED` or status transition exists anywhere in the file. Overlapping
+connections can still receive and materialize the same delivery.
 
-In the opposite direction, `materializeIncomingDelivery()` logs and returns normally
-when the target session is absent. The WS client treats that return as success and
-sends `delivery_ack`, permanently marking work delivered even though no xchange record
-was created.
+`materializeIncomingDelivery()` still logs and returns normally when the target session
+is absent. Since the original review, one call site (`handleLocalIncomingDelivery`)
+gained a pre-check that avoids acking a skipped delivery. The other call site (the
+`delivery_event` WS handler) has no equivalent guard, so deliveries arriving over that
+path can still be permanently marked delivered while silently dropped.
 
 Recommended fix:
 
@@ -365,39 +388,73 @@ Recommended fix:
 2. Persist a local processed-delivery marker before side effects and make notification
    and nudge idempotent.
 3. Throw a retryable error when the target session is temporarily unavailable; do not
-   ACK a skipped delivery.
+   ACK a skipped delivery. Apply the same guard `handleLocalIncomingDelivery` already
+   has to the `delivery_event` WS handler at `gateway-socket.service.ts:2782-2814`.
 4. Separate permanent invalid-target failure from transient startup/hydration failure.
 
 ### H-06 - Workspace confinement is vulnerable to symlink traversal
 
-Files:
+Status: **Partially resolved** — fixed for reads, still open for writes/deletes,
+re-verified on `2026-08-07`.
 
-- `src/services/features/telegram-mcp/src/shared/integrations/terminal/client.ts:94-126`
-- `src/services/features/telegram-mcp/src/shared/integrations/terminal/client.ts:182-203`
-- `src/services/features/telegram-mcp/src/shared/integrations/terminal/client.ts:261-267`
-- `tests/sendPartnerFileService.test.ts:119-166`
+Fixed (reads): `resolveWorkspaceFileForRead()` in
+`src/services/features/telegram-mcp/src/shared/integrations/terminal/client.ts:284-310`
+now calls `realpath()` on both the workspace root and the resolved target (lines
+292-295) before the containment check. Every consumer inherits the fix:
+`getFileService.ts:233` (the `get_file` MCP tool), `sendPartnerFileService.ts:114`
+(source-file read), `notifyService.ts:305`, `transportFileHandoffActions.ts:524`, and
+`localCollaborationBackend.ts:516`. Regression tests exist:
+`tests/getFileService.test.ts:163,305` plant an in-workspace symlink pointing outside
+the workspace and assert the read is rejected.
 
-Path checks use `path.resolve`/`path.relative`, which reject lexical `..` traversal but
-do not resolve symlinks. A path such as `workspace/link-to-home/.ssh/key` passes the
-workspace check when `link-to-home` is a symlink and is then read by `readFile`.
-Intermediate symlinks under `.mcp-xchange` can similarly redirect writes outside the
-exchange directory.
+Still open (writes/deletes): `resolvePathInsideRoot()` (`client.ts:99-113`) and
+`deleteXchangeFile()` (`client.ts:248-267`) remain lexical-only
+(`path.resolve`/`path.relative`, no `realpath`) — the same gap the original finding
+described, now at new line numbers. `resolvePathInsideRoot` backs
+`writeXchangeRelativeFile()` (`client.ts:190-211`, call at line 201), used by
+`browserRecordingBundle.ts` (12 call sites — screenshot/recording writes),
+`localCollaborationBackend.ts:275,521` (partner notes/artifacts),
+`transportFileHandoffActions.ts:441`, and `minioExchangeStore.ts:79`. No symlink test
+exists for any write or delete path (`grep -rn symlink tests/` only hits
+`getFileService.test.ts`).
 
-This weakens the safety boundary used by file-to-Telegram and partner-file operations,
-where accidental secret exfiltration matters even if the local agent itself has broad
-filesystem access.
+Read this together with `docs/DECISIONS.md` (D-029) and
+`docs/TELEGRAM_HUMAN_MCP_SPEC.md`: their "confined after symlink resolution" language
+is accurate for `get_file`/`get_file_list` reads specifically, but should not be read
+as a blanket guarantee — it does not cover the write/delete paths in the same
+`.mcp-xchange` storage layer.
+
+This still weakens the safety boundary for browser-recording writes, partner-artifact
+writes, and xchange-file deletion — a symlink placed inside `.mcp-xchange` can redirect
+those operations outside the intended root, even though the equivalent read path is
+now safe.
 
 Recommended fix:
 
 1. Resolve and compare `realpath()` for the workspace/root and existing read target.
+   **Done for reads.**
 2. For writes, validate the nearest existing parent by real path and use no-follow
-   semantics where supported.
+   semantics where supported. **Still needed** for `resolvePathInsideRoot`/
+   `writeXchangeRelativeFile` and `deleteXchangeFile`.
 3. Reject a symlinked exchange root unless explicitly allowed.
-4. Add read/write tests with an in-workspace symlink pointing outside.
+4. Add read/write tests with an in-workspace symlink pointing outside. **Done for reads
+   only.**
 
 ## Medium Findings And Optimization Targets
 
 ### M-01 - Browser recording events are concurrent and write-amplified
+
+Status: **Confirmed still open** on `2026-08-07`. Every inbound WS message is still
+dispatched fire-and-forget (`void this.handleMessage(state, payload)`,
+`firefoxAttachServer.ts:181`), with no mutex/queue anywhere in
+`browser-attach/model/*.ts`. `appendEvent` (`browserRecordingBundle.ts:351-365`)
+mutates shared `eventCount`/`currentPageId`/`pageCounter` state with no guard against
+a concurrent `stopRecording` (`firefoxAttachServer.ts:349-402`) or
+`handleInstanceDisconnect` for the same recording. `writeSessionJson`
+(`browserRecordingBundle.ts:834-883`) is still called unconditionally at the end of
+every `appendEvent` (line 500), and `maintenanceStore.setBrowserRecording` still issues
+one unthrottled `redis.set` per event (`stateStore.ts:626-629`, called from
+`firefoxAttachServer.ts:768`).
 
 Files:
 
@@ -421,11 +478,18 @@ flush on stop/disconnect.
 
 ### M-02 - Xchange SQLite opens synchronously and reapplies schema per operation
 
-File: `src/services/features/telegram-mcp/src/shared/integrations/xchange/sqliteRecordStore.ts:164-178`
+Status: **Confirmed still open** on `2026-08-07`.
 
-Every list/get/upsert/mark-read operation creates a new `DatabaseSync`, executes all
-`CREATE TABLE/INDEX IF NOT EXISTS` statements, runs one operation, and closes it. These
-calls block the Node event loop and add repeated open/schema/prepare overhead.
+File: `src/services/features/telegram-mcp/src/shared/integrations/xchange/sqliteRecordStore.ts:164-179`
+(`withDatabase`)
+
+Every list/get/upsert/mark-read operation (`upsertXchangeRecord:187`,
+`listXchangeRecords:247`, `getXchangeRecord:286`, `markXchangeRecordRead:305`) still
+calls `withDatabase`, which creates a new `DatabaseSync` (line 171), executes all
+`CREATE TABLE/INDEX IF NOT EXISTS` statements (`applySchema`, line 174), runs one
+operation, and closes it (line 177, `finally`). No connection caching or pooling exists
+anywhere in the file. These calls block the Node event loop and add repeated
+open/schema/prepare overhead.
 
 Recommended fix: use one workspace-scoped store/connection, apply migrations once,
 cache prepared statements, configure a busy timeout/WAL as appropriate, and serialize
@@ -433,12 +497,20 @@ or move synchronous DB work off the main event loop.
 
 ### M-03 - PTY failure and stop paths leak resources/state
 
-File: `src/services/features/telegram-mcp/src/shared/integrations/terminal/ptyRegistry.ts:94-194,207-264,825-841`
+Status: **Confirmed still open** on `2026-08-07`.
 
-Shell preparation creates temp directories before `spawn()`. If `spawn()` throws
-synchronously, no record is returned and the temp directory cannot be cleaned. On a
-normal stop, the record is disposed but remains in the global `sessions` map, so
-stopped targets accumulate and `hasPtyTarget()` still reports them as present.
+File: `src/services/features/telegram-mcp/src/shared/integrations/terminal/ptyRegistry.ts:94-155,207-265,619-621,825-842`
+
+`createSessionRecord` (207-265) still calls `prepareShellLaunch` (line 229, which for
+bash/zsh does `fs.mkdtempSync`/`fs.writeFileSync` at lines 99-121/129-155 and sets
+`record.tempPaths`) followed by `spawn(...)` (line 232) with no surrounding
+`try`/`catch`; `ensurePtySession` (627-647), the only caller, has none either. A
+synchronous `spawn` failure still orphans the temp directory. `stopPtyTarget`
+(825-836) still cleans temp paths and disposes the terminal but never calls
+`sessions.delete(target)`, and `stopAllPtyTargets` (838-842) has the same gap, so
+`hasPtyTarget()` (619-621, `sessions.has(target)`) keeps reporting a stopped target as
+present indefinitely — on a long-lived gateway/client process this is an unbounded
+accumulation, not just a cosmetic staleness.
 
 Recommended fix: wrap prepare/spawn in `try/catch/finally`, clean created paths and the
 headless terminal on failure, delete stopped records from the map, and test a missing
@@ -459,11 +531,22 @@ optional profile; label the compose file as development-only if that is its inte
 
 ### M-05 - Remaining browser-attach debt is still present
 
-The following existing findings were re-confirmed and should remain on the backlog:
+Status: **Confirmed still open** on `2026-08-07`, with concrete current counts.
 
-- `FirefoxAttach*` names and persisted `"firefox-attached"` values still describe
-  shared Firefox/Chrome infrastructure incorrectly.
-- `FirefoxAttachRegistry.setTabs()` can retain a stale `activeTab` after tab removal.
+- `FirefoxAttachRegistry` (`firefoxAttachRegistry.ts:18`) and `FirefoxAttachServer`
+  (`firefoxAttachServer.ts:110`) remain the class names; wired at
+  `firefoxAttachServer.ts:113`, `runtime.ts:59,306`, `browserService.ts:7,302`. The
+  literal `"firefox-attached"` backend value is hardcoded in **8 files, 14
+  occurrences** (`browserService.ts:492,510,2308,2325`, `firefoxAttachServer.ts:646`,
+  `browserRecordingBundle.ts:272`, `schema.ts:344,368,404`,
+  `types.ts:85,104,114,137,172`). `"chrome-attached"` occurs **zero** times anywhere in
+  the codebase — every Chrome-originated attach/recording record is currently
+  persisted and typed under the `firefox-attached` label. This is live data
+  mislabeling in production storage today, not just a naming preference; the longer
+  it continues, the more existing Redis/bundle records need reinterpretation on
+  migration.
+- `FirefoxAttachRegistry.setTabs()` can retain a stale `activeTab` after tab removal
+  (not re-verified in this pass; see `docs/CODE_REVIEW_browser-attach.md` §1.5).
 - attached script-export semantics still need cross-browser contract tests.
 - server-side stale-heartbeat reaping remains absent.
 - attach/reconnect/recording lifecycle tests are still missing.
@@ -474,17 +557,25 @@ See `docs/CODE_REVIEW_browser-attach.md` and
 ## Structural Risks
 
 Several core files are large enough that local reasoning and safe review are becoming
-difficult:
+difficult. Re-measured on `2026-08-07` (`wc -l`), for comparison with the `2026-07-13`
+figures:
 
-- `gateway-socket.service.ts`: 3648 lines
-- `gateway.service.ts`: 2707 lines
-- `browserService.ts`: 2530 lines
-- `gatewayHttpService.ts`: 1818 lines
-- Chrome/Firefox extension background scripts: 1740/1622 lines
+- `gateway-socket.service.ts`: 3648 -> **3707** lines (grew)
+- `gateway.service.ts`: 2707 -> **2707** lines (unchanged)
+- `browserService.ts`: 2530 -> **2541** lines (grew)
+- `gatewayHttpService.ts`: 1818 -> **1809** lines (roughly unchanged)
+- Chrome/Firefox extension background scripts: not re-measured in this pass
 
-This is not a standalone defect, but it amplifies auth, lifecycle, and duplicated-
-policy drift. Split by protocol responsibility after the critical fixes; do not mix a
-large refactor into the security patch.
+None of the top offenders shrank. The "split by protocol responsibility after the
+critical fixes" recommendation below has not been acted on in the month since this
+review; this is not a standalone defect, but it continues to amplify auth, lifecycle,
+and duplicated-policy drift risk every time one of these files is touched.
+
+For context, the wider codebase as of `2026-08-07` has 193 source `.ts` files under
+`src/` against 36 test files, and zero `TODO`/`FIXME`/`HACK`/`XXX` markers anywhere in
+`src/` — known gaps in this codebase are tracked exclusively in review documents like
+this one, not as inline code markers, so a reader of the source alone has no in-code
+signal that H-04/H-05/H-06/M-01/M-02/M-03 are open.
 
 ## Missing Tests
 
@@ -500,7 +591,8 @@ Highest-value additions:
 
 ## Verification
 
-Passed in this workspace:
+Passed in this workspace on `2026-07-14` (see also `docs/HANDOFF_CHAT_CONNECTOR_OAUTH.md`
+for a later `31 files, 150 tests` run the same day):
 
 ```text
 yarn build                 PASS
@@ -509,7 +601,7 @@ yarn lint                  PASS
 yarn test                  PASS (27 files, 121 tests)
 ```
 
-Dependency audit:
+Dependency audit (same date):
 
 ```text
 yarn audit --groups dependencies --level high
@@ -518,9 +610,16 @@ yarn audit --groups dependencies --level high
 
 The audit exits successfully because no high or critical advisories remain.
 
+The `2026-08-07` re-verification pass in this document was a **read-only source audit**
+(grep/read against the current tree) to check whether specific prior findings were
+still reproducible in code — it did not re-run `yarn build`/`yarn lint`/`yarn test`/
+`yarn audit`. Do not treat the figures above as current without re-running them; several
+commits have landed since `2026-07-14` (see `docs/HANDOFF.md` for the list).
+
 ## Recommended Fix Order
 
-1. CR-01: derive identity only from verified raw Telegram init data. **Resolved.**
+1. CR-01: derive identity only from verified raw Telegram init data. **Resolved**,
+   confirmed still correct on `2026-08-07`.
 2. CR-02: make gateway transport authentication fail closed and update all templates.
    **Resolved.**
 3. H-01: upgrade `ws`, refresh vulnerable transitive dependencies, and bound WS
@@ -528,5 +627,9 @@ The audit exits successfully because no high or critical advisories remain.
 4. H-02 browser-attach protocol hardening and H-03 HTTP/file input bounds are
    **Resolved** under the documented trust boundary and shared 16 MiB body policy.
 5. H-04/H-05: make enqueue and delivery transactional, claimed, and idempotent.
-6. H-06: make workspace path containment symlink-safe.
+   **Still open** on `2026-08-07` — see updated findings above, including the
+   unguarded `delivery_event` WS ack path.
+6. H-06: make workspace path containment symlink-safe. **Partially done** — reads are
+   fixed, writes/deletes are not; see updated finding above.
 7. M-01/M-02/M-03: serialize and reduce recording I/O, reuse SQLite, fix PTY cleanup.
+   **Still open** on `2026-08-07`, unchanged in substance from the original review.

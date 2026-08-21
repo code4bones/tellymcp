@@ -10,7 +10,7 @@ Rules:
 - keep open ideas and experiments in `docs/TODO.md`
 - when a decision changes, update this file instead of layering contradictory docs on top
 
-Last updated: `2026-07-14`
+Last updated: `2026-08-07`
 
 ## Core Architecture
 
@@ -291,7 +291,7 @@ Status: accepted
 - arbitrary project paths are intentionally not enumerated by `get_file_list`; callers must already know the exact path
 - sensitive filenames, extensions, and directories are rejected on the client before file reads and uploads; path confinement is still verified after realpath resolution
 - `selector = "latest_screenshot"` resolves the newest screenshot from existing per-session file metadata when the human does not know its generated path
-- file access must stay within the selected session workspace after symlink resolution and remain subject to body-size limits
+- file access for `get_file`/`get_file_list` reads must stay within the selected session workspace after symlink resolution and remain subject to body-size limits; this realpath-based guarantee covers these read paths only — xchange write and delete paths (browser-recording writes, partner-artifact writes, `deleteXchangeFile`) are a separate, still lexical-only (`path.resolve`/`path.relative`) check, tracked as open finding H-06 in `docs/CODE_REVIEW_2026-07-13.md`
 - temporary gateway files expire after 10 minutes and download links allow a small bounded number of GET requests
 - client-provided temporary filenames are untrusted and sanitized to a safe basename before storage and `Content-Disposition`; control and filesystem-reserved characters are replaced
 

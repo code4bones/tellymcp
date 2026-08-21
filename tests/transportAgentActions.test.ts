@@ -12,9 +12,28 @@ function createContext() {
 }
 
 function createHost(callGatewayJson: ReturnType<typeof vi.fn>) {
+  const routes = new Map<
+    string,
+    { mode: "pty" } | { mode: "agent"; agentId: "codex" | "claude" }
+  >();
   return {
     bindingStore: {
       getActiveSessionIdForPrincipal: vi.fn(async () => "relay-session"),
+      getConsoleDeliveryRoute: vi.fn(
+        async (_principal: unknown, sessionId: string) =>
+          routes.get(sessionId) ?? ({ mode: "pty" } as const),
+      ),
+      setConsoleDeliveryRoute: vi.fn(
+        async (
+          _principal: unknown,
+          sessionId: string,
+          route:
+            | { mode: "pty" }
+            | { mode: "agent"; agentId: "codex" | "claude" },
+        ) => {
+          routes.set(sessionId, route);
+        },
+      ),
     },
     sessionStore: {
       getSession: vi.fn(async () => ({
@@ -109,9 +128,41 @@ describe("TransportAgentActions", () => {
     expect(callGatewayJson).toHaveBeenNthCalledWith(2, "/agent/status", {
       session_id: "relay-session",
     });
+    expect(host.bindingStore.setConsoleDeliveryRoute).toHaveBeenCalledWith(
+      { telegramChatId: 42, telegramUserId: 7 },
+      "relay-session",
+      { mode: "agent", agentId: "claude" },
+    );
     const rendered = String(host.renderMenuScreen.mock.calls[0]?.[1]);
     expect(rendered).toContain("menu:agents.screen.chat_ready_hint");
     expect(rendered).not.toContain("menu:agents.screen.running_hint");
+  });
+
+  it("switches Telegram message delivery back to PTY", async () => {
+    const callGatewayJson = vi.fn(async () => ({
+      session_id: "workspace",
+      active_agent_id: "codex",
+      agents: [],
+    }));
+    const host = createHost(callGatewayJson);
+    await host.bindingStore.setConsoleDeliveryRoute(
+      { telegramChatId: 42, telegramUserId: 7 },
+      "relay-session",
+      { mode: "agent", agentId: "codex" },
+    );
+    host.bindingStore.setConsoleDeliveryRoute.mockClear();
+    const actions = new TransportAgentActions(host);
+
+    await actions.useTerminal(createContext());
+
+    expect(host.bindingStore.setConsoleDeliveryRoute).toHaveBeenCalledWith(
+      { telegramChatId: 42, telegramUserId: 7 },
+      "relay-session",
+      { mode: "pty" },
+    );
+    expect(String(host.renderMenuScreen.mock.calls[0]?.[1])).toContain(
+      "menu:agents.screen.route_pty",
+    );
   });
 
   it("does not fall back to launching an unmanaged agent", async () => {
@@ -131,6 +182,7 @@ describe("TransportAgentActions", () => {
       session_id: "relay-session",
       agent_id: "codex",
     });
+    expect(host.bindingStore.setConsoleDeliveryRoute).not.toHaveBeenCalled();
     expect(ctx.answerCallbackQuery).toHaveBeenCalledWith(
       expect.objectContaining({ show_alert: true }),
     );

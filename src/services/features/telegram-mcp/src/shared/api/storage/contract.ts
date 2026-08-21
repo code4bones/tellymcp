@@ -38,6 +38,10 @@ export type ProjectMenuViewState = {
   updatedAt: string;
 };
 
+export type TelegramConsoleDeliveryRoute =
+  | { mode: "pty" }
+  | { mode: "agent"; agentId: "codex" | "claude" };
+
 export interface SessionStore {
   getSession(sessionId: string): Promise<SessionContext | null>;
   listSessions(): Promise<SessionContext[]>;
@@ -68,6 +72,15 @@ export interface SessionBindingStore {
     principal: TelegramPrincipal,
   ): Promise<string[]>;
   listBoundPrincipals(): Promise<TelegramPrincipal[]>;
+  getConsoleDeliveryRoute(
+    principal: TelegramPrincipal,
+    sessionId: string,
+  ): Promise<TelegramConsoleDeliveryRoute>;
+  setConsoleDeliveryRoute(
+    principal: TelegramPrincipal,
+    sessionId: string,
+    route: TelegramConsoleDeliveryRoute,
+  ): Promise<void>;
 }
 
 export interface PendingRequestStore {

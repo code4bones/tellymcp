@@ -52,6 +52,19 @@ export interface TransportAgentActionsHost {
       telegramChatId: number;
       telegramUserId: number;
     }): Promise<string | null>;
+    getConsoleDeliveryRoute(
+      principal: { telegramChatId: number; telegramUserId: number },
+      sessionId: string,
+    ): Promise<
+      { mode: "pty" } | { mode: "agent"; agentId: "codex" | "claude" }
+    >;
+    setConsoleDeliveryRoute(
+      principal: { telegramChatId: number; telegramUserId: number },
+      sessionId: string,
+      route:
+        | { mode: "pty" }
+        | { mode: "agent"; agentId: "codex" | "claude" },
+    ): Promise<void>;
   };
   sessionStore: {
     getSession(sessionId: string): Promise<{
@@ -86,6 +99,7 @@ export class TransportAgentActions {
 
   private async getActiveSession(ctx: TelegramMenuContext): Promise<{
     locale: SupportedLocale;
+    principal: { telegramChatId: number; telegramUserId: number };
     sessionId: string;
     sessionName: string;
   } | null> {
@@ -112,6 +126,7 @@ export class TransportAgentActions {
     const session = await this.host.sessionStore.getSession(sessionId);
     return {
       locale,
+      principal,
       sessionId,
       sessionName: session?.label?.trim() || sessionId,
     };
@@ -120,12 +135,17 @@ export class TransportAgentActions {
   public async showAgentMenu(
     ctx: TelegramMenuContext,
     introText?: string,
-    chatReady = false,
   ): Promise<void> {
     const active = await this.getActiveSession(ctx);
     if (!active) {
       return;
     }
+
+    const deliveryRoute =
+      await this.host.bindingStore.getConsoleDeliveryRoute(
+        active.principal,
+        active.sessionId,
+      );
 
     let status: AgentStatusResponse;
     try {
@@ -207,6 +227,11 @@ export class TransportAgentActions {
       this.host.t(active.locale, "menu:agents.screen.active_session", {
         sessionName: active.sessionName,
       }),
+      deliveryRoute.mode === "agent"
+        ? this.host.t(active.locale, "menu:agents.screen.route_agent", {
+            agentName: deliveryRoute.agentId,
+          })
+        : this.host.t(active.locale, "menu:agents.screen.route_pty"),
       ...lines,
       ...runtimeLines,
       "",
@@ -215,7 +240,7 @@ export class TransportAgentActions {
           ? this.host.t(active.locale, "menu:agents.screen.turn_running_hint")
           : this.host.t(
               active.locale,
-              chatReady
+              deliveryRoute.mode === "agent"
                 ? "menu:agents.screen.chat_ready_hint"
                 : "menu:agents.screen.running_hint",
             )
@@ -247,6 +272,11 @@ export class TransportAgentActions {
         session_id: active.sessionId,
         agent_id: agentId,
       });
+      await this.host.bindingStore.setConsoleDeliveryRoute(
+        active.principal,
+        active.sessionId,
+        { mode: "agent", agentId },
+      );
       await ctx.answerCallbackQuery({
         text: this.host.t(active.locale, "menu:agents.actions.attached", {
           agentName: result.agent_id,
@@ -257,7 +287,6 @@ export class TransportAgentActions {
         this.host.t(active.locale, "menu:agents.screen.attached", {
           agentName: result.agent_id,
         }),
-        true,
       );
     } catch (error) {
       await ctx.answerCallbackQuery({
@@ -268,6 +297,26 @@ export class TransportAgentActions {
         show_alert: true,
       });
     }
+  }
+
+  public async useTerminal(ctx: TelegramMenuContext): Promise<void> {
+    const active = await this.getActiveSession(ctx);
+    if (!active) {
+      return;
+    }
+
+    await this.host.bindingStore.setConsoleDeliveryRoute(
+      active.principal,
+      active.sessionId,
+      { mode: "pty" },
+    );
+    await ctx.answerCallbackQuery({
+      text: this.host.t(active.locale, "menu:agents.actions.terminal_selected"),
+    });
+    await this.showAgentMenu(
+      ctx,
+      this.host.t(active.locale, "menu:agents.screen.terminal_selected"),
+    );
   }
 
   public async stopTurn(ctx: TelegramMenuContext): Promise<void> {

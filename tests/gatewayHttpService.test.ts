@@ -343,6 +343,8 @@ describe("GatewayHttpService agent runtime relay", () => {
       target_client_uuid: "client-1",
       target_local_session_id: "workspace",
       message: "Continue from Telegram",
+      delivery_mode: "agent",
+      agent_id: "codex",
     };
 
     await service.handleRequest(
@@ -367,18 +369,15 @@ describe("GatewayHttpService agent runtime relay", () => {
         params: {
           session_id: "workspace",
           message: "Continue from Telegram",
+          agent_id: "codex",
         },
       },
       { meta: { internal_call: true } },
     );
   });
 
-  it("keeps the PTY relay fallback when no structured agent is active", async () => {
-    const callBroker = vi.fn(async (actionName: string) =>
-      actionName === "telegramMcp.gatewaySocket.requestClientAction"
-        ? { handled: false }
-        : { ok: true },
-    );
+  it("routes directly to PTY when terminal delivery mode is selected", async () => {
+    const callBroker = vi.fn(async () => ({ ok: true }));
     const service = makeService(callBroker, "transport-secret");
     const response = makeResponse();
     const request = makeRequest(
@@ -390,6 +389,7 @@ describe("GatewayHttpService agent runtime relay", () => {
       target_client_uuid: "client-1",
       target_local_session_id: "workspace",
       message: "Continue in PTY",
+      delivery_mode: "pty",
     };
 
     await service.handleRequest(
@@ -399,15 +399,47 @@ describe("GatewayHttpService agent runtime relay", () => {
     );
 
     expect(response.statusCode).toBe(200);
-    expect(callBroker).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(response.body)).toMatchObject({ route: "pty" });
+    expect(callBroker).toHaveBeenCalledTimes(2);
     expect(callBroker).toHaveBeenNthCalledWith(
-      2,
+      1,
       "telegramMcp.gatewaySocket.requestLiveRelay",
       expect.objectContaining({
         requestType: "action",
         payload: { action: "text", text: "Continue in PTY" },
       }),
       { meta: { internal_call: true } },
+    );
+  });
+
+  it("does not fall back to PTY when the selected agent is unavailable", async () => {
+    const callBroker = vi.fn(async () => ({ handled: false }));
+    const service = makeService(callBroker, "transport-secret");
+    const response = makeResponse();
+    const request = makeRequest(
+      "Bearer transport-secret",
+    ) as IncomingMessage & { body: unknown };
+    request.body = {
+      target_client_uuid: "client-1",
+      target_local_session_id: "workspace",
+      message: "Do not type this into the shell",
+      delivery_mode: "agent",
+      agent_id: "codex",
+    };
+
+    await service.handleRequest(
+      request,
+      response,
+      "/gateway/relay/console-message",
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toContain("no longer available");
+    expect(callBroker).toHaveBeenCalledOnce();
+    expect(callBroker).not.toHaveBeenCalledWith(
+      "telegramMcp.gatewaySocket.requestLiveRelay",
+      expect.anything(),
+      expect.anything(),
     );
   });
 });

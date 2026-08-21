@@ -75,6 +75,7 @@ const TelegramMcpAgentRuntimeService: ServiceSchema = {
       params: {
         session_id: "string",
         message: "string",
+        agent_id: { type: "string", optional: true },
       },
       async handler(
         this: AgentRuntimeServiceCarrier,

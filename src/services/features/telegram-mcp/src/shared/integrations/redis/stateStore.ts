@@ -27,6 +27,7 @@ import type {
   PendingRequestStore,
   SessionBindingStore,
   SessionStore,
+  TelegramConsoleDeliveryRoute,
   TelegramAdminAuthStore,
   TelegramUserLocaleStore,
   TelegramXchangeFileMetaStore,
@@ -59,6 +60,14 @@ function principalSessionsKey(principal: TelegramPrincipal): string {
 
 function principalActiveSessionKey(principal: TelegramPrincipal): string {
   return `${KEY_PREFIX}:principal:${principal.telegramChatId}:${principal.telegramUserId}:active-session`;
+}
+
+function consoleDeliveryRouteKey(
+  principal: TelegramPrincipal,
+  sessionId: string,
+): string {
+  const sessionFingerprint = createHash("sha1").update(sessionId).digest("hex");
+  return `${KEY_PREFIX}:principal:${principal.telegramChatId}:${principal.telegramUserId}:delivery-route:${sessionFingerprint}`;
 }
 
 function principalActiveSessionMatchPattern(telegramUserId: number): string {
@@ -407,6 +416,36 @@ export class RedisStateStore
     return Array.from(principals.values());
   }
 
+  public async getConsoleDeliveryRoute(
+    principal: TelegramPrincipal,
+    sessionId: string,
+  ): Promise<TelegramConsoleDeliveryRoute> {
+    const raw = await this.redis.get(
+      consoleDeliveryRouteKey(principal, sessionId),
+    );
+    const route = parseJson<TelegramConsoleDeliveryRoute>(raw);
+    if (
+      route?.mode === "agent" &&
+      (route.agentId === "codex" || route.agentId === "claude")
+    ) {
+      return route;
+    }
+    return { mode: "pty" };
+  }
+
+  public async setConsoleDeliveryRoute(
+    principal: TelegramPrincipal,
+    sessionId: string,
+    route: TelegramConsoleDeliveryRoute,
+  ): Promise<void> {
+    const key = consoleDeliveryRouteKey(principal, sessionId);
+    if (route.mode === "pty") {
+      await this.redis.del(key);
+      return;
+    }
+    await this.redis.set(key, JSON.stringify(route));
+  }
+
   public async resetRuntimeState(): Promise<void> {
     await this.redis.del(activeRequestKey());
     await this.redis.del(queueKey());
@@ -734,6 +773,7 @@ export class RedisStateStore
     const activeKey = principalActiveSessionKey(principal);
 
     await this.redis.srem(sessionsKey, sessionId);
+    await this.redis.del(consoleDeliveryRouteKey(principal, sessionId));
 
     const activeSessionId = await this.redis.get(activeKey);
     if (activeSessionId !== sessionId) {

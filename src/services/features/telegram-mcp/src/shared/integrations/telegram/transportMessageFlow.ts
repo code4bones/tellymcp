@@ -292,15 +292,25 @@ export class TransportMessageFlow {
     attachments: StoredAttachmentRecord[];
   }): Promise<void> {
     const sourceActorLabel = this.resolveGatewayTelegramSourceLabel(input.ctx);
+    const deliveryRoute =
+      await this.host.bindingStore.getConsoleDeliveryRoute(
+        input.principal,
+        input.sourceSessionId,
+      );
     const output = await this.host.callGatewayJson<{
       ok: true;
       session_id: string;
       submitted_text: string;
+      route: "pty" | "agent";
     }>("/relay/console-message", {
       source_actor_label: sourceActorLabel,
       target_client_uuid: input.relayTarget.clientUuid,
       target_local_session_id: input.relayTarget.localSessionId,
       message: input.messageText,
+      delivery_mode: deliveryRoute.mode,
+      ...(deliveryRoute.mode === "agent"
+        ? { agent_id: deliveryRoute.agentId }
+        : {}),
       ...(input.attachments.length > 0
         ? {
             attachments: input.attachments.map((attachment) => attachment.filePath),
@@ -313,6 +323,7 @@ export class TransportMessageFlow {
       targetClientUuid: input.relayTarget.clientUuid,
       targetLocalSessionId: input.relayTarget.localSessionId,
       submittedTextLength: output.submitted_text.length,
+      route: output.route,
       chatId: input.principal.telegramChatId,
       userId: input.principal.telegramUserId,
     });

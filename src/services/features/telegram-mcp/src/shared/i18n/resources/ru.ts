@@ -60,10 +60,12 @@ export const ruMenu = {
   agents: {
     actions: {
       attached: "Подключено к {{agentName}}.",
+      terminal_selected: "Сообщения из Telegram будут отправляться в терминал.",
       stop_requested: "Остановка запрошена.",
       back_to_session: "Назад в меню сессии.",
     },
     buttons: {
+      terminal: "🖥 Терминал · PTY",
       stop: "⏹ Остановить активный turn",
     },
     states: {
@@ -74,6 +76,8 @@ export const ruMenu = {
     screen: {
       title: "🤖 Coding agent",
       active_session: "📌 Активная сессия: {{sessionName}}",
+      route_agent: "💬 Маршрут сообщений: {{agentName}}",
+      route_pty: "🖥 Маршрут сообщений: терминал (PTY)",
       provider: "• {{agentName}} · {{providerName}} — {{state}}",
       codex_policy:
         "🔒 Codex: {{sandbox}}, approvals {{approvalPolicy}}, сеть {{network}}",
@@ -90,6 +94,7 @@ export const ruMenu = {
         "Codex выполняет turn. Его можно остановить, не закрывая сессию агента.",
       unavailable: "Agent runtime недоступен: {{message}}",
       attached: "Подключено к {{agentName}} в выбранной консоли.",
+      terminal_selected: "Сообщения из Telegram теперь идут в терминал выбранной консоли.",
       stop_requested: "Для активного Codex-turn запрошена остановка.",
     },
   },

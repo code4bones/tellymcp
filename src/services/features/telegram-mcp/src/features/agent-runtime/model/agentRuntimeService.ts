@@ -109,6 +109,7 @@ export type AttachAgentRuntimeOutput = {
 export type SubmitAgentMessageInput = {
   session_id: string;
   message: string;
+  agent_id?: string | undefined;
 };
 
 export type SubmitAgentMessageOutput =
@@ -821,6 +822,9 @@ export class AgentRuntimeService {
     }
 
     const running = this.runningBySessionId.get(sessionId);
+    if (input.agent_id && running?.agentId !== input.agent_id.trim()) {
+      return { handled: false, session_id: sessionId };
+    }
     if (!running?.appServer || running.agentId !== "codex") {
       return { handled: false, session_id: sessionId };
     }

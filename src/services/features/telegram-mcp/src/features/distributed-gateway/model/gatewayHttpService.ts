@@ -122,6 +122,7 @@ type RelayConsoleMessageResult = {
   ok: true;
   session_id: string;
   submitted_text: string;
+  route: "pty" | "agent";
   source_label?: string;
 };
 
@@ -1270,11 +1271,31 @@ export class GatewayHttpService {
           typeof body.source_actor_label === "string"
             ? body.source_actor_label.trim()
             : undefined;
+        const deliveryMode =
+          body.delivery_mode === undefined ? "pty" : body.delivery_mode;
+        const agentId =
+          typeof body.agent_id === "string" ? body.agent_id.trim() : "";
 
         if (!targetClientUuid || !targetLocalSessionId || !text) {
           writeJson(res, 400, {
             error:
               "target_client_uuid, target_local_session_id, and message are required",
+          });
+          return true;
+        }
+        if (deliveryMode !== "pty" && deliveryMode !== "agent") {
+          writeJson(res, 400, {
+            error: "delivery_mode must be either pty or agent",
+          });
+          return true;
+        }
+        if (
+          deliveryMode === "agent" &&
+          agentId !== "codex" &&
+          agentId !== "claude"
+        ) {
+          writeJson(res, 400, {
+            error: "agent_id must be codex or claude in agent delivery mode",
           });
           return true;
         }
@@ -1284,24 +1305,30 @@ export class GatewayHttpService {
             ? `${text} [attachments saved: ${attachments.join(", ")}]`.trim()
             : text;
 
-        const agentResult = await this.callBroker<{
-          handled?: boolean;
-          thread_id?: string;
-          turn_id?: string;
-        }>(
-          "telegramMcp.gatewaySocket.requestClientAction",
-          {
-            clientUuid: targetClientUuid,
-            actionName: "telegramMcp.agentRuntime.submitRemote",
-            params: {
-              session_id: targetLocalSessionId,
-              message: submittedText,
+        if (deliveryMode === "agent") {
+          const agentResult = await this.callBroker<{
+            handled?: boolean;
+            thread_id?: string;
+            turn_id?: string;
+          }>(
+            "telegramMcp.gatewaySocket.requestClientAction",
+            {
+              clientUuid: targetClientUuid,
+              actionName: "telegramMcp.agentRuntime.submitRemote",
+              params: {
+                session_id: targetLocalSessionId,
+                message: submittedText,
+                agent_id: agentId,
+              },
             },
-          },
-          { meta: { internal_call: true } },
-        );
+            { meta: { internal_call: true } },
+          );
 
-        if (agentResult.handled) {
+          if (!agentResult.handled) {
+            throw new Error(
+              `The selected ${agentId} agent is no longer available in this console. Choose an agent again or switch to PTY.`,
+            );
+          }
           writeJson(res, 200, {
             ok: true,
             session_id: targetLocalSessionId,
@@ -1313,7 +1340,6 @@ export class GatewayHttpService {
             ...(agentResult.turn_id ? { turn_id: agentResult.turn_id } : {}),
             ...(sourceLabel ? { source_label: sourceLabel } : {}),
           } satisfies RelayConsoleMessageResult & {
-            route: "agent";
             thread_id?: string;
             turn_id?: string;
           });
@@ -1336,6 +1362,7 @@ export class GatewayHttpService {
           ok: true,
           session_id: targetLocalSessionId,
           submitted_text: submittedText,
+          route: "pty",
           ...(sourceLabel ? { source_label: sourceLabel } : {}),
         } satisfies RelayConsoleMessageResult);
         return true;

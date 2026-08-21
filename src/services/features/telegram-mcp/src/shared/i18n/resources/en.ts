@@ -60,10 +60,12 @@ export const enMenu = {
   agents: {
     actions: {
       attached: "Attached to {{agentName}}.",
+      terminal_selected: "Telegram messages will be sent to the terminal.",
       stop_requested: "Stop requested.",
       back_to_session: "Back to session menu.",
     },
     buttons: {
+      terminal: "🖥 Terminal · PTY",
       stop: "⏹ Stop active turn",
     },
     states: {
@@ -74,6 +76,8 @@ export const enMenu = {
     screen: {
       title: "🤖 Coding agent",
       active_session: "📌 Active session: {{sessionName}}",
+      route_agent: "💬 Message route: {{agentName}}",
+      route_pty: "🖥 Message route: terminal (PTY)",
       provider: "• {{agentName}} · {{providerName}} — {{state}}",
       codex_policy:
         "🔒 Codex: {{sandbox}}, approvals {{approvalPolicy}}, network {{network}}",
@@ -90,6 +94,7 @@ export const enMenu = {
         "A Codex turn is running. You can stop this turn without closing the agent session.",
       unavailable: "Agent runtime is unavailable: {{message}}",
       attached: "Attached to {{agentName}} in the selected console.",
+      terminal_selected: "Telegram messages now go to the selected console's terminal.",
       stop_requested: "Codex stop was requested for the active turn.",
     },
   },

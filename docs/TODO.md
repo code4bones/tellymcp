@@ -1,6 +1,8 @@
 # TODO
 
-Current focus areas after the gateway-first refactor:
+Accepted work that has not started yet. Move an item to `DOING.md` when work
+actually begins; do not use this file for architectural invariants or recurring
+maintenance policy.
 
 ## Reliability (verified still open on `2026-08-07`, see `docs/CODE_REVIEW_2026-07-13.md` for detail)
 
@@ -26,13 +28,9 @@ Current focus areas after the gateway-first refactor:
 ## Runtime
 
 - verify browser relay stability under repeated gateway-routed actions
-- keep project binding and live console binding paths explicit and observable
 
 ## Managed Agent Providers
 
-- connect Codex app-server command/file approval requests to the existing
-  Telegram approval UI and send the matching JSON-RPC decision back to the
-  originating request
 - add optional progress rendering from app-server item/turn events without
   flooding Telegram; completed final messages are already delivered
 - decide whether active Codex thread ids should persist across a TellyMCP client
@@ -43,12 +41,6 @@ Current focus areas after the gateway-first refactor:
   `.mcpsession.json` and auto-start on subsequent plain `tellymcp run`
 - add provider-specific model/profile selection without exposing arbitrary shell
   command injection through Telegram callbacks
-
-## Docs
-
-- keep `TOOLS.md` aligned with the actual MCP surface
-- keep screenshots folder labeled as current vs legacy
-- keep internal docs aligned with the gateway-first model
 
 ## UX
 
@@ -64,5 +56,3 @@ Current focus areas after the gateway-first refactor:
 ## Data Model
 
 - continue removing legacy assumptions around `gateway_sessions.project_uuid`
-- keep `gateway_live_consoles` as the canonical live source
-- keep project relations in dedicated binding tables

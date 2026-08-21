@@ -59,7 +59,7 @@ export const enMenu = {
   },
   agents: {
     actions: {
-      started: "Started {{agentName}}.",
+      attached: "Attached to {{agentName}}.",
       stop_requested: "Stop requested.",
       back_to_session: "Back to session menu.",
     },
@@ -67,8 +67,8 @@ export const enMenu = {
       stop: "⏹ Stop active turn",
     },
     states: {
-      running: "running",
-      ready: "ready",
+      running: "managed by Telly",
+      ready: "installed, not managed",
       missing: "CLI missing",
     },
     screen: {
@@ -81,13 +81,13 @@ export const enMenu = {
       last_usage:
         "📊 Last turn: {{inputTokens}} input / {{outputTokens}} output tokens",
       choose_hint:
-        "Choose an available agent. It will start in this console, and new Telegram messages will continue the same terminal conversation.",
+        "Choose an agent already started by Telly in this console. Telegram never launches an agent.",
       running_hint:
-        "An agent is already running. Exit it in the console before starting another one.",
+        "A Telly-managed agent is active. Choose it to attach Telegram to its current conversation.",
       turn_running_hint:
         "A Codex turn is running. You can stop this turn without closing the agent session.",
       unavailable: "Agent runtime is unavailable: {{message}}",
-      started: "Started {{agentName}} in the selected console.",
+      attached: "Attached to {{agentName}} in the selected console.",
       stop_requested: "Codex stop was requested for the active turn.",
     },
   },

@@ -14,6 +14,7 @@ import {
 } from "./notify.service";
 import {
   AgentRuntimeService,
+  type AttachAgentRuntimeInput,
   type ListAgentRuntimeInput,
   type StartAgentRuntimeInput,
   type StopAgentTurnInput,
@@ -56,6 +57,18 @@ const TelegramMcpAgentRuntimeService: ServiceSchema = {
         ctx: { params: StartAgentRuntimeInput },
       ) {
         return this.getAgentRuntimeService!().startAgent(ctx.params);
+      },
+    },
+    attachRemote: {
+      params: {
+        session_id: "string",
+        agent_id: "string",
+      },
+      async handler(
+        this: AgentRuntimeServiceCarrier,
+        ctx: { params: AttachAgentRuntimeInput },
+      ) {
+        return this.getAgentRuntimeService!().attachAgent(ctx.params);
       },
     },
     submitRemote: {

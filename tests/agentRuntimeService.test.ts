@@ -206,6 +206,16 @@ describe("agent runtime service", () => {
       transport: "app-server",
       thread_id: "thread-1",
     });
+    expect(
+      service.attachAgent({ session_id: "workspace", agent_id: "codex" }),
+    ).toMatchObject({
+      ok: true,
+      session_id: "workspace",
+      agent_id: "codex",
+      provider_id: "openai",
+      transport: "app-server",
+      thread_id: "thread-1",
+    });
     expect(sendLine).toHaveBeenCalledOnce();
     const approvalRequest = {
       requestId: "approval-1",
@@ -379,5 +389,20 @@ describe("agent runtime service", () => {
     await expect(
       service.startAgent({ session_id: "workspace", agent_id: "claude" }),
     ).rejects.toThrow("not installed");
+  });
+
+  it("refuses Telegram attach when no Telly-managed agent exists", () => {
+    const service = new AgentRuntimeService(
+      { terminal: {} } as AppConfig,
+      {} as SessionStore,
+      { info: vi.fn() } as unknown as Logger,
+      {
+        inspectProviders: () => [],
+      },
+    );
+
+    expect(() =>
+      service.attachAgent({ session_id: "workspace", agent_id: "codex" }),
+    ).toThrow("tellymcp run --agent codex");
   });
 });

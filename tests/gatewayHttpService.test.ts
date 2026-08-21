@@ -193,6 +193,30 @@ describe("GatewayHttpService live relay bootstrap", () => {
 });
 
 describe("GatewayHttpService agent runtime relay", () => {
+  it("does not expose a Telegram-facing route that launches agents", async () => {
+    const callBroker = vi.fn(async () => ({}));
+    const service = makeService(callBroker, "transport-secret");
+    const response = makeResponse();
+    const request = makeRequest(
+      "Bearer transport-secret",
+    ) as IncomingMessage & { body: unknown };
+    request.body = {};
+
+    await expect(
+      service.handleRequest(
+        request,
+        response,
+        "/gateway/agent/start",
+      ),
+    ).resolves.toBe(true);
+
+    expect(response.statusCode).toBe(410);
+    expect(JSON.parse(response.body)).toMatchObject({
+      error: expect.stringContaining("Remote agent launch is disabled"),
+    });
+    expect(callBroker).not.toHaveBeenCalled();
+  });
+
   it("requests provider status from the selected client console", async () => {
     const callBroker = vi.fn(async () => ({
       session_id: "workspace",
@@ -223,7 +247,7 @@ describe("GatewayHttpService agent runtime relay", () => {
     );
   });
 
-  it("resolves a canonical session before starting its agent", async () => {
+  it("resolves a canonical session before attaching its managed agent", async () => {
     const callBroker = vi.fn(async (actionName: string) => {
       if (
         actionName === "telegramMcp.gatewaySocket.resolveConnectedSessionTarget"
@@ -247,14 +271,14 @@ describe("GatewayHttpService agent runtime relay", () => {
       agent_id: "claude",
     };
 
-    await service.handleRequest(request, response, "/gateway/agent/start");
+    await service.handleRequest(request, response, "/gateway/agent/attach");
 
     expect(response.statusCode).toBe(200);
     expect(callBroker).toHaveBeenLastCalledWith(
       "telegramMcp.gatewaySocket.requestClientAction",
       {
         clientUuid: "client-2",
-        actionName: "telegramMcp.agentRuntime.startRemote",
+        actionName: "telegramMcp.agentRuntime.attachRemote",
         params: {
           agent_id: "claude",
           session_id: "workspace-2",

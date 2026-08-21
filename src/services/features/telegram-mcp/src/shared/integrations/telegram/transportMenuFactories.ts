@@ -77,7 +77,7 @@ export interface TransportMenuFactoriesHost {
   showDeveloperInfo(ctx: TelegramMenuContext): Promise<void>;
   showPruneConfirmMenu(ctx: TelegramMenuContext): Promise<void>;
   showActiveSessionInfo(ctx: TelegramMenuContext): Promise<void>;
-  startAgent(
+  attachAgent(
     ctx: TelegramMenuContext,
     agentId: "codex" | "claude",
   ): Promise<void>;
@@ -244,11 +244,11 @@ export class TransportMenuFactories {
       this.host.createMenuOptions((ctx) => this.host.showAgentMenu(ctx)),
     )
       .text("Codex · OpenAI", async (ctx) => {
-        await this.host.startAgent(ctx, "codex");
+        await this.host.attachAgent(ctx, "codex");
       })
       .row()
       .text("Claude Code · Anthropic", async (ctx) => {
-        await this.host.startAgent(ctx, "claude");
+        await this.host.attachAgent(ctx, "claude");
       })
       .row()
       .text(

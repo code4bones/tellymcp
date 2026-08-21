@@ -396,7 +396,7 @@ export class GatewayHttpService {
     sessionId: string;
     actionName:
       | "telegramMcp.agentRuntime.listRemote"
-      | "telegramMcp.agentRuntime.startRemote"
+      | "telegramMcp.agentRuntime.attachRemote"
       | "telegramMcp.agentRuntime.submitRemote"
       | "telegramMcp.agentRuntime.stopRemote";
     params?: Record<string, unknown>;
@@ -1081,6 +1081,14 @@ export class GatewayHttpService {
     }
 
     if (pathname === "/gateway/agent/start") {
+      writeJson(res, 410, {
+        error:
+          "Remote agent launch is disabled. Start the agent locally with 'tellymcp run --agent <provider>', then attach from Telegram.",
+      });
+      return true;
+    }
+
+    if (pathname === "/gateway/agent/attach") {
       if (req.method !== "POST") {
         writeText(res, 405, "Method not allowed");
         return true;
@@ -1101,7 +1109,7 @@ export class GatewayHttpService {
 
         const result = await this.requestAgentRuntimeAction({
           sessionId,
-          actionName: "telegramMcp.agentRuntime.startRemote",
+          actionName: "telegramMcp.agentRuntime.attachRemote",
           params: { agent_id: agentId },
         });
         writeJson(res, 200, result);

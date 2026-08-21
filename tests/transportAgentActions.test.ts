@@ -87,9 +87,9 @@ describe("TransportAgentActions", () => {
     );
   });
 
-  it("starts the selected agent on the active console", async () => {
+  it("attaches to an agent already managed by the active console", async () => {
     const callGatewayJson = vi.fn(async (path: string) =>
-      path === "/agent/start"
+      path === "/agent/attach"
         ? { agent_id: "claude", provider_id: "anthropic" }
         : {
             session_id: "workspace",
@@ -100,15 +100,37 @@ describe("TransportAgentActions", () => {
     const host = createHost(callGatewayJson);
     const actions = new TransportAgentActions(host);
 
-    await actions.startAgent(createContext(), "claude");
+    await actions.attachAgent(createContext(), "claude");
 
-    expect(callGatewayJson).toHaveBeenNthCalledWith(1, "/agent/start", {
+    expect(callGatewayJson).toHaveBeenNthCalledWith(1, "/agent/attach", {
       session_id: "relay-session",
       agent_id: "claude",
     });
     expect(callGatewayJson).toHaveBeenNthCalledWith(2, "/agent/status", {
       session_id: "relay-session",
     });
+  });
+
+  it("does not fall back to launching an unmanaged agent", async () => {
+    const callGatewayJson = vi.fn(async () => {
+      throw new Error(
+        "No Telly-managed Codex conversation is running. Start it locally with 'tellymcp run --agent codex'.",
+      );
+    });
+    const host = createHost(callGatewayJson);
+    const actions = new TransportAgentActions(host);
+    const ctx = createContext();
+
+    await actions.attachAgent(ctx, "codex");
+
+    expect(callGatewayJson).toHaveBeenCalledOnce();
+    expect(callGatewayJson).toHaveBeenCalledWith("/agent/attach", {
+      session_id: "relay-session",
+      agent_id: "codex",
+    });
+    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith(
+      expect.objectContaining({ show_alert: true }),
+    );
   });
 
   it("renders Codex policy, version, and bounded last-turn usage", async () => {

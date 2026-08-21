@@ -59,7 +59,7 @@ export const ruMenu = {
   },
   agents: {
     actions: {
-      started: "Запущен {{agentName}}.",
+      attached: "Подключено к {{agentName}}.",
       stop_requested: "Остановка запрошена.",
       back_to_session: "Назад в меню сессии.",
     },
@@ -67,8 +67,8 @@ export const ruMenu = {
       stop: "⏹ Остановить активный turn",
     },
     states: {
-      running: "запущен",
-      ready: "готов",
+      running: "под управлением Telly",
+      ready: "установлен, но не управляется Telly",
       missing: "CLI не найден",
     },
     screen: {
@@ -81,13 +81,13 @@ export const ruMenu = {
       last_usage:
         "📊 Последний turn: {{inputTokens}} входных / {{outputTokens}} выходных токенов",
       choose_hint:
-        "Выбери доступного агента. Он запустится в этой консоли, а новые сообщения из Telegram продолжат тот же терминальный диалог.",
+        "Выбери агента, уже запущенного через Telly в этой консоли. Telegram никогда не запускает агента.",
       running_hint:
-        "Агент уже запущен. Заверши его в консоли, прежде чем запускать другого.",
+        "Агент запущен через Telly. Выбери его, чтобы подключить Telegram к текущему диалогу.",
       turn_running_hint:
         "Codex выполняет turn. Его можно остановить, не закрывая сессию агента.",
       unavailable: "Agent runtime недоступен: {{message}}",
-      started: "{{agentName}} запущен в выбранной консоли.",
+      attached: "Подключено к {{agentName}} в выбранной консоли.",
       stop_requested: "Для активного Codex-turn запрошена остановка.",
     },
   },

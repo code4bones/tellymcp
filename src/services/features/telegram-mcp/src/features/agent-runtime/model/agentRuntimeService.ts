@@ -90,6 +90,21 @@ export type StartAgentRuntimeOutput = {
   thread_id?: string | undefined;
 };
 
+export type AttachAgentRuntimeInput = {
+  session_id: string;
+  agent_id: string;
+};
+
+export type AttachAgentRuntimeOutput = {
+  ok: true;
+  session_id: string;
+  agent_id: CodingAgentId;
+  provider_id: string;
+  transport: AgentTransportKind;
+  started_at: string;
+  thread_id?: string | undefined;
+};
+
 export type SubmitAgentMessageInput = {
   session_id: string;
   message: string;
@@ -719,6 +734,52 @@ export class AgentRuntimeService {
       transport: definition.transport,
       started_at: startedAt,
       ...(backend ? { thread_id: backend.threadId } : {}),
+    };
+  }
+
+  public attachAgent(input: AttachAgentRuntimeInput): AttachAgentRuntimeOutput {
+    const sessionId = input.session_id.trim();
+    if (!sessionId) {
+      throw new Error("session_id is required");
+    }
+
+    const definition = resolveAgentProvider(input.agent_id);
+    if (!definition) {
+      throw new Error(`Unsupported agent: ${input.agent_id}`);
+    }
+
+    const running = this.runningBySessionId.get(sessionId);
+    if (!running) {
+      throw new Error(
+        `No Telly-managed ${definition.agentName} conversation is running. Start it locally with 'tellymcp run --agent ${definition.agentId}'.`,
+      );
+    }
+    if (running.agentId !== definition.agentId) {
+      throw new Error(
+        `Cannot attach ${definition.agentName}: ${running.agentId} is the active Telly-managed agent for this session.`,
+      );
+    }
+    if (definition.transport === "app-server" && !running.appServer) {
+      throw new Error(
+        `Cannot attach ${definition.agentName}: its Telly-managed app-server is unavailable.`,
+      );
+    }
+
+    this.logger.info("Telegram attached to Telly-managed coding agent", {
+      sessionId,
+      agentId: definition.agentId,
+      providerId: definition.providerId,
+      ...(running.appServer ? { threadId: running.appServer.threadId } : {}),
+    });
+
+    return {
+      ok: true,
+      session_id: sessionId,
+      agent_id: definition.agentId,
+      provider_id: definition.providerId,
+      transport: definition.transport,
+      started_at: running.startedAt,
+      ...(running.appServer ? { thread_id: running.appServer.threadId } : {}),
     };
   }
 

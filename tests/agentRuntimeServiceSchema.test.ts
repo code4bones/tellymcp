@@ -19,6 +19,7 @@ describe("agent runtime Moleculer action schemas", () => {
   it.each([
     ["listRemote", { session_id: "workspace" }],
     ["startRemote", { session_id: "workspace", agent_id: "codex" }],
+    ["attachRemote", { session_id: "workspace", agent_id: "codex" }],
     ["submitRemote", { session_id: "workspace", message: "Continue" }],
     ["stopRemote", { session_id: "workspace" }],
   ])("accepts the real %s request DTO", (actionName, params) => {

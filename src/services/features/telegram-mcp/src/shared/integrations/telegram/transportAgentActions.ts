@@ -224,7 +224,7 @@ export class TransportAgentActions {
     );
   }
 
-  public async startAgent(
+  public async attachAgent(
     ctx: TelegramMenuContext,
     agentId: "codex" | "claude",
   ): Promise<void> {
@@ -237,18 +237,18 @@ export class TransportAgentActions {
       const result = await this.host.callGatewayJson<{
         agent_id: string;
         provider_id: string;
-      }>("/agent/start", {
+      }>("/agent/attach", {
         session_id: active.sessionId,
         agent_id: agentId,
       });
       await ctx.answerCallbackQuery({
-        text: this.host.t(active.locale, "menu:agents.actions.started", {
+        text: this.host.t(active.locale, "menu:agents.actions.attached", {
           agentName: result.agent_id,
         }),
       });
       await this.showAgentMenu(
         ctx,
-        this.host.t(active.locale, "menu:agents.screen.started", {
+        this.host.t(active.locale, "menu:agents.screen.attached", {
           agentName: result.agent_id,
         }),
       );

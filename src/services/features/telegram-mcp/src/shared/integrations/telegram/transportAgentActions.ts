@@ -161,7 +161,10 @@ export class TransportAgentActions {
     try {
       const response = await this.host.callGatewayJson<unknown>(
         "/agent/status",
-        { session_id: active.sessionId },
+        {
+          session_id: active.sessionId,
+          telegram_user_id: active.principal.telegramUserId,
+        },
       );
       if (
         !response ||
@@ -299,6 +302,7 @@ export class TransportAgentActions {
       }>("/agent/attach", {
         session_id: active.sessionId,
         agent_id: agentId,
+        telegram_user_id: active.principal.telegramUserId,
       });
       await this.host.bindingStore.setConsoleDeliveryRoute(
         active.principal,
@@ -356,6 +360,7 @@ export class TransportAgentActions {
     try {
       await this.host.callGatewayJson("/agent/stop", {
         session_id: active.sessionId,
+        telegram_user_id: active.principal.telegramUserId,
       });
       await ctx.answerCallbackQuery({
         text: this.host.t(active.locale, "menu:agents.actions.stop_requested"),

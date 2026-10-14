@@ -231,11 +231,20 @@ describe("GatewayHttpService agent runtime relay", () => {
     };
     request.body = {
       session_id: buildLiveRelaySessionId("client-1", "workspace"),
+      telegram_user_id: 1711337558,
     };
 
     await service.handleRequest(request, response, "/gateway/agent/status");
 
     expect(response.statusCode).toBe(200);
+    expect(callBroker).toHaveBeenCalledWith(
+      "telegramMcp.gateway.resolveLiveConsole",
+      {
+        sessionId: "client-1:workspace",
+        telegram_user_id: "1711337558",
+      },
+      { meta: { internal_call: true } },
+    );
     expect(callBroker).toHaveBeenCalledWith(
       "telegramMcp.gatewaySocket.requestClientAction",
       {
@@ -247,6 +256,26 @@ describe("GatewayHttpService agent runtime relay", () => {
     );
   });
 
+  it("rejects /gateway/agent/status when telegram_user_id is missing", async () => {
+    const callBroker = vi.fn(async () => ({}));
+    const service = makeService(callBroker, "transport-secret");
+    const response = makeResponse();
+    const request = makeRequest(
+      "Bearer transport-secret",
+    ) as IncomingMessage & { body: unknown };
+    request.body = {
+      session_id: buildLiveRelaySessionId("client-1", "workspace"),
+    };
+
+    await service.handleRequest(request, response, "/gateway/agent/status");
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body)).toMatchObject({
+      error: expect.stringContaining("telegram_user_id"),
+    });
+    expect(callBroker).not.toHaveBeenCalled();
+  });
+
   it("resolves a canonical session before attaching its managed agent", async () => {
     const callBroker = vi.fn(async (actionName: string) => {
       if (
@@ -256,6 +285,9 @@ describe("GatewayHttpService agent runtime relay", () => {
           client_uuid: "client-2",
           local_session_id: "workspace-2",
         };
+      }
+      if (actionName === "telegramMcp.gateway.resolveLiveConsole") {
+        return { client_uuid: "client-2", local_session_id: "workspace-2" };
       }
       return { ok: true, agent_id: "claude", provider_id: "anthropic" };
     });
@@ -269,11 +301,17 @@ describe("GatewayHttpService agent runtime relay", () => {
     request.body = {
       session_id: "client-2:workspace-2",
       agent_id: "claude",
+      telegram_user_id: 42,
     };
 
     await service.handleRequest(request, response, "/gateway/agent/attach");
 
     expect(response.statusCode).toBe(200);
+    expect(callBroker).toHaveBeenCalledWith(
+      "telegramMcp.gateway.resolveLiveConsole",
+      { sessionId: "client-2:workspace-2", telegram_user_id: "42" },
+      { meta: { internal_call: true } },
+    );
     expect(callBroker).toHaveBeenLastCalledWith(
       "telegramMcp.gatewaySocket.requestClientAction",
       {
@@ -288,6 +326,45 @@ describe("GatewayHttpService agent runtime relay", () => {
     );
   });
 
+  it("rejects attach when the resolved console belongs to a different owner", async () => {
+    const callBroker = vi.fn(async (actionName: string) => {
+      if (
+        actionName === "telegramMcp.gatewaySocket.resolveConnectedSessionTarget"
+      ) {
+        return {
+          client_uuid: "client-2",
+          local_session_id: "workspace-2",
+        };
+      }
+      if (actionName === "telegramMcp.gateway.resolveLiveConsole") {
+        return null;
+      }
+      return { ok: true, agent_id: "claude", provider_id: "anthropic" };
+    });
+    const service = makeService(callBroker, "transport-secret");
+    const response = makeResponse();
+    const request = makeRequest(
+      "Bearer transport-secret",
+    ) as IncomingMessage & { body: unknown };
+    request.body = {
+      session_id: "client-2:workspace-2",
+      agent_id: "claude",
+      telegram_user_id: 99,
+    };
+
+    await service.handleRequest(request, response, "/gateway/agent/attach");
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body)).toMatchObject({
+      error: expect.stringContaining("Could not resolve live console target"),
+    });
+    expect(callBroker).not.toHaveBeenCalledWith(
+      "telegramMcp.gatewaySocket.requestClientAction",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
   it("requests interruption of the active turn on the selected console", async () => {
     const callBroker = vi.fn(async (actionName: string) => {
       if (
@@ -297,6 +374,9 @@ describe("GatewayHttpService agent runtime relay", () => {
           client_uuid: "client-2",
           local_session_id: "workspace-2",
         };
+      }
+      if (actionName === "telegramMcp.gateway.resolveLiveConsole") {
+        return { client_uuid: "client-2", local_session_id: "workspace-2" };
       }
       return {
         ok: true,
@@ -310,7 +390,10 @@ describe("GatewayHttpService agent runtime relay", () => {
     const request = makeRequest(
       "Bearer transport-secret",
     ) as IncomingMessage & { body: unknown };
-    request.body = { session_id: "client-2:workspace-2" };
+    request.body = {
+      session_id: "client-2:workspace-2",
+      telegram_user_id: 42,
+    };
 
     await service.handleRequest(request, response, "/gateway/agent/stop");
 
@@ -326,12 +409,38 @@ describe("GatewayHttpService agent runtime relay", () => {
     );
   });
 
-  it("submits Telegram text through the active structured agent", async () => {
+  it("rejects /gateway/agent/stop when telegram_user_id is missing", async () => {
     const callBroker = vi.fn(async () => ({
-      handled: true,
-      thread_id: "thread-1",
-      turn_id: "turn-1",
+      client_uuid: "client-2",
+      local_session_id: "workspace-2",
     }));
+    const service = makeService(callBroker, "transport-secret");
+    const response = makeResponse();
+    const request = makeRequest(
+      "Bearer transport-secret",
+    ) as IncomingMessage & { body: unknown };
+    request.body = { session_id: "client-2:workspace-2" };
+
+    await service.handleRequest(request, response, "/gateway/agent/stop");
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body)).toMatchObject({
+      error: expect.stringContaining("telegram_user_id"),
+    });
+    expect(callBroker).not.toHaveBeenCalled();
+  });
+
+  it("submits Telegram text through the active structured agent", async () => {
+    const callBroker = vi.fn(async (actionName: string) => {
+      if (actionName === "telegramMcp.gateway.resolveLiveConsole") {
+        return { client_uuid: "client-1", local_session_id: "workspace" };
+      }
+      return {
+        handled: true,
+        thread_id: "thread-1",
+        turn_id: "turn-1",
+      };
+    });
     const service = makeService(callBroker, "transport-secret");
     const response = makeResponse();
     const request = makeRequest(
@@ -345,6 +454,7 @@ describe("GatewayHttpService agent runtime relay", () => {
       message: "Continue from Telegram",
       delivery_mode: "agent",
       agent_id: "codex",
+      telegram_user_id: 1711337558,
     };
 
     await service.handleRequest(
@@ -360,7 +470,12 @@ describe("GatewayHttpService agent runtime relay", () => {
       thread_id: "thread-1",
       turn_id: "turn-1",
     });
-    expect(callBroker).toHaveBeenCalledOnce();
+    expect(callBroker).toHaveBeenCalledTimes(2);
+    expect(callBroker).toHaveBeenCalledWith(
+      "telegramMcp.gateway.resolveLiveConsole",
+      { sessionId: "client-1:workspace", telegram_user_id: "1711337558" },
+      { meta: { internal_call: true } },
+    );
     expect(callBroker).toHaveBeenCalledWith(
       "telegramMcp.gatewaySocket.requestClientAction",
       {
@@ -373,6 +488,72 @@ describe("GatewayHttpService agent runtime relay", () => {
         },
       },
       { meta: { internal_call: true } },
+    );
+  });
+
+  it("rejects agent delivery on /gateway/relay/console-message when telegram_user_id is missing", async () => {
+    const callBroker = vi.fn(async () => ({ handled: true }));
+    const service = makeService(callBroker, "transport-secret");
+    const response = makeResponse();
+    const request = makeRequest(
+      "Bearer transport-secret",
+    ) as IncomingMessage & { body: unknown };
+    request.body = {
+      target_client_uuid: "client-1",
+      target_local_session_id: "workspace",
+      message: "Continue from Telegram",
+      delivery_mode: "agent",
+      agent_id: "codex",
+    };
+
+    await service.handleRequest(
+      request,
+      response,
+      "/gateway/relay/console-message",
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body)).toMatchObject({
+      error: expect.stringContaining("telegram_user_id"),
+    });
+    expect(callBroker).not.toHaveBeenCalled();
+  });
+
+  it("rejects agent delivery when the target console belongs to a different owner", async () => {
+    const callBroker = vi.fn(async (actionName: string) => {
+      if (actionName === "telegramMcp.gateway.resolveLiveConsole") {
+        return null;
+      }
+      return { handled: true };
+    });
+    const service = makeService(callBroker, "transport-secret");
+    const response = makeResponse();
+    const request = makeRequest(
+      "Bearer transport-secret",
+    ) as IncomingMessage & { body: unknown };
+    request.body = {
+      target_client_uuid: "client-1",
+      target_local_session_id: "workspace",
+      message: "Continue from Telegram",
+      delivery_mode: "agent",
+      agent_id: "codex",
+      telegram_user_id: 99,
+    };
+
+    await service.handleRequest(
+      request,
+      response,
+      "/gateway/relay/console-message",
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body)).toMatchObject({
+      error: expect.stringContaining("Could not resolve live console target"),
+    });
+    expect(callBroker).not.toHaveBeenCalledWith(
+      "telegramMcp.gatewaySocket.requestClientAction",
+      expect.anything(),
+      expect.anything(),
     );
   });
 
@@ -413,7 +594,12 @@ describe("GatewayHttpService agent runtime relay", () => {
   });
 
   it("does not fall back to PTY when the selected agent is unavailable", async () => {
-    const callBroker = vi.fn(async () => ({ handled: false }));
+    const callBroker = vi.fn(async (actionName: string) => {
+      if (actionName === "telegramMcp.gateway.resolveLiveConsole") {
+        return { client_uuid: "client-1", local_session_id: "workspace" };
+      }
+      return { handled: false };
+    });
     const service = makeService(callBroker, "transport-secret");
     const response = makeResponse();
     const request = makeRequest(
@@ -425,6 +611,7 @@ describe("GatewayHttpService agent runtime relay", () => {
       message: "Do not type this into the shell",
       delivery_mode: "agent",
       agent_id: "codex",
+      telegram_user_id: 1711337558,
     };
 
     await service.handleRequest(
@@ -435,7 +622,7 @@ describe("GatewayHttpService agent runtime relay", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.body).toContain("no longer available");
-    expect(callBroker).toHaveBeenCalledOnce();
+    expect(callBroker).toHaveBeenCalledTimes(2);
     expect(callBroker).not.toHaveBeenCalledWith(
       "telegramMcp.gatewaySocket.requestLiveRelay",
       expect.anything(),

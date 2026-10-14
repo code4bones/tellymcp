@@ -308,6 +308,7 @@ export class TransportMessageFlow {
       target_local_session_id: input.relayTarget.localSessionId,
       message: input.messageText,
       delivery_mode: deliveryRoute.mode,
+      telegram_user_id: input.principal.telegramUserId,
       ...(deliveryRoute.mode === "agent"
         ? { agent_id: deliveryRoute.agentId }
         : {}),

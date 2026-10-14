@@ -393,8 +393,38 @@ export class GatewayHttpService {
     };
   }
 
+  private readTelegramUserId(body: Record<string, unknown>): string {
+    const value = body.telegram_user_id;
+    if (typeof value === "string") {
+      return value.trim();
+    }
+    if (typeof value === "number") {
+      return String(value);
+    }
+    return "";
+  }
+
+  private async assertAgentConsoleOwnership(
+    clientUuid: string,
+    localSessionId: string,
+    telegramUserId: string,
+  ): Promise<void> {
+    const owned = await this.callBroker<{
+      client_uuid: string;
+      local_session_id: string;
+    } | null>(
+      "telegramMcp.gateway.resolveLiveConsole",
+      { sessionId: `${clientUuid}:${localSessionId}`, telegram_user_id: telegramUserId },
+      { meta: { internal_call: true } },
+    );
+    if (!owned) {
+      throw new Error(`Could not resolve live console target for client '${clientUuid}'.`);
+    }
+  }
+
   private async requestAgentRuntimeAction<T>(input: {
     sessionId: string;
+    telegramUserId: string;
     actionName:
       | "telegramMcp.agentRuntime.listRemote"
       | "telegramMcp.agentRuntime.attachRemote"
@@ -403,6 +433,11 @@ export class GatewayHttpService {
     params?: Record<string, unknown>;
   }): Promise<T> {
     const target = await this.resolveConnectedConsoleTarget(input.sessionId);
+    await this.assertAgentConsoleOwnership(
+      target.clientUuid,
+      target.localSessionId,
+      input.telegramUserId,
+    );
     return await this.callBroker<T>(
       "telegramMcp.gatewaySocket.requestClientAction",
       {
@@ -1062,13 +1097,19 @@ export class GatewayHttpService {
         const body = (await this.readJsonBody(req)) as Record<string, unknown>;
         const sessionId =
           typeof body.session_id === "string" ? body.session_id.trim() : "";
+        const telegramUserId = this.readTelegramUserId(body);
         if (!sessionId) {
           writeJson(res, 400, { error: "session_id is required" });
+          return true;
+        }
+        if (!telegramUserId) {
+          writeJson(res, 400, { error: "telegram_user_id is required" });
           return true;
         }
 
         const result = await this.requestAgentRuntimeAction({
           sessionId,
+          telegramUserId,
           actionName: "telegramMcp.agentRuntime.listRemote",
         });
         writeJson(res, 200, result);
@@ -1101,15 +1142,21 @@ export class GatewayHttpService {
           typeof body.session_id === "string" ? body.session_id.trim() : "";
         const agentId =
           typeof body.agent_id === "string" ? body.agent_id.trim() : "";
+        const telegramUserId = this.readTelegramUserId(body);
         if (!sessionId || !agentId) {
           writeJson(res, 400, {
             error: "session_id and agent_id are required",
           });
           return true;
         }
+        if (!telegramUserId) {
+          writeJson(res, 400, { error: "telegram_user_id is required" });
+          return true;
+        }
 
         const result = await this.requestAgentRuntimeAction({
           sessionId,
+          telegramUserId,
           actionName: "telegramMcp.agentRuntime.attachRemote",
           params: { agent_id: agentId },
         });
@@ -1133,13 +1180,19 @@ export class GatewayHttpService {
         const body = (await this.readJsonBody(req)) as Record<string, unknown>;
         const sessionId =
           typeof body.session_id === "string" ? body.session_id.trim() : "";
+        const telegramUserId = this.readTelegramUserId(body);
         if (!sessionId) {
           writeJson(res, 400, { error: "session_id is required" });
+          return true;
+        }
+        if (!telegramUserId) {
+          writeJson(res, 400, { error: "telegram_user_id is required" });
           return true;
         }
 
         const result = await this.requestAgentRuntimeAction({
           sessionId,
+          telegramUserId,
           actionName: "telegramMcp.agentRuntime.stopRemote",
         });
         writeJson(res, 200, result);
@@ -1275,6 +1328,7 @@ export class GatewayHttpService {
           body.delivery_mode === undefined ? "pty" : body.delivery_mode;
         const agentId =
           typeof body.agent_id === "string" ? body.agent_id.trim() : "";
+        const telegramUserId = this.readTelegramUserId(body);
 
         if (!targetClientUuid || !targetLocalSessionId || !text) {
           writeJson(res, 400, {
@@ -1299,6 +1353,10 @@ export class GatewayHttpService {
           });
           return true;
         }
+        if (deliveryMode === "agent" && !telegramUserId) {
+          writeJson(res, 400, { error: "telegram_user_id is required" });
+          return true;
+        }
 
         const submittedText =
           attachments.length > 0
@@ -1306,6 +1364,11 @@ export class GatewayHttpService {
             : text;
 
         if (deliveryMode === "agent") {
+          await this.assertAgentConsoleOwnership(
+            targetClientUuid,
+            targetLocalSessionId,
+            telegramUserId,
+          );
           const agentResult = await this.callBroker<{
             handled?: boolean;
             thread_id?: string;

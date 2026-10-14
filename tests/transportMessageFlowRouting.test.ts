@@ -45,6 +45,7 @@ describe("TransportMessageFlow relay routing", () => {
       message: "Continue",
       delivery_mode: "agent",
       agent_id: "codex",
+      telegram_user_id: 7,
     });
     expect(logger.info).toHaveBeenCalledWith(
       "Telegram message routed to gateway relay session",

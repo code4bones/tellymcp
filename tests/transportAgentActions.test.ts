@@ -78,6 +78,7 @@ describe("TransportAgentActions", () => {
 
     expect(callGatewayJson).toHaveBeenCalledWith("/agent/status", {
       session_id: "relay-session",
+      telegram_user_id: 7,
     });
     expect(host.renderMenuScreen).toHaveBeenCalledOnce();
     expect(String(host.renderMenuScreen.mock.calls[0]?.[1])).toContain(
@@ -124,9 +125,11 @@ describe("TransportAgentActions", () => {
     expect(callGatewayJson).toHaveBeenNthCalledWith(1, "/agent/attach", {
       session_id: "relay-session",
       agent_id: "claude",
+      telegram_user_id: 7,
     });
     expect(callGatewayJson).toHaveBeenNthCalledWith(2, "/agent/status", {
       session_id: "relay-session",
+      telegram_user_id: 7,
     });
     expect(host.bindingStore.setConsoleDeliveryRoute).toHaveBeenCalledWith(
       { telegramChatId: 42, telegramUserId: 7 },
@@ -181,6 +184,7 @@ describe("TransportAgentActions", () => {
     expect(callGatewayJson).toHaveBeenCalledWith("/agent/attach", {
       session_id: "relay-session",
       agent_id: "codex",
+      telegram_user_id: 7,
     });
     expect(host.bindingStore.setConsoleDeliveryRoute).not.toHaveBeenCalled();
     expect(ctx.answerCallbackQuery).toHaveBeenCalledWith(
@@ -236,9 +240,11 @@ describe("TransportAgentActions", () => {
 
     expect(callGatewayJson).toHaveBeenNthCalledWith(1, "/agent/stop", {
       session_id: "relay-session",
+      telegram_user_id: 7,
     });
     expect(callGatewayJson).toHaveBeenNthCalledWith(2, "/agent/status", {
       session_id: "relay-session",
+      telegram_user_id: 7,
     });
     expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({
       text: "menu:agents.actions.stop_requested",

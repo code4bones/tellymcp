@@ -20,6 +20,14 @@ const GATEWAY_ENABLED =
 
 const POLL_INTERVAL_MS = 5000;
 const RECONNECT_DELAY_MS = 3000;
+// Gives the console's input UI time to finish rendering the pasted nudge
+// text before Enter arrives -- sending both back-to-back races the TUI's
+// own paste/redraw handling and Enter can land before the text is "seen".
+const NUDGE_ENTER_DELAY_MS = 150;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 const APPROVAL_TIMEOUT_SECONDS = Number(
   process.env.INBOX_APPROVAL_TIMEOUT_SECONDS || 600,
 );
@@ -357,6 +365,7 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
           action: "text",
           text: buildInboxNudgeText(row),
         });
+        await delay(NUDGE_ENTER_DELAY_MS);
         await runtime.gatewayHttpService.requestLiveRelayAction({
           clientUuid: routeBinding.clientUuid,
           localSessionId: routeBinding.localSessionId,

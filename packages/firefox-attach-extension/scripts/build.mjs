@@ -18,6 +18,10 @@ const entries = [
   "popup.html",
   "popup.js",
   "icon.svg",
+  "icon-16.png",
+  "icon-32.png",
+  "icon-48.png",
+  "icon-128.png",
   "recorder-content.js",
   "recorder-page.js",
 ];

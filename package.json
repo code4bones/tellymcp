@@ -40,6 +40,8 @@
   "scripts": {
     "postinstall": "node ./scripts/postinstall.js",
     "build:extensions": "node ./packages/firefox-attach-extension/scripts/build.mjs && node ./packages/chrome-attach-extension/scripts/build.mjs",
+    "sync:extensions-version": "node ./scripts/sync-extensions-version.mjs",
+    "release:extensions": "node ./scripts/release-extensions.mjs",
     "prepack": "yarn build && yarn build:extensions",
     "prepublishOnly": "yarn build && yarn build:extensions && yarn lint && yarn test",
     "mcp:local": "codex mcp add telegramHuman --url http://127.0.0.1:8787/mcp",

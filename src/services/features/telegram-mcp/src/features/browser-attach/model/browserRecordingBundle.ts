@@ -218,7 +218,12 @@ async function allocateBundleDirName(
   throw new Error("Could not allocate a unique browser recording bundle directory.");
 }
 
+const SESSION_JSON_FLUSH_INTERVAL_MS = 2000;
+
 export class BrowserRecordingBundleWriter {
+  private readonly pendingSessionJsonFlush = new Map<string, NodeJS.Timeout>();
+  private readonly lastSessionJsonFlushAt = new Map<string, number>();
+
   public constructor(
     private readonly config: AppConfig,
     private readonly logger: Logger,
@@ -228,6 +233,7 @@ export class BrowserRecordingBundleWriter {
     session: SessionContext;
     sessionId: string;
     instanceId: string;
+    browser: "firefox" | "chrome";
     tabId: number;
     tabTitle: string;
     tabUrl?: string | undefined;
@@ -269,7 +275,7 @@ export class BrowserRecordingBundleWriter {
     const startedAt = formatLocalTimestamp(new Date());
     const record: BrowserRecordingRecord = {
       sessionId: input.sessionId,
-      backend: "firefox-attached",
+      backend: input.browser === "chrome" ? "chrome-attached" : "firefox-attached",
       recordingId: input.recordingId,
       instanceId: input.instanceId,
       tabId: input.tabId,
@@ -497,9 +503,54 @@ export class BrowserRecordingBundleWriter {
       `${state.record.bundleRelativePath}/timeline.ndjson`,
       timelineEntry,
     );
-    await this.writeSessionJson(state);
+
+    if (event.kind === "session_stopped") {
+      await this.flushSessionJson(state);
+    } else {
+      this.scheduleSessionJsonFlush(state);
+    }
 
     return state;
+  }
+
+  private scheduleSessionJsonFlush(state: ActiveBrowserRecordingState): void {
+    const recordingId = state.record.recordingId;
+    if (this.pendingSessionJsonFlush.has(recordingId)) {
+      return;
+    }
+    const lastFlushAt = this.lastSessionJsonFlushAt.get(recordingId) ?? 0;
+    const delay = Math.max(0, SESSION_JSON_FLUSH_INTERVAL_MS - (Date.now() - lastFlushAt));
+    const timer = setTimeout(() => {
+      this.pendingSessionJsonFlush.delete(recordingId);
+      this.lastSessionJsonFlushAt.set(recordingId, Date.now());
+      void this.writeSessionJson(state).catch((error) => {
+        this.logger.warn("Failed to flush throttled browser recording session.json", {
+          recordingId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }, delay);
+    this.pendingSessionJsonFlush.set(recordingId, timer);
+  }
+
+  public async flushSessionJson(state: ActiveBrowserRecordingState): Promise<void> {
+    const recordingId = state.record.recordingId;
+    const pending = this.pendingSessionJsonFlush.get(recordingId);
+    if (pending) {
+      clearTimeout(pending);
+      this.pendingSessionJsonFlush.delete(recordingId);
+    }
+    this.lastSessionJsonFlushAt.set(recordingId, Date.now());
+    await this.writeSessionJson(state);
+  }
+
+  public cancelPendingSessionJsonFlush(recordingId: string): void {
+    const pending = this.pendingSessionJsonFlush.get(recordingId);
+    if (pending) {
+      clearTimeout(pending);
+      this.pendingSessionJsonFlush.delete(recordingId);
+    }
+    this.lastSessionJsonFlushAt.delete(recordingId);
   }
 
   public async finalizeExisting(

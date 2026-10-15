@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 
 import type { AppConfig } from "../src/services/features/telegram-mcp/src/app/config/env";
-import { FirefoxAttachServer } from "../src/services/features/telegram-mcp/src/features/browser-attach/model/firefoxAttachServer";
+import { BrowserAttachServer } from "../src/services/features/telegram-mcp/src/features/browser-attach/model/browserAttachServer";
 import { firefoxAttachInboundMessageSchema } from "../src/services/features/telegram-mcp/src/features/browser-attach/model/types";
 import type {
   MaintenanceStore,
@@ -105,7 +105,7 @@ describe("browser attach WebSocket security", () => {
 
   const startServer = async (overrides?: {
     setBrowserAttachment?: MaintenanceStore["setBrowserAttachment"];
-  }): Promise<{ server: FirefoxAttachServer; url: string; logger: Logger }> => {
+  }): Promise<{ server: BrowserAttachServer; url: string; logger: Logger }> => {
     const port = await getAvailablePort();
     const config = {
       browser: {
@@ -133,7 +133,7 @@ describe("browser attach WebSocket security", () => {
       setBrowserAttachment:
         overrides?.setBrowserAttachment ?? vi.fn(async () => undefined),
     } as unknown as MaintenanceStore;
-    const server = new FirefoxAttachServer(
+    const server = new BrowserAttachServer(
       config,
       logger,
       {} as SessionStore,

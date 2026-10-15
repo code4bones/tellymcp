@@ -82,7 +82,7 @@ export type BrowserAttachTabInput = {
 
 export type BrowserAttachTabOutput = {
   session_id: string;
-  backend: "firefox-attached";
+  backend: "firefox-attached" | "chrome-attached";
   instance_id: string;
   tab_id: number;
   attached_at: string;
@@ -101,7 +101,7 @@ export type BrowserDetachTabOutput = {
 
 export type BrowserAttachmentRecord = {
   sessionId: string;
-  backend: "firefox-attached";
+  backend: "firefox-attached" | "chrome-attached";
   instanceId: string;
   tabId: number;
   attachedAt: string;
@@ -111,7 +111,7 @@ export type BrowserAttachmentRecord = {
 
 export type BrowserRecordingRecord = {
   sessionId: string;
-  backend: "firefox-attached";
+  backend: "firefox-attached" | "chrome-attached";
   recordingId: string;
   instanceId: string;
   tabId: number;
@@ -134,7 +134,7 @@ export type BrowserRecordingStartInput = {
 
 export type BrowserRecordingStartOutput = {
   session_id: string;
-  backend: "firefox-attached";
+  backend: "firefox-attached" | "chrome-attached";
   started: boolean;
   recording_id: string;
   instance_id: string;
@@ -169,7 +169,7 @@ export type BrowserRecordingStatusOutput = {
   session_id: string;
   active: boolean;
   recording?: {
-    backend: "firefox-attached";
+    backend: "firefox-attached" | "chrome-attached";
     recording_id: string;
     instance_id: string;
     tab_id: number;

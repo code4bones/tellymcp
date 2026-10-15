@@ -16,9 +16,9 @@ import {
   type ActiveBrowserRecordingState,
 } from "./browserRecordingBundle";
 import {
-  FirefoxAttachRegistry,
+  BrowserAttachRegistry,
   type FirefoxAttachInstanceRecord,
-} from "./firefoxAttachRegistry";
+} from "./browserAttachRegistry";
 import { firefoxAttachInboundMessageSchema } from "./types";
 import type {
   FirefoxAttachGetActiveTabRequest,
@@ -91,12 +91,13 @@ type PendingRecordingControl = {
 const ATTACH_HEARTBEAT_TIMEOUT_MS = 45_000;
 const ATTACH_HEARTBEAT_REAP_INTERVAL_MS = 15_000;
 const ATTACH_RATE_WINDOW_MS = 1_000;
+const RECORDING_PERSIST_INTERVAL_MS = 1_000;
 const ATTACH_RATE_MAX_MESSAGES = 1_000;
 
-class FirefoxAttachProtocolError extends Error {
+class BrowserAttachProtocolError extends Error {
   public constructor(public readonly reason: string) {
     super(reason);
-    this.name = "FirefoxAttachProtocolError";
+    this.name = "BrowserAttachProtocolError";
   }
 }
 
@@ -107,10 +108,10 @@ const isAllowedAttachOrigin = (origin: string | undefined): boolean => {
   return /^(?:moz|chrome)-extension:\/\/[a-z0-9-]+\/?$/iu.test(origin);
 };
 
-export class FirefoxAttachServer {
+export class BrowserAttachServer {
   private wsServer: FirefoxAttachWebSocketServer | null = null;
 
-  private readonly registry = new FirefoxAttachRegistry();
+  private readonly registry = new BrowserAttachRegistry();
 
   private readonly recordingWriter: BrowserRecordingBundleWriter;
 
@@ -129,6 +130,10 @@ export class FirefoxAttachServer {
     string,
     ActiveBrowserRecordingState
   >();
+
+  private readonly pendingRecordingPersist = new Map<string, NodeJS.Timeout>();
+
+  private readonly lastRecordingPersistAt = new Map<string, number>();
 
   private heartbeatReaper: NodeJS.Timeout | null = null;
 
@@ -315,10 +320,12 @@ export class FirefoxAttachServer {
     }
 
     const recordingId = randomUUID();
+    const instance = this.registry.get(input.instanceId);
     const state = await this.recordingWriter.create({
       session: resolvedSession,
       sessionId: input.sessionId,
       instanceId: input.instanceId,
+      browser: instance?.browser ?? "firefox",
       tabId: input.tabId,
       tabTitle: input.tabTitle,
       ...(input.tabUrl ? { tabUrl: input.tabUrl } : {}),
@@ -338,6 +345,7 @@ export class FirefoxAttachServer {
       });
     } catch (error) {
       this.activeRecordingsById.delete(recordingId);
+      this.cancelRecordingPersist(recordingId);
       await this.maintenanceStore.clearBrowserRecording(input.sessionId);
       await this.broadcastRecordingState(null);
       throw error;
@@ -375,7 +383,7 @@ export class FirefoxAttachServer {
         status: "stopped",
       });
       this.activeRecordingsById.delete(existing.recordingId);
-      await this.maintenanceStore.setBrowserRecording(activeState.record);
+      await this.flushRecordingPersist(activeState);
       await this.broadcastRecordingState(activeState.record);
       return activeState.record;
     }
@@ -484,20 +492,20 @@ export class FirefoxAttachServer {
     try {
       decoded = JSON.parse(raw);
     } catch {
-      throw new FirefoxAttachProtocolError("invalid_json");
+      throw new BrowserAttachProtocolError("invalid_json");
     }
 
     const parsed = firefoxAttachInboundMessageSchema.safeParse(decoded);
     if (!parsed.success) {
-      throw new FirefoxAttachProtocolError("invalid_message");
+      throw new BrowserAttachProtocolError("invalid_message");
     }
     const message = parsed.data;
 
     if (!state.instanceId && message.type !== "hello") {
-      throw new FirefoxAttachProtocolError("hello_required");
+      throw new BrowserAttachProtocolError("hello_required");
     }
     if (state.instanceId && message.type === "hello") {
-      throw new FirefoxAttachProtocolError("duplicate_hello");
+      throw new BrowserAttachProtocolError("duplicate_hello");
     }
     const connectedInstanceId = state.instanceId;
 
@@ -528,6 +536,11 @@ export class FirefoxAttachServer {
       case "tab_updated":
         if (state.instanceId) {
           this.registry.updateTab(state.instanceId, message.tab);
+        }
+        return;
+      case "tab_removed":
+        if (state.instanceId) {
+          this.registry.removeTab(state.instanceId, message.tab_id);
         }
         return;
       case "attach_tab_selected":
@@ -641,9 +654,10 @@ export class FirefoxAttachServer {
       return;
     }
 
+    const instance = this.registry.get(instanceId);
     await this.maintenanceStore.setBrowserAttachment({
       sessionId,
-      backend: "firefox-attached",
+      backend: instance?.browser === "chrome" ? "chrome-attached" : "firefox-attached",
       instanceId,
       tabId: tab.tab_id,
       attachedAt: formatLocalTimestamp(new Date()),
@@ -765,7 +779,58 @@ export class FirefoxAttachServer {
       state,
       event as Parameters<BrowserRecordingBundleWriter["appendEvent"]>[1],
     );
+
+    if (event.kind === "session_stopped") {
+      await this.flushRecordingPersist(state);
+    } else {
+      this.scheduleRecordingPersist(state);
+    }
+  }
+
+  private scheduleRecordingPersist(state: ActiveBrowserRecordingState): void {
+    const recordingId = state.record.recordingId;
+    if (this.pendingRecordingPersist.has(recordingId)) {
+      return;
+    }
+    const lastFlushAt = this.lastRecordingPersistAt.get(recordingId) ?? 0;
+    const delay = Math.max(
+      0,
+      RECORDING_PERSIST_INTERVAL_MS - (Date.now() - lastFlushAt),
+    );
+    const timer = setTimeout(() => {
+      this.pendingRecordingPersist.delete(recordingId);
+      this.lastRecordingPersistAt.set(recordingId, Date.now());
+      void this.maintenanceStore.setBrowserRecording(state.record).catch((error) => {
+        this.logger.warn("Failed to persist throttled browser recording state", {
+          recordingId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }, delay);
+    this.pendingRecordingPersist.set(recordingId, timer);
+  }
+
+  private async flushRecordingPersist(
+    state: ActiveBrowserRecordingState,
+  ): Promise<void> {
+    const recordingId = state.record.recordingId;
+    const pending = this.pendingRecordingPersist.get(recordingId);
+    if (pending) {
+      clearTimeout(pending);
+      this.pendingRecordingPersist.delete(recordingId);
+    }
+    this.lastRecordingPersistAt.set(recordingId, Date.now());
     await this.maintenanceStore.setBrowserRecording(state.record);
+  }
+
+  private cancelRecordingPersist(recordingId: string): void {
+    const pending = this.pendingRecordingPersist.get(recordingId);
+    if (pending) {
+      clearTimeout(pending);
+      this.pendingRecordingPersist.delete(recordingId);
+    }
+    this.lastRecordingPersistAt.delete(recordingId);
+    this.recordingWriter.cancelPendingSessionJsonFlush(recordingId);
   }
 
   private async handleInstanceDisconnect(instanceId: string): Promise<void> {
@@ -776,15 +841,17 @@ export class FirefoxAttachServer {
       return;
     }
 
-    for (const state of activeStates) {
-      await this.recordingWriter.appendEvent(state, {
-        kind: "session_stopped",
-        status: "instance_disconnected",
-      });
-      this.activeRecordingsById.delete(state.record.recordingId);
-      await this.maintenanceStore.setBrowserRecording(state.record);
-      await this.broadcastRecordingState(state.record);
-    }
+    await Promise.all(
+      activeStates.map(async (state) => {
+        await this.recordingWriter.appendEvent(state, {
+          kind: "session_stopped",
+          status: "instance_disconnected",
+        });
+        this.activeRecordingsById.delete(state.record.recordingId);
+        await this.flushRecordingPersist(state);
+        await this.broadcastRecordingState(state.record);
+      }),
+    );
   }
 
   private buildRecordingStateMessage(
@@ -826,7 +893,7 @@ export class FirefoxAttachServer {
     }
     state.rateWindowMessageCount += 1;
     if (state.rateWindowMessageCount > ATTACH_RATE_MAX_MESSAGES) {
-      throw new FirefoxAttachProtocolError("rate_limit_exceeded");
+      throw new BrowserAttachProtocolError("rate_limit_exceeded");
     }
   }
 
@@ -839,7 +906,7 @@ export class FirefoxAttachServer {
     }
     state.protocolFailed = true;
     const reason =
-      error instanceof FirefoxAttachProtocolError
+      error instanceof BrowserAttachProtocolError
         ? error.reason
         : "message_handler_failed";
     this.logger.warn("Firefox attach protocol error", {

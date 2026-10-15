@@ -126,6 +126,10 @@ export const firefoxAttachInboundMessageSchema = z.discriminatedUnion("type", [
     tab: firefoxAttachTabRecordSchema,
   }),
   z.strictObject({
+    type: z.literal("tab_removed"),
+    tab_id: tabId,
+  }),
+  z.strictObject({
     type: z.literal("tab_action_result"),
     request_id: requestId,
     ok: z.boolean(),
@@ -265,6 +269,11 @@ export type FirefoxAttachTabUpdatedEvent = {
 export type FirefoxAttachTabSelectedEvent = {
   type: "attach_tab_selected";
   tab: FirefoxAttachTabRecord;
+};
+
+export type FirefoxAttachTabRemovedEvent = {
+  type: "tab_removed";
+  tab_id: number;
 };
 
 export type FirefoxAttachTabActionResult = {

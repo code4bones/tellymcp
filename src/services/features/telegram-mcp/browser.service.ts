@@ -4,7 +4,7 @@ import {
   TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
   type TelegramMcpRuntimeServiceInstance,
 } from "./runtime.service";
-import { FirefoxAttachServer } from "./src/features/browser-attach/model/firefoxAttachServer";
+import { BrowserAttachServer } from "./src/features/browser-attach/model/browserAttachServer";
 import { RemoteConsoleActionClient } from "./src/features/distributed-gateway/model/remoteConsoleActionClient";
 import type {
   BrowserAttachActiveTabInput,
@@ -299,7 +299,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
     const runtime = await runtimeService.waitUntilReady();
 
     this.logger.info("Starting telegram_mcp browser service");
-    const firefoxAttachServer = runtime.firefoxAttachServer as FirefoxAttachServer;
+    const browserAttachServer = runtime.browserAttachServer as BrowserAttachServer;
     this.browserService = new BrowserService(
       runtime.config,
       runtime.sessionStore,
@@ -313,7 +313,7 @@ const TelegramMcpBrowserService: ServiceSchema = {
       new RemoteConsoleActionClient((actionName, params) =>
         this.broker.call(actionName, params, { meta: { internal_call: true } }),
       ),
-      firefoxAttachServer,
+      browserAttachServer,
     );
     this.logger.info("telegram_mcp browser service is ready");
   },

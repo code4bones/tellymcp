@@ -15,7 +15,7 @@ export type FirefoxAttachInstanceRecord = {
   activeTab: FirefoxAttachTabRecord | null;
 };
 
-export class FirefoxAttachRegistry {
+export class BrowserAttachRegistry {
   private readonly instances = new Map<string, FirefoxAttachInstanceRecord>();
 
   public setConnected(input: {
@@ -56,8 +56,24 @@ export class FirefoxAttachRegistry {
       return;
     }
     existing.tabs = tabs.map((tab) => ({ ...tab }));
+    const reportedActive = tabs.find((tab) => tab.active) ?? null;
+    const previousActiveStillPresent = existing.activeTab
+      ? tabs.some((tab) => tab.tab_id === existing.activeTab?.tab_id)
+      : false;
     existing.activeTab =
-      tabs.find((tab) => tab.active) ?? existing.activeTab ?? null;
+      reportedActive ?? (previousActiveStillPresent ? existing.activeTab : null);
+    existing.lastSeenAt = formatLocalTimestamp(new Date());
+  }
+
+  public removeTab(instanceId: string, tabId: number): void {
+    const existing = this.instances.get(instanceId);
+    if (!existing) {
+      return;
+    }
+    existing.tabs = existing.tabs.filter((tab) => tab.tab_id !== tabId);
+    if (existing.activeTab?.tab_id === tabId) {
+      existing.activeTab = null;
+    }
     existing.lastSeenAt = formatLocalTimestamp(new Date());
   }
 
@@ -94,6 +110,19 @@ export class FirefoxAttachRegistry {
 
   public remove(instanceId: string): void {
     this.instances.delete(instanceId);
+  }
+
+  public get(instanceId: string): FirefoxAttachInstanceRecord | undefined {
+    const existing = this.instances.get(instanceId);
+    if (!existing) {
+      return undefined;
+    }
+    return {
+      ...existing,
+      tabs: existing.tabs.map((tab) => ({ ...tab })),
+      activeTab: existing.activeTab ? { ...existing.activeTab } : null,
+      capabilities: [...existing.capabilities],
+    };
   }
 
   public listInstances(): FirefoxAttachInstanceRecord[] {

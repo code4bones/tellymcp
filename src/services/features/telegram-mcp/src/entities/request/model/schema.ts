@@ -341,7 +341,7 @@ export const browserAttachTabInputSchema = z.object({
 
 export const browserAttachTabOutputSchema = z.object({
   session_id: z.string().trim().min(1),
-  backend: z.literal("firefox-attached"),
+  backend: z.enum(["firefox-attached", "chrome-attached"]),
   instance_id: z.string().trim().min(1),
   tab_id: z.number().int().nonnegative(),
   attached_at: z.string().trim().min(1),
@@ -365,7 +365,7 @@ export const browserRecordingStartInputSchema = z.object({
 
 export const browserRecordingStartOutputSchema = z.object({
   session_id: z.string().trim().min(1),
-  backend: z.literal("firefox-attached"),
+  backend: z.enum(["firefox-attached", "chrome-attached"]),
   started: z.boolean(),
   recording_id: z.string().trim().min(1),
   instance_id: z.string().trim().min(1),
@@ -401,7 +401,7 @@ export const browserRecordingStatusOutputSchema = z.object({
   active: z.boolean(),
   recording: z
     .object({
-      backend: z.literal("firefox-attached"),
+      backend: z.enum(["firefox-attached", "chrome-attached"]),
       recording_id: z.string().trim().min(1),
       instance_id: z.string().trim().min(1),
       tab_id: z.number().int().nonnegative(),

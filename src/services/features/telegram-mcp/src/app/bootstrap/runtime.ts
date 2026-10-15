@@ -20,7 +20,7 @@ import { TelegramTransport } from "../../shared/integrations/telegram/transport"
 import { MinioExchangeStore } from "../../shared/integrations/object-storage/minioExchangeStore";
 import { GatewayHttpService } from "../../features/distributed-gateway/model/gatewayHttpService";
 import { ensureGatewayClientUuid } from "../../features/distributed-client/model/gatewayClientAccess";
-import { FirefoxAttachServer } from "../../features/browser-attach/model/firefoxAttachServer";
+import { BrowserAttachServer } from "../../features/browser-attach/model/browserAttachServer";
 import { TemporaryFileLinkStore } from "../../features/file-content/model/temporaryFileLinkStore";
 import {
   ensureTerminalTargetForSession,
@@ -56,7 +56,7 @@ export type AppRuntime = {
   projectIdentityResolver: ProjectIdentityResolver;
   webAppLaunchRegistry: WebAppLaunchRegistry;
   gatewayHttpService: GatewayHttpService;
-  firefoxAttachServer: FirefoxAttachServer;
+  browserAttachServer: BrowserAttachServer;
   temporaryFileLinkStore: TemporaryFileLinkStore | null;
   shutdown: () => Promise<void>;
 };
@@ -303,13 +303,13 @@ export async function createAppRuntime(input: {
         )
       : null;
   await temporaryFileLinkStore?.start();
-  const firefoxAttachServer = new FirefoxAttachServer(
+  const browserAttachServer = new BrowserAttachServer(
     config,
     logger,
     sessionStore,
     stateStore,
   );
-  await firefoxAttachServer.start();
+  await browserAttachServer.start();
 
   return {
     callBroker: input.callBroker,
@@ -328,12 +328,12 @@ export async function createAppRuntime(input: {
     projectIdentityResolver,
     webAppLaunchRegistry,
     gatewayHttpService,
-    firefoxAttachServer,
+    browserAttachServer,
     temporaryFileLinkStore,
     shutdown: async () => {
       logger.info("Shutdown started");
       await temporaryFileLinkStore?.stop();
-      await firefoxAttachServer.stop();
+      await browserAttachServer.stop();
       await telegramTransport.stop();
       stopAllPtyTargets();
       redis?.disconnect();

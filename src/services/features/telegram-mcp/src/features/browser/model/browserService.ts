@@ -90,7 +90,7 @@ import {
   callGatewayJson,
   ensureGatewayClientUuid,
 } from "../../distributed-client/model/gatewayClientAccess";
-import type { FirefoxAttachInstanceRecord } from "../../browser-attach/model/firefoxAttachRegistry";
+import type { FirefoxAttachInstanceRecord } from "../../browser-attach/model/browserAttachRegistry";
 
 type WaitUntilState = "load" | "domcontentloaded" | "networkidle" | "commit";
 
@@ -209,7 +209,7 @@ type RemoteConsoleInvoker = {
   ): Promise<T>;
 };
 
-type FirefoxAttachHost = {
+type BrowserAttachHost = {
   listInstances(): FirefoxAttachInstanceRecord[];
   getRecordingStatus(sessionId: string): Promise<BrowserRecordingRecord | null>;
   startRecording(input: {
@@ -266,7 +266,7 @@ export class BrowserService {
     private readonly logger: Logger,
     private readonly projectIdentityResolver: ProjectIdentityResolver,
     private readonly remoteConsoleInvoker?: RemoteConsoleInvoker,
-    private readonly firefoxAttachRegistry?: FirefoxAttachHost,
+    private readonly browserAttachRegistry?: BrowserAttachHost,
   ) {}
 
   public async listAttachedInstances(
@@ -287,7 +287,7 @@ export class BrowserService {
       }
     }
 
-    const instances = this.listFirefoxAttachInstances();
+    const instances = this.listBrowserAttachInstances();
     return {
       ...(resolvedSessionId ? { session_id: resolvedSessionId } : {}),
       total: instances.length,
@@ -336,7 +336,7 @@ export class BrowserService {
       }
     }
 
-    const instances = this.listFirefoxAttachInstances();
+    const instances = this.listBrowserAttachInstances();
     const instance =
       input.instance_id?.trim()
         ? instances.find((item) => item.instanceId === input.instance_id?.trim())
@@ -398,7 +398,7 @@ export class BrowserService {
       return remote;
     }
 
-    const instances = this.listFirefoxAttachInstances();
+    const instances = this.listBrowserAttachInstances();
     const instance =
       input.instance_id?.trim()
         ? instances.find((item) => item.instanceId === input.instance_id?.trim())
@@ -450,11 +450,11 @@ export class BrowserService {
       return remote;
     }
 
-    if (!this.firefoxAttachRegistry) {
+    if (!this.browserAttachRegistry) {
       throw new Error("Attached browser backend is not available.");
     }
 
-    const instances = this.listFirefoxAttachInstances();
+    const instances = this.listBrowserAttachInstances();
     const instance =
       input.instance_id?.trim()
         ? instances.find((item) => item.instanceId === input.instance_id?.trim())
@@ -480,16 +480,17 @@ export class BrowserService {
       );
     }
 
-    const result = await this.firefoxAttachRegistry.invokeTabAction({
+    const result = await this.browserAttachRegistry.invokeTabAction({
       instanceId: instance.instanceId,
       tabId: tab.tab_id,
       action: "attach",
     });
 
     const attachedAt = formatLocalTimestamp(new Date());
+    const backend = instance.browser === "chrome" ? "chrome-attached" : "firefox-attached";
     await this.maintenanceStore.setBrowserAttachment({
       sessionId: normalizedSessionId,
-      backend: "firefox-attached",
+      backend,
       instanceId: instance.instanceId,
       tabId: tab.tab_id,
       attachedAt,
@@ -507,7 +508,7 @@ export class BrowserService {
 
     return {
       session_id: normalizedSessionId,
-      backend: "firefox-attached",
+      backend,
       instance_id: instance.instanceId,
       tab_id: tab.tab_id,
       attached_at: attachedAt,
@@ -544,9 +545,9 @@ export class BrowserService {
     }
 
     const attachment = await this.getAttachedBrowserAttachment(normalizedSessionId);
-    if (attachment && this.firefoxAttachRegistry) {
+    if (attachment && this.browserAttachRegistry) {
       try {
-        await this.firefoxAttachRegistry.invokeTabAction({
+        await this.browserAttachRegistry.invokeTabAction({
           instanceId: attachment.instanceId,
           tabId: attachment.tabId,
           action: "detach",
@@ -588,11 +589,11 @@ export class BrowserService {
         "No attached browser tab is selected for this session. Select a tab in the browser attach panel first.",
       );
     }
-    if (!this.firefoxAttachRegistry) {
-      throw new Error("Firefox attach backend is not available.");
+    if (!this.browserAttachRegistry) {
+      throw new Error("Browser attach backend is not available.");
     }
 
-    const record = await this.firefoxAttachRegistry.startRecording({
+    const record = await this.browserAttachRegistry.startRecording({
       sessionId: normalizedSessionId,
       instanceId: input.instance_id?.trim() || attached.instanceId,
       tabId: attached.tabId,
@@ -622,11 +623,11 @@ export class BrowserService {
       return remote;
     }
 
-    if (!this.firefoxAttachRegistry) {
-      throw new Error("Firefox attach backend is not available.");
+    if (!this.browserAttachRegistry) {
+      throw new Error("Browser attach backend is not available.");
     }
 
-    const record = await this.firefoxAttachRegistry.stopRecording({
+    const record = await this.browserAttachRegistry.stopRecording({
       sessionId: normalizedSessionId,
     });
     if (!record) {
@@ -666,11 +667,11 @@ export class BrowserService {
       return remote;
     }
 
-    if (!this.firefoxAttachRegistry) {
-      throw new Error("Firefox attach backend is not available.");
+    if (!this.browserAttachRegistry) {
+      throw new Error("Browser attach backend is not available.");
     }
 
-    const record = await this.firefoxAttachRegistry.getRecordingStatus(
+    const record = await this.browserAttachRegistry.getRecordingStatus(
       normalizedSessionId,
     );
     return {
@@ -2274,11 +2275,11 @@ export class BrowserService {
     return await this.normalizeSessionIdForAccess(trimmed);
   }
 
-  private listFirefoxAttachInstances(): FirefoxAttachInstanceRecord[] {
-    if (!this.firefoxAttachRegistry) {
+  private listBrowserAttachInstances(): FirefoxAttachInstanceRecord[] {
+    if (!this.browserAttachRegistry) {
       return [];
     }
-    return this.firefoxAttachRegistry.listInstances();
+    return this.browserAttachRegistry.listInstances();
   }
 
   private buildAttachedLocatorPayload(
@@ -2305,7 +2306,7 @@ export class BrowserService {
     return {
       session_id: sessionId,
       started: true,
-      backend: "firefox-attached",
+      backend: record.backend,
       recording_id: record.recordingId,
       instance_id: record.instanceId,
       tab_id: record.tabId,
@@ -2322,7 +2323,7 @@ export class BrowserService {
     record: BrowserRecordingRecord,
   ): NonNullable<BrowserRecordingStatusOutput["recording"]> {
     return {
-      backend: "firefox-attached",
+      backend: record.backend,
       recording_id: record.recordingId,
       instance_id: record.instanceId,
       tab_id: record.tabId,
@@ -2362,11 +2363,11 @@ export class BrowserService {
       payload?: Record<string, unknown> | undefined;
     },
   ): Promise<Record<string, unknown> | undefined> {
-    if (!this.firefoxAttachRegistry) {
+    if (!this.browserAttachRegistry) {
       throw new Error("Attached browser backend is not available.");
     }
 
-    const result = await this.firefoxAttachRegistry.invokeTabAction({
+    const result = await this.browserAttachRegistry.invokeTabAction({
       instanceId: attachment.instanceId,
       tabId: attachment.tabId,
       action: input.action,

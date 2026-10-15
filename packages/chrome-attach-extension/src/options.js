@@ -190,6 +190,10 @@ function updateConnectionButtons(status, enabled) {
   toggleButton.disabled = false;
 }
 
+function isInternalTabUrl(url) {
+  return typeof url === "string" && (url.startsWith("chrome://") || url.startsWith("chrome-"));
+}
+
 function renderTabs(tabs, attachedTabId, recordingStatus, connected, currentInstanceId) {
   const container = document.getElementById("tabs");
   if (!container) {
@@ -555,7 +559,7 @@ async function render() {
   setRecordingTabText(recordingStatus);
   setRecordingScopeText(recordingStatus, currentInstanceId);
   renderTabs(
-    tabs,
+    tabs.filter((tab) => !isInternalTabUrl(tab.url)),
     stored[ATTACHED_TAB_KEY]?.tab_id,
     recordingStatus,
     status.state === "connected",
@@ -599,6 +603,10 @@ browser.storage.onChanged.addListener((changes, areaName) => {
 
 document.getElementById("inject-script-button").addEventListener("click", () => {
   void injectSelectedFile();
+});
+
+document.getElementById("tabs-reload-button").addEventListener("click", () => {
+  void render();
 });
 
 startControlPanelPort();

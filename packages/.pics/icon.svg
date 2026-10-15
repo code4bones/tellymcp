@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128"><defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2140"/>
+      <stop offset="1" stop-color="#15111f"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3fd0e0"/>
+      <stop offset="1" stop-color="#2a9fd6"/>
+    </linearGradient>
+    <radialGradient id="screen" cx="0.5" cy="0.4" r="0.7">
+      <stop offset="0" stop-color="#1f2a3d"/>
+      <stop offset="1" stop-color="#0d1220"/>
+    </radialGradient>
+  </defs><g transform="translate(16 16) scale(0.75)">
+
+  <!-- tile -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#bg)"/>
+
+  <!-- antennas -->
+  <path d="M52 34 L40 16" stroke="#3fd0e0" stroke-width="5" stroke-linecap="round"/>
+  <path d="M68 34 L82 18" stroke="#3fd0e0" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="40" cy="16" r="6" fill="#ff7aa8"/>
+  <circle cx="82" cy="18" r="6" fill="#ff7aa8"/>
+
+  <!-- cable with plug -->
+  <path d="M88 86 C104 88 108 98 100 106" stroke="#ff7aa8" stroke-width="6" fill="none" stroke-linecap="round"/>
+  <rect x="92" y="102" width="18" height="14" rx="4" fill="#ff7aa8" transform="rotate(-30 101 109)"/>
+  <path d="M104 116 l4 6 M110 112 l4 6" stroke="#ff7aa8" stroke-width="4" stroke-linecap="round" transform="rotate(-30 101 109)"/>
+
+  <!-- TV body -->
+  <rect x="18" y="32" width="76" height="62" rx="16" fill="url(#body)"/>
+  <!-- screen -->
+  <rect x="26" y="40" width="60" height="46" rx="10" fill="url(#screen)"/>
+  <!-- tab notch on screen top -->
+  <path d="M32 40 h20 l4 6 h-24 z" fill="#3fd0e0" opacity="0.35"/>
+
+  <!-- cute face -->
+  <circle cx="45" cy="62" r="5" fill="#eafcff"/>
+  <circle cx="67" cy="62" r="5" fill="#eafcff"/>
+  <circle cx="46.5" cy="60.5" r="1.6" fill="#0d1220"/>
+  <circle cx="68.5" cy="60.5" r="1.6" fill="#0d1220"/>
+  <path d="M51 71 q5 5 10 0" stroke="#eafcff" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <circle cx="38" cy="71" r="3.5" fill="#ff7aa8" opacity="0.7"/>
+  <circle cx="74" cy="71" r="3.5" fill="#ff7aa8" opacity="0.7"/>
+
+  <!-- feet -->
+  <rect x="30" y="92" width="10" height="8" rx="3" fill="#2a9fd6"/>
+  <rect x="72" y="92" width="10" height="8" rx="3" fill="#2a9fd6"/>
+</g></svg>

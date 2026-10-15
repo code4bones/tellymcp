@@ -1,14 +1,21 @@
 {
   "manifest_version": 3,
   "name": "TellyMCP Chrome Attach",
-  "version": "0.0.2",
+  "version": "0.0.6",
   "description": "Attach TellyMCP to an already running Chrome session.",
+  "icons": {
+    "16": "icon-16.png",
+    "32": "icon-32.png",
+    "48": "icon-48.png",
+    "128": "icon-128.png"
+  },
   "permissions": [
     "tabs",
     "activeTab",
     "storage",
     "cookies",
     "alarms",
+    "debugger",
     "webNavigation",
     "webRequest",
     "scripting"
@@ -21,6 +28,12 @@
   },
   "action": {
     "default_title": "TellyMCP Chrome Attach",
+    "default_icon": {
+      "16": "icon-16.png",
+      "32": "icon-32.png",
+      "48": "icon-48.png",
+      "128": "icon-128.png"
+    },
     "default_popup": "popup.html"
   },
   "options_page": "options.html",

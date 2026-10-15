@@ -90,6 +90,17 @@
         font-size: 16px;
       }
 
+      .tabs-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .tabs-header h2 {
+        margin: 0;
+      }
+
       .status {
         font-size: 15px;
         font-weight: 700;
@@ -301,7 +312,10 @@
         </div>
 
         <div class="card">
-          <h2>Tabs</h2>
+          <div class="tabs-header">
+            <h2>Tabs</h2>
+            <button id="tabs-reload-button" class="secondary" type="button">Reload</button>
+          </div>
           <p class="tabs-title">Tabs in current window</p>
           <div id="tabs" class="tabs"></div>
         </div>

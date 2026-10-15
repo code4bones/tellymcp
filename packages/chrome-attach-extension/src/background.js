@@ -178,56 +178,93 @@ function scriptingExecuteScript(options) {
   });
 }
 
-function collectInjectExportNames(source) {
-  const names = new Set();
-  const patterns = [
-    /\basync\s+function\s+([A-Za-z_$][\w$]*)\s*\(/gu,
-    /\bfunction\s+([A-Za-z_$][\w$]*)\s*\(/gu,
-    /\bclass\s+([A-Za-z_$][\w$]*)\s*(?:\{|extends\b)/gu,
-    /\b(?:var|let|const)\s+([A-Za-z_$][\w$]*)\s*=/gu,
-  ];
+const DEBUGGER_PROTOCOL_VERSION = "1.3";
 
-  for (const pattern of patterns) {
-    for (const match of source.matchAll(pattern)) {
-      const name = match[1];
-      if (name && name !== "TELLY") {
-        names.add(name);
-      }
-    }
-  }
-
-  return [...names];
+function diffNewWindowKeys(beforeKeys, afterKeys, namespace) {
+  const before = new Set(Array.isArray(beforeKeys) ? beforeKeys : []);
+  const after = Array.isArray(afterKeys) ? afterKeys : [];
+  return after.filter((name) => name !== namespace && !before.has(name));
 }
 
-function runInjectedMainWorldScript(namespace, source, exportNames) {
+function debuggerAttach(tabId) {
+  return new Promise((resolve, reject) => {
+    browser.debugger.attach({ tabId }, DEBUGGER_PROTOCOL_VERSION, () => {
+      const error = browser.runtime?.lastError;
+      if (error) {
+        reject(new Error(error.message));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function debuggerDetach(tabId) {
+  return new Promise((resolve) => {
+    browser.debugger.detach({ tabId }, () => {
+      void browser.runtime?.lastError;
+      resolve();
+    });
+  });
+}
+
+function debuggerSendCommand(tabId, method, params) {
+  return new Promise((resolve, reject) => {
+    browser.debugger.sendCommand({ tabId }, method, params, (result) => {
+      const error = browser.runtime?.lastError;
+      if (error) {
+        reject(new Error(error.message));
+        return;
+      }
+      resolve(result);
+    });
+  });
+}
+
+async function evaluateInPage(tabId, expression) {
+  const response = await debuggerSendCommand(tabId, "Runtime.evaluate", {
+    expression,
+    returnByValue: true,
+    awaitPromise: false,
+  });
+  if (response?.exceptionDetails) {
+    const message =
+      response.exceptionDetails.exception?.description ||
+      response.exceptionDetails.text ||
+      "Script evaluation failed.";
+    throw new Error(message);
+  }
+  return response?.result?.value;
+}
+
+async function runInjectScriptViaDebugger(tabId, namespace, source) {
+  let attached = false;
   try {
-    window[namespace] = window[namespace] || {};
-    const wrapped = "window[" + JSON.stringify(namespace) + "]=window[" + JSON.stringify(namespace) + "]||{};var TELLY=window[" + JSON.stringify(namespace) + "];\n"
-      + String(source || "");
+    await debuggerAttach(tabId);
+    attached = true;
 
-    const script = document.createElement("script");
-    script.textContent = wrapped;
-    (document.documentElement || document.head || document.body).appendChild(script);
-    script.remove();
+    const beforeKeys = await evaluateInPage(tabId, "Object.getOwnPropertyNames(window)");
+    await evaluateInPage(tabId, source);
+    const afterKeys = await evaluateInPage(tabId, "Object.getOwnPropertyNames(window)");
 
-    for (const name of Array.isArray(exportNames) ? exportNames : []) {
-      if (!name || !(name in window)) {
-        continue;
-      }
-      try {
-        window[namespace][name] = window[name];
-      } catch {
-        // ignore unassignable globals
-      }
-    }
+    const newNames = diffNewWindowKeys(beforeKeys, afterKeys, namespace);
+    const exportStatements = newNames
+      .map(
+        (name) =>
+          `try{window[${JSON.stringify(namespace)}][${JSON.stringify(name)}]=window[${JSON.stringify(name)}];}catch(e){}`,
+      )
+      .join("");
+    const summaryExpression =
+      `window[${JSON.stringify(namespace)}]=window[${JSON.stringify(namespace)}]||{};` +
+      exportStatements +
+      `({namespace:${JSON.stringify(namespace)},bytes:${JSON.stringify(source.length)},url:location.href,title:document.title});`;
+    const summary = await evaluateInPage(tabId, summaryExpression);
 
     return {
       ok: true,
-      result: {
+      result: summary || {
         namespace,
-        bytes: String(source || "").length,
-        url: location.href,
-        title: document.title,
+        bytes: source.length,
       },
     };
   } catch (error) {
@@ -235,6 +272,10 @@ function runInjectedMainWorldScript(namespace, source, exportNames) {
       ok: false,
       error: error instanceof Error ? error.message : String(error),
     };
+  } finally {
+    if (attached) {
+      await debuggerDetach(tabId);
+    }
   }
 }
 
@@ -777,19 +818,12 @@ async function runTabAction(tabId, action, payload) {
       };
     }
 
-    const execution = await scriptingExecuteScript({
-      target: { tabId },
-      world: "MAIN",
-      func: runInjectedMainWorldScript,
-      args: [namespace, source, collectInjectExportNames(source)],
-    });
-    const result = execution[0]?.result;
-
-    if (!result || result.ok !== true) {
-      return {
-        ok: false,
-        error: result?.error || "Tab action did not return a successful result.",
-      };
+    const result = await runInjectScriptViaDebugger(tabId, namespace, source);
+    if (!result.ok) {
+      const message = /already attach/iu.test(result.error || "")
+        ? "Cannot inject: DevTools (or another debugger) is already attached to this tab. Close DevTools and retry."
+        : result.error || "Tab action did not return a successful result.";
+      return { ok: false, error: message };
     }
 
     return result;
@@ -1422,6 +1456,19 @@ browser.runtime.onConnect.addListener((port) => {
   });
   port.onMessage.addListener(() => {
     // keep the service worker alive while the control panel is open
+  });
+});
+
+browser.tabs.onRemoved.addListener((tabId) => {
+  consoleMessagesByTabId.delete(tabId);
+  pageErrorsByTabId.delete(tabId);
+  networkFailuresByTabId.delete(tabId);
+  if (attachedTabId === tabId) {
+    void setAttachedTab(null);
+  }
+  sendJson({
+    type: "tab_removed",
+    tab_id: tabId,
   });
 });
 

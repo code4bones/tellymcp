@@ -80,10 +80,10 @@ For the production deployment used while implementing this feature, the
 working ChatGPT values are:
 
 ```text
-Connection:                https://drd.undoo.ru/api/mcp
-Authorization server base: https://drd.undoo.ru/api
-Resource:                  https://drd.undoo.ru/api/mcp
-OIDC configuration URL:    https://drd.undoo.ru/.well-known/openid-configuration/api
+Connection:                https://your-gateway-domain.example/api/mcp
+Authorization server base: https://your-gateway-domain.example/api
+Resource:                  https://your-gateway-domain.example/api/mcp
+OIDC configuration URL:    https://your-gateway-domain.example/.well-known/openid-configuration/api
 ```
 
 The `/api` suffix in the root discovery URL is expected RFC 8414

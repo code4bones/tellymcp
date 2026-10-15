@@ -13,14 +13,14 @@ connection URL was corrected.
 The decisive configuration distinction is:
 
 ```text
-Chat host Connection:      https://drd.undoo.ru/api/mcp
-OAuth public base:         https://drd.undoo.ru/api
-OAuth issuer:              https://drd.undoo.ru/api
-OAuth configured audience: https://drd.undoo.ru/api
-Discovered MCP resource:   https://drd.undoo.ru/api/mcp
+Chat host Connection:      https://your-gateway-domain.example/api/mcp
+OAuth public base:         https://your-gateway-domain.example/api
+OAuth issuer:              https://your-gateway-domain.example/api
+OAuth configured audience: https://your-gateway-domain.example/api
+Discovered MCP resource:   https://your-gateway-domain.example/api/mcp
 ```
 
-Entering `https://drd.undoo.ru/api` in ChatGPT's `Connection` field causes the
+Entering `https://your-gateway-domain.example/api` in ChatGPT's `Connection` field causes the
 host to complete OAuth discovery but never reach MCP `initialize` or
 `tools/list`. The UI does not expose a useful error for this case.
 
@@ -29,11 +29,11 @@ host to complete OAuth discovery but never reach MCP `initialize` or
 With the correct connection URL, ChatGPT derives values equivalent to:
 
 ```text
-Auth URL:                  https://drd.undoo.ru/api/oauth/authorize
-Token URL:                 https://drd.undoo.ru/api/oauth/token
-Authorization server base: https://drd.undoo.ru/api
-Resource:                  https://drd.undoo.ru/api/mcp
-OIDC configuration URL:    https://drd.undoo.ru/.well-known/openid-configuration/api
+Auth URL:                  https://your-gateway-domain.example/api/oauth/authorize
+Token URL:                 https://your-gateway-domain.example/api/oauth/token
+Authorization server base: https://your-gateway-domain.example/api
+Resource:                  https://your-gateway-domain.example/api/mcp
+OIDC configuration URL:    https://your-gateway-domain.example/.well-known/openid-configuration/api
 ```
 
 The final `/api` on the OIDC and authorization-server discovery URLs is not an
@@ -164,9 +164,9 @@ Important proxy behavior:
 Non-secret production values are:
 
 ```env
-TELLYMCP_PUBLIC_URL=https://drd.undoo.ru/api
-TELLYMCP_OAUTH_ISSUER=https://drd.undoo.ru/api
-TELLYMCP_OAUTH_AUDIENCE=https://drd.undoo.ru/api
+TELLYMCP_PUBLIC_URL=https://your-gateway-domain.example/api
+TELLYMCP_OAUTH_ISSUER=https://your-gateway-domain.example/api
+TELLYMCP_OAUTH_AUDIENCE=https://your-gateway-domain.example/api
 ```
 
 The gateway also has operator-owned values for the magic token, client id,

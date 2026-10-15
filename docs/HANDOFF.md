@@ -28,7 +28,7 @@ is next fully reconciled against `git log`.
 - ChatGPT/Claude OAuth connector support was implemented around the existing
   Streamable HTTP MCP endpoint
 - the connector was validated in production with ChatGPT on
-  `https://drd.undoo.ru/api/mcp`; reconnect and tool refresh succeeded
+  `https://your-gateway-domain.example/api/mcp`; reconnect and tool refresh succeeded
 - OAuth discovery, PKCE authorization-code exchange, RS256 JWT bearer auth,
   exact redirect allowlisting, confidential-client auth, JWKS, dual MCP auth,
   Nginx routes, signing-key CLI support, and safe diagnostics are present

@@ -263,9 +263,9 @@ Status: accepted
 Status: accepted
 
 - the public chat-host connection URL is the concrete Streamable HTTP endpoint,
-  for example `https://drd.undoo.ru/api/mcp`
+  for example `https://your-gateway-domain.example/api/mcp`
 - the OAuth issuer and default audience remain the gateway base URL, for example
-  `https://drd.undoo.ru/api`
+  `https://your-gateway-domain.example/api`
 - protected-resource discovery may expose `/api/mcp` as the more specific MCP
   resource without changing the configured base audience
 - RFC 8414 path-insertion discovery ending in `/api` is expected when the issuer

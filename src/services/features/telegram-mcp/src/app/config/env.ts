@@ -74,6 +74,7 @@ const envSchema = z.object({
   MCP_HTTP_PORT: z.coerce.number().int().positive().default(8787),
   MCP_HTTP_PATH: z.string().min(1).default("/mcp"),
   MCP_HTTP_BEARER_TOKEN: optionalNonEmptyString,
+  TELLYMCP_INBOX_BEARER_TOKEN: optionalNonEmptyString,
   TELLYMCP_PUBLIC_URL: optionalUrlString,
   TELLYMCP_OAUTH_ISSUER: optionalUrlString,
   TELLYMCP_OAUTH_AUDIENCE: optionalUrlString,
@@ -278,6 +279,7 @@ export type AppConfig = {
     httpPort: number;
     httpPath: string;
     bearerToken?: string;
+    inboxBearerToken?: string;
     enableDebugRoutes: boolean;
     enablePruneRoute: boolean;
   };
@@ -583,6 +585,9 @@ export function loadConfig(): AppConfig {
       httpPath: parsed.MCP_HTTP_PATH,
       ...(parsed.MCP_HTTP_BEARER_TOKEN
         ? { bearerToken: parsed.MCP_HTTP_BEARER_TOKEN }
+        : {}),
+      ...(parsed.TELLYMCP_INBOX_BEARER_TOKEN
+        ? { inboxBearerToken: parsed.TELLYMCP_INBOX_BEARER_TOKEN }
         : {}),
       enableDebugRoutes: parsed.MCP_HTTP_ENABLE_DEBUG_ROUTES,
       enablePruneRoute: parsed.MCP_HTTP_ENABLE_PRUNE_ROUTE,

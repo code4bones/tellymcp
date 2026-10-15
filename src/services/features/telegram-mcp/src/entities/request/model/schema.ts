@@ -839,3 +839,81 @@ export const markXchangeRecordReadOutputSchema = z.object({
   record_id: z.string(),
   updated: z.boolean(),
 });
+
+const inboxExternalPrincipalSchema = z.object({
+  namespace: z.string().trim().min(1),
+  subject: z.string().trim().min(1),
+});
+
+export const inboxPutInputSchema = z.object({
+  source: z.object({
+    integration: z.string().trim().min(1),
+    messageId: z.string().trim().min(1),
+  }),
+  recipient: z.object({ externalPrincipal: inboxExternalPrincipalSchema }),
+  route: z.object({
+    namespace: z.string().trim().min(1),
+    key: z.string().trim().min(1),
+  }),
+  resource: z.object({
+    kind: z.string().trim().min(1),
+    id: z.string().trim().min(1),
+  }),
+  kind: z.string().trim().min(1),
+  requiresAcceptance: z.boolean().optional(),
+  schemaVersion: z.number().int().positive().optional(),
+  display: z.object({
+    title: z.string().trim().min(1),
+    summary: z.string().trim().optional(),
+  }),
+});
+
+export const inboxPutOutputSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  deduplicated: z.boolean(),
+});
+
+export const inboxResponsesInputSchema = z.object({
+  integration: z.string().trim().min(1),
+  since: z.string().trim().min(1).optional(),
+  limit: z.number().int().positive().max(100).optional(),
+});
+
+export const inboxResponsesOutputSchema = z.object({
+  items: z.array(
+    z.object({
+      message_id: z.string(),
+      status: z.string(),
+      status_reason: z.string().optional(),
+      updated_at: z.string(),
+    }),
+  ),
+  next_cursor: z.string().nullable(),
+});
+
+export const inboxBindIdentityInputSchema = z.object({
+  namespace: z.string().trim().min(1),
+  subject: z.string().trim().min(1),
+  telegram_user_id: z.union([z.string(), z.number()]),
+});
+
+export const inboxBindIdentityOutputSchema = z.object({
+  namespace: z.string(),
+  subject: z.string(),
+  gateway_user_uuid: z.string(),
+});
+
+export const inboxBindRouteInputSchema = z.object({
+  namespace: z.string().trim().min(1),
+  route_key: z.string().trim().min(1),
+  telegram_user_id: z.union([z.string(), z.number()]),
+  session_id: z.string().trim().min(1),
+});
+
+export const inboxBindRouteOutputSchema = z.object({
+  namespace: z.string(),
+  route_key: z.string(),
+  client_uuid: z.string(),
+  local_session_id: z.string(),
+});

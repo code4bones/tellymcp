@@ -538,6 +538,133 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
           );
         });
       }
+
+      if (!(await this.db.schema.withSchema(MCP_SCHEMA).hasTable("inbox_messages"))) {
+        await this.db.schema.withSchema(MCP_SCHEMA).createTable("inbox_messages", (table) => {
+          table.uuid("id").primary();
+          table.text("source_integration").notNullable();
+          table.text("source_message_id").notNullable();
+          table.text("recipient_namespace").notNullable();
+          table.text("recipient_subject").notNullable();
+          table.text("route_namespace").notNullable();
+          table.text("route_key").notNullable();
+          table.text("resource_kind").notNullable();
+          table.text("resource_id").notNullable();
+          table.text("kind").notNullable();
+          table.boolean("requires_acceptance").notNullable().defaultTo(true);
+          table.integer("schema_version").notNullable().defaultTo(1);
+          table.jsonb("payload").notNullable().defaultTo(this.db.raw(`'{}'::jsonb`));
+          table.text("status").notNullable().defaultTo("pending");
+          table.text("status_reason");
+          table.text("pending_request_id");
+          table.uuid("xchange_message_uuid");
+          table.integer("attempts").notNullable().defaultTo(0);
+          table.timestamp("last_attempt_at", { useTz: true });
+          table
+            .timestamp("created_at", { useTz: true })
+            .notNullable()
+            .defaultTo(this.db.fn.now());
+          table
+            .timestamp("updated_at", { useTz: true })
+            .notNullable()
+            .defaultTo(this.db.fn.now());
+          table.unique(
+            ["source_integration", "source_message_id"],
+            "inbox_messages_source_unique",
+          );
+          table.index(["status", "created_at"], "inbox_messages_status_idx");
+          table.index(
+            ["source_integration", "updated_at"],
+            "inbox_messages_integration_cursor_idx",
+          );
+        });
+      }
+
+      if (
+        !(await this.db.schema
+          .withSchema(MCP_SCHEMA)
+          .hasTable("inbox_external_principals"))
+      ) {
+        await this.db.schema
+          .withSchema(MCP_SCHEMA)
+          .createTable("inbox_external_principals", (table) => {
+            table.uuid("id").primary();
+            table.text("namespace").notNullable();
+            table.text("subject").notNullable();
+            table.uuid("gateway_user_uuid").notNullable();
+            table
+              .timestamp("created_at", { useTz: true })
+              .notNullable()
+              .defaultTo(this.db.fn.now());
+            table
+              .timestamp("updated_at", { useTz: true })
+              .notNullable()
+              .defaultTo(this.db.fn.now());
+            table
+              .foreign("gateway_user_uuid")
+              .references("gateway_user_uuid")
+              .inTable(`${MCP_SCHEMA}.gateway_users`)
+              .onDelete("CASCADE");
+            table.unique(
+              ["namespace", "subject"],
+              "inbox_external_principals_unique",
+            );
+          });
+      }
+
+      if (
+        !(await this.db.schema.withSchema(MCP_SCHEMA).hasTable("inbox_route_bindings"))
+      ) {
+        await this.db.schema
+          .withSchema(MCP_SCHEMA)
+          .createTable("inbox_route_bindings", (table) => {
+            table.uuid("id").primary();
+            table.text("namespace").notNullable();
+            table.text("route_key").notNullable();
+            table.uuid("gateway_user_uuid").notNullable();
+            table.uuid("client_uuid").notNullable();
+            table.text("local_session_id").notNullable();
+            table
+              .timestamp("created_at", { useTz: true })
+              .notNullable()
+              .defaultTo(this.db.fn.now());
+            table
+              .timestamp("updated_at", { useTz: true })
+              .notNullable()
+              .defaultTo(this.db.fn.now());
+            table
+              .foreign("gateway_user_uuid")
+              .references("gateway_user_uuid")
+              .inTable(`${MCP_SCHEMA}.gateway_users`)
+              .onDelete("CASCADE");
+            table
+              .foreign("client_uuid")
+              .references("client_uuid")
+              .inTable(`${MCP_SCHEMA}.gateway_clients`)
+              .onDelete("CASCADE");
+            table.unique(
+              ["namespace", "route_key", "gateway_user_uuid"],
+              "inbox_route_bindings_unique",
+            );
+          });
+      }
+
+      await this.db.raw(`
+        create or replace function ${MCP_SCHEMA}.inbox_messages_notify() returns trigger as $$
+        begin
+          perform pg_notify('inbox_ready', NEW.id::text);
+          return NEW;
+        end;
+        $$ language plpgsql;
+      `);
+      await this.db.raw(
+        `drop trigger if exists inbox_messages_notify_trigger on ${MCP_SCHEMA}.inbox_messages`,
+      );
+      await this.db.raw(`
+        create trigger inbox_messages_notify_trigger
+          after insert on ${MCP_SCHEMA}.inbox_messages
+          for each row execute function ${MCP_SCHEMA}.inbox_messages_notify();
+      `);
     },
   },
 

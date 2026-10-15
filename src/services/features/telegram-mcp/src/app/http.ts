@@ -7,6 +7,7 @@ import type { Socket } from "node:net";
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { Update } from "grammy/types";
 import ws from "ws";
@@ -217,13 +218,21 @@ function readBearerToken(req: IncomingMessage): string | null {
   return header.slice("Bearer ".length).trim() || null;
 }
 
-export type McpHttpAuthorizationMode = "public" | "internal_bearer" | "oauth";
+export type McpHttpAuthorizationMode =
+  | "public"
+  | "internal_bearer"
+  | "inbox_bearer"
+  | "oauth";
 
 export function resolveMcpHttpAuthorization(
   req: IncomingMessage,
   internalBearerToken: string | undefined,
   oauthFacade: Pick<OAuthFacade, "verifyAccessToken"> | null,
+  inboxBearerToken?: string,
 ): McpHttpAuthorizationMode | null {
+  if (inboxBearerToken && isAuthorized(req, inboxBearerToken)) {
+    return "inbox_bearer";
+  }
   if (!internalBearerToken && !oauthFacade) {
     return "public";
   }
@@ -298,7 +307,7 @@ function isRelayTerminalUnavailableMessage(error: unknown): boolean {
 export function createMcpHttpHandler(
   runtime: AppRuntime,
   input: {
-    createMcpServer: () => McpServer;
+    createMcpServer: (scope?: "inbox") => McpServer;
     getGatewaySocketService?: () => {
       openLiveRelayStream?: (params: {
         clientUuid: string;
@@ -1375,7 +1384,19 @@ export function createMcpHttpHandler(
       req,
       runtime.config.mcp.bearerToken,
       oauthFacade,
+      runtime.config.mcp.inboxBearerToken,
     );
+    if (authorizationMode === "inbox_bearer") {
+      // Tags req.auth so the MCP SDK's StreamableHTTPServerTransport exposes
+      // it to tool handlers as extra.authInfo; createMcpServer("inbox") below
+      // is the real enforcement (only inbox_* tools are registered on that
+      // server instance), this is belt-and-suspenders.
+      (req as IncomingMessage & { auth?: AuthInfo }).auth = {
+        token: runtime.config.mcp.inboxBearerToken ?? "",
+        clientId: "inbox-integration",
+        scopes: ["inbox"],
+      };
+    }
     if (!authorizationMode) {
       const authorizationHeader = readHeader(req, "authorization");
       runtime.logger.warn("Unauthorized MCP HTTP request rejected", {
@@ -1473,7 +1494,9 @@ export function createMcpHttpHandler(
             }
           },
         });
-        const server = input.createMcpServer();
+        const server = input.createMcpServer(
+          authorizationMode === "inbox_bearer" ? "inbox" : undefined,
+        );
         const closeEntry = async (
           initiator: "app" | "transport",
         ): Promise<void> => {

@@ -10,6 +10,7 @@ import {
   TELEGRAM_MCP_BROWSER_SERVICE_NAME,
   type TelegramMcpBrowserServiceInstance,
 } from "./browser.service";
+import { TELEGRAM_MCP_EXTERNAL_INBOX_SERVICE_NAME } from "./external-inbox.service";
 import {
   TELEGRAM_MCP_COLLABORATION_SERVICE_NAME,
   type TelegramMcpCollaborationServiceInstance,
@@ -75,16 +76,23 @@ import { RefreshToolsMarkdownTool } from "./src/features/tools-sync/model/refres
 import { GetXchangeRecordTool } from "./src/features/xchange/model/getXchangeRecordTool";
 import { ListXchangeRecordsTool } from "./src/features/xchange/model/listXchangeRecordsTool";
 import { MarkXchangeRecordReadTool } from "./src/features/xchange/model/markXchangeRecordReadTool";
+import { InboxPutTool } from "./src/features/external-inbox/model/inboxPutTool";
+import { InboxResponsesTool } from "./src/features/external-inbox/model/inboxResponsesTool";
+import { InboxBindIdentityTool } from "./src/features/external-inbox/model/inboxBindIdentityTool";
+import { InboxBindRouteTool } from "./src/features/external-inbox/model/inboxBindRouteTool";
+import { ExternalInboxToolService } from "./src/features/external-inbox/model/externalInboxToolService";
 import type { ToolModule } from "./src/shared/api/tool-registry/types";
 
 export const TELEGRAM_MCP_MCP_SERVER_SERVICE_NAME = "telegramMcp.mcpServer";
 
+export type McpServerScope = "inbox" | undefined;
+
 export type TelegramMcpMcpServerServiceInstance = Service & {
-  createServer: () => McpServer;
+  createServer: (scope?: McpServerScope) => McpServer;
 };
 
 type McpServerCarrier = Service & {
-  createServer?: () => McpServer;
+  createServer?: (scope?: McpServerScope) => McpServer;
 };
 
 const TelegramMcpMcpServerService: ServiceSchema = {
@@ -98,10 +106,27 @@ const TelegramMcpMcpServerService: ServiceSchema = {
     TELEGRAM_MCP_FILE_CONTENT_SERVICE_NAME,
     TELEGRAM_MCP_TOOLS_SYNC_SERVICE_NAME,
     TELEGRAM_MCP_XCHANGE_SERVICE_NAME,
+    TELEGRAM_MCP_EXTERNAL_INBOX_SERVICE_NAME,
   ],
 
   methods: {
-    createServer(this: McpServerCarrier): McpServer {
+    createServer(this: McpServerCarrier, scope?: McpServerScope): McpServer {
+      if (scope === "inbox") {
+        const inboxToolService = new ExternalInboxToolService((actionName, params) =>
+          this.broker.call(actionName, params, { meta: { internal_call: true } }),
+        );
+        const inboxTools: ToolModule[] = [
+          new InboxPutTool(inboxToolService),
+          new InboxResponsesTool(inboxToolService),
+          new InboxBindIdentityTool(inboxToolService),
+          new InboxBindRouteTool(inboxToolService),
+        ];
+        this.logger.info("telegram_mcp MCP server instance created (inbox scope)", {
+          toolCount: inboxTools.length,
+        });
+        return createMcpServer(inboxTools);
+      }
+
       const sessionContextService = this.broker.getLocalService(
         TELEGRAM_MCP_SESSION_CONTEXT_SERVICE_NAME,
       ) as TelegramMcpSessionContextServiceInstance | null;
@@ -218,6 +243,7 @@ const TelegramMcpMcpServerService: ServiceSchema = {
       TELEGRAM_MCP_FILE_CONTENT_SERVICE_NAME,
       TELEGRAM_MCP_TOOLS_SYNC_SERVICE_NAME,
       TELEGRAM_MCP_XCHANGE_SERVICE_NAME,
+      TELEGRAM_MCP_EXTERNAL_INBOX_SERVICE_NAME,
     ]);
 
     this.logger.info("telegram_mcp MCP server service is ready");

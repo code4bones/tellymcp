@@ -19,6 +19,14 @@ const DISTRIBUTED_MODE = process.env.DISTRIBUTED_MODE || "client";
 const GATEWAY_ENABLED =
   DISTRIBUTED_MODE === "gateway" || DISTRIBUTED_MODE === "both";
 
+// Reserved, globally-fixed identities for the external-inbox feature's xchange
+// "sender": inbox-originated nudges have no real source console, so they are
+// attributed to one explicit, clearly-labeled system project/client/session
+// rather than a hidden/ambiguous fallback.
+const INBOX_SYSTEM_PROJECT_UUID = "00000000-0000-0000-0000-00000000c001";
+const INBOX_SYSTEM_CLIENT_UUID = "00000000-0000-0000-0000-00000000c002";
+const INBOX_SYSTEM_SESSION_UUID = "00000000-0000-0000-0000-00000000c003";
+
 type GatewayServiceCarrier = Service & {
   normalizeOptionalText?: (value: unknown) => string | null;
   requireText?: (value: unknown, fieldName: string) => string;
@@ -187,6 +195,14 @@ type GatewayServiceCarrier = Service & {
   sendPartnerNoteRecord?: (
     input: Record<string, unknown>,
   ) => Promise<SendPartnerNoteOutput>;
+  ensureInboxSystemActorRecord?: () => Promise<{
+    projectUuid: string;
+    clientUuid: string;
+    sessionUuid: string;
+  }>;
+  createInboxDeliveryRecord?: (
+    input: Record<string, unknown>,
+  ) => Promise<{ message_uuid: string; delivery_uuid: string }>;
   pollDeliveriesRecord?: (input: Record<string, unknown>) => Promise<{
     deliveries: Array<{
       delivery_uuid: string;
@@ -2127,6 +2143,142 @@ const TelegramMcpGatewayService: ServiceSchema = {
       };
     },
 
+    async ensureInboxSystemActorRecord(this: GatewayServiceCarrier): Promise<{
+      projectUuid: string;
+      clientUuid: string;
+      sessionUuid: string;
+    }> {
+      const projectUuid = INBOX_SYSTEM_PROJECT_UUID;
+      const clientUuid = INBOX_SYSTEM_CLIENT_UUID;
+      const sessionUuid = INBOX_SYSTEM_SESSION_UUID;
+
+      const existingProject = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_projects")
+        .where({ project_uuid: projectUuid })
+        .first("project_uuid");
+      if (!existingProject) {
+        await this.db
+          .withSchema(MCP_SCHEMA)
+          .table("gateway_projects")
+          .insert({
+            project_uuid: projectUuid,
+            name: "TellyMCP Inbox",
+            invite_token: `system-inbox-${projectUuid}`,
+          })
+          .onConflict("project_uuid")
+          .ignore();
+      }
+
+      const existingClient = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_clients")
+        .where({ client_uuid: clientUuid })
+        .first("client_uuid");
+      if (!existingClient) {
+        await this.db
+          .withSchema(MCP_SCHEMA)
+          .table("gateway_clients")
+          .insert({
+            client_uuid: clientUuid,
+            client_label: "TellyMCP Inbox",
+            meta: this.db.raw(`?::jsonb`, [
+              JSON.stringify({ system: true, feature: "external-inbox" }),
+            ]),
+          })
+          .onConflict("client_uuid")
+          .ignore();
+      }
+
+      const existingSession = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_sessions")
+        .where({ session_uuid: sessionUuid })
+        .first("session_uuid");
+      if (!existingSession) {
+        await this.db
+          .withSchema(MCP_SCHEMA)
+          .table("gateway_sessions")
+          .insert({
+            session_uuid: sessionUuid,
+            client_uuid: clientUuid,
+            local_session_id: "inbox",
+            label: "TellyMCP Inbox",
+            status: "active",
+          })
+          .onConflict("session_uuid")
+          .ignore();
+      }
+
+      return { projectUuid, clientUuid, sessionUuid };
+    },
+
+    async createInboxDeliveryRecord(
+      this: GatewayServiceCarrier,
+      input: Record<string, unknown>,
+    ): Promise<{ message_uuid: string; delivery_uuid: string }> {
+      const targetClientUuid = this.requireText?.(
+        input.target_client_uuid,
+        "target_client_uuid",
+      ) as string;
+      const targetLocalSessionId = this.requireText?.(
+        input.target_local_session_id,
+        "target_local_session_id",
+      ) as string;
+      const kind = this.requireText?.(input.kind, "kind") as string;
+      const summary = this.requireText?.(input.summary, "summary") as string;
+      const message = this.requireText?.(input.message, "message") as string;
+
+      const targetSession = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_sessions")
+        .where({
+          client_uuid: targetClientUuid,
+          local_session_id: targetLocalSessionId,
+        })
+        .first("session_uuid", "client_uuid", "local_session_id");
+
+      if (!targetSession) {
+        throw new Error(
+          `Target console '${targetClientUuid}:${targetLocalSessionId}' is not registered.`,
+        );
+      }
+
+      const system = await this.ensureInboxSystemActorRecord?.();
+      if (!system) {
+        throw new Error("Failed to ensure inbox system actor record.");
+      }
+
+      const messageUuid = randomUUID();
+      const deliveryUuid = randomUUID();
+      const now = new Date().toISOString();
+
+      await this.db.withSchema(MCP_SCHEMA).table("gateway_messages").insert({
+        message_uuid: messageUuid,
+        project_uuid: system.projectUuid,
+        from_session_uuid: system.sessionUuid,
+        to_session_uuid: targetSession.session_uuid,
+        kind,
+        summary,
+        body: message,
+        requires_reply: false,
+        created_at: now,
+      });
+
+      await this.db.withSchema(MCP_SCHEMA).table("gateway_deliveries").insert({
+        delivery_uuid: deliveryUuid,
+        message_uuid: messageUuid,
+        target_client_uuid: targetSession.client_uuid,
+        target_session_uuid: targetSession.session_uuid,
+        status: "queued",
+        attempt_count: 0,
+        available_at: now,
+        created_at: now,
+      });
+
+      return { message_uuid: messageUuid, delivery_uuid: deliveryUuid };
+    },
+
     async pollDeliveriesRecord(
       this: GatewayServiceCarrier,
       input: Record<string, unknown>,
@@ -2656,6 +2808,16 @@ const TelegramMcpGatewayService: ServiceSchema = {
           throw new Error("Gateway service is disabled in client mode");
         }
         return this.sendPartnerNoteRecord?.(ctx.params as Record<string, unknown>);
+      },
+    },
+    createInboxDelivery: {
+      async handler(this: GatewayServiceCarrier, ctx) {
+        if (!GATEWAY_ENABLED) {
+          throw new Error("Gateway service is disabled in client mode");
+        }
+        return this.createInboxDeliveryRecord?.(
+          ctx.params as Record<string, unknown>,
+        );
       },
     },
     pollDeliveries: {

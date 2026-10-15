@@ -63,6 +63,13 @@ Common optional gateway groups:
   `TERMINAL_PROMPT_SCAN_INTERVAL_SECONDS`,
   `TERMINAL_PROMPT_SCAN_COOLDOWN_SECONDS`, `TERMINAL_PROMPT_SCAN_STRATEGY`,
   `TERMINAL_PROMPT_SCAN_MIN_SCORE`
+- generic external inbox (`inbox_put`/`inbox_responses`/`inbox_bind_identity`/
+  `inbox_bind_route`, e.g. the Marrow integration): `TELLYMCP_INBOX_BEARER_TOKEN`
+  (a dedicated bearer token, separate from `MCP_HTTP_BEARER_TOKEN`, required to
+  call these four tools — without it they are unreachable, matching the "narrow,
+  separately auditable credential" requirement), `INBOX_APPROVAL_TIMEOUT_SECONDS`
+  (default 600; how long a Telegram Approve/Reject prompt waits before the
+  message is marked failed)
 
 ## Client / Agent Console
 

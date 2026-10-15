@@ -1,4 +1,4 @@
-import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";

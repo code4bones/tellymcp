@@ -9,7 +9,7 @@ build:package:
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v?\d+\.\d+\.\d+$/'
   script:
-    - bash scripts/build-package-artifact.sh
+    - bash tools/build-package-artifact.sh
   artifacts:
     expire_in: 7 days
     paths:
@@ -25,7 +25,7 @@ deploy:gateway:
     - job: build:package
       artifacts: true
   script:
-    - bash scripts/deploy-gateway.sh
+    - bash tools/deploy-gateway.sh
 
 build:onebot:
   stage: build
@@ -54,4 +54,4 @@ deploy:onebot:
     - job: build:onebot
       artifacts: true
   script:
-    - bash scripts/deploy-onebot-branch.sh
+    - bash tools/deploy-onebot-branch.sh

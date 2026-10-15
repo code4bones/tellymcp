@@ -52,7 +52,7 @@ const chromeDir = path.join(repoRoot, "packages", "chrome-attach-extension");
 const firefoxDir = path.join(repoRoot, "packages", "firefox-attach-extension");
 
 run(repoRoot, "node", [
-  path.join(repoRoot, "scripts", "sync-extensions-version.mjs"),
+  path.join(repoRoot, "tools", "sync-extensions-version.mjs"),
   ...(explicitVersion ? [explicitVersion] : []),
 ]);
 

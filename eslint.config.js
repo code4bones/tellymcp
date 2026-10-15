@@ -91,6 +91,7 @@ export default tseslint.config(
     files: [
       "packages/firefox-attach-extension/scripts/**/*.mjs",
       "packages/chrome-attach-extension/scripts/**/*.mjs",
+      "tools/**/*.mjs",
     ],
     languageOptions: {
       ecmaVersion: "latest",

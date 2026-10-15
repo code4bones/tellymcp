@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
-  "name": "TellyMCP Firefox Attach",
-  "version": "0.0.1",
-  "description": "Attach TellyMCP to an already running Firefox session.",
+  "name": "TellyMCP Attach",
+  "version": "0.0.3",
+  "description": "Attach TellyMCP to an already running browser session.",
   "icons": {
     "32": "icon.svg"
   },
@@ -24,7 +24,7 @@
     "persistent": true
   },
   "browser_action": {
-    "default_title": "TellyMCP Firefox Attach",
+    "default_title": "TellyMCP Attach",
     "default_icon": "icon.svg",
     "default_popup": "popup.html",
     "browser_style": true

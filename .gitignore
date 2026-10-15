@@ -24,3 +24,9 @@ logs
 dev2.sh
 current
 .resume-old
+web-ext-artifacts
+crx-artifacts
+webstore-artifacts
+*.xpi
+*.crx
+key.pem

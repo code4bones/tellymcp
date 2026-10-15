@@ -1198,6 +1198,19 @@ browser.storage.onChanged.addListener((changes, areaName) => {
   }
 });
 
+browser.tabs.onRemoved.addListener((tabId) => {
+  consoleMessagesByTabId.delete(tabId);
+  pageErrorsByTabId.delete(tabId);
+  networkFailuresByTabId.delete(tabId);
+  if (attachedTabId === tabId) {
+    void setAttachedTab(null);
+  }
+  sendJson({
+    type: "tab_removed",
+    tab_id: tabId,
+  });
+});
+
 browser.tabs.onActivated.addListener(async () => {
   const tab = await getActiveTab();
   if (!tab) {

@@ -865,7 +865,16 @@ export const inboxPutInputSchema = z.object({
   display: z.object({
     title: z.string().trim().min(1),
     summary: z.string().trim().optional(),
+    // Deep link to this record in the source integration's own UI (e.g.
+    // Marrow's /projects/:slug/tasks/:id); rendered as a clickable "Open"
+    // link in the Telegram approval card.
+    url: z.string().trim().url().optional(),
   }),
+  // The exact text to type into the target console once approved. The
+  // source integration composes this -- Telly only relays it -- so it must
+  // stick to identifiers it controls (ids, slugs) rather than free text any
+  // of its own users could set, since this becomes literal PTY input.
+  consoleText: z.string().trim().min(1).max(4000),
 });
 
 export const inboxPutOutputSchema = z.object({

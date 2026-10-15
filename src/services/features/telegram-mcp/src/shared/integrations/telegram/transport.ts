@@ -690,6 +690,12 @@ export class TelegramTransport implements HumanTransport {
     return this.requestFlow.sendRequest(input);
   }
 
+  public async sendRichRequest(
+    input: Parameters<TransportRequestFlow["sendRichRequest"]>[0],
+  ): Promise<{ externalMessageId?: string | number }> {
+    return this.requestFlow.sendRichRequest(input);
+  }
+
   public async sendRequestForGatewayBoundSession(
     input: HumanTransportRequest & { sourceClientUuid: string },
   ): Promise<{ externalMessageId?: string | number }> {

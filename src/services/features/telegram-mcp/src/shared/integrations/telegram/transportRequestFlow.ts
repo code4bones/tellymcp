@@ -9,6 +9,8 @@ import type {
 } from "../../api/transport/contract";
 import type {
   AdminGatewayRegistrationSessionRecord,
+  RichMessageBlock,
+  RichMessageReplyMarkup,
   SentChunk,
   TelegramMenuContext,
   TelegramSendMessageOptions,
@@ -48,6 +50,12 @@ export interface TransportRequestFlowHost {
     },
     finalChunkOptions?: TelegramSendMessageOptions,
   ): Promise<SentChunk[]>;
+  sendRichMessage(
+    chatId: number,
+    blocks: RichMessageBlock[],
+    replyMarkup: RichMessageReplyMarkup | undefined,
+    meta: { sessionId: string; requestId?: string; kind: "request" | "notification" | "transport" },
+  ): Promise<{ message_id: number }>;
   callGatewayJson<T>(path: string, payload?: Record<string, unknown>): Promise<T>;
 }
 
@@ -157,6 +165,60 @@ export class TransportRequestFlow {
     }
   }
 
+  private buildOptionKeyboard(
+    options: string[] | undefined,
+    requestId: string,
+  ): InlineKeyboard | null {
+    const keyboard =
+      options &&
+      options.length > 0 &&
+      options.length <= 5 &&
+      Buffer.byteLength(
+        `request-option:${options.length - 1}:${requestId}`,
+        "utf8",
+      ) <= 64
+        ? new InlineKeyboard()
+        : null;
+    options?.forEach((option, index) => {
+      if (!keyboard) return;
+      keyboard.text(option.slice(0, 40), `request-option:${index}:${requestId}`);
+      if (index < (options?.length ?? 0) - 1) keyboard.row();
+    });
+    return keyboard;
+  }
+
+  // Structured counterpart to sendRequest -- same Approve/Reject keyboard
+  // and waiter registration, but the message body is Rich Message blocks
+  // (heading/paragraph/table/url) instead of hand-escaped MarkdownV2 text.
+  // Used by integrations (e.g. the Marrow inbox) that compose their own
+  // display content and just need Telly to render + wait for an answer.
+  public async sendRichRequest(input: {
+    requestId: string;
+    sessionId: string;
+    recipient: { telegramChatId: number; telegramUserId: number };
+    blocks: RichMessageBlock[];
+    options?: string[];
+  }): Promise<{ externalMessageId?: string | number }> {
+    const optionKeyboard = this.buildOptionKeyboard(input.options, input.requestId);
+    const response = await this.host.sendRichMessage(
+      input.recipient.telegramChatId,
+      input.blocks,
+      optionKeyboard ?? undefined,
+      { sessionId: input.sessionId, requestId: input.requestId, kind: "request" },
+    );
+
+    this.host.waiters.set(input.requestId, {
+      requestId: input.requestId,
+      telegramChatId: input.recipient.telegramChatId,
+      telegramUserId: input.recipient.telegramUserId,
+      telegramMessageId: response.message_id,
+      sentAtMs: Date.now(),
+      ...(input.options ? { options: [...input.options] } : {}),
+    });
+
+    return { externalMessageId: response.message_id };
+  }
+
   public async sendRequest(
     input: HumanTransportRequest,
   ): Promise<{ externalMessageId?: string | number }> {
@@ -169,24 +231,7 @@ export class TransportRequestFlow {
       maxContextChars: this.host.config.telegram.maxContextChars,
       maxMessageChars: this.host.config.telegram.maxMessageChars,
     });
-    const optionKeyboard =
-      input.options &&
-      input.options.length > 0 &&
-      input.options.length <= 5 &&
-      Buffer.byteLength(
-        `request-option:${input.options.length - 1}:${input.requestId}`,
-        "utf8",
-      ) <= 64
-        ? new InlineKeyboard()
-        : null;
-    input.options?.forEach((option, index) => {
-      if (!optionKeyboard) return;
-      optionKeyboard.text(
-        option.slice(0, 40),
-        `request-option:${index}:${input.requestId}`,
-      );
-      if (index < (input.options?.length ?? 0) - 1) optionKeyboard.row();
-    });
+    const optionKeyboard = this.buildOptionKeyboard(input.options, input.requestId);
     const sentChunks = await this.host.sendTextChunks(
       input.recipient.telegramChatId,
       text,

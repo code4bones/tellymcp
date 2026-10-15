@@ -27,7 +27,10 @@ const baseRow = {
   kind: "work.offer",
   requires_acceptance: true,
   schema_version: 1,
-  payload: { display: { title: "Fix the thing", summary: "Details" } },
+  payload: {
+    display: { title: "Fix the thing", summary: "Details" },
+    consoleText: "Check task T-1 in project P-1 via your own tools.",
+  },
   status: "processing",
   status_reason: null,
   pending_request_id: null,
@@ -63,12 +66,12 @@ function createWorkerHarness(
     requestLiveRelayAction?: () => Promise<unknown>;
   } = {},
 ) {
-  const sendRequest = vi.fn(async () => ({}));
+  const sendRichRequest = vi.fn(async () => ({}));
   const waitForReply = vi.fn(opts.waitForReply ?? (async () => ({ answer: "Approve" })));
   const requestLiveRelayAction = vi.fn(opts.requestLiveRelayAction ?? (async () => ({})));
 
   const runtime = {
-    telegramTransport: { sendRequest, waitForReply },
+    telegramTransport: { sendRichRequest, waitForReply },
     gatewayHttpService: { requestLiveRelayAction },
   };
   const runtimeService = { waitUntilReady: vi.fn(async () => runtime) };
@@ -94,7 +97,7 @@ function createWorkerHarness(
     },
   };
 
-  return { harness, sendRequest, waitForReply, requestLiveRelayAction, brokerCall };
+  return { harness, sendRichRequest, waitForReply, requestLiveRelayAction, brokerCall };
 }
 
 describe("inbox worker handleClaimedMessage", () => {
@@ -130,7 +133,7 @@ describe("inbox worker handleClaimedMessage", () => {
 
   it("marks no_live_session without ever sending a Telegram prompt when the console is offline", async () => {
     const inboxService = createInboxServiceMock();
-    const { harness, sendRequest } = createWorkerHarness({ resolveLiveConsole: null });
+    const { harness, sendRichRequest } = createWorkerHarness({ resolveLiveConsole: null });
 
     await methods.handleClaimedMessage.call(harness, baseRow, inboxService);
 
@@ -138,20 +141,24 @@ describe("inbox worker handleClaimedMessage", () => {
       status: "no_live_session",
       statusReason: "target console is not currently connected",
     });
-    expect(sendRequest).not.toHaveBeenCalled();
+    expect(sendRichRequest).not.toHaveBeenCalled();
   });
 
   it("on Approve: nudges the console and records the xchange delivery", async () => {
     const inboxService = createInboxServiceMock();
-    const { harness, sendRequest, requestLiveRelayAction, brokerCall } =
+    const { harness, sendRichRequest, requestLiveRelayAction, brokerCall } =
       createWorkerHarness();
 
     await methods.handleClaimedMessage.call(harness, baseRow, inboxService);
 
-    expect(sendRequest).toHaveBeenCalledWith(
+    expect(sendRichRequest).toHaveBeenCalledWith(
       expect.objectContaining({
         recipient: { telegramChatId: 42, telegramUserId: 7 },
         options: ["Approve", "Reject"],
+        blocks: expect.arrayContaining([
+          expect.objectContaining({ type: "heading", text: "Fix the thing" }),
+          expect.objectContaining({ type: "table" }),
+        ]),
       }),
     );
     expect(brokerCall).toHaveBeenCalledWith(
@@ -166,7 +173,7 @@ describe("inbox worker handleClaimedMessage", () => {
       clientUuid: "client-1",
       localSessionId: "workspace",
       action: "text",
-      text: expect.stringContaining("marrow inbox: task T-1 in marrow:P-1"),
+      text: "Check task T-1 in project P-1 via your own tools.",
     });
     expect(requestLiveRelayAction).toHaveBeenNthCalledWith(2, {
       clientUuid: "client-1",

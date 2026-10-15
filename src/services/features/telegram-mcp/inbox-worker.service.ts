@@ -35,18 +35,41 @@ const APPROVE_OPTION = "Approve";
 const REJECT_OPTION = "Reject";
 const MAX_ATTEMPTS = 5;
 
-// Built only from structured identifiers (integration name, route/resource
-// ids) set by the source integration itself, never from task title/summary
-// free text that any project member could set — typing that directly into
-// the PTY would be command/prompt injection into the agent's input stream.
-function buildInboxNudgeText(row: InboxMessageRow): string {
+const MAX_CONSOLE_TEXT_LENGTH = 4000;
+
+// The source integration (Marrow) composes the exact text to type into the
+// PTY -- Telly only relays it. It still lands as literal pty.write() input
+// though, so this strips control/escape bytes (ANSI/terminal injection) and
+// collapses it to one line regardless of how much today's source is
+// trusted: a stray \n here would submit the console's input early, ahead
+// of the deliberate delay+Enter below.
+function sanitizeConsoleText(raw: unknown): string | null {
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const collapsed = raw
+    // eslint-disable-next-line no-control-regex -- deliberately stripping control/ANSI bytes
+    .replace(/[\x00-\x1F\x7F]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return collapsed ? collapsed.slice(0, MAX_CONSOLE_TEXT_LENGTH) : null;
+}
+
+// Only used if the source integration didn't send a valid consoleText --
+// schema validation on inbox_put should make this unreachable in practice.
+function fallbackConsoleText(row: InboxMessageRow): string {
   return (
     `${row.source_integration} inbox: ${row.resource_kind} ${row.resource_id} ` +
-    `in ${row.route_namespace}:${row.route_key} was just approved. ` +
-    "Re-read and claim it through your own authenticated connection to the " +
-    "source integration before doing any work; its xchange record has the " +
-    "approved display snapshot."
+    `in ${row.route_namespace}:${row.route_key} was just approved. Re-read ` +
+    "and claim it through your own authenticated connection before doing any work."
   );
+}
+
+function tableCell(
+  text: string,
+  isHeader = false,
+): { text: string; is_header?: true; align: "left"; valign: "middle" } {
+  return { text, ...(isHeader ? { is_header: true as const } : {}), align: "left", valign: "middle" };
 }
 
 const DBConfig = {
@@ -295,13 +318,34 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
           : row.resource_id;
       const summary =
         typeof display.summary === "string" ? display.summary.trim() : "";
-      const question = [
-        `New ${row.kind} from ${row.source_integration}: ${title}`,
-        `${row.resource_kind} ${row.resource_id} in ${row.route_namespace}:${row.route_key}`,
-        summary,
-      ]
-        .filter(Boolean)
-        .join("\n\n");
+      const url =
+        typeof display.url === "string" && display.url.trim()
+          ? display.url.trim()
+          : undefined;
+      const consoleText =
+        sanitizeConsoleText(payload.consoleText) ?? fallbackConsoleText(row);
+
+      const blocks = [
+        { type: "heading" as const, size: 3 as const, text: title },
+        ...(summary ? [{ type: "paragraph" as const, text: summary }] : []),
+        {
+          type: "table" as const,
+          cells: [
+            [tableCell("Source", true), tableCell(row.source_integration)],
+            [tableCell(row.resource_kind, true), tableCell(row.resource_id)],
+            [tableCell("Route", true), tableCell(`${row.route_namespace}:${row.route_key}`)],
+          ],
+          is_bordered: true as const,
+        },
+        ...(url
+          ? [
+              {
+                type: "paragraph" as const,
+                text: { type: "url" as const, text: "Open →", url },
+              },
+            ]
+          : []),
+      ];
 
       const requestId = createRequestId();
       await inboxService.updateMessageStatus(row.id, {
@@ -309,10 +353,10 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
         pendingRequestId: requestId,
       });
 
-      await runtime.telegramTransport.sendRequest({
+      await runtime.telegramTransport.sendRichRequest({
         requestId,
         sessionId: `${routeBinding.clientUuid}:${routeBinding.localSessionId}`,
-        question,
+        blocks,
         recipient: {
           telegramChatId: contact.telegramChatId,
           telegramUserId: contact.telegramUserId,
@@ -364,7 +408,7 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
           clientUuid: routeBinding.clientUuid,
           localSessionId: routeBinding.localSessionId,
           action: "text",
-          text: buildInboxNudgeText(row),
+          text: consoleText,
         });
         await delay(NUDGE_ENTER_DELAY_MS);
         await runtime.gatewayHttpService.requestLiveRelayAction({

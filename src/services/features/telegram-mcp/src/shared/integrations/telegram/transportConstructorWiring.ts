@@ -757,6 +757,8 @@ export function buildTransportConstructorWiring(
       context.tForContext(ctx, key, options),
     sendTextChunks: (chatId, body, meta, finalChunkOptions) =>
       outputActions.sendTextChunks(chatId, body, meta, finalChunkOptions),
+    sendRichMessage: (chatId, blocks, replyMarkup, meta) =>
+      outputActions.sendRichMessage(chatId, blocks, replyMarkup, meta),
     callGatewayJson: (path, payload) => host.callGatewayJson(path, payload),
   });
 

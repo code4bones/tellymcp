@@ -8,6 +8,8 @@ import {
   splitTitleAndBody,
 } from "./transportUtils";
 import type {
+  RichMessageBlock,
+  RichMessageReplyMarkup,
   SendMessageMeta,
   SentChunk,
   TelegramEditMessageOptions,
@@ -127,6 +129,42 @@ export class TransportOutputActions {
       options,
       meta,
     );
+  }
+
+  // Structured blocks (heading/paragraph/table/url) instead of hand-escaped
+  // MarkdownV2 -- no chunking, since the inbox approval card this backs is
+  // always short and single-message.
+  public async sendRichMessage(
+    telegramChatId: number,
+    blocks: RichMessageBlock[],
+    replyMarkup: RichMessageReplyMarkup | undefined,
+    meta: SendMessageMeta,
+  ): Promise<{ message_id: number }> {
+    let attempt = 0;
+    while (true) {
+      attempt += 1;
+      try {
+        return await this.host.bot.api.sendRichMessage(
+          telegramChatId,
+          { blocks },
+          replyMarkup ? { reply_markup: replyMarkup } : undefined,
+        );
+      } catch (error) {
+        if (!(error instanceof GrammyError) || error.error_code !== 429) {
+          throw error;
+        }
+        const retryAfterSeconds = Math.max(1, error.parameters.retry_after ?? 1);
+        this.host.logger.warn("Telegram rate limit hit sending rich message, cooling down before retry", {
+          kind: meta.kind,
+          sessionId: meta.sessionId,
+          requestId: meta.requestId,
+          attempt,
+          retryAfterSeconds,
+          description: error.description,
+        });
+        await new Promise((resolve) => setTimeout(resolve, retryAfterSeconds * 1000));
+      }
+    }
   }
 
   public async replyText(

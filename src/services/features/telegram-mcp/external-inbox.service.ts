@@ -144,6 +144,10 @@ const TelegramMcpExternalInboxService: ServiceSchema = {
       // display.title is required: TellyMCP does not call back to the source
       // integration to hydrate a preview, so the source must embed one.
       this.requireText!(display.title, "display.title");
+      // consoleText is required: the source integration composes the exact
+      // PTY text, Telly only relays it (see inbox-worker's sanitization,
+      // which still treats this defensively since it's literal PTY input).
+      this.requireText!(input.consoleText, "consoleText");
       const requiresAcceptance = input.requiresAcceptance !== false;
       const schemaVersion =
         typeof input.schemaVersion === "number" ? input.schemaVersion : 1;

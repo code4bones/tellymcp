@@ -141,6 +141,7 @@ const validPutInput = {
   resource: { kind: "task", id: "T-1" },
   kind: "work.offer",
   display: { title: "Fix the thing", summary: "Details" },
+  consoleText: "Check task T-1 in project P-1 via your own tools.",
 };
 
 describe("external-inbox service: inbox_put", () => {

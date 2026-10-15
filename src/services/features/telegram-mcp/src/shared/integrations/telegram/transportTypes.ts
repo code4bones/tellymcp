@@ -32,6 +32,17 @@ export type TelegramEditMessageOptions = NonNullable<
   Parameters<Bot<TelegramMenuContext>["api"]["editMessageText"]>[3]
 >;
 
+// Structured Rich Messages (heading/paragraph/table/url blocks) -- used by
+// the inbox approval card so it never has to hand-escape MarkdownV2 the way
+// sendTextChunks's plain-text path does.
+export type RichMessageBlock = NonNullable<
+  Parameters<Bot<TelegramMenuContext>["api"]["sendRichMessage"]>[1]["blocks"]
+>[number];
+
+export type RichMessageReplyMarkup = NonNullable<
+  Parameters<Bot<TelegramMenuContext>["api"]["sendRichMessage"]>[2]
+>["reply_markup"];
+
 export type TelegramClientFetch = NonNullable<
   NonNullable<NonNullable<ConstructorParameters<typeof Bot>[1]>["client"]>["fetch"]
 >;

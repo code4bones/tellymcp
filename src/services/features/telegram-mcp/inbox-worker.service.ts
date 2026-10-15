@@ -297,6 +297,7 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
         typeof display.summary === "string" ? display.summary.trim() : "";
       const question = [
         `New ${row.kind} from ${row.source_integration}: ${title}`,
+        `${row.resource_kind} ${row.resource_id} in ${row.route_namespace}:${row.route_key}`,
         summary,
       ]
         .filter(Boolean)

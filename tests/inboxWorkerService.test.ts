@@ -166,7 +166,7 @@ describe("inbox worker handleClaimedMessage", () => {
       clientUuid: "client-1",
       localSessionId: "workspace",
       action: "text",
-      text: expect.stringContaining("inbox item is ready"),
+      text: expect.stringContaining("marrow inbox: task T-1 in marrow:P-1"),
     });
     expect(requestLiveRelayAction).toHaveBeenNthCalledWith(2, {
       clientUuid: "client-1",

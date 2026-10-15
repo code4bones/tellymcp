@@ -26,8 +26,20 @@ const APPROVAL_TIMEOUT_SECONDS = Number(
 const APPROVE_OPTION = "Approve";
 const REJECT_OPTION = "Reject";
 const MAX_ATTEMPTS = 5;
-const INBOX_NUDGE_TEXT =
-  "A newly approved inbox item is ready; read its xchange record.";
+
+// Built only from structured identifiers (integration name, route/resource
+// ids) set by the source integration itself, never from task title/summary
+// free text that any project member could set — typing that directly into
+// the PTY would be command/prompt injection into the agent's input stream.
+function buildInboxNudgeText(row: InboxMessageRow): string {
+  return (
+    `${row.source_integration} inbox: ${row.resource_kind} ${row.resource_id} ` +
+    `in ${row.route_namespace}:${row.route_key} was just approved. ` +
+    "Re-read and claim it through your own authenticated connection to the " +
+    "source integration before doing any work; its xchange record has the " +
+    "approved display snapshot."
+  );
+}
 
 const DBConfig = {
   host: process.env.DB_HOST || "localhost",
@@ -343,7 +355,7 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
           clientUuid: routeBinding.clientUuid,
           localSessionId: routeBinding.localSessionId,
           action: "text",
-          text: INBOX_NUDGE_TEXT,
+          text: buildInboxNudgeText(row),
         });
         await runtime.gatewayHttpService.requestLiveRelayAction({
           clientUuid: routeBinding.clientUuid,

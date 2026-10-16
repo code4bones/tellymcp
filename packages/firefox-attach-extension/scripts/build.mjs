@@ -8,6 +8,10 @@ const packageRoot = path.resolve(__dirname, "..");
 const srcDir = path.join(packageRoot, "src");
 const distDir = path.join(packageRoot, "dist");
 
+// Wipe the whole dist dir rather than just the known entries below, so stray
+// files (e.g. web-ext's own .amo-upload-uuid cache, written here by `npm run
+// sign`) never linger and get swept into a packaged zip/xpi.
+rmSync(distDir, { recursive: true, force: true });
 mkdirSync(distDir, { recursive: true });
 
 const entries = [
@@ -25,10 +29,6 @@ const entries = [
   "recorder-content.js",
   "recorder-page.js",
 ];
-
-for (const entry of entries) {
-  rmSync(path.join(distDir, entry), { recursive: true, force: true });
-}
 
 for (const entry of entries) {
   const sourcePath = path.join(srcDir, entry);

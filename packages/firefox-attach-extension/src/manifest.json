@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "TellyMCP Attach",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Attach TellyMCP to an already running browser session.",
   "icons": {
     "16": "icon-16.png",

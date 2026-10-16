@@ -1301,6 +1301,13 @@ async function runSystemPrune(args: string[]): Promise<void> {
       maxRetriesPerRequest: 1,
       enableReadyCheck: true,
     });
+    // ioredis is an EventEmitter: an unhandled "error" event crashes the
+    // process instead of surfacing as a normal command failure.
+    redis.on("error", (error: unknown) => {
+      process.stderr.write(
+        `Redis error during system-prune: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+    });
 
     try {
       let cursor = "0";

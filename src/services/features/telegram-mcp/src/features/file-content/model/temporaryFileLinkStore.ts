@@ -138,7 +138,11 @@ export class TemporaryFileLinkStore {
       ),
     );
     this.cleanupTimer = setInterval(() => {
-      void this.cleanupExpired();
+      void this.cleanupExpired().catch((error: unknown) => {
+        this.logger.warn("Temporary file link cleanup failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
     }, FILE_LINK_CLEANUP_INTERVAL_MS);
     this.cleanupTimer.unref();
   }

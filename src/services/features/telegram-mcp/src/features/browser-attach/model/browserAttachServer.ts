@@ -46,10 +46,8 @@ type FirefoxAttachSocket = {
 };
 
 type FirefoxAttachWebSocketServer = {
-  on: (
-    event: "connection",
-    listener: (socket: FirefoxAttachSocket) => void,
-  ) => void;
+  on(event: "connection", listener: (socket: FirefoxAttachSocket) => void): void;
+  on(event: "error", listener: (error: unknown) => void): void;
   close: (callback: (error?: unknown) => void) => void;
 };
 
@@ -170,6 +168,17 @@ export class BrowserAttachServer {
       },
     });
     this.wsServer = wsServer;
+
+    wsServer.on("error", (error) => {
+      this.logger.error("Browser attach WebSocket server error", {
+        host: this.config.browser.attach.host,
+        port: this.config.browser.attach.port,
+        error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+      });
+      if (this.wsServer === wsServer) {
+        this.wsServer = null;
+      }
+    });
 
     wsServer.on("connection", (socket) => {
       const now = Date.now();

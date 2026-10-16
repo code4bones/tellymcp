@@ -540,7 +540,12 @@ export class CodexAppServerClient {
     }
 
     if (message.id !== undefined && message.method) {
-      void this.handleServerRequest(message);
+      void this.handleServerRequest(message).catch((error) => {
+        this.logger.warn("Codex server request handling failed", {
+          method: message.method,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
       return;
     }
 
@@ -583,14 +588,21 @@ export class CodexAppServerClient {
         plan.length > 0 &&
         plan.every((entry) => asRecord(entry)?.status === "completed");
       if (turn?.onProgress) {
-        void turn.onProgress({
-          threadId:
-            typeof params?.threadId === "string" ? params.threadId : "",
-          turnId,
-          itemId: `plan-${turnId}`,
-          kind: "plan",
-          phase: completed ? "completed" : "started",
-          message: "Codex updated its plan.",
+        void Promise.resolve(
+          turn.onProgress({
+            threadId:
+              typeof params?.threadId === "string" ? params.threadId : "",
+            turnId,
+            itemId: `plan-${turnId}`,
+            kind: "plan",
+            phase: completed ? "completed" : "started",
+            message: "Codex updated its plan.",
+          }),
+        ).catch((error) => {
+          this.logger.warn("Codex plan-progress callback failed", {
+            turnId,
+            error: error instanceof Error ? error.message : String(error),
+          });
         });
       }
       return;
@@ -787,25 +799,44 @@ export class CodexAppServerClient {
     this.pendingTurns.delete(turnId);
     clearTimeout(turn.pollTimer);
     if (turnRecord?.status === "interrupted") {
-      void turn.onInterrupted?.();
+      void Promise.resolve(turn.onInterrupted?.()).catch((error) => {
+        this.logger.warn("Codex onInterrupted callback failed", {
+          turnId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
       return;
     }
     if (turnRecord?.status === "failed") {
       const errorRecord = asRecord(turnRecord.error);
-      void turn.onError(
-        new Error(
-          typeof errorRecord?.message === "string"
-            ? errorRecord.message
-            : "Codex turn failed.",
+      void Promise.resolve(
+        turn.onError(
+          new Error(
+            typeof errorRecord?.message === "string"
+              ? errorRecord.message
+              : "Codex turn failed.",
+          ),
         ),
-      );
+      ).catch((error) => {
+        this.logger.warn("Codex onError callback failed", {
+          turnId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
       return;
     }
     const finalMessage = (turn.finalMessage || turn.fallbackMessage).trim();
-    void turn.onComplete({
-      message:
-        finalMessage || "Codex completed the turn without a text response.",
-      ...(turn.usage ? { usage: turn.usage } : {}),
+    void Promise.resolve(
+      turn.onComplete({
+        message:
+          finalMessage || "Codex completed the turn without a text response.",
+        ...(turn.usage ? { usage: turn.usage } : {}),
+      }),
+    ).catch((error) => {
+      this.logger.warn("Codex onComplete callback failed", {
+        turnId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     });
   }
 
@@ -986,7 +1017,14 @@ export class CodexAppServerClient {
     this.pendingRequests.clear();
     for (const turn of this.pendingTurns.values()) {
       clearTimeout(turn.pollTimer);
-      void turn.onError(error);
+      void Promise.resolve(turn.onError(error)).catch((callbackError) => {
+        this.logger.warn("Codex onError callback failed during rejectAll", {
+          error:
+            callbackError instanceof Error
+              ? callbackError.message
+              : String(callbackError),
+        });
+      });
     }
     this.pendingTurns.clear();
     for (const pending of this.pendingThreadStarts) {

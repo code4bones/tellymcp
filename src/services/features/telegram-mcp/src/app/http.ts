@@ -438,7 +438,11 @@ export function createMcpHttpHandler(
       };
 
       socket.on("close", () => {
-        void cleanup();
+        void cleanup().catch((error: unknown) => {
+          runtime.logger.warn("Telegram WebApp live WS cleanup failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
       });
 
       socket.on("error", (error: unknown) => {
@@ -728,7 +732,7 @@ export function createMcpHttpHandler(
         return;
       }
 
-      const body = await readJsonBody(req);
+      const body = await readJsonBody(req).catch(ignoreInvalidJsonBody);
       if (!body || typeof body !== "object") {
         writeText(res, 400, "Telegram update body is required");
         return;
@@ -1534,7 +1538,12 @@ export function createMcpHttpHandler(
           close: () => closeEntry("app"),
         };
         transport.onclose = () => {
-          void closeEntry("transport");
+          void closeEntry("transport").catch((error: unknown) => {
+            runtime.logger.warn("MCP HTTP transport close failed", {
+              sessionId: knownSessionId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
         };
         transport.onerror = (error) => {
           if (isDuplicateSseStreamError(error)) {

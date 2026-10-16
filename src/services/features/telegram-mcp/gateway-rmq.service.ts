@@ -255,7 +255,13 @@ const TelegramMcpGatewayRmqService: ServiceSchema = {
 
       this.reconnectTimer = setTimeout(() => {
         this.reconnectTimer = null;
-        void this.connectRmq?.();
+        this.connectRmq?.()?.catch((error: unknown) => {
+          this.logger.warn("Gateway RMQ reconnect attempt failed", {
+            error:
+              error instanceof Error ? (error.stack ?? error.message) : String(error),
+          });
+          this.scheduleReconnect?.();
+        });
       }, RECONNECT_DELAY_MS);
 
       this.logger.warn("Gateway RMQ reconnect scheduled", {
@@ -311,17 +317,24 @@ const TelegramMcpGatewayRmqService: ServiceSchema = {
     },
 
     async connectRmq(this: GatewayRmqCarrier): Promise<void> {
-      if (this.stopRequested || !this.isEnabled?.() || this.channel) {
+      if (this.stopRequested || this.channel) {
         return;
       }
 
-      const runtime = this.getRuntimeOrThrow?.();
-      const rmq = runtime?.config.distributed.rmq;
-      if (!runtime || !rmq) {
-        return;
-      }
-
+      let rmq:
+        | ReturnType<TelegramMcpRuntimeServiceInstance["getRuntime"]>["config"]["distributed"]["rmq"]
+        | undefined;
       try {
+        if (!this.isEnabled?.()) {
+          return;
+        }
+
+        const runtime = this.getRuntimeOrThrow?.();
+        rmq = runtime?.config.distributed.rmq;
+        if (!runtime || !rmq) {
+          return;
+        }
+
         const connection = await connect({
           protocol: "amqp",
           hostname: rmq.host,
@@ -331,16 +344,6 @@ const TelegramMcpGatewayRmqService: ServiceSchema = {
           vhost: rmq.vhost,
         });
         const channel = await connection.createChannel();
-        const exchange = this.getExchangeName?.() ?? rmq.exchange;
-        const queue = this.getQueueName?.() ?? QUEUE_NAME;
-
-        await channel.assertExchange(exchange, "topic", { durable: true });
-        await channel.assertQueue(queue, { durable: true });
-        await channel.bindQueue(queue, exchange, "delivery.queued");
-        await channel.bindQueue(queue, exchange, "delivery.status");
-        await channel.bindQueue(queue, exchange, "project.member_joined");
-        await channel.bindQueue(queue, exchange, "project.member_left");
-        await channel.bindQueue(queue, exchange, "project.deleted");
 
         const onDisconnected = (eventName: string, error?: unknown) => {
           this.logger.warn("Gateway RMQ connection closed", {
@@ -354,8 +357,21 @@ const TelegramMcpGatewayRmqService: ServiceSchema = {
           this.scheduleReconnect?.();
         };
 
-        connection.on("error", (error) => onDisconnected("error", error));
-        connection.on("close", () => onDisconnected("close"));
+        connection.on("error", (error) => onDisconnected("connection-error", error));
+        connection.on("close", () => onDisconnected("connection-close"));
+        channel.on("error", (error) => onDisconnected("channel-error", error));
+        channel.on("close", () => onDisconnected("channel-close"));
+
+        const exchange = this.getExchangeName?.() ?? rmq.exchange;
+        const queue = this.getQueueName?.() ?? QUEUE_NAME;
+
+        await channel.assertExchange(exchange, "topic", { durable: true });
+        await channel.assertQueue(queue, { durable: true });
+        await channel.bindQueue(queue, exchange, "delivery.queued");
+        await channel.bindQueue(queue, exchange, "delivery.status");
+        await channel.bindQueue(queue, exchange, "project.member_joined");
+        await channel.bindQueue(queue, exchange, "project.member_left");
+        await channel.bindQueue(queue, exchange, "project.deleted");
 
         const consumeResult = await channel.consume(
           queue,
@@ -392,8 +408,8 @@ const TelegramMcpGatewayRmqService: ServiceSchema = {
         });
       } catch (error) {
         this.logger.warn("Gateway RMQ connect failed", {
-          host: rmq.host,
-          port: rmq.port,
+          host: rmq?.host,
+          port: rmq?.port,
           error: error instanceof Error ? (error.stack ?? error.message) : String(error),
         });
         await this.closeRmq?.();

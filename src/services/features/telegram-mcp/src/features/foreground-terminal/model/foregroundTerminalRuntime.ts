@@ -225,6 +225,25 @@ export async function runForegroundPtyRuntime(
 
   const handle = await createForegroundBroker(input.envPath, input.packageRoot);
 
+  // The gateway WS client and the PTY-attached agent session share this single
+  // Node process. Without these handlers, an unhandled rejection anywhere in the
+  // embedded broker (e.g. a transient gateway-reconnect failure) would crash the
+  // whole process and take the live PTY session down with it as a side effect.
+  const logUnexpectedRuntimeError = (kind: string, error: unknown) => {
+    handle.runtime.logger.error(
+      `Foreground PTY runtime caught an unexpected ${kind}; keeping the PTY session alive`,
+      {
+        error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+      },
+    );
+  };
+  process.on("unhandledRejection", (reason) =>
+    logUnexpectedRuntimeError("unhandledRejection", reason),
+  );
+  process.on("uncaughtException", (error) =>
+    logUnexpectedRuntimeError("uncaughtException", error),
+  );
+
   try {
     const session = await ensureForegroundPtySession(handle.runtime);
     await handle.broker

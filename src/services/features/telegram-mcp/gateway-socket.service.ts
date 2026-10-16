@@ -1135,9 +1135,11 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
               const session =
                 await runtime.sessionStore.getSession(resolved.sessionId);
               if (!session) {
-                throw new Error(
-                  `Current console '${resolved.sessionId}' is missing from session store during gateway hello.`,
+                runtime.logger.warn(
+                  "Gateway hello: current console is missing from session store; sending hello without session tools",
+                  { sessionId: resolved.sessionId },
                 );
+                return [];
               }
 
               return [session];
@@ -3580,7 +3582,13 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
       this.wsReconnectTimer = setTimeout(() => {
         this.wsReconnectTimer = null;
-        void this.startGatewayWsClient?.();
+        this.startGatewayWsClient?.()?.catch((error: unknown) => {
+          runtime?.logger.warn("Gateway WS reconnect attempt failed", {
+            error:
+              error instanceof Error ? (error.stack ?? error.message) : String(error),
+          });
+          this.scheduleGatewayWsReconnect?.();
+        });
       }, CLIENT_RECONNECT_DELAY_MS);
     },
 
@@ -3628,7 +3636,18 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         );
         this.wsClientHasConnectedOnce = true;
         this.wsAwaitingPong = false;
-        void this.sendClientHello?.(socket);
+        this.sendClientHello?.(socket)?.catch((error: unknown) => {
+          runtime.logger.warn("Gateway WS client hello failed", {
+            url: normalizedUrl,
+            error:
+              error instanceof Error ? (error.stack ?? error.message) : String(error),
+          });
+          if (this.wsClient === socket) {
+            this.wsClient = null;
+          }
+          socket.terminate?.();
+          this.scheduleGatewayWsReconnect?.();
+        });
       });
 
       socket.on("message", (raw: unknown) => {

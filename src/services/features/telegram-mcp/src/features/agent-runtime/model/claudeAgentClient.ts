@@ -185,7 +185,14 @@ export class ClaudeAgentClient {
       },
     });
     this.activeTurn = { turnId, abortController, query };
-    void this.consumeTurn(turnId, query, abortController, input);
+    void this.consumeTurn(turnId, query, abortController, input).catch(
+      (error: unknown) => {
+        this.logger.warn("Claude turn consumption failed", {
+          turnId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      },
+    );
     return { sessionId: this.sessionId, turnId };
   }
 

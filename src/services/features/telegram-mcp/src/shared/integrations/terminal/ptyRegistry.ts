@@ -238,12 +238,20 @@ function createSessionRecord(
   });
 
   pty.onData((data) => {
-    record.pendingWrite = record.pendingWrite.then(
-      () =>
-        new Promise<void>((resolve) => {
-          record.terminal.write(data, resolve);
-        }),
-    );
+    record.pendingWrite = record.pendingWrite
+      .then(
+        () =>
+          new Promise<void>((resolve) => {
+            record.terminal.write(data, resolve);
+          }),
+      )
+      .catch((error: unknown) => {
+        // Recover so the chain keeps accepting new writes; without this
+        // .catch attached synchronously, a write failure on the last link
+        // (e.g. right as the pty exits, with no further onData to chain
+        // another .then onto it) would be an unhandled rejection.
+        console.error("pty terminal write failed", record.target, error);
+      });
   });
 
   pty.onExit(({ exitCode, signal }) => {
@@ -252,13 +260,29 @@ function createSessionRecord(
     record.exitCode = exitCode;
     record.signal = signal;
     cleanupRecordTempPaths(record);
-    record.pendingWrite = record.pendingWrite.then(
-      () =>
-        new Promise<void>((resolve) => {
-          record.terminal.writeln(buildExitLine(record), resolve);
-        }),
-    );
+    record.pendingWrite = record.pendingWrite
+      .then(
+        () =>
+          new Promise<void>((resolve) => {
+            record.terminal.writeln(buildExitLine(record), resolve);
+          }),
+      )
+      .catch((error: unknown) => {
+        console.error("pty terminal writeln failed", record.target, error);
+      });
   });
+
+  // IPty's public typings don't declare "error", but node-pty's UnixTerminal
+  // is an EventEmitter at runtime and its internal socket-error relay throws
+  // synchronously unless at least two "error" listeners are attached (see
+  // node_modules/node-pty/lib/unixTerminal.js) — without this, a non-EAGAIN/
+  // EIO fd error on an active session crashes the whole process.
+  (pty as unknown as { on(event: "error", listener: (error: unknown) => void): void }).on(
+    "error",
+    (error: unknown) => {
+      console.error("pty fd error", record.target, error);
+    },
+  );
 
   record.pty = pty;
   return record;

@@ -150,7 +150,11 @@ export class HumanApprovalOrchestrator {
 
       void this.pendingStore.enqueue(requestRecord).then(
         () => {
-          void this.processQueue();
+          void this.processQueue().catch((error: unknown) => {
+            this.logger.warn("Pending request queue processing failed", {
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
         },
         (error: unknown) => {
           this.queuedJobs.delete(requestId);
@@ -168,7 +172,15 @@ export class HumanApprovalOrchestrator {
     this.processingQueue = true;
     try {
       while (true) {
-        const next = await this.pendingStore.dequeueNext();
+        let next;
+        try {
+          next = await this.pendingStore.dequeueNext();
+        } catch (error) {
+          this.logger.warn("Pending request dequeue failed; pausing queue", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return;
+        }
         if (!next) {
           return;
         }

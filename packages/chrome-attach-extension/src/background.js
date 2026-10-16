@@ -1238,10 +1238,16 @@ async function handleTabActionMessage(message) {
 }
 
 async function handleMessage(rawData) {
-  const message =
-    typeof rawData === "string"
-      ? JSON.parse(rawData)
-      : JSON.parse(String(rawData));
+  let message;
+  try {
+    message =
+      typeof rawData === "string"
+        ? JSON.parse(rawData)
+        : JSON.parse(String(rawData));
+  } catch (error) {
+    console.error("Failed to parse attach gateway message", error);
+    return;
+  }
 
   switch (message.type) {
     case "hello_ack":
@@ -1336,15 +1342,30 @@ async function connect() {
     state: "connecting",
     text: `Connecting: ${settings.host}:${settings.port}`,
   });
-  const wsUrl = buildWebSocketUrl(settings);
-  socket = new WebSocket(wsUrl);
+  try {
+    const wsUrl = buildWebSocketUrl(settings);
+    socket = new WebSocket(wsUrl);
+  } catch (error) {
+    console.error("Failed to open attach WebSocket", error);
+    socket = null;
+    await setConnectionStatus({
+      state: "disconnected",
+      text: "Disconnected: invalid host/port",
+    });
+    scheduleReconnect();
+    return;
+  }
 
   socket.addEventListener("open", () => {
-    void sendHello();
+    void sendHello().catch((error) => {
+      console.error("Failed to send attach hello", error);
+    });
   });
 
   socket.addEventListener("message", (event) => {
-    void handleMessage(event.data);
+    void handleMessage(event.data).catch((error) => {
+      console.error("Failed to handle attach gateway message", error);
+    });
   });
 
   socket.addEventListener("close", () => {

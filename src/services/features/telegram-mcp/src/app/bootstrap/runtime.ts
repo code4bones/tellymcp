@@ -165,7 +165,7 @@ export async function createAppRuntime(input: {
       gatewayClientUuidRestored: Boolean(marker?.gatewayClientUuid),
     });
   } else {
-    redis = await createRedisClient(config);
+    redis = await createRedisClient(config, logger);
     logger.info("Redis connected", {
       host: config.redis.host,
       port: config.redis.port,

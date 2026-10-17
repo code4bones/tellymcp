@@ -374,6 +374,7 @@ export const enMenu = {
       fullscreen: "Fullscreen",
       expand: "Expand",
       default: "Default",
+      open_in_browser: "🌐 Open in browser",
     },
     actions: {
       opening: "Opening Live View.",

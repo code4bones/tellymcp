@@ -2,7 +2,7 @@ import { Bot } from "grammy";
 import { Menu } from "@grammyjs/menu";
 
 import type { AppConfig } from "../../../app/config/env";
-import type { WebAppLaunchRegistry } from "../../../app/webapp/auth";
+import type { WebAppLaunchRegistry, WebAppSessionRegistry } from "../../../app/webapp/auth";
 import type { CollaborationService } from "../../../features/collaboration/model/collaborationService";
 import type {
   MaintenanceStore,
@@ -90,6 +90,7 @@ export interface TransportConstructorWiringHost {
   maintenanceStore: MaintenanceStore;
   objectStore: MinioExchangeStore;
   webAppLaunchRegistry: WebAppLaunchRegistry;
+  webAppSessions: WebAppSessionRegistry;
   logger: Logger;
   waiters: Map<string, WaiterRecord>;
   terminalNudgeDebounceTimers: Map<string, NodeJS.Timeout>;
@@ -263,6 +264,7 @@ export function buildTransportConstructorWiring(
   const liveActions = new TransportLiveActions({
     config: host.config,
     webAppLaunchRegistry: host.webAppLaunchRegistry,
+    webAppSessions: host.webAppSessions,
     logger: host.logger,
     t: (locale, key, vars) => context.t(locale, key, vars),
     ensureGatewayClientUuid: (principal, actor) =>

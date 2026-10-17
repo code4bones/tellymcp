@@ -16,7 +16,6 @@ import type { AppRuntime } from "./bootstrap/runtime";
 import { createOAuthFacade, type OAuthFacade } from "./oauthFacade";
 import {
   type TelegramWebAppInitDataUnsafe,
-  WebAppSessionRegistry,
   validateTelegramWebAppInitData,
 } from "./webapp/auth";
 import { parseLiveRelaySessionId } from "./webapp/relay";
@@ -329,7 +328,7 @@ export function createMcpHttpHandler(
   },
 ): McpHttpHandler {
   const transports = new Map<string, SessionEntry>();
-  const webAppSessions = new WebAppSessionRegistry();
+  const webAppSessions = runtime.webAppSessions;
   const liveWsServer = new WebSocketServer({
     noServer: true,
     maxPayload: MAX_BODY_SIZE_BYTES,
@@ -860,6 +859,34 @@ export function createMcpHttpHandler(
                 "initDataUnsafe",
               ) as TelegramWebAppInitDataUnsafe)
             : null;
+        const presetToken =
+          body &&
+          typeof body === "object" &&
+          typeof Reflect.get(body, "directToken") === "string"
+            ? String(Reflect.get(body, "directToken")).trim()
+            : "";
+
+        if (presetToken) {
+          // Pre-minted directly by the bot (see TransportLiveActions) — no Telegram
+          // WebApp/initData round-trip involved, works in a plain browser tab.
+          const resolved = await resolveAuthorizedWebAppSession(presetToken);
+          if (!resolved) {
+            writeText(res, 403, "This link has expired or is invalid.");
+            return;
+          }
+
+          writeJson(res, 200, {
+            token: resolved.webAppSession.token,
+            session_id: resolved.webAppSession.sessionId,
+            session_label:
+              resolved.session?.label ?? resolved.webAppSession.sessionId,
+            terminal_target: resolved.relayTarget
+              ? true
+              : Boolean(resolved.session?.terminalTarget),
+            expires_at: new Date(resolved.webAppSession.expiresAtMs).toISOString(),
+          });
+          return;
+        }
 
         if (!initDataRaw || !initDataUnsafe) {
           writeText(res, 400, "initDataRaw and initDataUnsafe are required");

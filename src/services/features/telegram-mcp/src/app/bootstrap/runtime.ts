@@ -1,5 +1,5 @@
 import { loadConfig, type AppConfig } from "../config/env";
-import { WebAppLaunchRegistry } from "../webapp/auth";
+import { WebAppLaunchRegistry, WebAppSessionRegistry } from "../webapp/auth";
 import {
   createRedisClient,
   type RedisClient,
@@ -55,6 +55,7 @@ export type AppRuntime = {
   objectStore: MinioExchangeStore;
   projectIdentityResolver: ProjectIdentityResolver;
   webAppLaunchRegistry: WebAppLaunchRegistry;
+  webAppSessions: WebAppSessionRegistry;
   gatewayHttpService: GatewayHttpService;
   browserAttachServer: BrowserAttachServer;
   temporaryFileLinkStore: TemporaryFileLinkStore | null;
@@ -176,6 +177,7 @@ export async function createAppRuntime(input: {
     sessionStore = redisStateStore;
   }
   const webAppLaunchRegistry = new WebAppLaunchRegistry();
+  const webAppSessions = new WebAppSessionRegistry();
   const objectStore = new MinioExchangeStore(
     config.terminal,
     config.exchange.dir,
@@ -286,6 +288,7 @@ export async function createAppRuntime(input: {
     stateStore,
     objectStore,
     webAppLaunchRegistry,
+    webAppSessions,
     logger,
   );
   await telegramTransport.start();
@@ -327,6 +330,7 @@ export async function createAppRuntime(input: {
     objectStore,
     projectIdentityResolver,
     webAppLaunchRegistry,
+    webAppSessions,
     gatewayHttpService,
     browserAttachServer,
     temporaryFileLinkStore,

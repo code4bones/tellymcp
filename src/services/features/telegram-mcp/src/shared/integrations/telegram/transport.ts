@@ -6,7 +6,7 @@ import { Bot, GrammyError, InputFile } from "grammy";
 import type { Update } from "grammy/types";
 
 import type { AppConfig } from "../../../app/config/env";
-import type { WebAppLaunchRegistry } from "../../../app/webapp/auth";
+import type { WebAppLaunchRegistry, WebAppSessionRegistry } from "../../../app/webapp/auth";
 import type { CollaborationService } from "../../../features/collaboration/model/collaborationService";
 import type { PartnerNoteKind } from "../../../entities/collaboration/model/types";
 import type {
@@ -205,6 +205,7 @@ export class TelegramTransport implements HumanTransport {
     private readonly maintenanceStore: MaintenanceStore,
     private readonly objectStore: MinioExchangeStore,
     private readonly webAppLaunchRegistry: WebAppLaunchRegistry,
+    private readonly webAppSessions: WebAppSessionRegistry,
     private readonly logger: Logger,
   ) {
     const composition = buildTransportConstructorWiring({
@@ -218,6 +219,7 @@ export class TelegramTransport implements HumanTransport {
       maintenanceStore: this.maintenanceStore,
       objectStore: this.objectStore,
       webAppLaunchRegistry: this.webAppLaunchRegistry,
+      webAppSessions: this.webAppSessions,
       logger: this.logger,
       waiters: this.waiters,
       terminalNudgeDebounceTimers: this.terminalNudgeDebounceTimers,

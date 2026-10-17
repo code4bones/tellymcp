@@ -378,6 +378,7 @@ export const ruMenu = {
       fullscreen: "Fullscreen",
       expand: "Expand",
       default: "Default",
+      open_in_browser: "🌐 Открыть в браузере",
     },
     actions: {
       opening: "Открываю Live View.",

@@ -827,6 +827,17 @@ function getRequestedSessionId() {
   return null;
 }
 
+function getRequestedDirectToken() {
+  const url = new URL(window.location.href);
+  const fromQuery = url.searchParams.get("token");
+  if (fromQuery) {
+    return fromQuery;
+  }
+
+  const fromHash = new URLSearchParams(url.hash.replace(/^#/, "")).get("token");
+  return fromHash || null;
+}
+
 function getInitData() {
   return tg?.initData || "";
 }
@@ -837,16 +848,23 @@ function getInitDataUnsafe() {
 
 async function bootstrap() {
   const sessionId = getRequestedSessionId();
-  const initData = getInitData();
-  const initDataUnsafe = getInitDataUnsafe();
+  const directToken = getRequestedDirectToken();
 
-  if (!initDataUnsafe || !initData || !initData.includes("hash=")) {
-    throw new Error("Open this page inside Telegram Mini App.");
-  }
+  let payload;
+  if (directToken) {
+    payload = { directToken };
+  } else {
+    const initData = getInitData();
+    const initDataUnsafe = getInitDataUnsafe();
 
-  const payload = { initDataRaw: initData, initDataUnsafe };
-  if (sessionId) {
-    payload.sessionId = sessionId;
+    if (!initDataUnsafe || !initData || !initData.includes("hash=")) {
+      throw new Error("Open this page inside Telegram Mini App.");
+    }
+
+    payload = { initDataRaw: initData, initDataUnsafe };
+    if (sessionId) {
+      payload.sessionId = sessionId;
+    }
   }
 
   const response = await fetch(config.basePath + "/api/bootstrap", {
@@ -1223,7 +1241,7 @@ async function main() {
     await applyLaunchMode();
     loadWrapPreference();
     bindUi();
-    setStatus("Authorizing Mini App...");
+    setStatus(getRequestedDirectToken() ? "Connecting..." : "Authorizing Mini App...");
     const bootstrapPayload = await bootstrap();
     applyBootstrapPayload(bootstrapPayload);
     try {

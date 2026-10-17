@@ -2,7 +2,7 @@ import { URL } from "node:url";
 
 import { buildLiveRelaySessionId, parseLiveRelaySessionId, resolveGatewayWebAppBaseUrl } from "../../../app/webapp/relay";
 import type { AppConfig } from "../../../app/config/env";
-import type { WebAppLaunchRegistry } from "../../../app/webapp/auth";
+import type { WebAppLaunchRegistry, WebAppSessionRegistry } from "../../../app/webapp/auth";
 import type { Logger } from "../../lib/logger/logger";
 import type { SupportedLocale } from "../../i18n";
 import type { GatewayActorProfile, SendMessageMeta, TelegramSendMessageOptions, WebAppLaunchMode } from "./transportTypes";
@@ -12,6 +12,7 @@ import { resolveWebAppPublicBaseUrl } from "./transportUtils";
 export interface TransportLiveHost {
   config: AppConfig;
   webAppLaunchRegistry: WebAppLaunchRegistry;
+  webAppSessions: WebAppSessionRegistry;
   logger: Logger;
   t(locale: SupportedLocale, key: string, vars?: Record<string, string | number>): string;
   ensureGatewayClientUuid(
@@ -99,6 +100,28 @@ export class TransportLiveActions {
     const url = new URL(`${baseUrl}/live/${encodeURIComponent(resolvedLiveSessionId)}`);
     url.searchParams.set("launchMode", this.host.config.webapp.launchMode);
 
+    const directBrowserToken = this.host.webAppSessions.create(
+      resolvedLiveSessionId,
+      input.principal.telegramUserId,
+      this.host.config.webapp.sessionTtlSeconds,
+    ).token;
+    const directBrowserUrl = new URL(
+      `${baseUrl}/live/${encodeURIComponent(resolvedLiveSessionId)}`,
+    );
+    directBrowserUrl.searchParams.set("token", directBrowserToken);
+
+    const keyboard = this.buildKeyboard((mode) => {
+      const modeUrl = new URL(url.toString());
+      modeUrl.searchParams.set("launchMode", mode);
+      return modeUrl.toString();
+    }, input.locale);
+    keyboard
+      .row()
+      .url(
+        this.host.t(input.locale, "menu:live.buttons.open_in_browser"),
+        directBrowserUrl.toString(),
+      );
+
     const sent = await this.host.sendChatMessage(
       input.principal.telegramChatId,
       buildLiveLauncherText({
@@ -108,11 +131,7 @@ export class TransportLiveActions {
         chooseMode: this.host.t(input.locale, "menu:live.actions.choose_mode"),
       }),
       {
-        reply_markup: this.buildKeyboard((mode) => {
-          const modeUrl = new URL(url.toString());
-          modeUrl.searchParams.set("launchMode", mode);
-          return modeUrl.toString();
-        }, input.locale),
+        reply_markup: keyboard,
       },
       {
         kind: "notification",

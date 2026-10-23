@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TellyMCP Chrome Attach",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "Attach TellyMCP to an already running Chrome session.",
   "icons": {
     "16": "icon-16.png",
@@ -16,7 +16,6 @@
     "cookies",
     "alarms",
     "debugger",
-    "webNavigation",
     "webRequest",
     "scripting"
   ],

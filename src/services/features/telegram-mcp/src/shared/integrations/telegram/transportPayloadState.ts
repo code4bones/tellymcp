@@ -61,6 +61,34 @@ export class TransportPayloadState {
     });
   }
 
+  public async createInboxRouteMenuPayload(
+    sessionId: string,
+    namespace: string,
+    routeKey: string,
+  ): Promise<string> {
+    return this.createPayload({
+      kind: "inbox-route-entry",
+      sessionId,
+      namespace,
+      routeKey,
+    });
+  }
+
+  public async createInboxMessageMenuPayload(
+    sessionId: string,
+    namespace: string,
+    routeKey: string,
+    messageId: string,
+  ): Promise<string> {
+    return this.createPayload({
+      kind: "inbox-message-entry",
+      sessionId,
+      namespace,
+      routeKey,
+      messageId,
+    });
+  }
+
   public async createProjectDeleteMenuPayload(
     sessionId: string,
     projectUuid: string,

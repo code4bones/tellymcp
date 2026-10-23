@@ -13,6 +13,17 @@
   `OAuthRefreshTokenStore` port as the rest of gateway state (Redis in
   gateway/`both` mode, process-local otherwise), so they survive a gateway
   restart instead of forcing re-auth on every redeploy too.
+- Self-service "📬 Входящие" Telegram menu (same row as Settings in the
+  session menu): lists projects/routes with pending tasks addressed to you,
+  picking one binds the *current* console to that route and shows its
+  active tasks, and each task's card offers Approve/Reject/Postpone
+  directly -- no need to wait for the reactive first-event prompt or stay
+  on the console that received it. Fully generic (works for any inbox
+  `namespace`, not just Marrow); internally a real grammY menu for the
+  top-level route list and plain inline keyboards (dispatched via
+  `inbox-message-open:`/`inbox-decision:`/`inbox-route-back:` callback
+  prefixes) for the parameterized route/message screens, matching how the
+  existing Collab project-members screens are built.
 - Backend groundwork for a self-service "Входящие" Telegram menu: generic
   queries to list a recipient's active inbox routes and the active messages
   within one (`telegramMcp.externalInbox.listActiveRoutes`/

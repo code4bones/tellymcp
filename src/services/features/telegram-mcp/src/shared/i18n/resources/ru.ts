@@ -35,6 +35,7 @@ export const ruMenu = {
       collab: "👥 Collab",
       storage: "📦 Storage",
       settings: "⚙ Settings",
+      externalInbox: "📬 Входящие",
       back: "⬅ Назад",
     },
     actions: {
@@ -42,6 +43,7 @@ export const ruMenu = {
       open_browser: "Открываю browser.",
       open_agents: "Открываю меню агентов.",
       open_inbox: "Открываю inbox.",
+      open_external_inbox: "Открываю входящие.",
       open_storage: "Открываю storage.",
       open_settings: "Открываю настройки.",
       back_to_sessions: "Назад к сессиям.",
@@ -141,6 +143,45 @@ export const ruMenu = {
     actions: {
       empty: "Нет сохранённых внеочередных Telegram-сообщений.",
       refreshed: "Inbox обновлён.",
+    },
+  },
+  // Generic external inbox (Marrow task-assignment integration and any
+  // future source) -- unrelated to the legacy per-session "inbox" block
+  // above, which stores ad-hoc Telegram messages, not external work offers.
+  externalInbox: {
+    screen: {
+      title: "📬 Входящие: проекты с ожидающими задачами",
+    },
+    labels: {
+      empty: "Нет ожидающих задач ни по одному проекту.",
+    },
+    data_stale: "Данные устарели, открой меню заново.",
+    actions: {
+      back_to_session_menu: "Назад к меню сессии.",
+      bound: "Проект {{route}} привязан к этой консоли.",
+      approved: "Задача одобрена, нудж отправлен в консоль.",
+      rejected: "Задача отклонена.",
+      deferred: "Задача отложена.",
+    },
+    route_screen: {
+      title: "📥 {{route}}",
+      pick_one: "Выбери задачу, чтобы посмотреть и принять решение:",
+      empty: "Нет активных задач по этому проекту.",
+    },
+    status: {
+      pending: "⏳",
+      offered: "❓",
+      deferred: "⏸",
+      no_live_session: "📴",
+    },
+    message_screen: {
+      title: "{{title}}",
+      resource: "{{kind}}: {{id}}",
+    },
+    buttons: {
+      approve: "✅ Принять",
+      reject: "❌ Отклонить",
+      postpone: "⏸ Отложить",
     },
   },
   buffer: {

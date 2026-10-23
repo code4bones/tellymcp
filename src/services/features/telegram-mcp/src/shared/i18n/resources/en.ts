@@ -34,6 +34,7 @@ export const enMenu = {
       collab: "👥 Collab",
       storage: "📦 Storage",
       settings: "⚙ Settings",
+      externalInbox: "📬 Inbox",
       back: "⬅ Back",
     },
     actions: {
@@ -41,6 +42,7 @@ export const enMenu = {
       open_browser: "Opening browser menu.",
       open_agents: "Opening agent menu.",
       open_inbox: "Opening inbox.",
+      open_external_inbox: "Opening inbox.",
       open_storage: "Opening storage.",
       open_settings: "Opening settings.",
       back_to_sessions: "Back to sessions.",
@@ -139,6 +141,45 @@ export const enMenu = {
     actions: {
       empty: "No unsolicited Telegram messages are stored.",
       refreshed: "Inbox refreshed.",
+    },
+  },
+  // Generic external inbox (Marrow task-assignment integration and any
+  // future source) -- unrelated to the legacy per-session "inbox" block
+  // above, which stores ad-hoc Telegram messages, not external work offers.
+  externalInbox: {
+    screen: {
+      title: "📬 Inbox: projects with pending tasks",
+    },
+    labels: {
+      empty: "No pending tasks on any project.",
+    },
+    data_stale: "That data is stale, reopen the menu.",
+    actions: {
+      back_to_session_menu: "Back to session menu.",
+      bound: "Project {{route}} is now bound to this console.",
+      approved: "Approved -- the nudge was sent to the console.",
+      rejected: "Rejected.",
+      deferred: "Postponed.",
+    },
+    route_screen: {
+      title: "📥 {{route}}",
+      pick_one: "Pick a task to review and decide:",
+      empty: "No active tasks for this project.",
+    },
+    status: {
+      pending: "⏳",
+      offered: "❓",
+      deferred: "⏸",
+      no_live_session: "📴",
+    },
+    message_screen: {
+      title: "{{title}}",
+      resource: "{{kind}}: {{id}}",
+    },
+    buttons: {
+      approve: "✅ Approve",
+      reject: "❌ Reject",
+      postpone: "⏸ Postpone",
     },
   },
   buffer: {

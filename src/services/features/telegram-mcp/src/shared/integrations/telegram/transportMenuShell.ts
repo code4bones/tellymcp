@@ -33,6 +33,9 @@ type TransportMenuShellHost = {
   handleProjectDetailCallback: (ctx: TelegramMenuContext) => Promise<void>;
   handleProjectDeleteCallback: (ctx: TelegramMenuContext) => Promise<void>;
   handleProjectLeaveCallback: (ctx: TelegramMenuContext) => Promise<void>;
+  handleInboxMessageOpenCallback: (ctx: TelegramMenuContext) => Promise<void>;
+  handleInboxDecisionCallback: (ctx: TelegramMenuContext) => Promise<void>;
+  handleInboxRouteBackCallback: (ctx: TelegramMenuContext) => Promise<void>;
 };
 
 export class TransportMenuShell {
@@ -94,6 +97,15 @@ export class TransportMenuShell {
     });
     bot.callbackQuery(/^project-leave:(.+)$/u, async (ctx) => {
       await this.host.handleProjectLeaveCallback(ctx);
+    });
+    bot.callbackQuery(/^inbox-message-open:(.+)$/u, async (ctx) => {
+      await this.host.handleInboxMessageOpenCallback(ctx);
+    });
+    bot.callbackQuery(/^inbox-decision:(approve|reject|defer):(.+)$/u, async (ctx) => {
+      await this.host.handleInboxDecisionCallback(ctx);
+    });
+    bot.callbackQuery(/^inbox-route-back:(.+)$/u, async (ctx) => {
+      await this.host.handleInboxRouteBackCallback(ctx);
     });
     bot.callbackQuery("project-back", async (ctx) => {
       await ctx.answerCallbackQuery({ text: "Back to projects." });

@@ -64,6 +64,7 @@ export interface TransportMenuFactoriesHost {
   showAgentMenu(ctx: TelegramMenuContext): Promise<void>;
   showMainMenu(ctx: TelegramMenuContext): Promise<void>;
   showProjectsEntryPoint(ctx: TelegramMenuContext): Promise<void>;
+  showInboxMenu(ctx: TelegramMenuContext): Promise<void>;
   showStorageMenu(ctx: TelegramMenuContext): Promise<void>;
   showSettingsMenu(ctx: TelegramMenuContext): Promise<void>;
   showSessionsMenu(ctx: TelegramMenuContext): Promise<void>;
@@ -218,6 +219,15 @@ export class TransportMenuFactories {
             text: await this.host.tForContext(ctx, "menu:main.actions.open_settings"),
           });
           await this.host.showSettingsMenu(ctx);
+        },
+      )
+      .text(
+        async (ctx) => this.host.tForContext(ctx, "menu:main.buttons.externalInbox"),
+        async (ctx) => {
+          await ctx.answerCallbackQuery({
+            text: await this.host.tForContext(ctx, "menu:main.actions.open_external_inbox"),
+          });
+          await this.host.showInboxMenu(ctx);
         },
       )
       .row()

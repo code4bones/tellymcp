@@ -42,11 +42,15 @@ export type TelegramMenuPayloadRecord = {
     | "live-approval"
     | "terminal-prompt-action"
     | "project-file-target"
-    | "partner-file-target";
+    | "partner-file-target"
+    | "inbox-route-entry"
+    | "inbox-message-entry";
   sessionId?: string | undefined;
   ownerKey?: string | undefined;
   ownerLabel?: string | undefined;
   messageId?: string | undefined;
+  namespace?: string | undefined;
+  routeKey?: string | undefined;
   filePath?: string | undefined;
   targetSessionId?: string | undefined;
   sourceSessionId?: string | undefined;

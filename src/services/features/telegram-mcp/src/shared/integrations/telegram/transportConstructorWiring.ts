@@ -55,6 +55,8 @@ import { TransportDocumentActions } from "./transportDocumentActions";
 import { TransportEventActions } from "./transportEventActions";
 import { TransportFileHandoffActions } from "./transportFileHandoffActions";
 import { TransportGatewayActions } from "./transportGatewayActions";
+import { TransportInboxMenus } from "./transportInboxMenus";
+import { TransportInboxState } from "./transportInboxState";
 import { TransportLifecycleActions } from "./transportLifecycleActions";
 import { TransportLiveActions } from "./transportLiveActions";
 import { TransportMenuCallbacks } from "./transportMenuCallbacks";
@@ -242,6 +244,7 @@ export function buildTransportConstructorWiring(
     bot,
   });
   const agentMenuRef: { current?: Menu<TelegramMenuContext> } = {};
+  const inboxMenuRef: { current?: Menu<TelegramMenuContext> } = {};
   const agentActions = new TransportAgentActions({
     bindingStore: host.bindingStore,
     sessionStore: host.sessionStore,
@@ -362,6 +365,46 @@ export function buildTransportConstructorWiring(
     showMainMenu: (ctx) => menuState.showMainMenu(ctx),
   });
 
+  const inboxState: TransportInboxState = new TransportInboxState({
+    getPrincipalFromContext: (ctx) => context.getPrincipalFromContext(ctx),
+    callGatewayJson: (path, payload) => host.callGatewayJson(path, payload),
+    bindingStore: host.bindingStore,
+  });
+
+  const inboxMenus: TransportInboxMenus = new TransportInboxMenus({
+    createMenuOptions: (onMenuOutdated) => host.createMenuOptions(onMenuOutdated),
+    getPrincipalFromContext: (ctx) => context.getPrincipalFromContext(ctx),
+    resolveLocaleForContext: (ctx) => context.resolveLocaleForContext(ctx),
+    t: (locale, key, vars) => context.t(locale, key, vars),
+    tForContext: (ctx, key, vars) => context.tForContext(ctx, key, vars),
+    menuPayloadStore: host.menuPayloadStore,
+    createInboxRouteMenuPayload: (sessionId, namespace, routeKey) =>
+      payloadState.createInboxRouteMenuPayload(sessionId, namespace, routeKey),
+    createInboxMessageMenuPayload: (sessionId, namespace, routeKey, messageId) =>
+      payloadState.createInboxMessageMenuPayload(sessionId, namespace, routeKey, messageId),
+    buildInboxRoutesFingerprint: (ctx) => inboxState.buildInboxRoutesFingerprint(ctx),
+    loadInboxRoutesContext: (ctx) => inboxState.loadInboxRoutesContext(ctx),
+    listInboxMessages: (principal, namespace, routeKey) =>
+      inboxState.listInboxMessages(principal, namespace, routeKey),
+    bindCurrentSessionToRoute: (principal, sessionId, namespace, routeKey) =>
+      inboxState.bindCurrentSessionToRoute(principal, sessionId, namespace, routeKey),
+    resolveInboxMessage: (messageId, decision) =>
+      inboxState.resolveInboxMessage(messageId, decision),
+    showMainMenu: (ctx) => menuState.showMainMenu(ctx),
+    getInboxMenu: () => {
+      if (!inboxMenuRef.current) {
+        throw new Error("Telegram inbox menu is not initialized yet");
+      }
+      return inboxMenuRef.current;
+    },
+    renderMenuHtmlScreen: (ctx, text, meta, menu) =>
+      menuFlow.renderMenuHtmlScreen(ctx, text, meta, menu as Menu<TelegramMenuContext>),
+    editText: (ctx, text, meta, options) =>
+      outputActions.editText(ctx, text, meta, options as TelegramEditMessageOptions),
+    replyText: (ctx, text, meta, options) =>
+      outputActions.replyText(ctx, text, meta, options as TelegramSendMessageOptions),
+  });
+
   const menuFactories: TransportMenuFactories = new TransportMenuFactories({
     logger: host.logger,
     bindingStore: host.bindingStore,
@@ -385,6 +428,7 @@ export function buildTransportConstructorWiring(
     showAgentMenu: (ctx) => agentActions.showAgentMenu(ctx),
     showMainMenu: (ctx) => menuState.showMainMenu(ctx),
     showProjectsEntryPoint: (ctx) => menuFlow.showProjectsMenu(ctx),
+    showInboxMenu: (ctx) => inboxMenus.showInboxMenu(ctx),
     showStorageMenu: (ctx) => menuFlow.showStorageMenu(ctx),
     showSettingsMenu: (ctx) => menuFlow.showSettingsMenu(ctx),
     showSessionsMenu: (ctx) => menuFlow.showSessionsMenu(ctx),
@@ -451,6 +495,8 @@ export function buildTransportConstructorWiring(
   const pruneConfirmMenu: Menu<TelegramMenuContext> = menuFactories.createPruneConfirmMenu();
   const storageMessageMenu: Menu<TelegramMenuContext> = menuFactories.createStorageMessageMenu();
   const screenshotMessageMenu: Menu<TelegramMenuContext> = menuFactories.createScreenshotMessageMenu();
+  const inboxMenu: Menu<TelegramMenuContext> = inboxMenus.createInboxMenu();
+  inboxMenuRef.current = inboxMenu;
   const projectsMenu: Menu<TelegramMenuContext> = projectMenus.createProjectsMenu();
   const collabToolsMenu: Menu<TelegramMenuContext> = projectMenus.createCollabToolsMenu();
   const collabDeleteMenu: Menu<TelegramMenuContext> = projectMenus.createCollabDeleteMenu();
@@ -973,12 +1019,19 @@ export function buildTransportConstructorWiring(
       projectActions.handleProjectDeleteCallback(ctx),
     handleProjectLeaveCallback: (ctx) =>
       projectActions.handleProjectLeaveCallback(ctx),
+    handleInboxMessageOpenCallback: (ctx) =>
+      inboxMenus.handleInboxMessageOpenCallback(ctx),
+    handleInboxDecisionCallback: (ctx) =>
+      inboxMenus.handleInboxDecisionCallback(ctx),
+    handleInboxRouteBackCallback: (ctx) =>
+      inboxMenus.handleInboxRouteBackCallback(ctx),
   });
 
   mainMenu.register([
     agentMenu,
     storageMenu,
     browserMenu,
+    inboxMenu,
     projectsMenu,
     collabToolsMenu,
     collabDeleteMenu,

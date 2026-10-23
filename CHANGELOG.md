@@ -13,6 +13,12 @@
   `OAuthRefreshTokenStore` port as the rest of gateway state (Redis in
   gateway/`both` mode, process-local otherwise), so they survive a gateway
   restart instead of forcing re-auth on every redeploy too.
+- Inbox offers now have a third Telegram option, "Postpone", alongside
+  Approve/Reject -- marks the message `deferred` instead of losing it, and
+  the approve/reject/defer decision is now its own reusable step
+  (`resolveInboxMessage`) that a future menu can call directly on a message
+  with no live prompt of its own (e.g. approving something deferred days
+  earlier).
 - Generic external inbox (`inbox_put`/`inbox_bind_identity`/`inbox_bind_route`,
   Marrow task-assignment integration): когда маршрут ни разу не привязан, но
   получатель уже известен Telly, воркер сам предлагает ему в Telegram выбрать

@@ -44,7 +44,10 @@ const ROUTE_BIND_TIMEOUT_SECONDS = Number(
 );
 const APPROVE_OPTION = "Approve";
 const REJECT_OPTION = "Reject";
+const POSTPONE_OPTION = "Postpone";
 const MAX_ATTEMPTS = 5;
+
+type OfferDecision = "approve" | "reject" | "defer";
 
 const MAX_CONSOLE_TEXT_LENGTH = 4000;
 const MAX_OPTION_LABEL_LENGTH = 60;
@@ -75,6 +78,36 @@ function fallbackConsoleText(row: InboxMessageRow): string {
     `in ${row.route_namespace}:${row.route_key} was just approved. Re-read ` +
     "and claim it through your own authenticated connection before doing any work."
   );
+}
+
+type OfferDisplay = {
+  title: string;
+  summary: string;
+  url: string | undefined;
+  consoleText: string;
+};
+
+// Shared by deliverOffer's prompt and resolveInboxMessage's approve path --
+// both need the same display snapshot, and the approve path may run long
+// after the prompt was sent (a deferred message, approved later from a
+// menu), so it re-derives this from the row rather than reusing a captured
+// closure value.
+function buildOfferDisplay(row: InboxMessageRow): OfferDisplay {
+  const payload = (row.payload ?? {}) as Record<string, unknown>;
+  const display = (payload.display ?? {}) as Record<string, unknown>;
+  const title =
+    typeof display.title === "string" && display.title.trim()
+      ? display.title.trim()
+      : row.resource_id;
+  const summary =
+    typeof display.summary === "string" ? display.summary.trim() : "";
+  const url =
+    typeof display.url === "string" && display.url.trim()
+      ? display.url.trim()
+      : undefined;
+  const consoleText =
+    sanitizeConsoleText(payload.consoleText) ?? fallbackConsoleText(row);
+  return { title, summary, url, consoleText };
 }
 
 function tableCell(
@@ -135,6 +168,12 @@ type InboxWorkerCarrier = Service & {
     inboxService: TelegramMcpExternalInboxServiceInstance,
     routeBinding: { clientUuid: string; localSessionId: string },
     contact: { telegramChatId: number; telegramUserId: number },
+  ) => Promise<void>;
+  resolveInboxMessage?: (
+    row: InboxMessageRow,
+    inboxService: TelegramMcpExternalInboxServiceInstance,
+    routeBinding: { clientUuid: string; localSessionId: string },
+    decision: OfferDecision,
   ) => Promise<void>;
   beginRouteBindingPrompt?: (
     row: InboxMessageRow,
@@ -501,7 +540,10 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
         // Retried by the no-live-session sweep below once a console with
         // this exact statusReason reconnects -- bounded by the same
         // MAX_ATTEMPTS the rest of the worker uses, so a console that never
-        // comes back eventually gives up instead of waiting forever.
+        // comes back eventually gives up instead of waiting forever. This is
+        // only a precheck: it just decides whether to bother the recipient
+        // with a Telegram prompt at all, independent of the real liveness
+        // gate resolveInboxMessage's approve path checks again before nudging.
         await inboxService.updateMessageStatus(row.id, {
           status: row.attempts >= MAX_ATTEMPTS ? "failed" : "no_live_session",
           statusReason:
@@ -521,21 +563,7 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
         );
       }
       const runtime = await runtimeService.waitUntilReady();
-
-      const payload = (row.payload ?? {}) as Record<string, unknown>;
-      const display = (payload.display ?? {}) as Record<string, unknown>;
-      const title =
-        typeof display.title === "string" && display.title.trim()
-          ? display.title.trim()
-          : row.resource_id;
-      const summary =
-        typeof display.summary === "string" ? display.summary.trim() : "";
-      const url =
-        typeof display.url === "string" && display.url.trim()
-          ? display.url.trim()
-          : undefined;
-      const consoleText =
-        sanitizeConsoleText(payload.consoleText) ?? fallbackConsoleText(row);
+      const { title, summary, url } = buildOfferDisplay(row);
 
       const blocks = [
         { type: "heading" as const, size: 3 as const, text: title },
@@ -573,7 +601,7 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
           telegramChatId: contact.telegramChatId,
           telegramUserId: contact.telegramUserId,
         },
-        options: [APPROVE_OPTION, REJECT_OPTION],
+        options: [APPROVE_OPTION, REJECT_OPTION, POSTPONE_OPTION],
       });
 
       const reply = await runtime.telegramTransport.waitForReply(
@@ -589,10 +617,64 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
         return;
       }
 
-      if (reply.answer !== APPROVE_OPTION) {
+      const decision: OfferDecision =
+        reply.answer === APPROVE_OPTION
+          ? "approve"
+          : reply.answer === POSTPONE_OPTION
+            ? "defer"
+            : "reject";
+      await this.resolveInboxMessage?.(row, inboxService, routeBinding, decision);
+    },
+
+    // Approve/reject/defer a message independent of any live waitForReply --
+    // the same decision path the original Telegram prompt's buttons use,
+    // and the one a later "Входящие" menu re-offer (e.g. approving a
+    // previously deferred message, possibly long after the prompt that
+    // created it has expired) calls directly with no prompt of its own.
+    async resolveInboxMessage(
+      this: InboxWorkerCarrier,
+      row: InboxMessageRow,
+      inboxService: TelegramMcpExternalInboxServiceInstance,
+      routeBinding: { clientUuid: string; localSessionId: string },
+      decision: OfferDecision,
+    ): Promise<void> {
+      if (decision === "reject") {
         await inboxService.updateMessageStatus(row.id, { status: "rejected" });
         return;
       }
+      if (decision === "defer") {
+        await inboxService.updateMessageStatus(row.id, { status: "deferred" });
+        return;
+      }
+
+      const liveConsole = (await this.broker.call(
+        "telegramMcp.gateway.resolveLiveConsole",
+        {
+          sessionId: `${routeBinding.clientUuid}:${routeBinding.localSessionId}`,
+        },
+        { meta: { internal_call: true } },
+      )) as LiveConsole;
+      if (!liveConsole) {
+        await inboxService.updateMessageStatus(row.id, {
+          status: row.attempts >= MAX_ATTEMPTS ? "failed" : "no_live_session",
+          statusReason:
+            row.attempts >= MAX_ATTEMPTS
+              ? "console did not reconnect within retry budget"
+              : "target console is not currently connected",
+        });
+        return;
+      }
+
+      const runtimeService = this.broker.getLocalService(
+        TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
+      ) as TelegramMcpRuntimeServiceInstance | null;
+      if (!runtimeService) {
+        throw new Error(
+          `Local Moleculer service '${TELEGRAM_MCP_RUNTIME_SERVICE_NAME}' is unavailable`,
+        );
+      }
+      const runtime = await runtimeService.waitUntilReady();
+      const { title, summary, consoleText } = buildOfferDisplay(row);
 
       try {
         const xchangeMessage = [

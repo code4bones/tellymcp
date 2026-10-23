@@ -14,6 +14,7 @@ const methods = InboxWorkerService.methods as unknown as {
   ) => Promise<void>;
   deliverOffer: (this: unknown, ...args: unknown[]) => Promise<void>;
   beginRouteBindingPrompt: (this: unknown, ...args: unknown[]) => Promise<void>;
+  resolveInboxMessage: (this: unknown, ...args: unknown[]) => Promise<void>;
   retryNoLiveSessionMessages: (this: unknown) => Promise<void>;
 };
 
@@ -119,6 +120,7 @@ function createWorkerHarness(
   };
   harness.deliverOffer = methods.deliverOffer.bind(harness);
   harness.beginRouteBindingPrompt = methods.beginRouteBindingPrompt.bind(harness);
+  harness.resolveInboxMessage = methods.resolveInboxMessage.bind(harness);
 
   return { harness, sendRichRequest, waitForReply, requestLiveRelayAction, brokerCall };
 }
@@ -245,7 +247,7 @@ describe("inbox worker handleClaimedMessage", () => {
     expect(sendRichRequest).toHaveBeenCalledWith(
       expect.objectContaining({
         recipient: { telegramChatId: 42, telegramUserId: 7 },
-        options: ["Approve", "Reject"],
+        options: ["Approve", "Reject", "Postpone"],
         blocks: expect.arrayContaining([
           expect.objectContaining({ type: "heading", text: "Fix the thing" }),
           expect.objectContaining({ type: "table" }),
@@ -294,6 +296,45 @@ describe("inbox worker handleClaimedMessage", () => {
       expect.anything(),
       expect.anything(),
     );
+  });
+
+  it("on Postpone: marks the message deferred and never touches the console", async () => {
+    const inboxService = createInboxServiceMock();
+    const { harness, requestLiveRelayAction, brokerCall } = createWorkerHarness({
+      waitForReply: async () => ({ answer: "Postpone" }),
+    });
+
+    await methods.handleClaimedMessage.call(harness, baseRow, inboxService);
+
+    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith("msg-row-1", {
+      status: "deferred",
+    });
+    expect(requestLiveRelayAction).not.toHaveBeenCalled();
+    expect(brokerCall).not.toHaveBeenCalledWith(
+      "telegramMcp.gateway.createInboxDelivery",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("resolveInboxMessage re-checks console liveness and nudges directly, with no prompt of its own (e.g. approving a previously deferred message from a menu)", async () => {
+    const inboxService = createInboxServiceMock();
+    const { harness, sendRichRequest, requestLiveRelayAction } = createWorkerHarness();
+
+    await methods.resolveInboxMessage.call(
+      harness,
+      { ...baseRow, status: "deferred" },
+      inboxService,
+      { clientUuid: "client-1", localSessionId: "workspace" },
+      "approve",
+    );
+
+    expect(sendRichRequest).not.toHaveBeenCalled();
+    expect(requestLiveRelayAction).toHaveBeenCalled();
+    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith("msg-row-1", {
+      status: "delivered",
+      xchangeMessageUuid: "msg-uuid-1",
+    });
   });
 
   it("marks failed on approval timeout", async () => {

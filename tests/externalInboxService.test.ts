@@ -124,6 +124,10 @@ const methods = ExternalInboxService.methods as unknown as {
     input: Record<string, unknown>,
   ) => Promise<unknown>;
   claimNextPendingMessage: (this: unknown) => Promise<unknown>;
+  resetRetryableNoLiveSessionMessages: (
+    this: unknown,
+    maxAttempts: number,
+  ) => Promise<number>;
 };
 
 function bindHarnessMethods(harness: ReturnType<typeof createHarness>) {
@@ -289,5 +293,28 @@ describe("external-inbox service: claimNextPendingMessage", () => {
     );
 
     expect(result).toBeNull();
+  });
+});
+
+describe("external-inbox service: resetRetryableNoLiveSessionMessages", () => {
+  it("only resets the precheck no_live_session reason, bounded by max attempts", async () => {
+    const harness = createHarness();
+
+    const result = await methods.resetRetryableNoLiveSessionMessages.call(
+      bindHarnessMethods(harness),
+      5,
+    );
+
+    expect(result).toBe(1);
+    const update = harness.__state.updates.find(
+      (entry) => entry.tableName === "inbox_messages",
+    );
+    expect(update?.where).toEqual({
+      status: "no_live_session",
+      status_reason: "target console is not currently connected",
+    });
+    expect(update?.payload).toEqual(
+      expect.objectContaining({ status: "pending" }),
+    );
   });
 });

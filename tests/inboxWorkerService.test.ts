@@ -14,6 +14,7 @@ const methods = InboxWorkerService.methods as unknown as {
   ) => Promise<void>;
   deliverOffer: (this: unknown, ...args: unknown[]) => Promise<void>;
   beginRouteBindingPrompt: (this: unknown, ...args: unknown[]) => Promise<void>;
+  retryNoLiveSessionMessages: (this: unknown) => Promise<void>;
 };
 
 const baseRow = {
@@ -217,6 +218,23 @@ describe("inbox worker handleClaimedMessage", () => {
     expect(sendRichRequest).not.toHaveBeenCalled();
   });
 
+  it("gives up with failed once the console never reconnects within the retry budget", async () => {
+    const inboxService = createInboxServiceMock();
+    const { harness, sendRichRequest } = createWorkerHarness({ resolveLiveConsole: null });
+
+    await methods.handleClaimedMessage.call(
+      harness,
+      { ...baseRow, attempts: 5 },
+      inboxService,
+    );
+
+    expect(inboxService.updateMessageStatus).toHaveBeenCalledWith("msg-row-1", {
+      status: "failed",
+      statusReason: "console did not reconnect within retry budget",
+    });
+    expect(sendRichRequest).not.toHaveBeenCalled();
+  });
+
   it("on Approve: nudges the console and records the xchange delivery", async () => {
     const inboxService = createInboxServiceMock();
     const { harness, sendRichRequest, requestLiveRelayAction, brokerCall } =
@@ -304,5 +322,54 @@ describe("inbox worker handleClaimedMessage", () => {
       status: "no_live_session",
       statusReason: expect.stringContaining("is not connected"),
     });
+  });
+});
+
+describe("inbox worker retryNoLiveSessionMessages", () => {
+  function createRetrySweepHarness(resetCount: number) {
+    const resetRetryableNoLiveSessionMessages = vi.fn(async () => resetCount);
+    const schedulePollSoon = vi.fn();
+    const getLocalService = vi.fn(() => ({ resetRetryableNoLiveSessionMessages }));
+    const harness = {
+      stopRequested: false,
+      isEnabled: () => true,
+      logger: { info: vi.fn(), warn: vi.fn() },
+      broker: { getLocalService },
+      schedulePollSoon,
+    };
+    return { harness, resetRetryableNoLiveSessionMessages, schedulePollSoon };
+  }
+
+  it("requeues retryable rows and schedules an immediate poll", async () => {
+    const { harness, resetRetryableNoLiveSessionMessages, schedulePollSoon } =
+      createRetrySweepHarness(2);
+
+    await methods.retryNoLiveSessionMessages.call(harness);
+
+    expect(resetRetryableNoLiveSessionMessages).toHaveBeenCalledWith(5);
+    expect(schedulePollSoon).toHaveBeenCalledOnce();
+  });
+
+  it("does nothing when there is nothing to retry", async () => {
+    const { schedulePollSoon, harness } = createRetrySweepHarness(0);
+
+    await methods.retryNoLiveSessionMessages.call(harness);
+
+    expect(schedulePollSoon).not.toHaveBeenCalled();
+  });
+
+  it("skips the sweep entirely while disabled", async () => {
+    const getLocalService = vi.fn();
+    const harness = {
+      stopRequested: false,
+      isEnabled: () => false,
+      logger: { info: vi.fn(), warn: vi.fn() },
+      broker: { getLocalService },
+      schedulePollSoon: vi.fn(),
+    };
+
+    await methods.retryNoLiveSessionMessages.call(harness);
+
+    expect(getLocalService).not.toHaveBeenCalled();
   });
 });

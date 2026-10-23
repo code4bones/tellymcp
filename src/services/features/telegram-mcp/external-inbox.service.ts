@@ -79,6 +79,7 @@ export type TelegramMcpExternalInboxServiceInstance = Service & {
     gatewayUserUuid: string,
   ) => Promise<{ telegramChatId: number; telegramUserId: number } | null>;
   reconcileOrphanedMessages: () => Promise<number>;
+  resetRetryableNoLiveSessionMessages: (maxAttempts: number) => Promise<number>;
 };
 
 type ExternalInboxCarrier = Service & Partial<TelegramMcpExternalInboxServiceInstance> & {
@@ -477,6 +478,26 @@ const TelegramMcpExternalInboxService: ServiceSchema = {
         .withSchema(MCP_SCHEMA)
         .table("inbox_messages")
         .whereIn("status", ["processing", "offered", "awaiting_route_binding"])
+        .update({ status: "pending", updated_at: new Date().toISOString() });
+      return typeof result === "number" ? result : 0;
+    },
+
+    async resetRetryableNoLiveSessionMessages(
+      this: ExternalInboxCarrier,
+      maxAttempts: number,
+    ): Promise<number> {
+      // Only the precheck statusReason is retried here -- the post-approval
+      // race case (console disconnected between Approve and the nudge) is
+      // left alone so the recipient is never asked to approve the same
+      // offer twice.
+      const result = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("inbox_messages")
+        .where({
+          status: "no_live_session",
+          status_reason: "target console is not currently connected",
+        })
+        .andWhere("attempts", "<", maxAttempts)
         .update({ status: "pending", updated_at: new Date().toISOString() });
       return typeof result === "number" ? result : 0;
     },

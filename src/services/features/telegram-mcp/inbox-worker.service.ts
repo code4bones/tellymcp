@@ -20,6 +20,11 @@ const GATEWAY_ENABLED =
 
 const POLL_INTERVAL_MS = 5000;
 const RECONNECT_DELAY_MS = 3000;
+// How often we sweep for "no_live_session" rows and give them another shot,
+// in case the target console has reconnected since the last attempt.
+const NO_LIVE_SESSION_RETRY_INTERVAL_MS = Number(
+  process.env.INBOX_NO_LIVE_SESSION_RETRY_INTERVAL_MS || 60_000,
+);
 // Gives the console's input UI time to finish rendering the pasted nudge
 // text before Enter arrives -- sending both back-to-back races the TUI's
 // own paste/redraw handling and Enter can land before the text is "seen".
@@ -111,6 +116,7 @@ type InboxWorkerCarrier = Service & {
   pgClient?: PgClient | null;
   pollTimer?: NodeJS.Timeout | null;
   reconnectTimer?: NodeJS.Timeout | null;
+  noLiveSessionRetryTimer?: NodeJS.Timeout | null;
   stopRequested?: boolean;
   isEnabled?: () => boolean;
   connectListen?: () => Promise<void>;
@@ -118,6 +124,7 @@ type InboxWorkerCarrier = Service & {
   closeListen?: () => Promise<void>;
   schedulePollSoon?: () => void;
   runPollLoop?: () => Promise<void>;
+  retryNoLiveSessionMessages?: () => Promise<void>;
   processOneMessage?: () => Promise<boolean>;
   handleClaimedMessage?: (
     row: InboxMessageRow,
@@ -156,12 +163,45 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
     this.pgClient = null;
     this.pollTimer = null;
     this.reconnectTimer = null;
+    this.noLiveSessionRetryTimer = null;
     this.stopRequested = false;
   },
 
   methods: {
     isEnabled(this: InboxWorkerCarrier): boolean {
       return GATEWAY_ENABLED && Boolean(process.env.DB_HOST?.trim());
+    },
+
+    // Independent of the pending-message poll loop: "no_live_session" rows
+    // are not "pending", so claimNextPendingMessage never sees them again
+    // on its own. This is what gives them another shot once their console
+    // reconnects, without re-sending a Telegram prompt the recipient
+    // already answered (resetRetryableNoLiveSessionMessages only targets
+    // the precheck statusReason, not the post-approval race case).
+    async retryNoLiveSessionMessages(this: InboxWorkerCarrier): Promise<void> {
+      if (this.stopRequested || !this.isEnabled?.()) {
+        return;
+      }
+      const inboxService = getInboxService.call(this);
+      if (!inboxService) {
+        return;
+      }
+      try {
+        const count = await inboxService.resetRetryableNoLiveSessionMessages(
+          MAX_ATTEMPTS,
+        );
+        if (count > 0) {
+          this.logger.info(
+            "Inbox worker requeued no_live_session messages for retry",
+            { count },
+          );
+          this.schedulePollSoon?.();
+        }
+      } catch (error) {
+        this.logger.warn("No-live-session retry sweep failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     },
 
     async connectListen(this: InboxWorkerCarrier): Promise<void> {
@@ -458,9 +498,16 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
         { meta: { internal_call: true } },
       )) as LiveConsole;
       if (!liveConsole) {
+        // Retried by the no-live-session sweep below once a console with
+        // this exact statusReason reconnects -- bounded by the same
+        // MAX_ATTEMPTS the rest of the worker uses, so a console that never
+        // comes back eventually gives up instead of waiting forever.
         await inboxService.updateMessageStatus(row.id, {
-          status: "no_live_session",
-          statusReason: "target console is not currently connected",
+          status: row.attempts >= MAX_ATTEMPTS ? "failed" : "no_live_session",
+          statusReason:
+            row.attempts >= MAX_ATTEMPTS
+              ? "console did not reconnect within retry budget"
+              : "target console is not currently connected",
         });
         return;
       }
@@ -626,11 +673,18 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
     this.pollTimer = setTimeout(() => {
       void this.runPollLoop?.();
     }, 0);
+    this.noLiveSessionRetryTimer = setInterval(() => {
+      void this.retryNoLiveSessionMessages?.();
+    }, NO_LIVE_SESSION_RETRY_INTERVAL_MS);
     this.logger.info("telegram_mcp inbox worker is ready");
   },
 
   async stopped(this: InboxWorkerCarrier) {
     this.stopRequested = true;
+    if (this.noLiveSessionRetryTimer) {
+      clearInterval(this.noLiveSessionRetryTimer);
+      this.noLiveSessionRetryTimer = null;
+    }
     if (this.pollTimer) {
       clearTimeout(this.pollTimer);
       this.pollTimer = null;

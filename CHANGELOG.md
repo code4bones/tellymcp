@@ -9,7 +9,10 @@
   default 30 days) and supports `grant_type=refresh_token` to silently renew
   past the much shorter access-token TTL, instead of forcing a full
   interactive re-authorization every time it expires. Refresh tokens rotate
-  on every use, so a replayed old one is rejected.
+  on every use, so a replayed old one is rejected. Stored through the same
+  `OAuthRefreshTokenStore` port as the rest of gateway state (Redis in
+  gateway/`both` mode, process-local otherwise), so they survive a gateway
+  restart instead of forcing re-auth on every redeploy too.
 - Generic external inbox (`inbox_put`/`inbox_bind_identity`/`inbox_bind_route`,
   Marrow task-assignment integration): когда маршрут ни разу не привязан, но
   получатель уже известен Telly, воркер сам предлагает ему в Telegram выбрать

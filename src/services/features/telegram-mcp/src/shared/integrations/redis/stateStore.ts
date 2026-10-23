@@ -22,6 +22,8 @@ import type {
 import type { SessionContext } from "../../../entities/session/model/types";
 import type {
   MaintenanceStore,
+  OAuthRefreshTokenRecord,
+  OAuthRefreshTokenStore,
   OutgoingDeliveryNotice,
   ProjectMenuViewState,
   PendingRequestStore,
@@ -77,6 +79,10 @@ function principalActiveSessionMatchPattern(telegramUserId: number): string {
 
 function bindingMatchPattern(): string {
   return `${KEY_PREFIX}:binding:*`;
+}
+
+function oauthRefreshTokenKey(token: string): string {
+  return `${KEY_PREFIX}:oauth-refresh-token:${token}`;
 }
 
 function menuPayloadKey(key: string): string {
@@ -165,6 +171,7 @@ export class RedisStateStore
     TelegramUserLocaleStore,
     TelegramXchangeFileMetaStore,
     TelegramMenuPayloadStore,
+    OAuthRefreshTokenStore,
     MaintenanceStore
 {
   private readonly sessionAdapter: RedisAdapter<SessionContext>;
@@ -562,6 +569,30 @@ export class RedisStateStore
   ): Promise<TelegramMenuPayloadRecord | null> {
     const raw = await this.redis.get(menuPayloadKey(key));
     return parseJson<TelegramMenuPayloadRecord>(raw);
+  }
+
+  public async createRefreshToken(
+    token: string,
+    record: OAuthRefreshTokenRecord,
+    ttlSeconds: number,
+  ): Promise<void> {
+    await this.redis.set(
+      oauthRefreshTokenKey(token),
+      JSON.stringify(record),
+      "EX",
+      ttlSeconds,
+    );
+  }
+
+  public async getRefreshToken(
+    token: string,
+  ): Promise<OAuthRefreshTokenRecord | null> {
+    const raw = await this.redis.get(oauthRefreshTokenKey(token));
+    return parseJson<OAuthRefreshTokenRecord>(raw);
+  }
+
+  public async deleteRefreshToken(token: string): Promise<void> {
+    await this.redis.del(oauthRefreshTokenKey(token));
   }
 
   public async setXchangeFileMeta(meta: TelegramXchangeFileMeta): Promise<void> {

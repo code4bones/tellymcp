@@ -17,6 +17,8 @@ import type {
 } from "../../../entities/request/model/types";
 import type {
   MaintenanceStore,
+  OAuthRefreshTokenRecord,
+  OAuthRefreshTokenStore,
   OutgoingDeliveryNotice,
   PendingRequestStore,
   ProjectMenuViewState,
@@ -37,6 +39,7 @@ export type RuntimeStateStore = SessionBindingStore &
   TelegramUserLocaleStore &
   TelegramXchangeFileMetaStore &
   TelegramMenuPayloadStore &
+  OAuthRefreshTokenStore &
   MaintenanceStore;
 
 type Expiring<T> = { value: T; expiresAt: number };
@@ -75,6 +78,7 @@ export class ProcessLocalStateStore implements RuntimeStateStore {
   private readonly requestQueue: string[] = [];
   private activeRequestId: string | null = null;
   private readonly menuPayloads = new Map<string, Expiring<TelegramMenuPayloadRecord>>();
+  private readonly refreshTokens = new Map<string, Expiring<OAuthRefreshTokenRecord>>();
   private readonly xchangeFileMetas = new Map<string, TelegramXchangeFileMeta>();
   private readonly browserAttachments = new Map<string, BrowserAttachmentRecord>();
   private readonly browserRecordings = new Map<string, BrowserRecordingRecord>();
@@ -246,6 +250,22 @@ export class ProcessLocalStateStore implements RuntimeStateStore {
 
   public async getMenuPayload(key: string): Promise<TelegramMenuPayloadRecord | null> {
     return this.readExpiring(this.menuPayloads, key);
+  }
+
+  public async createRefreshToken(
+    token: string,
+    record: OAuthRefreshTokenRecord,
+    ttlSeconds: number,
+  ): Promise<void> {
+    this.refreshTokens.set(token, { value: record, expiresAt: Date.now() + ttlSeconds * 1000 });
+  }
+
+  public async getRefreshToken(token: string): Promise<OAuthRefreshTokenRecord | null> {
+    return this.readExpiring(this.refreshTokens, token);
+  }
+
+  public async deleteRefreshToken(token: string): Promise<void> {
+    this.refreshTokens.delete(token);
   }
 
   public async getUserLocale(telegramUserId: number): Promise<string | null> {

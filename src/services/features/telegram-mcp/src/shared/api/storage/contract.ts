@@ -139,6 +139,36 @@ export interface TelegramXchangeFileMetaStore {
   deleteXchangeFileMeta(sessionId: string, filePath: string): Promise<boolean>;
 }
 
+// Deliberately duplicates the relevant TelegramOidcIdentity fields instead of
+// importing it from app/telegramOidc.ts: shared/ must not depend upward on
+// app/ (see AGENTS.md dependency direction).
+export type OAuthRefreshTokenRecord = {
+  clientId: string;
+  clientAuthentication: "public" | "confidential" | "cimd";
+  scope: string;
+  resource: string;
+  subject: string;
+  telegramIdentity?: {
+    telegramId: string;
+    username?: string;
+    firstName?: string;
+  };
+};
+
+export interface OAuthRefreshTokenStore {
+  createRefreshToken(
+    token: string,
+    record: OAuthRefreshTokenRecord,
+    ttlSeconds: number,
+  ): Promise<void>;
+  // Deliberately a peek, not a destructive read: the caller authenticates
+  // the client against the returned record BEFORE deciding whether to
+  // rotate it, so a client that merely typos its secret doesn't permanently
+  // burn an otherwise-valid refresh token.
+  getRefreshToken(token: string): Promise<OAuthRefreshTokenRecord | null>;
+  deleteRefreshToken(token: string): Promise<void>;
+}
+
 export interface MaintenanceStore {
   pruneAll(): Promise<{ deletedKeys: number }>;
   getGatewayClientUuid(): Promise<string | null>;

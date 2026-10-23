@@ -472,6 +472,72 @@ describe("TellyMCP OAuth facade", () => {
     expect(wrongSecretResponse.statusCode).toBe(401);
   });
 
+  it("stores refresh tokens through an injected store (e.g. Redis) instead of process memory", async () => {
+    const backing = new Map<string, unknown>();
+    const injectedStore = {
+      createRefreshToken: vi.fn(async (token: string, record: unknown) => {
+        backing.set(token, record);
+      }),
+      getRefreshToken: vi.fn(async (token: string) => backing.get(token) ?? null),
+      deleteRefreshToken: vi.fn(async (token: string) => {
+        backing.delete(token);
+      }),
+    };
+    const facade = createOAuthFacade(
+      oauthConfig,
+      "/mcp",
+      undefined,
+      undefined,
+      injectedStore as never,
+    );
+    const verifier = "injected-store-verifier-".padEnd(64, "x");
+    const code = await authorize(facade, verifier);
+    const tokenResponse = makeResponse();
+
+    await facade.handleRequest(
+      makeRequest({
+        method: "POST",
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: "https://chat.example/callback",
+          client_id: "chat-client",
+          code_verifier: verifier,
+          resource: "https://mcp.example.com/api/mcp",
+        }).toString(),
+      }),
+      tokenResponse,
+      "/oauth/token",
+    );
+
+    expect(injectedStore.createRefreshToken).toHaveBeenCalledOnce();
+    const { refresh_token: refreshToken } = JSON.parse(tokenResponse.body) as {
+      refresh_token: string;
+    };
+    expect(backing.has(refreshToken)).toBe(true);
+
+    const refreshResponse = makeResponse();
+    await facade.handleRequest(
+      makeRequest({
+        method: "POST",
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: refreshToken,
+          client_id: "chat-client",
+        }).toString(),
+      }),
+      refreshResponse,
+      "/oauth/token",
+    );
+
+    expect(refreshResponse.statusCode).toBe(200);
+    expect(injectedStore.getRefreshToken).toHaveBeenCalledWith(refreshToken);
+    expect(injectedStore.deleteRefreshToken).toHaveBeenCalledWith(refreshToken);
+    // Rotated: the old token is gone from the injected backing store, a new
+    // one is in it.
+    expect(backing.has(refreshToken)).toBe(false);
+  });
+
   it("requires the configured confidential-client secret", async () => {
     const facade = createOAuthFacade(
       {

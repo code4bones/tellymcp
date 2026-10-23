@@ -442,6 +442,7 @@ export function createMcpHttpHandler(
         runtime.config.oauth.telegramLogin
           ? { requestApproval: requestTelegramLoginApproval }
           : undefined,
+        runtime.stateStore,
       )
     : null;
 

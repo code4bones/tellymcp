@@ -20,6 +20,10 @@ import {
   verifyTelegramOidcIdToken,
   type TelegramOidcIdentity,
 } from "./telegramOidc";
+import type {
+  OAuthRefreshTokenRecord,
+  OAuthRefreshTokenStore,
+} from "../shared/api/storage/contract";
 
 const OAUTH_FORM_LIMIT_BYTES = 64 * 1024;
 const FAILED_MAGIC_TOKEN_WINDOW_MS = 60_000;
@@ -59,18 +63,6 @@ type AuthorizationCode = AuthorizationRequest & {
   telegramIdentity?: TelegramOidcIdentity;
 };
 
-// Deliberately narrower than AuthorizationCode: a refresh token has no
-// redirect_uri/state/code_challenge to re-check, only what's needed to
-// authenticate the client and re-issue an access token for the same grant.
-type RefreshTokenRecord = {
-  clientId: string;
-  clientAuthentication: AuthorizationRequest["clientAuthentication"];
-  scope: string;
-  resource: string;
-  subject: string;
-  telegramIdentity?: TelegramOidcIdentity;
-  expiresAtMs: number;
-};
 
 type PendingTelegramLogin = {
   authorizationRequest: AuthorizationRequest;
@@ -474,12 +466,38 @@ function parseJwtJson(value: string): unknown {
   return JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
 }
 
+// Used only when the caller doesn't inject a durable store (unit tests, or
+// any future caller that doesn't have one): same semantics, but refresh
+// tokens don't survive a process restart.
+function createInMemoryRefreshTokenStore(): OAuthRefreshTokenStore {
+  const store = new Map<string, { record: OAuthRefreshTokenRecord; expiresAtMs: number }>();
+  return {
+    async createRefreshToken(token, record, ttlSeconds) {
+      store.set(token, { record, expiresAtMs: Date.now() + ttlSeconds * 1000 });
+    },
+    async getRefreshToken(token) {
+      const entry = store.get(token);
+      if (!entry) return null;
+      if (entry.expiresAtMs <= Date.now()) {
+        store.delete(token);
+        return null;
+      }
+      return entry.record;
+    },
+    async deleteRefreshToken(token) {
+      store.delete(token);
+    },
+  };
+}
+
 export function createOAuthFacade(
   config: OAuthConfig,
   mcpPath: string,
   logger?: OAuthLogger,
   telegramLoginApproval?: TelegramLoginApprovalGate,
+  refreshTokenStore?: OAuthRefreshTokenStore,
 ): OAuthFacade {
+  const refreshTokens = refreshTokenStore ?? createInMemoryRefreshTokenStore();
   const publicUrl = normalizeUrl(config.publicUrl);
   const issuer = normalizeUrl(config.issuer);
   const audience = normalizeUrl(config.audience);
@@ -498,7 +516,6 @@ export function createOAuthFacade(
     alg: "RS256",
   };
   const authorizationCodes = new Map<string, AuthorizationCode>();
-  const refreshTokens = new Map<string, RefreshTokenRecord>();
   const failedAttempts = new Map<string, FailedAttemptState>();
   const pendingTelegramLogins = new Map<string, PendingTelegramLogin>();
   const cimdClients = new Map<string, CimdClient>();
@@ -542,25 +559,14 @@ export function createOAuthFacade(
     }
   };
 
-  const purgeExpiredRefreshTokens = (nowMs: number): void => {
-    for (const [token, record] of refreshTokens) {
-      if (record.expiresAtMs <= nowMs) {
-        refreshTokens.delete(token);
-      }
-    }
-  };
-
-  const issueRefreshToken = (
+  const issueRefreshToken = async (
     record: Pick<
-      RefreshTokenRecord,
+      OAuthRefreshTokenRecord,
       "clientId" | "clientAuthentication" | "scope" | "resource" | "subject" | "telegramIdentity"
     >,
-  ): string => {
+  ): Promise<string> => {
     const token = randomBytes(32).toString("base64url");
-    refreshTokens.set(token, {
-      ...record,
-      expiresAtMs: Date.now() + config.refreshTokenTtlSeconds * 1000,
-    });
+    await refreshTokens.createRefreshToken(token, record, config.refreshTokenTtlSeconds);
     return token;
   };
 
@@ -1319,11 +1325,8 @@ export function createOAuthFacade(
 
       if (grantType === "refresh_token") {
         const presentedToken = params.get("refresh_token") ?? "";
-        const refreshRecord = refreshTokens.get(presentedToken);
-        const refreshNowMs = Date.now();
-        purgeExpiredRefreshTokens(refreshNowMs);
-        if (!refreshRecord || refreshRecord.expiresAtMs <= refreshNowMs) {
-          refreshTokens.delete(presentedToken);
+        const refreshRecord = await refreshTokens.getRefreshToken(presentedToken);
+        if (!refreshRecord) {
           logger?.warn("OAuth token request rejected", {
             reason: "unknown_or_expired_refresh_token",
             clientId: params.get("client_id")?.trim() || null,
@@ -1356,8 +1359,8 @@ export function createOAuthFacade(
         // Rotate on every use: the presented token is consumed here and a
         // fresh one takes its place, so a stolen-and-replayed refresh token
         // stops working the moment the legitimate client refreshes again.
-        refreshTokens.delete(presentedToken);
-        const rotatedRefreshToken = issueRefreshToken(refreshRecord);
+        await refreshTokens.deleteRefreshToken(presentedToken);
+        const rotatedRefreshToken = await issueRefreshToken(refreshRecord);
         logger?.info("OAuth access token refreshed", {
           clientId: refreshRecord.clientId,
           audience: refreshRecord.resource,
@@ -1436,7 +1439,7 @@ export function createOAuthFacade(
       writeOAuthJson(res, 200, {
         access_token: issueAccessToken(record),
         token_type: "Bearer",
-        refresh_token: issueRefreshToken(record),
+        refresh_token: await issueRefreshToken(record),
         scope,
       });
       return true;

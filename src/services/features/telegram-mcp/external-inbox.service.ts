@@ -469,13 +469,14 @@ const TelegramMcpExternalInboxService: ServiceSchema = {
 
     async reconcileOrphanedMessages(this: ExternalInboxCarrier): Promise<number> {
       // A gateway restart loses any in-memory Telegram-reply waiter, so rows
-      // left in "processing"/"offered" by a crashed previous instance would
-      // otherwise wait forever. Reset them to "pending" for a fresh attempt,
-      // bounded by their existing attempts counter.
+      // left in "processing"/"offered"/"awaiting_route_binding" by a crashed
+      // previous instance would otherwise wait forever. Reset them to
+      // "pending" for a fresh attempt, bounded by their existing attempts
+      // counter.
       const result = await this.db
         .withSchema(MCP_SCHEMA)
         .table("inbox_messages")
-        .whereIn("status", ["processing", "offered"])
+        .whereIn("status", ["processing", "offered", "awaiting_route_binding"])
         .update({ status: "pending", updated_at: new Date().toISOString() });
       return typeof result === "number" ? result : 0;
     },

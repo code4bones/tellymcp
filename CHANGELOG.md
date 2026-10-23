@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+
+- Generic external inbox (`inbox_put`/`inbox_bind_identity`/`inbox_bind_route`,
+  Marrow task-assignment integration): когда маршрут ни разу не привязан, но
+  получатель уже известен Telly, воркер сам предлагает ему в Telegram выбрать
+  одну из своих живых консолей, привязывает маршрут и тут же продолжает
+  доставку того же сообщения (approve/reject-оффер), а не теряет его. Новый
+  статус сообщения — `awaiting_route_binding`, также восстанавливается после
+  перезапуска гейтвея наравне с `processing`/`offered`.
+
 ### Changed
 
 - CLI больше не загружает `node-pty` до разбора команды: `tellymcp --help`,

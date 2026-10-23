@@ -31,11 +31,18 @@ function delay(ms: number): Promise<void> {
 const APPROVAL_TIMEOUT_SECONDS = Number(
   process.env.INBOX_APPROVAL_TIMEOUT_SECONDS || 600,
 );
+// How long we wait for the recipient to pick a console when a route has
+// never been bound before. Separate from APPROVAL_TIMEOUT_SECONDS so the two
+// can be tuned independently later even though they share a default today.
+const ROUTE_BIND_TIMEOUT_SECONDS = Number(
+  process.env.INBOX_ROUTE_BIND_TIMEOUT_SECONDS || 600,
+);
 const APPROVE_OPTION = "Approve";
 const REJECT_OPTION = "Reject";
 const MAX_ATTEMPTS = 5;
 
 const MAX_CONSOLE_TEXT_LENGTH = 4000;
+const MAX_OPTION_LABEL_LENGTH = 60;
 
 // The source integration (Marrow) composes the exact text to type into the
 // PTY -- Telly only relays it. It still lands as literal pty.write() input
@@ -82,6 +89,24 @@ const DBConfig = {
 
 type LiveConsole = { client_uuid: string; local_session_id: string } | null;
 
+type OwnerLiveConsole = {
+  client_uuid: string;
+  local_session_id: string;
+  session_label?: string | null;
+  cwd?: string | null;
+};
+
+// Telegram inline buttons stay readable with a short label; a full cwd path
+// is truncated rather than left to wrap/overflow the button.
+function consoleOptionLabel(liveConsole: OwnerLiveConsole): string {
+  const label = liveConsole.session_label?.trim() || liveConsole.local_session_id;
+  const cwd = liveConsole.cwd?.trim();
+  const full = cwd ? `${label} · ${cwd}` : label;
+  return full.length > MAX_OPTION_LABEL_LENGTH
+    ? `${full.slice(0, MAX_OPTION_LABEL_LENGTH - 1)}…`
+    : full;
+}
+
 type InboxWorkerCarrier = Service & {
   pgClient?: PgClient | null;
   pollTimer?: NodeJS.Timeout | null;
@@ -97,6 +122,18 @@ type InboxWorkerCarrier = Service & {
   handleClaimedMessage?: (
     row: InboxMessageRow,
     inboxService: TelegramMcpExternalInboxServiceInstance,
+  ) => Promise<void>;
+  deliverOffer?: (
+    row: InboxMessageRow,
+    inboxService: TelegramMcpExternalInboxServiceInstance,
+    routeBinding: { clientUuid: string; localSessionId: string },
+    contact: { telegramChatId: number; telegramUserId: number },
+  ) => Promise<void>;
+  beginRouteBindingPrompt?: (
+    row: InboxMessageRow,
+    inboxService: TelegramMcpExternalInboxServiceInstance,
+    gatewayUserUuid: string,
+    contact: { telegramChatId: number; telegramUserId: number },
   ) => Promise<void>;
 };
 
@@ -263,19 +300,9 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
         return;
       }
 
-      const routeBinding = await inboxService.resolveRouteBinding(
-        row.route_namespace,
-        row.route_key,
-        gatewayUserUuid,
-      );
-      if (!routeBinding) {
-        await inboxService.updateMessageStatus(row.id, {
-          status: "failed",
-          statusReason: "no route binding",
-        });
-        return;
-      }
-
+      // Resolved ahead of the route-binding check: a missing route sends the
+      // recipient a console-picker over Telegram, which needs this contact
+      // just as much as the eventual approve/reject offer does.
       const contact = await inboxService.resolveGatewayUserContact(gatewayUserUuid);
       if (!contact) {
         await inboxService.updateMessageStatus(row.id, {
@@ -285,6 +312,144 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
         return;
       }
 
+      const routeBinding = await inboxService.resolveRouteBinding(
+        row.route_namespace,
+        row.route_key,
+        gatewayUserUuid,
+      );
+      if (!routeBinding) {
+        await this.beginRouteBindingPrompt?.(row, inboxService, gatewayUserUuid, contact);
+        return;
+      }
+
+      await this.deliverOffer?.(row, inboxService, routeBinding, contact);
+    },
+
+    // One-time console picker for a route that has never been bound. Reuses
+    // the same sendRichRequest/waitForReply primitive as the approve/reject
+    // offer below, just with one button per live console instead of a fixed
+    // Approve/Reject pair. On a pick, binds the route and immediately
+    // continues into deliverOffer so the triggering message isn't lost.
+    async beginRouteBindingPrompt(
+      this: InboxWorkerCarrier,
+      row: InboxMessageRow,
+      inboxService: TelegramMcpExternalInboxServiceInstance,
+      gatewayUserUuid: string,
+      contact: { telegramChatId: number; telegramUserId: number },
+    ): Promise<void> {
+      const result = (await this.broker.call(
+        "telegramMcp.gateway.listLiveConsoles",
+        { owner_user_uuid: gatewayUserUuid },
+        { meta: { internal_call: true } },
+      )) as { sessions: OwnerLiveConsole[] } | null;
+      const consoles = result?.sessions ?? [];
+
+      if (!consoles.length) {
+        await inboxService.updateMessageStatus(row.id, {
+          status: "failed",
+          statusReason: "no live console to bind",
+        });
+        return;
+      }
+
+      const byLabel = new Map<string, OwnerLiveConsole>();
+      const options: string[] = [];
+      for (const liveConsole of consoles) {
+        const label = consoleOptionLabel(liveConsole);
+        if (byLabel.has(label)) {
+          continue; // keep options unique so the reply maps back unambiguously
+        }
+        byLabel.set(label, liveConsole);
+        options.push(label);
+      }
+
+      const runtimeService = this.broker.getLocalService(
+        TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
+      ) as TelegramMcpRuntimeServiceInstance | null;
+      if (!runtimeService) {
+        throw new Error(
+          `Local Moleculer service '${TELEGRAM_MCP_RUNTIME_SERVICE_NAME}' is unavailable`,
+        );
+      }
+      const runtime = await runtimeService.waitUntilReady();
+
+      const requestId = createRequestId();
+      await inboxService.updateMessageStatus(row.id, {
+        status: "awaiting_route_binding",
+        pendingRequestId: requestId,
+      });
+
+      await runtime.telegramTransport.sendRichRequest({
+        requestId,
+        sessionId: `inbox-bind:${row.id}`,
+        blocks: [
+          { type: "heading" as const, size: 3 as const, text: "Нужна привязка консоли" },
+          {
+            type: "paragraph" as const,
+            text:
+              `Проект ${row.route_namespace}:${row.route_key} пока не привязан ни к одной ` +
+              "консоли. Выбери, куда присылать уведомления о задачах этого проекта:",
+          },
+        ],
+        recipient: {
+          telegramChatId: contact.telegramChatId,
+          telegramUserId: contact.telegramUserId,
+        },
+        options,
+      });
+
+      const reply = await runtime.telegramTransport.waitForReply(
+        requestId,
+        ROUTE_BIND_TIMEOUT_SECONDS,
+      );
+
+      if (!reply) {
+        await inboxService.updateMessageStatus(row.id, {
+          status: "failed",
+          statusReason: "route binding prompt timed out",
+        });
+        return;
+      }
+
+      const chosen = byLabel.get(reply.answer);
+      if (!chosen) {
+        await inboxService.updateMessageStatus(row.id, {
+          status: "failed",
+          statusReason: "route binding prompt returned an unrecognized console",
+        });
+        return;
+      }
+
+      try {
+        await inboxService.bindRouteRecord({
+          namespace: row.route_namespace,
+          route_key: row.route_key,
+          telegram_user_id: contact.telegramUserId,
+          session_id: `${chosen.client_uuid}:${chosen.local_session_id}`,
+        });
+      } catch (error) {
+        await inboxService.updateMessageStatus(row.id, {
+          status: "failed",
+          statusReason: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+
+      await this.deliverOffer?.(
+        row,
+        inboxService,
+        { clientUuid: chosen.client_uuid, localSessionId: chosen.local_session_id },
+        contact,
+      );
+    },
+
+    async deliverOffer(
+      this: InboxWorkerCarrier,
+      row: InboxMessageRow,
+      inboxService: TelegramMcpExternalInboxServiceInstance,
+      routeBinding: { clientUuid: string; localSessionId: string },
+      contact: { telegramChatId: number; telegramUserId: number },
+    ): Promise<void> {
       const liveConsole = (await this.broker.call(
         "telegramMcp.gateway.resolveLiveConsole",
         {

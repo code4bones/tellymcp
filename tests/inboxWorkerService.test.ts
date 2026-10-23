@@ -12,6 +12,8 @@ const methods = InboxWorkerService.methods as unknown as {
     row: InboxMessageRow,
     inboxService: TelegramMcpExternalInboxServiceInstance,
   ) => Promise<void>;
+  deliverOffer: (this: unknown, ...args: unknown[]) => Promise<void>;
+  beginRouteBindingPrompt: (this: unknown, ...args: unknown[]) => Promise<void>;
 };
 
 const baseRow = {
@@ -54,6 +56,12 @@ function createInboxServiceMock(
       telegramUserId: 7,
     })),
     updateMessageStatus: vi.fn(async () => undefined),
+    bindRouteRecord: vi.fn(async () => ({
+      namespace: "marrow",
+      route_key: "P-1",
+      client_uuid: "client-1",
+      local_session_id: "workspace",
+    })),
     ...overrides,
   } as unknown as TelegramMcpExternalInboxServiceInstance;
 }
@@ -62,6 +70,7 @@ function createWorkerHarness(
   opts: {
     resolveLiveConsole?: unknown;
     createInboxDelivery?: unknown;
+    listLiveConsoles?: unknown;
     waitForReply?: () => Promise<unknown>;
     requestLiveRelayAction?: () => Promise<unknown>;
   } = {},
@@ -87,15 +96,28 @@ function createWorkerHarness(
         ? { message_uuid: "msg-uuid-1", delivery_uuid: "delivery-uuid-1" }
         : opts.createInboxDelivery;
     }
+    if (actionName === "telegramMcp.gateway.listLiveConsoles") {
+      return opts.listLiveConsoles === undefined
+        ? {
+            sessions: [
+              { client_uuid: "client-1", local_session_id: "workspace", cwd: "/repo" },
+            ],
+          }
+        : opts.listLiveConsoles;
+    }
     throw new Error(`unexpected broker call: ${actionName}`);
   });
 
-  const harness = {
+  // Mirrors how Moleculer exposes every sibling `methods` entry on `this` --
+  // handleClaimedMessage delegates to this.deliverOffer/this.beginRouteBindingPrompt.
+  const harness: Record<string, unknown> = {
     broker: {
       call: brokerCall,
       getLocalService: vi.fn(() => runtimeService),
     },
   };
+  harness.deliverOffer = methods.deliverOffer.bind(harness);
+  harness.beginRouteBindingPrompt = methods.beginRouteBindingPrompt.bind(harness);
 
   return { harness, sendRichRequest, waitForReply, requestLiveRelayAction, brokerCall };
 }
@@ -116,19 +138,70 @@ describe("inbox worker handleClaimedMessage", () => {
     expect(brokerCall).not.toHaveBeenCalled();
   });
 
-  it("fails closed when there is no route binding for the recipient", async () => {
+  it("fails closed when there is no route binding and no live console to offer", async () => {
     const inboxService = createInboxServiceMock({
       resolveRouteBinding: vi.fn(async () => null),
     });
-    const { harness, brokerCall } = createWorkerHarness();
+    const { harness } = createWorkerHarness({ listLiveConsoles: { sessions: [] } });
+
+    await methods.handleClaimedMessage.call(harness, baseRow, inboxService);
+
+    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith("msg-row-1", {
+      status: "failed",
+      statusReason: "no live console to bind",
+    });
+  });
+
+  it("prompts for a console when the route is unbound, then binds and delivers the offer", async () => {
+    const inboxService = createInboxServiceMock({
+      resolveRouteBinding: vi.fn(async () => null),
+    });
+    const { harness, sendRichRequest, waitForReply, requestLiveRelayAction } =
+      createWorkerHarness({
+        waitForReply: vi
+          .fn()
+          .mockResolvedValueOnce({ answer: "workspace · /repo" })
+          .mockResolvedValueOnce({ answer: "Approve" }) as unknown as () => Promise<unknown>,
+      });
 
     await methods.handleClaimedMessage.call(harness, baseRow, inboxService);
 
     expect(inboxService.updateMessageStatus).toHaveBeenCalledWith("msg-row-1", {
-      status: "failed",
-      statusReason: "no route binding",
+      status: "awaiting_route_binding",
+      pendingRequestId: expect.any(String),
     });
-    expect(brokerCall).not.toHaveBeenCalled();
+    expect(sendRichRequest).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ options: ["workspace · /repo"] }),
+    );
+    expect(inboxService.bindRouteRecord).toHaveBeenCalledWith({
+      namespace: "marrow",
+      route_key: "P-1",
+      telegram_user_id: 7,
+      session_id: "client-1:workspace",
+    });
+    // Falls straight through into the normal offer flow on the same message.
+    expect(requestLiveRelayAction).toHaveBeenCalled();
+    expect(waitForReply).toHaveBeenCalledTimes(2);
+    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith("msg-row-1", {
+      status: "delivered",
+      xchangeMessageUuid: "msg-uuid-1",
+    });
+  });
+
+  it("marks failed when the route-binding prompt times out", async () => {
+    const inboxService = createInboxServiceMock({
+      resolveRouteBinding: vi.fn(async () => null),
+    });
+    const { harness } = createWorkerHarness({ waitForReply: async () => null });
+
+    await methods.handleClaimedMessage.call(harness, baseRow, inboxService);
+
+    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith("msg-row-1", {
+      status: "failed",
+      statusReason: "route binding prompt timed out",
+    });
+    expect(inboxService.bindRouteRecord).not.toHaveBeenCalled();
   });
 
   it("marks no_live_session without ever sending a Telegram prompt when the console is offline", async () => {

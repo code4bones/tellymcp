@@ -111,9 +111,22 @@ export interface TelegramUserLocaleStore {
 
 export interface TelegramAdminAuthStore {
   isAdminAuthorized(principal: TelegramPrincipal): Promise<boolean>;
-  setAdminAuthorized(principal: TelegramPrincipal): Promise<void>;
+  claimAdminAuthorization(
+    principal: TelegramPrincipal,
+  ): Promise<"granted" | "already_admin" | "claimed_by_another">;
   clearAdminAuthorized(principal: TelegramPrincipal): Promise<void>;
   listAdminAuthorizedPrincipals(): Promise<TelegramPrincipal[]>;
+}
+
+/**
+ * Records that a Telegram principal has presented the gateway scope token.
+ * This is deliberately separate from TelegramAdminAuthStore: being a member of
+ * a gateway scope must not make a user an OAuth approval administrator.
+ */
+export interface TelegramGatewayAuthStore {
+  isGatewayAuthorized(principal: TelegramPrincipal): Promise<boolean>;
+  setGatewayAuthorized(principal: TelegramPrincipal): Promise<void>;
+  clearGatewayAuthorized(principal: TelegramPrincipal): Promise<void>;
 }
 
 export interface TelegramXchangeFileMetaStore {

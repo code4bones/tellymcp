@@ -31,6 +31,7 @@ import type {
   SessionStore,
   SessionBindingStore,
   TelegramAdminAuthStore,
+  TelegramGatewayAuthStore,
   TelegramUserLocaleStore,
   TelegramXchangeFileMetaStore,
 } from "../../shared/api/storage/contract";
@@ -49,6 +50,7 @@ export type AppRuntime = {
   sessionStore: SessionStore;
   bindingStore: SessionBindingStore;
   adminAuthStore: TelegramAdminAuthStore;
+  gatewayAuthStore: TelegramGatewayAuthStore;
   localeStore: TelegramUserLocaleStore;
   xchangeFileMetaStore: TelegramXchangeFileMetaStore;
   maintenanceStore: MaintenanceStore;
@@ -286,6 +288,7 @@ export async function createAppRuntime(input: {
     stateStore,
     stateStore,
     stateStore,
+    stateStore,
     objectStore,
     webAppLaunchRegistry,
     webAppSessions,
@@ -324,6 +327,7 @@ export async function createAppRuntime(input: {
     sessionStore,
     bindingStore: stateStore,
     adminAuthStore: stateStore,
+    gatewayAuthStore: stateStore,
     localeStore: stateStore,
     xchangeFileMetaStore: stateStore,
     maintenanceStore: stateStore,

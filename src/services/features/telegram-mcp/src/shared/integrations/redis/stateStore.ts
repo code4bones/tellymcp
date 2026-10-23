@@ -29,6 +29,7 @@ import type {
   SessionStore,
   TelegramConsoleDeliveryRoute,
   TelegramAdminAuthStore,
+  TelegramGatewayAuthStore,
   TelegramUserLocaleStore,
   TelegramXchangeFileMetaStore,
   TelegramMenuPayloadStore,
@@ -86,12 +87,31 @@ function userLocaleKey(telegramUserId: number): string {
   return `${KEY_PREFIX}:user-locale:${telegramUserId}`;
 }
 
-function adminAuthorizedKey(principal: TelegramPrincipal): string {
-  return `${KEY_PREFIX}:admin-auth:${principal.telegramChatId}:${principal.telegramUserId}`;
+function adminAuthorizationKey(): string {
+  // v1 was populated by /auth <GATEWAY_SCOPE_TOKEN> before scope access and
+  // administrator privileges were split. v2 still allowed multiple principals.
+  // Never treat either legacy state as an explicit, exclusive administrator grant.
+  return `${KEY_PREFIX}:admin-auth:v3:principal`;
 }
 
-function adminAuthorizedMatchPattern(): string {
-  return `${KEY_PREFIX}:admin-auth:*:*`;
+function serializePrincipal(principal: TelegramPrincipal): string {
+  return `${principal.telegramChatId}:${principal.telegramUserId}`;
+}
+
+function parsePrincipal(value: string | null): TelegramPrincipal | null {
+  const match = value?.match(/^(-?\d+):(-?\d+)$/u);
+  if (!match) {
+    return null;
+  }
+  const telegramChatId = Number(match[1]);
+  const telegramUserId = Number(match[2]);
+  return Number.isFinite(telegramChatId) && Number.isFinite(telegramUserId)
+    ? { telegramChatId, telegramUserId }
+    : null;
+}
+
+function gatewayAuthorizedKey(principal: TelegramPrincipal): string {
+  return `${KEY_PREFIX}:gateway-auth:${principal.telegramChatId}:${principal.telegramUserId}`;
 }
 
 function gatewayClientUuidKey(): string {
@@ -141,6 +161,7 @@ export class RedisStateStore
     SessionBindingStore,
     PendingRequestStore,
     TelegramAdminAuthStore,
+    TelegramGatewayAuthStore,
     TelegramUserLocaleStore,
     TelegramXchangeFileMetaStore,
     TelegramMenuPayloadStore,
@@ -238,57 +259,59 @@ export class RedisStateStore
   public async isAdminAuthorized(
     principal: TelegramPrincipal,
   ): Promise<boolean> {
-    return (await this.redis.get(adminAuthorizedKey(principal))) === "1";
+    return (await this.redis.get(adminAuthorizationKey())) === serializePrincipal(principal);
   }
 
-  public async setAdminAuthorized(
+  public async claimAdminAuthorization(
     principal: TelegramPrincipal,
-  ): Promise<void> {
-    await this.redis.set(adminAuthorizedKey(principal), "1");
+  ): Promise<"granted" | "already_admin" | "claimed_by_another"> {
+    const expected = serializePrincipal(principal);
+    const current = await this.redis.get(adminAuthorizationKey());
+    if (current === expected) {
+      return "already_admin";
+    }
+    if (current) {
+      return "claimed_by_another";
+    }
+
+    const result = await this.redis.set(adminAuthorizationKey(), expected, "NX");
+    if (result === "OK") {
+      return "granted";
+    }
+    return (await this.redis.get(adminAuthorizationKey())) === expected
+      ? "already_admin"
+      : "claimed_by_another";
   }
 
   public async clearAdminAuthorized(
     principal: TelegramPrincipal,
   ): Promise<void> {
-    await this.redis.del(adminAuthorizedKey(principal));
+    if (await this.isAdminAuthorized(principal)) {
+      await this.redis.del(adminAuthorizationKey());
+    }
   }
 
   public async listAdminAuthorizedPrincipals(): Promise<TelegramPrincipal[]> {
-    const principals: TelegramPrincipal[] = [];
-    let cursor = "0";
+    const principal = parsePrincipal(await this.redis.get(adminAuthorizationKey()));
+    return principal ? [principal] : [];
+  }
 
-    do {
-      const [nextCursor, keys] = await this.redis.scan(
-        cursor,
-        "MATCH",
-        adminAuthorizedMatchPattern(),
-        "COUNT",
-        100,
-      );
-      cursor = nextCursor;
+  public async isGatewayAuthorized(
+    principal: TelegramPrincipal,
+  ): Promise<boolean> {
+    return (await this.redis.get(gatewayAuthorizedKey(principal))) === "1";
+  }
 
-      for (const key of keys) {
-        const match = key.match(
-          /^telegram-mcp:admin-auth:(-?\d+):(-?\d+)$/u,
-        );
-        if (!match) {
-          continue;
-        }
+  public async setGatewayAuthorized(
+    principal: TelegramPrincipal,
+  ): Promise<void> {
+    await this.redis.set(gatewayAuthorizedKey(principal), "1");
+  }
 
-        const telegramChatId = Number(match[1]);
-        const telegramUserId = Number(match[2]);
-        if (!Number.isFinite(telegramChatId) || !Number.isFinite(telegramUserId)) {
-          continue;
-        }
-
-        principals.push({
-          telegramChatId,
-          telegramUserId,
-        });
-      }
-    } while (cursor !== "0");
-
-    return principals;
+  public async clearGatewayAuthorized(
+    principal: TelegramPrincipal,
+  ): Promise<void> {
+    await this.redis.del(gatewayAuthorizedKey(principal));
   }
 
   public async setBinding(binding: SessionBinding): Promise<void> {

@@ -492,13 +492,24 @@ export const enMenu = {
     },
   },
   admin: {
-    auth: {
-      prompt: "Gateway admin access is locked. Send /auth <token> to continue.",
-      help: "This gateway bot requires admin authentication first. Send /auth <token>.",
-      required_callback: "Authenticate first with /auth <token>.",
-      invalid: "Admin token is invalid.",
+    gateway_auth: {
+      prompt:
+        "Gateway bot access is locked. Send /auth <GATEWAY_SCOPE_TOKEN> to continue.",
+      required_callback:
+        "Authenticate with /auth <GATEWAY_SCOPE_TOKEN> first.",
+      invalid: "GATEWAY_SCOPE_TOKEN is invalid.",
       success:
-        "Gateway admin authentication accepted. You can continue with commands and menus.",
+        "Gateway scope access accepted. You can now use commands and menus.",
+      disabled: "Gateway scope authentication is not enabled.",
+    },
+    auth: {
+      prompt: "Send /admin <ADMIN_TOKEN> for administrator actions.",
+      help: "This gateway bot requires administrator authentication. Send /admin <ADMIN_TOKEN>.",
+      required_callback: "Authenticate first with /admin <ADMIN_TOKEN>.",
+      invalid: "Admin token is invalid.",
+      claimed: "Administrator access is already assigned to another Telegram user.",
+      success:
+        "Gateway administrator authentication accepted.",
       disabled: "Gateway admin authentication is not enabled.",
     },
     buttons: {

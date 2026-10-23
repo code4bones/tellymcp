@@ -2,6 +2,7 @@ import type { Service, ServiceSchema } from "moleculer";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { createMcpServer } from "./src/app/providers/mcp/server";
+import { GetAuthenticatedUserTool } from "./src/features/auth/model/getAuthenticatedUserTool";
 import {
   TELEGRAM_MCP_APPROVAL_SERVICE_NAME,
   type TelegramMcpApprovalServiceInstance,
@@ -166,6 +167,7 @@ const TelegramMcpMcpServerService: ServiceSchema = {
       }
 
       const tools: ToolModule[] = [
+        new GetAuthenticatedUserTool(),
         new SetSessionContextTool(
           sessionContextService.getSessionContextService(),
         ),

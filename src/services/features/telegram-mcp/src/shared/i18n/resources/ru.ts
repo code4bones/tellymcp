@@ -497,14 +497,25 @@ export const ruMenu = {
     },
   },
   admin: {
+    gateway_auth: {
+      prompt:
+        "Доступ к gateway-боту закрыт. Отправь /auth <GATEWAY_SCOPE_TOKEN>, чтобы продолжить.",
+      required_callback:
+        "Сначала авторизуйся через /auth <GATEWAY_SCOPE_TOKEN>.",
+      invalid: "GATEWAY_SCOPE_TOKEN неверный.",
+      success:
+        "Доступ к scope шлюза подтверждён. Теперь можно пользоваться командами и меню.",
+      disabled: "Scope-аутентификация gateway не включена.",
+    },
     auth: {
       prompt:
-        "Доступ к gateway-боту закрыт. Отправь /auth <token>, чтобы продолжить.",
-      help: "Этот gateway-бот требует предварительную admin-аутентификацию. Отправь /auth <token>.",
-      required_callback: "Сначала авторизуйся через /auth <token>.",
+        "Для действий администратора отправь /admin <ADMIN_TOKEN>.",
+      help: "Этот gateway-бот требует admin-аутентификацию. Отправь /admin <ADMIN_TOKEN>.",
+      required_callback: "Сначала авторизуйся через /admin <ADMIN_TOKEN>.",
       invalid: "Admin token неверный.",
+      claimed: "Администратор уже назначен другому Telegram-пользователю.",
       success:
-        "Admin-аутентификация шлюза принята. Теперь можно пользоваться командами и меню.",
+        "Admin-аутентификация шлюза принята.",
       disabled: "Admin-аутентификация шлюза не включена.",
     },
     buttons: {

@@ -2,11 +2,30 @@ import { createHash, generateKeyPairSync } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "../src/services/features/telegram-mcp/src/app/config/env";
 import { isMcpHttpRequestAuthorized } from "../src/services/features/telegram-mcp/src/app/http";
 import { createOAuthFacade } from "../src/services/features/telegram-mcp/src/app/oauthFacade";
+
+vi.mock(
+  "../src/services/features/telegram-mcp/src/app/telegramOidc",
+  async (importOriginal) => {
+    const original = await importOriginal<
+      typeof import("../src/services/features/telegram-mcp/src/app/telegramOidc")
+    >();
+    return {
+      ...original,
+      exchangeTelegramOidcCode: vi.fn(),
+      verifyTelegramOidcIdToken: vi.fn(),
+    };
+  },
+);
+
+import {
+  exchangeTelegramOidcCode,
+  verifyTelegramOidcIdToken,
+} from "../src/services/features/telegram-mcp/src/app/telegramOidc";
 
 type TestResponse = ServerResponse & {
   body: string;
@@ -25,9 +44,15 @@ const oauthConfig = {
   allowedRedirectUris: ["https://chat.example/callback"],
   privateKeyPem,
   authCodeTtlSeconds: 300,
+  accessTokenTtlSeconds: 3600,
   scopes: ["tellymcp:read", "tellymcp:write"],
   keyId: "tellymcp-test",
 } satisfies NonNullable<AppConfig["oauth"]>;
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 function makeRequest(
   input: {
@@ -105,6 +130,9 @@ async function authorize(
   expect(location).toBeDefined();
   const redirect = new URL(location ?? "https://invalid.example");
   expect(redirect.searchParams.get("state")).toBe("original-state");
+  expect(redirect.searchParams.get("iss")).toBe(
+    "https://mcp.example.com/api",
+  );
   return redirect.searchParams.get("code") ?? "";
 }
 
@@ -147,6 +175,8 @@ describe("TellyMCP OAuth facade", () => {
       issuer: "https://mcp.example.com/api",
       authorization_endpoint: "https://mcp.example.com/api/oauth/authorize",
       token_endpoint_auth_methods_supported: ["none"],
+      client_id_metadata_document_supported: true,
+      authorization_response_iss_parameter_supported: true,
     });
 
     const resourceResponse = makeResponse();
@@ -265,6 +295,7 @@ describe("TellyMCP OAuth facade", () => {
       aud: "https://mcp.example.com/api/mcp",
       client_id: "chat-client",
       scope: "tellymcp:read tellymcp:write",
+      exp: expect.any(Number),
     });
     const tokenParts = payload.access_token.split(".");
     const signature = tokenParts[2]!;
@@ -334,6 +365,160 @@ describe("TellyMCP OAuth facade", () => {
       "/oauth/token",
     );
     expect(authenticatedResponse.statusCode).toBe(200);
+  });
+
+  it("rejects an expired access token", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-21T00:00:00Z"));
+    const facade = createOAuthFacade(
+      { ...oauthConfig, accessTokenTtlSeconds: 1 },
+      "/mcp",
+    );
+    const token = await issueAccessToken(
+      facade,
+      "expired-token-verifier-".padEnd(64, "x"),
+    );
+
+    vi.setSystemTime(new Date("2026-10-21T00:00:02Z"));
+    expect(facade.verifyAccessToken(token)).toBeNull();
+  });
+
+  it("accepts ChatGPT's CIMD public client and its declared redirect URI", async () => {
+    const clientId = "https://chatgpt.com/oauth/client.json";
+    const redirectUri =
+      "https://chatgpt.com/connector_platform_oauth_redirect";
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        redirect_uris: [redirectUri],
+        token_endpoint_auth_methods_supported: ["none", "private_key_jwt"],
+        token_endpoint_auth_method: "private_key_jwt",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const facade = createOAuthFacade(
+      {
+        ...oauthConfig,
+        clientId: "legacy-client",
+        clientSecret: "legacy-secret",
+      },
+      "/mcp",
+    );
+    const verifier = "cimd-verifier-".padEnd(64, "x");
+    const params = authorizationParams(verifier);
+    params.set("client_id", clientId);
+    params.set("redirect_uri", redirectUri);
+    params.set("magic_token", "private-magic-token");
+    const authorizeResponse = makeResponse();
+
+    await facade.handleRequest(
+      makeRequest({ method: "POST", body: params.toString() }),
+      authorizeResponse,
+      "/oauth/authorize",
+    );
+
+    expect(authorizeResponse.statusCode).toBe(302);
+    expect(fetchMock).toHaveBeenCalledWith(
+      clientId,
+      expect.objectContaining({ redirect: "error" }),
+    );
+    const code = new URL(
+      authorizeResponse.headers.get("location") ?? "https://invalid.example",
+    ).searchParams.get("code");
+    const tokenResponse = makeResponse();
+    await facade.handleRequest(
+      makeRequest({
+        method: "POST",
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: code ?? "",
+          redirect_uri: redirectUri,
+          client_id: clientId,
+          code_verifier: verifier,
+          resource: "https://mcp.example.com/api/mcp",
+        }).toString(),
+      }),
+      tokenResponse,
+      "/oauth/token",
+    );
+
+    expect(tokenResponse.statusCode).toBe(200);
+  });
+
+  it("rejects a ChatGPT CIMD request whose redirect URI is absent from metadata", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          redirect_uris: ["https://chatgpt.com/connector_platform_oauth_redirect"],
+          token_endpoint_auth_methods_supported: ["none"],
+        }),
+      }),
+    );
+    const facade = createOAuthFacade(oauthConfig, "/mcp");
+    const params = authorizationParams("cimd-rejected-".padEnd(64, "x"));
+    params.set("client_id", "https://chatgpt.com/oauth/client.json");
+    params.set("magic_token", "private-magic-token");
+    const response = makeResponse();
+
+    await facade.handleRequest(
+      makeRequest({ method: "POST", body: params.toString() }),
+      response,
+      "/oauth/authorize",
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toBe("Unknown OAuth client");
+  });
+
+  it("accepts Codex's pinned CIMD client with an ephemeral loopback port", async () => {
+    const clientId = "https://chatgpt.com/oauth/codex/client.json";
+    const redirectUri = "http://127.0.0.1:44123/callback";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          redirect_uris: ["http://127.0.0.1/callback", "http://localhost/callback"],
+          token_endpoint_auth_methods_supported: ["none"],
+        }),
+      }),
+    );
+    const facade = createOAuthFacade(oauthConfig, "/mcp");
+    const verifier = "codex-cimd-verifier-".padEnd(64, "x");
+    const params = authorizationParams(verifier);
+    params.set("client_id", clientId);
+    params.set("redirect_uri", redirectUri);
+    params.set("magic_token", "private-magic-token");
+    const authorizeResponse = makeResponse();
+    await facade.handleRequest(
+      makeRequest({ method: "POST", body: params.toString() }),
+      authorizeResponse,
+      "/oauth/authorize",
+    );
+    expect(authorizeResponse.statusCode).toBe(302);
+
+    const code = new URL(
+      authorizeResponse.headers.get("location") ?? "https://invalid.example",
+    ).searchParams.get("code");
+    const tokenResponse = makeResponse();
+    await facade.handleRequest(
+      makeRequest({
+        method: "POST",
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: code ?? "",
+          redirect_uri: redirectUri,
+          client_id: clientId,
+          code_verifier: verifier,
+          resource: "https://mcp.example.com/api/mcp",
+        }).toString(),
+      }),
+      tokenResponse,
+      "/oauth/token",
+    );
+    expect(tokenResponse.statusCode).toBe(200);
   });
 
   it("writes an MCP discovery challenge", () => {
@@ -415,5 +600,216 @@ describe("TellyMCP OAuth facade", () => {
     expect(serializedLogs).not.toContain("private-magic-token");
     expect(serializedLogs).not.toContain(accessToken);
     expect(serializedLogs).not.toContain("logging-verifier");
+  });
+});
+
+const telegramLoginConfig = {
+  clientId: "tg-client",
+  clientSecret: "tg-secret",
+  callbackUrl: "https://mcp.example.com/api/oauth/tg/callback",
+};
+
+describe("Telegram login sub-flow", () => {
+  beforeEach(() => {
+    vi.mocked(exchangeTelegramOidcCode).mockReset();
+    vi.mocked(verifyTelegramOidcIdToken).mockReset();
+  });
+
+  async function startTelegramLogin(
+    facade: ReturnType<typeof createOAuthFacade>,
+  ): Promise<string> {
+    const params = authorizationParams("tg-verifier-".padEnd(64, "x"));
+    const response = makeResponse();
+    await facade.handleRequest(
+      makeRequest({ url: `/api/oauth/tg/login?${params.toString()}` }),
+      response,
+      "/oauth/tg/login",
+    );
+    expect(response.statusCode).toBe(302);
+    const location = new URL(response.headers.get("location") ?? "");
+    expect(location.origin + location.pathname).toBe(
+      "https://oauth.telegram.org/auth",
+    );
+    expect(location.searchParams.get("client_id")).toBe("tg-client");
+    return location.searchParams.get("state") ?? "";
+  }
+
+  it("hides the Telegram login routes when not configured", async () => {
+    const facade = createOAuthFacade(oauthConfig, "/mcp");
+
+    const loginResponse = makeResponse();
+    await facade.handleRequest(
+      makeRequest({ url: "/api/oauth/tg/login?foo=bar" }),
+      loginResponse,
+      "/oauth/tg/login",
+    );
+    expect(loginResponse.statusCode).toBe(404);
+
+    const callbackResponse = makeResponse();
+    await facade.handleRequest(
+      makeRequest({ url: "/api/oauth/tg/callback?code=x&state=y" }),
+      callbackResponse,
+      "/oauth/tg/callback",
+    );
+    expect(callbackResponse.statusCode).toBe(404);
+  });
+
+  it("approves and completes the outer authorization code flow", async () => {
+    const requestApproval = vi.fn().mockResolvedValue("approved");
+    const facade = createOAuthFacade(
+      { ...oauthConfig, telegramLogin: telegramLoginConfig },
+      "/mcp",
+      undefined,
+      { requestApproval },
+    );
+    const telegramState = await startTelegramLogin(facade);
+
+    vi.mocked(exchangeTelegramOidcCode).mockResolvedValue("fake-id-token");
+    vi.mocked(verifyTelegramOidcIdToken).mockResolvedValue({
+      telegramId: "4242",
+      username: "someone",
+    });
+
+    const callbackResponse = makeResponse();
+    await facade.handleRequest(
+      makeRequest({
+        url: `/api/oauth/tg/callback?code=telegram-code&state=${telegramState}`,
+      }),
+      callbackResponse,
+      "/oauth/tg/callback",
+    );
+
+    expect(callbackResponse.statusCode).toBe(302);
+    expect(requestApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ telegramId: "4242" }),
+    );
+    const redirect = new URL(callbackResponse.headers.get("location") ?? "");
+    expect(redirect.origin + redirect.pathname).toBe(
+      "https://chat.example/callback",
+    );
+    expect(redirect.searchParams.get("state")).toBe("original-state");
+    expect(redirect.searchParams.get("code")).toBeTruthy();
+
+    const tokenResponse = makeResponse();
+    const verifier = "tg-verifier-".padEnd(64, "x");
+    await facade.handleRequest(
+      makeRequest({
+        method: "POST",
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: redirect.searchParams.get("code") ?? "",
+          redirect_uri: "https://chat.example/callback",
+          client_id: "chat-client",
+          code_verifier: verifier,
+          resource: "https://mcp.example.com/api/mcp",
+        }).toString(),
+      }),
+      tokenResponse,
+      "/oauth/token",
+    );
+    expect(tokenResponse.statusCode).toBe(200);
+    const token = (JSON.parse(tokenResponse.body) as { access_token: string })
+      .access_token;
+    expect(facade.verifyAccessToken(token)).toMatchObject({
+      sub: "telegram:4242",
+      telegram_id: "4242",
+      preferred_username: "someone",
+      client_id: "chat-client",
+    });
+  });
+
+  it("rejects the flow when the admin declines", async () => {
+    const requestApproval = vi.fn().mockResolvedValue("rejected");
+    const facade = createOAuthFacade(
+      { ...oauthConfig, telegramLogin: telegramLoginConfig },
+      "/mcp",
+      undefined,
+      { requestApproval },
+    );
+    const telegramState = await startTelegramLogin(facade);
+    vi.mocked(exchangeTelegramOidcCode).mockResolvedValue("fake-id-token");
+    vi.mocked(verifyTelegramOidcIdToken).mockResolvedValue({
+      telegramId: "4242",
+    });
+
+    const response = makeResponse();
+    await facade.handleRequest(
+      makeRequest({
+        url: `/api/oauth/tg/callback?code=telegram-code&state=${telegramState}`,
+      }),
+      response,
+      "/oauth/tg/callback",
+    );
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toContain("rejected");
+  });
+
+  it("fails closed when no admin is authorized", async () => {
+    const requestApproval = vi.fn().mockResolvedValue("no_admin");
+    const facade = createOAuthFacade(
+      { ...oauthConfig, telegramLogin: telegramLoginConfig },
+      "/mcp",
+      undefined,
+      { requestApproval },
+    );
+    const telegramState = await startTelegramLogin(facade);
+    vi.mocked(exchangeTelegramOidcCode).mockResolvedValue("fake-id-token");
+    vi.mocked(verifyTelegramOidcIdToken).mockResolvedValue({
+      telegramId: "4242",
+    });
+
+    const response = makeResponse();
+    await facade.handleRequest(
+      makeRequest({
+        url: `/api/oauth/tg/callback?code=telegram-code&state=${telegramState}`,
+      }),
+      response,
+      "/oauth/tg/callback",
+    );
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toContain("/auth");
+  });
+
+  it("rejects an unknown or expired Telegram login state", async () => {
+    const requestApproval = vi.fn();
+    const facade = createOAuthFacade(
+      { ...oauthConfig, telegramLogin: telegramLoginConfig },
+      "/mcp",
+      undefined,
+      { requestApproval },
+    );
+
+    const response = makeResponse();
+    await facade.handleRequest(
+      makeRequest({
+        url: "/api/oauth/tg/callback?code=telegram-code&state=unknown-state",
+      }),
+      response,
+      "/oauth/tg/callback",
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(requestApproval).not.toHaveBeenCalled();
+  });
+
+  it("shows a Telegram login link on the authorization form when configured", async () => {
+    const facade = createOAuthFacade(
+      { ...oauthConfig, telegramLogin: telegramLoginConfig },
+      "/mcp",
+    );
+    const params = authorizationParams("v".repeat(64));
+    const response = makeResponse();
+
+    await facade.handleRequest(
+      makeRequest({ url: `/api/oauth/authorize?${params.toString()}` }),
+      response,
+      "/oauth/authorize",
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain("Log in with Telegram");
+    expect(response.body).toContain("/oauth/tg/login?");
   });
 });

@@ -12,6 +12,7 @@ import type { PartnerNoteKind } from "../../../entities/collaboration/model/type
 import type {
   SessionStore,
   TelegramAdminAuthStore,
+  TelegramGatewayAuthStore,
   SessionBindingStore,
   TelegramMenuPayloadStore,
   TelegramUserLocaleStore,
@@ -198,6 +199,7 @@ export class TelegramTransport implements HumanTransport {
     private readonly config: AppConfig,
     private readonly sessionStore: SessionStore,
     private readonly adminAuthStore: TelegramAdminAuthStore,
+    private readonly gatewayAuthStore: TelegramGatewayAuthStore,
     private readonly bindingStore: SessionBindingStore,
     private readonly menuPayloadStore: TelegramMenuPayloadStore,
     private readonly localeStore: TelegramUserLocaleStore,
@@ -212,6 +214,7 @@ export class TelegramTransport implements HumanTransport {
       config: this.config,
       sessionStore: this.sessionStore,
       adminAuthStore: this.adminAuthStore,
+      gatewayAuthStore: this.gatewayAuthStore,
       bindingStore: this.bindingStore,
       menuPayloadStore: this.menuPayloadStore,
       localeStore: this.localeStore,
@@ -244,11 +247,16 @@ export class TelegramTransport implements HumanTransport {
         this.maybeNotifyToolsMismatchForSession(sessionId),
       callGatewayJson: (endpointPath, body) => this.callGatewayJson(endpointPath, body),
       isAdminAuthEnabled: () => this.isAdminAuthEnabled(),
+      isGatewayAuthEnabled: () => this.isGatewayAuthEnabled(),
       isAdminBotProfile: () => this.isAdminBotProfile(),
+      isPrincipalGatewayAuthorized: (principal) =>
+        this.isPrincipalGatewayAuthorized(principal),
       isPrincipalAdminAuthorized: (principal) =>
         this.isPrincipalAdminAuthorized(principal),
-      setPrincipalAdminAuthorized: (principal) =>
-        this.setPrincipalAdminAuthorized(principal),
+      setPrincipalGatewayAuthorized: (principal) =>
+        this.setPrincipalGatewayAuthorized(principal),
+      claimPrincipalAdminAuthorization: (principal) =>
+        this.claimPrincipalAdminAuthorization(principal),
       ensureGatewayUserForPrincipal: (input) =>
         this.ensureGatewayUserForPrincipal(input.principal, input.ctx),
     });
@@ -307,6 +315,10 @@ export class TelegramTransport implements HumanTransport {
   }
 
   private isAdminAuthEnabled(): boolean {
+    return this.isAdminBotProfile() && Boolean(this.config.telegram.adminToken?.trim());
+  }
+
+  private isGatewayAuthEnabled(): boolean {
     return (
       this.isAdminBotProfile() &&
       Boolean(this.config.distributed.gatewayScopeToken?.trim())
@@ -333,11 +345,30 @@ export class TelegramTransport implements HumanTransport {
     return this.adminAuthStore.isAdminAuthorized(principal);
   }
 
-  private async setPrincipalAdminAuthorized(principal: {
+  private async claimPrincipalAdminAuthorization(principal: {
+    telegramChatId: number;
+    telegramUserId: number;
+  }): Promise<"granted" | "already_admin" | "claimed_by_another"> {
+    return this.adminAuthStore.claimAdminAuthorization(principal);
+  }
+
+  private async isPrincipalGatewayAuthorized(
+    principal: { telegramChatId: number; telegramUserId: number } | null,
+  ): Promise<boolean> {
+    if (!this.isGatewayAuthEnabled()) {
+      return true;
+    }
+    if (!principal) {
+      return false;
+    }
+    return this.gatewayAuthStore.isGatewayAuthorized(principal);
+  }
+
+  private async setPrincipalGatewayAuthorized(principal: {
     telegramChatId: number;
     telegramUserId: number;
   }): Promise<void> {
-    await this.adminAuthStore.setAdminAuthorized(principal);
+    await this.gatewayAuthStore.setGatewayAuthorized(principal);
   }
 
   private async ensureGatewayUserForPrincipal(
@@ -426,12 +457,19 @@ export class TelegramTransport implements HumanTransport {
       botId: this.bot.botInfo.id,
       botUsername: this.bot.botInfo.username,
     });
-    await this.bot.api.setMyCommands([
+    const commands = [
       { command: "menu", description: "Open console menu" },
       { command: "help", description: "Show help" },
-    ]);
+      ...(this.isAdminBotProfile()
+        ? [
+            { command: "auth", description: "Authorize gateway scope" },
+            { command: "admin", description: "Authorize administrator access" },
+          ]
+        : []),
+    ];
+    await this.bot.api.setMyCommands(commands);
     this.logger.info("Telegram bot commands registered", {
-      commands: ["/menu", "/help"],
+      commands: commands.map((command) => `/${command.command}`),
     });
 
     if (this.config.telegram.webhook.enabled) {

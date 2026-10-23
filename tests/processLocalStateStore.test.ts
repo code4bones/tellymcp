@@ -58,4 +58,21 @@ describe("process-local client state store", () => {
       "session-1",
     ]);
   });
+
+  it("keeps gateway scope access separate from administrator access", async () => {
+    const store = new ProcessLocalStateStore();
+    const principal = { telegramChatId: 42, telegramUserId: 7 };
+
+    await store.setGatewayAuthorized(principal);
+    await expect(store.isGatewayAuthorized(principal)).resolves.toBe(true);
+    await expect(store.isAdminAuthorized(principal)).resolves.toBe(false);
+
+    await expect(store.claimAdminAuthorization(principal)).resolves.toBe("granted");
+    await store.clearGatewayAuthorized(principal);
+    await expect(store.isGatewayAuthorized(principal)).resolves.toBe(false);
+    await expect(store.isAdminAuthorized(principal)).resolves.toBe(true);
+    await expect(
+      store.claimAdminAuthorization({ telegramChatId: 42, telegramUserId: 8 }),
+    ).resolves.toBe("claimed_by_another");
+  });
 });

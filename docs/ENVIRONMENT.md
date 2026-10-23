@@ -11,8 +11,15 @@ only as secret-free starting points.
 - Keep only required values and intentional overrides. Defaults do not need to be
   copied into production files.
 - A gateway and its clients must share `GATEWAY_AUTH_TOKEN`.
-- `GATEWAY_SCOPE_TOKEN` is an optional data-partition key, not an authentication
-  credential.
+- `GATEWAY_SCOPE_TOKEN` is an optional data-partition key, not the gateway's
+  transport credential. When it is configured, a Telegram principal must present
+  it through `/auth <GATEWAY_SCOPE_TOKEN>` before accessing that gateway scope.
+- `ADMIN_TOKEN`, when configured, is separate: `/admin <ADMIN_TOKEN>` grants the
+  Telegram principal the administrator role used for OAuth login approvals. It
+  does not replace `/auth`.
+- Deployments that previously used `/auth` as an administrator command must run
+  `/admin <ADMIN_TOKEN>` once after this update. Legacy Redis grants are ignored
+  so a scope token alone cannot retain administrator access.
 - Never keep old credentials in commented lines. Git and backups still retain them.
 - Legacy or removed TellyMCP keys fail startup with a migration-required error and
   the `tellymcp migrate-env` command instead of being silently ignored.
@@ -138,6 +145,7 @@ Supported keys:
 - `TELLYMCP_ALLOWED_REDIRECT_URIS`
 - `TELLYMCP_OAUTH_PRIVATE_KEY_PEM`
 - `TELLYMCP_AUTH_CODE_TTL_SECONDS`
+- `TELLYMCP_OAUTH_ACCESS_TOKEN_TTL_SECONDS` (default `3600`)
 - `TELLYMCP_OAUTH_SCOPES`
 - `TELLYMCP_OAUTH_KEY_ID`
 

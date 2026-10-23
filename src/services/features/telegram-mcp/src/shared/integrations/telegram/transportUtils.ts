@@ -90,8 +90,13 @@ export function isHelpCommand(text: string): boolean {
   return /^\/help(?:@\w+)?$/i.test(text.trim());
 }
 
-export function parseAdminAuthCommand(text: string): string | null {
+export function parseGatewayAuthCommand(text: string): string | null {
   const match = text.trim().match(/^\/auth(?:@\w+)?(?:\s+(.+))?$/i);
+  return match?.[1]?.trim() || null;
+}
+
+export function parseAdminAuthCommand(text: string): string | null {
+  const match = text.trim().match(/^\/admin(?:@\w+)?(?:\s+(.+))?$/i);
   return match?.[1]?.trim() || null;
 }
 

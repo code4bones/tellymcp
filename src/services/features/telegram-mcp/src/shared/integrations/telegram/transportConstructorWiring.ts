@@ -9,6 +9,7 @@ import type {
   SessionBindingStore,
   SessionStore,
   TelegramAdminAuthStore,
+  TelegramGatewayAuthStore,
   TelegramMenuPayloadStore,
   TelegramUserLocaleStore,
   TelegramXchangeFileMetaStore,
@@ -83,6 +84,7 @@ export interface TransportConstructorWiringHost {
   config: AppConfig;
   sessionStore: SessionStore;
   adminAuthStore: TelegramAdminAuthStore;
+  gatewayAuthStore: TelegramGatewayAuthStore;
   bindingStore: SessionBindingStore;
   menuPayloadStore: TelegramMenuPayloadStore;
   localeStore: TelegramUserLocaleStore;
@@ -123,11 +125,19 @@ export interface TransportConstructorWiringHost {
     body?: Record<string, unknown>,
   ): Promise<T>;
   isAdminAuthEnabled(): boolean;
+  isGatewayAuthEnabled(): boolean;
   isAdminBotProfile(): boolean;
   isPrincipalAdminAuthorized(
     principal: { telegramChatId: number; telegramUserId: number } | null,
   ): Promise<boolean>;
-  setPrincipalAdminAuthorized(principal: {
+  claimPrincipalAdminAuthorization(principal: {
+    telegramChatId: number;
+    telegramUserId: number;
+  }): Promise<"granted" | "already_admin" | "claimed_by_another">;
+  isPrincipalGatewayAuthorized(
+    principal: { telegramChatId: number; telegramUserId: number } | null,
+  ): Promise<boolean>;
+  setPrincipalGatewayAuthorized(principal: {
     telegramChatId: number;
     telegramUserId: number;
   }): Promise<void>;
@@ -862,10 +872,15 @@ export function buildTransportConstructorWiring(
     bindingStore: host.bindingStore,
     sessionStore: host.sessionStore,
     isAdminAuthEnabled: () => host.isAdminAuthEnabled(),
+    isGatewayAuthEnabled: () => host.isGatewayAuthEnabled(),
     isPrincipalAdminAuthorized: (principal) =>
       host.isPrincipalAdminAuthorized(principal),
-    setPrincipalAdminAuthorized: (principal) =>
-      host.setPrincipalAdminAuthorized(principal),
+    claimPrincipalAdminAuthorization: (principal) =>
+      host.claimPrincipalAdminAuthorization(principal),
+    isPrincipalGatewayAuthorized: (principal) =>
+      host.isPrincipalGatewayAuthorized(principal),
+    setPrincipalGatewayAuthorized: (principal) =>
+      host.setPrincipalGatewayAuthorized(principal),
     waiters: host.waiters,
     currentAttachmentTargets: host.currentAttachmentTargets,
     isAdminBotProfile: () => host.isAdminBotProfile(),

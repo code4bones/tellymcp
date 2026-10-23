@@ -13,10 +13,27 @@ import {
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type { AppConfig } from "./config/env";
+import {
+  buildTelegramAuthorizeUrl,
+  exchangeTelegramOidcCode,
+  generateTelegramOidcPkce,
+  verifyTelegramOidcIdToken,
+  type TelegramOidcIdentity,
+} from "./telegramOidc";
 
 const OAUTH_FORM_LIMIT_BYTES = 64 * 1024;
 const FAILED_MAGIC_TOKEN_WINDOW_MS = 60_000;
 const MAX_FAILED_MAGIC_TOKEN_ATTEMPTS = 5;
+const TELEGRAM_LOGIN_STATE_TTL_MS = 5 * 60_000;
+const CIMD_CACHE_TTL_MS = 10 * 60_000;
+const CHATGPT_CIMD_CLIENT_ID = "https://chatgpt.com/oauth/client.json";
+const CODEX_CIMD_CLIENT_ID = "https://chatgpt.com/oauth/codex/client.json";
+const CHATGPT_CIMD_REDIRECT_URI =
+  "https://chatgpt.com/connector_platform_oauth_redirect";
+const CODEX_CIMD_REDIRECT_URIS = [
+  "http://127.0.0.1/callback",
+  "http://localhost/callback",
+];
 
 type OAuthConfig = NonNullable<AppConfig["oauth"]>;
 
@@ -28,6 +45,7 @@ type OAuthLogger = {
 
 type AuthorizationRequest = {
   clientId: string;
+  clientAuthentication: "public" | "confidential" | "cimd";
   redirectUri: string;
   scope: string;
   state: string;
@@ -37,16 +55,39 @@ type AuthorizationRequest = {
 
 type AuthorizationCode = AuthorizationRequest & {
   expiresAtMs: number;
+  subject: string;
+  telegramIdentity?: TelegramOidcIdentity;
 };
 
-type AccessTokenClaims = {
+type PendingTelegramLogin = {
+  authorizationRequest: AuthorizationRequest;
+  codeVerifier: string;
+  expiresAtMs: number;
+};
+
+export type TelegramLoginApprovalOutcome =
+  | "approved"
+  | "rejected"
+  | "timeout"
+  | "no_admin";
+
+export type TelegramLoginApprovalGate = {
+  requestApproval: (
+    identity: TelegramOidcIdentity,
+  ) => Promise<TelegramLoginApprovalOutcome>;
+};
+
+export type OAuthAccessTokenClaims = {
   iss: string;
   aud: string;
   sub: string;
   client_id: string;
   scope: string;
   iat: number;
+  exp: number;
   jti: string;
+  telegram_id?: string;
+  preferred_username?: string;
 };
 
 type FailedAttemptState = {
@@ -54,9 +95,88 @@ type FailedAttemptState = {
   windowStartedAtMs: number;
 };
 
+type CimdClient = {
+  redirectUris: Set<string>;
+  expiresAtMs: number;
+};
+
+type CimdClientInfo = {
+  label: "ChatGPT" | "Codex";
+  fallbackRedirectUris: readonly string[];
+};
+
 type ParsedAuthorizationRequest =
   | { ok: true; value: AuthorizationRequest }
   | { ok: false; error: string };
+
+function cimdClientInfo(clientId: string): CimdClientInfo | null {
+  if (clientId === CHATGPT_CIMD_CLIENT_ID) {
+    return {
+      label: "ChatGPT",
+      fallbackRedirectUris: [CHATGPT_CIMD_REDIRECT_URI],
+    };
+  }
+  if (clientId === CODEX_CIMD_CLIENT_ID) {
+    return { label: "Codex", fallbackRedirectUris: CODEX_CIMD_REDIRECT_URIS };
+  }
+  return null;
+}
+
+function isCimdClientId(clientId: string): boolean {
+  return cimdClientInfo(clientId) !== null;
+}
+
+function isAllowedCimdRedirectUri(
+  clientId: string,
+  redirectUri: string,
+  redirectUris: Set<string>,
+): boolean {
+  if (redirectUris.has(redirectUri)) {
+    return true;
+  }
+  if (clientId !== CODEX_CIMD_CLIENT_ID) {
+    return false;
+  }
+  let candidate: URL;
+  try {
+    candidate = new URL(redirectUri);
+  } catch {
+    return false;
+  }
+  if (
+    candidate.protocol !== "http:" ||
+    !candidate.port ||
+    (candidate.hostname !== "127.0.0.1" && candidate.hostname !== "localhost") ||
+    candidate.username ||
+    candidate.password ||
+    candidate.hash
+  ) {
+    return false;
+  }
+  return Array.from(redirectUris).some((registeredUri) => {
+    try {
+      const registered = new URL(registeredUri);
+      return (
+        registered.protocol === "http:" &&
+        !registered.port &&
+        registered.hostname === candidate.hostname &&
+        registered.pathname === candidate.pathname &&
+        registered.search === candidate.search &&
+        !registered.username &&
+        !registered.password &&
+        !registered.hash
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+}
 
 export type OAuthFacade = {
   ephemeralSigningKey: boolean;
@@ -65,7 +185,7 @@ export type OAuthFacade = {
     res: ServerResponse,
     pathname: string,
   ) => Promise<boolean>;
-  verifyAccessToken: (token: string) => AccessTokenClaims | null;
+  verifyAccessToken: (token: string) => OAuthAccessTokenClaims | null;
   writeMcpChallenge: (res: ServerResponse) => void;
 };
 
@@ -217,6 +337,7 @@ function renderAuthorizationForm(
   action: string,
   request: AuthorizationRequest,
   errorMessage?: string,
+  telegramLoginUrl?: string,
 ): string {
   const hidden = [
     ["response_type", "code"],
@@ -250,6 +371,9 @@ function renderAuthorizationForm(
     label { display: block; margin: 1.25rem 0 .5rem; }
     input[type=password] { width: 100%; box-sizing: border-box; padding: .75rem; border: 1px solid #4b5563; border-radius: .5rem; font: inherit; }
     button { width: 100%; margin-top: 1rem; padding: .8rem; border: 0; border-radius: .5rem; background: #2563eb; color: white; font: inherit; font-weight: 600; cursor: pointer; }
+    a.telegram-login { display: block; box-sizing: border-box; margin-top: 1.25rem; padding: .8rem; border-radius: .5rem; background: #229ed9; color: white; font-weight: 600; text-align: center; text-decoration: none; }
+    .divider { display: flex; align-items: center; gap: .75rem; margin: 1.5rem 0; color: #6b7280; font-size: .85rem; }
+    .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: #374151; }
   </style>
 </head>
 <body>
@@ -263,9 +387,53 @@ function renderAuthorizationForm(
       <input id="magic_token" name="magic_token" type="password" required autofocus>
       <button type="submit">Authorize</button>
     </form>
+    ${
+      telegramLoginUrl
+        ? `<div class="divider">or</div><a class="telegram-login" href="${escapeHtml(telegramLoginUrl)}">Log in with Telegram</a>`
+        : ""
+    }
   </main>
 </body>
 </html>`;
+}
+
+function renderTelegramLoginErrorPage(message: string): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Telegram login failed</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { display: grid; min-height: 100vh; margin: 0; place-items: center; background: #111827; color: #f9fafb; }
+    main { width: min(92vw, 28rem); box-sizing: border-box; padding: 2rem; border: 1px solid #374151; border-radius: 1rem; background: #1f2937; }
+    h1 { margin-top: 0; font-size: 1.4rem; }
+    p { color: #d1d5db; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Telegram login failed</h1>
+    <p>${escapeHtml(message)}</p>
+  </main>
+</body>
+</html>`;
+}
+
+function authorizationRequestToSearchParams(
+  request: AuthorizationRequest,
+): URLSearchParams {
+  const params = new URLSearchParams();
+  params.set("response_type", "code");
+  params.set("client_id", request.clientId);
+  params.set("redirect_uri", request.redirectUri);
+  params.set("scope", request.scope);
+  params.set("state", request.state);
+  params.set("code_challenge", request.codeChallenge);
+  params.set("code_challenge_method", "S256");
+  params.set("resource", request.resource);
+  return params;
 }
 
 function normalizeUrl(value: string): string {
@@ -297,6 +465,7 @@ export function createOAuthFacade(
   config: OAuthConfig,
   mcpPath: string,
   logger?: OAuthLogger,
+  telegramLoginApproval?: TelegramLoginApprovalGate,
 ): OAuthFacade {
   const publicUrl = normalizeUrl(config.publicUrl);
   const issuer = normalizeUrl(config.issuer);
@@ -317,6 +486,8 @@ export function createOAuthFacade(
   };
   const authorizationCodes = new Map<string, AuthorizationCode>();
   const failedAttempts = new Map<string, FailedAttemptState>();
+  const pendingTelegramLogins = new Map<string, PendingTelegramLogin>();
+  const cimdClients = new Map<string, CimdClient>();
   const issuerPath = new URL(issuer).pathname.replace(/\/+$/u, "");
   const mcpResourcePath = new URL(mcpResource).pathname;
   const authorizationServerInsertionPath = `/.well-known/oauth-authorization-server${issuerPath === "/" ? "" : issuerPath}`;
@@ -335,9 +506,17 @@ export function createOAuthFacade(
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code"],
     code_challenge_methods_supported: ["S256"],
-    token_endpoint_auth_methods_supported: config.clientSecret
-      ? ["client_secret_post", "client_secret_basic"]
-      : ["none"],
+    // Keep `none` available for a public client that proves its identity with
+    // ChatGPT's Client ID Metadata Document (CIMD). The legacy operator-owned
+    // confidential client remains available alongside it.
+    token_endpoint_auth_methods_supported: [
+      "none",
+      ...(config.clientSecret
+        ? ["client_secret_post", "client_secret_basic"]
+        : []),
+    ],
+    client_id_metadata_document_supported: true,
+    authorization_response_iss_parameter_supported: true,
     scopes_supported: config.scopes,
   };
 
@@ -349,9 +528,100 @@ export function createOAuthFacade(
     }
   };
 
-  const parseAuthorizationRequest = (
+  const purgeExpiredTelegramLogins = (nowMs: number): void => {
+    for (const [state, record] of pendingTelegramLogins) {
+      if (record.expiresAtMs <= nowMs) {
+        pendingTelegramLogins.delete(state);
+      }
+    }
+  };
+
+  const resolveCimdClient = async (
+    clientId: string,
+  ): Promise<CimdClient | null> => {
+    const knownClient = cimdClientInfo(clientId);
+    if (!knownClient) {
+      return null;
+    }
+
+    const cached = cimdClients.get(clientId);
+    if (cached && cached.expiresAtMs > Date.now()) {
+      return cached;
+    }
+
+    try {
+      const response = await fetch(clientId, {
+        headers: { accept: "application/json" },
+        redirect: "error",
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (!response.ok) {
+        throw new Error(`CIMD metadata request failed: ${response.status}`);
+      }
+      const metadata: unknown = await response.json();
+      if (!metadata || typeof metadata !== "object") {
+        throw new Error("CIMD metadata was not an object");
+      }
+      const methods = new Set([
+        ...readStringArray(
+          Reflect.get(metadata, "token_endpoint_auth_methods_supported"),
+        ),
+        ...(typeof Reflect.get(metadata, "token_endpoint_auth_method") ===
+        "string"
+          ? [
+              Reflect.get(
+                metadata,
+                "token_endpoint_auth_method",
+              ) as string,
+            ]
+          : []),
+      ]);
+      const redirectUris = new Set(
+        readStringArray(Reflect.get(metadata, "redirect_uris")).filter(
+          (redirectUri) => {
+            try {
+              const parsed = new URL(redirectUri);
+              const httpsRedirect = parsed.protocol === "https:" && !parsed.hash;
+              const codexLoopbackRedirect =
+                clientId === CODEX_CIMD_CLIENT_ID &&
+                parsed.protocol === "http:" &&
+                !parsed.port &&
+                !parsed.hash &&
+                (parsed.hostname === "127.0.0.1" ||
+                  parsed.hostname === "localhost");
+              return httpsRedirect || codexLoopbackRedirect;
+            } catch {
+              return false;
+            }
+          },
+        ),
+      );
+      if (!methods.has("none") || redirectUris.size === 0) {
+        throw new Error("CIMD metadata did not support public PKCE");
+      }
+      const client = {
+        redirectUris,
+        expiresAtMs: Date.now() + CIMD_CACHE_TTL_MS,
+      };
+      cimdClients.set(clientId, client);
+      return client;
+    } catch {
+      // The two URLs above are pinned OpenAI public client identities. A
+      // narrow fallback keeps a transient OpenAI-edge JSON failure from
+      // breaking `codex mcp login`, without turning this into a generic URL
+      // fetch / SSRF bypass.
+      const client = {
+        redirectUris: new Set(knownClient.fallbackRedirectUris),
+        expiresAtMs: Date.now() + 60_000,
+      };
+      cimdClients.set(clientId, client);
+      return client;
+    }
+  };
+
+  const parseAuthorizationRequest = async (
     params: URLSearchParams,
-  ): ParsedAuthorizationRequest => {
+  ): Promise<ParsedAuthorizationRequest> => {
     if (params.get("response_type") !== "code") {
       return { ok: false, error: "response_type must be code" };
     }
@@ -371,10 +641,6 @@ export function createOAuthFacade(
     if (!/^[A-Za-z0-9_-]{43,128}$/u.test(codeChallenge)) {
       return { ok: false, error: "Invalid PKCE code challenge" };
     }
-    if (config.clientId && clientId !== config.clientId) {
-      return { ok: false, error: "Unknown OAuth client" };
-    }
-
     try {
       const parsedRedirect = new URL(redirectUri);
       if (parsedRedirect.hash) {
@@ -382,12 +648,6 @@ export function createOAuthFacade(
       }
     } catch {
       return { ok: false, error: "Invalid redirect URI" };
-    }
-    if (
-      config.allowedRedirectUris.length > 0 &&
-      !config.allowedRedirectUris.includes(redirectUri)
-    ) {
-      return { ok: false, error: "Redirect URI is not allowed" };
     }
     if (!allowedResources.has(resource)) {
       return { ok: false, error: "Invalid OAuth resource" };
@@ -398,10 +658,34 @@ export function createOAuthFacade(
       return { ok: false, error: "Unsupported OAuth scope" };
     }
 
+    let clientAuthentication: AuthorizationRequest["clientAuthentication"];
+    if (isCimdClientId(clientId)) {
+      const client = await resolveCimdClient(clientId);
+      if (
+        !client ||
+        !isAllowedCimdRedirectUri(clientId, redirectUri, client.redirectUris)
+      ) {
+        return { ok: false, error: "Unknown OAuth client" };
+      }
+      clientAuthentication = "cimd";
+    } else {
+      if (config.clientId && clientId !== config.clientId) {
+        return { ok: false, error: "Unknown OAuth client" };
+      }
+      if (
+        config.allowedRedirectUris.length > 0 &&
+        !config.allowedRedirectUris.includes(redirectUri)
+      ) {
+        return { ok: false, error: "Redirect URI is not allowed" };
+      }
+      clientAuthentication = config.clientSecret ? "confidential" : "public";
+    }
+
     return {
       ok: true,
       value: {
         clientId,
+        clientAuthentication,
         redirectUri,
         scope: requestedScope,
         state,
@@ -463,10 +747,21 @@ export function createOAuthFacade(
   const authenticateTokenClient = (
     req: IncomingMessage,
     params: URLSearchParams,
+    record: AuthorizationCode,
   ): string | null => {
     const formClientId = params.get("client_id")?.trim() ?? "";
-    if (!config.clientSecret) {
-      return formClientId || null;
+    if (formClientId !== record.clientId) {
+      return null;
+    }
+    if (record.clientAuthentication !== "confidential") {
+      // CIMD uses a public OAuth client. Its identity and redirect URI were
+      // verified from ChatGPT's hosted metadata before issuing this code; PKCE
+      // binds the exchange to the same client without a stored client secret.
+      return formClientId;
+    }
+    const clientSecret = config.clientSecret;
+    if (!clientSecret) {
+      return null;
     }
 
     const authorization = readHeader(req, "authorization");
@@ -483,8 +778,8 @@ export function createOAuthFacade(
         const basicClientId = decoded.slice(0, separator);
         const basicSecret = decoded.slice(separator + 1);
         if (
-          basicClientId === config.clientId &&
-          safeEqual(basicSecret, config.clientSecret)
+          basicClientId === record.clientId &&
+          safeEqual(basicSecret, clientSecret)
         ) {
           return basicClientId;
         }
@@ -496,8 +791,8 @@ export function createOAuthFacade(
 
     const formSecret = params.get("client_secret") ?? "";
     if (
-      formClientId === config.clientId &&
-      safeEqual(formSecret, config.clientSecret)
+      formClientId === record.clientId &&
+      safeEqual(formSecret, clientSecret)
     ) {
       return formClientId;
     }
@@ -510,14 +805,24 @@ export function createOAuthFacade(
       typ: "JWT",
       kid: config.keyId,
     });
-    const claims: AccessTokenClaims = {
+    const issuedAt = Math.floor(Date.now() / 1000);
+    const claims: OAuthAccessTokenClaims = {
       iss: issuer,
       aud: record.resource,
-      sub: "tellymcp-chat-connector",
+      sub: record.subject,
       client_id: record.clientId,
       scope,
-      iat: Math.floor(Date.now() / 1000),
+      iat: issuedAt,
+      exp: issuedAt + config.accessTokenTtlSeconds,
       jti: randomUUID(),
+      ...(record.telegramIdentity
+        ? {
+            telegram_id: record.telegramIdentity.telegramId,
+            ...(record.telegramIdentity.username
+              ? { preferred_username: record.telegramIdentity.username }
+              : {}),
+          }
+        : {}),
     };
     const payload = base64UrlJson(claims);
     const signingInput = `${header}.${payload}`;
@@ -529,7 +834,7 @@ export function createOAuthFacade(
     return `${signingInput}.${signature}`;
   };
 
-  const verifyAccessToken = (token: string): AccessTokenClaims | null => {
+  const verifyAccessToken = (token: string): OAuthAccessTokenClaims | null => {
     const reject = (reason: string): null => {
       logger?.warn("OAuth access token rejected", { reason });
       return null;
@@ -567,7 +872,7 @@ export function createOAuthFacade(
         return reject("invalid_signature");
       }
 
-      const candidate = claims as Partial<AccessTokenClaims>;
+      const candidate = claims as Partial<OAuthAccessTokenClaims>;
       if (
         candidate.iss !== issuer ||
         typeof candidate.aud !== "string" ||
@@ -576,12 +881,18 @@ export function createOAuthFacade(
         typeof candidate.client_id !== "string" ||
         typeof candidate.scope !== "string" ||
         typeof candidate.iat !== "number" ||
+        typeof candidate.exp !== "number" ||
         typeof candidate.jti !== "string" ||
-        candidate.iat > Math.floor(Date.now() / 1000) + 60
+        candidate.iat > Math.floor(Date.now() / 1000) + 60 ||
+        candidate.exp <= Math.floor(Date.now() / 1000)
       ) {
         return reject("invalid_claims");
       }
-      if (config.clientId && candidate.client_id !== config.clientId) {
+      if (
+        config.clientId &&
+        candidate.client_id !== config.clientId &&
+        !isCimdClientId(candidate.client_id)
+      ) {
         return reject("client_id_mismatch");
       }
       const tokenScopes = new Set(
@@ -595,7 +906,7 @@ export function createOAuthFacade(
         audience: candidate.aud,
         scopes: candidate.scope,
       });
-      return candidate as AccessTokenClaims;
+      return candidate as OAuthAccessTokenClaims;
     } catch (error) {
       return reject(
         error instanceof Error
@@ -682,7 +993,7 @@ export function createOAuthFacade(
         writeText(res, 413, "OAuth form is too large");
         return true;
       }
-      const parsed = parseAuthorizationRequest(params);
+      const parsed = await parseAuthorizationRequest(params);
       if (!parsed.ok) {
         logger?.warn("OAuth authorization request rejected", {
           method,
@@ -691,6 +1002,10 @@ export function createOAuthFacade(
         writeText(res, 400, parsed.error);
         return true;
       }
+      const telegramLoginUrl = config.telegramLogin
+        ? `${issuer}/oauth/tg/login?${authorizationRequestToSearchParams(parsed.value).toString()}`
+        : undefined;
+
       if (method === "GET") {
         logger?.info("OAuth authorization form opened", {
           clientId: parsed.value.clientId,
@@ -701,7 +1016,12 @@ export function createOAuthFacade(
         writeHtml(
           res,
           200,
-          renderAuthorizationForm(authorizeEndpoint, parsed.value),
+          renderAuthorizationForm(
+            authorizeEndpoint,
+            parsed.value,
+            undefined,
+            telegramLoginUrl,
+          ),
         );
         return true;
       }
@@ -722,6 +1042,7 @@ export function createOAuthFacade(
             authorizeEndpoint,
             parsed.value,
             "Authorization failed. Try again later.",
+            telegramLoginUrl,
           ),
         );
         return true;
@@ -741,6 +1062,7 @@ export function createOAuthFacade(
             authorizeEndpoint,
             parsed.value,
             "Invalid connector token.",
+            telegramLoginUrl,
           ),
         );
         return true;
@@ -751,6 +1073,7 @@ export function createOAuthFacade(
       authorizationCodes.set(code, {
         ...parsed.value,
         expiresAtMs: nowMs + config.authCodeTtlSeconds * 1000,
+        subject: "tellymcp-magic-token",
       });
       logger?.info("OAuth authorization code issued", {
         clientId: parsed.value.clientId,
@@ -761,8 +1084,171 @@ export function createOAuthFacade(
       });
       const redirect = new URL(parsed.value.redirectUri);
       redirect.searchParams.set("code", code);
+      redirect.searchParams.set("iss", issuer);
       if (parsed.value.state) {
         redirect.searchParams.set("state", parsed.value.state);
+      }
+      res.statusCode = 302;
+      res.setHeader("location", redirect.toString());
+      res.setHeader("cache-control", "no-store");
+      res.end();
+      return true;
+    }
+
+    if (pathname === "/oauth/tg/login") {
+      if (!config.telegramLogin) {
+        writeText(res, 404, "Not found");
+        return true;
+      }
+      if (method !== "GET") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      const params = new URL(req.url ?? authorizeEndpoint, authorizeEndpoint)
+        .searchParams;
+      const parsed = await parseAuthorizationRequest(params);
+      if (!parsed.ok) {
+        logger?.warn("Telegram login request rejected", {
+          reason: parsed.error,
+        });
+        writeText(res, 400, parsed.error);
+        return true;
+      }
+
+      const nowMs = Date.now();
+      purgeExpiredTelegramLogins(nowMs);
+      const { verifier, challenge } = generateTelegramOidcPkce();
+      const telegramState = randomBytes(24).toString("base64url");
+      pendingTelegramLogins.set(telegramState, {
+        authorizationRequest: parsed.value,
+        codeVerifier: verifier,
+        expiresAtMs: nowMs + TELEGRAM_LOGIN_STATE_TTL_MS,
+      });
+
+      const authorizeUrl = buildTelegramAuthorizeUrl(config.telegramLogin, {
+        state: telegramState,
+        codeChallenge: challenge,
+      });
+      logger?.info("Telegram login started", {
+        clientId: parsed.value.clientId,
+        redirectUri: parsed.value.redirectUri,
+      });
+      res.statusCode = 302;
+      res.setHeader("location", authorizeUrl);
+      res.setHeader("cache-control", "no-store");
+      res.end();
+      return true;
+    }
+
+    if (pathname === "/oauth/tg/callback") {
+      if (!config.telegramLogin || !telegramLoginApproval) {
+        writeText(res, 404, "Not found");
+        return true;
+      }
+      if (method !== "GET") {
+        writeText(res, 405, "Method not allowed");
+        return true;
+      }
+
+      const params = new URL(req.url ?? authorizeEndpoint, authorizeEndpoint)
+        .searchParams;
+      const telegramState = params.get("state") ?? "";
+      const pending = pendingTelegramLogins.get(telegramState);
+      pendingTelegramLogins.delete(telegramState);
+      const nowMs = Date.now();
+      purgeExpiredTelegramLogins(nowMs);
+      if (!pending || pending.expiresAtMs <= nowMs) {
+        writeHtml(
+          res,
+          400,
+          renderTelegramLoginErrorPage(
+            "This Telegram login link has expired. Please try again.",
+          ),
+        );
+        return true;
+      }
+
+      const code = params.get("code");
+      if (!code) {
+        writeHtml(
+          res,
+          400,
+          renderTelegramLoginErrorPage(
+            "Telegram did not return an authorization code.",
+          ),
+        );
+        return true;
+      }
+
+      let identity: TelegramOidcIdentity;
+      try {
+        const idToken = await exchangeTelegramOidcCode(config.telegramLogin, {
+          code,
+          codeVerifier: pending.codeVerifier,
+        });
+        identity = await verifyTelegramOidcIdToken(
+          idToken,
+          config.telegramLogin.clientId,
+        );
+      } catch (error) {
+        logger?.warn("Telegram OIDC login verification failed", {
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        writeHtml(
+          res,
+          400,
+          renderTelegramLoginErrorPage(
+            "Telegram login verification failed. Please try again.",
+          ),
+        );
+        return true;
+      }
+
+      logger?.info("Telegram identity verified, requesting admin approval", {
+        telegramId: identity.telegramId,
+        username: identity.username,
+      });
+
+      const outcome = await telegramLoginApproval.requestApproval(identity);
+      if (outcome !== "approved") {
+        logger?.warn("Telegram login was not approved", {
+          telegramId: identity.telegramId,
+          outcome,
+        });
+        writeHtml(
+          res,
+          403,
+          renderTelegramLoginErrorPage(
+            outcome === "no_admin"
+              ? "No gateway admin is currently authorized to approve this login. Authorize an admin on the bot first (/auth)."
+              : outcome === "timeout"
+                ? "The login request timed out waiting for admin approval."
+                : "The admin rejected this login request.",
+          ),
+        );
+        return true;
+      }
+
+      purgeExpiredCodes(nowMs);
+      const issuedCode = randomBytes(32).toString("base64url");
+      authorizationCodes.set(issuedCode, {
+        ...pending.authorizationRequest,
+        expiresAtMs: nowMs + config.authCodeTtlSeconds * 1000,
+        subject: `telegram:${identity.telegramId}`,
+        telegramIdentity: identity,
+      });
+      logger?.info("OAuth authorization code issued via Telegram login", {
+        clientId: pending.authorizationRequest.clientId,
+        redirectUri: pending.authorizationRequest.redirectUri,
+        telegramId: identity.telegramId,
+      });
+
+      const redirect = new URL(pending.authorizationRequest.redirectUri);
+      redirect.searchParams.set("code", issuedCode);
+      redirect.searchParams.set("iss", issuer);
+      if (pending.authorizationRequest.state) {
+        redirect.searchParams.set("state", pending.authorizationRequest.state);
       }
       res.statusCode = 302;
       res.setHeader("location", redirect.toString());
@@ -792,7 +1278,21 @@ export function createOAuthFacade(
         return true;
       }
 
-      const authenticatedClientId = authenticateTokenClient(req, params);
+      const code = params.get("code") ?? "";
+      const record = authorizationCodes.get(code);
+      const nowMs = Date.now();
+      purgeExpiredCodes(nowMs);
+      if (!record || record.expiresAtMs <= nowMs) {
+        authorizationCodes.delete(code);
+        logger?.warn("OAuth token request rejected", {
+          reason: "unknown_or_expired_code",
+          clientId: params.get("client_id")?.trim() || null,
+        });
+        writeOAuthJson(res, 400, { error: "invalid_grant" });
+        return true;
+      }
+
+      const authenticatedClientId = authenticateTokenClient(req, params, record);
       if (!authenticatedClientId) {
         logger?.warn("OAuth token request rejected", {
           reason: "invalid_client",
@@ -803,24 +1303,10 @@ export function createOAuthFacade(
             ? "client_secret_basic"
             : "client_secret_post",
         });
-        if (config.clientSecret) {
+        if (record.clientAuthentication === "confidential") {
           res.setHeader("www-authenticate", 'Basic realm="oauth/token"');
         }
         writeOAuthJson(res, 401, { error: "invalid_client" });
-        return true;
-      }
-
-      const code = params.get("code") ?? "";
-      const record = authorizationCodes.get(code);
-      const nowMs = Date.now();
-      purgeExpiredCodes(nowMs);
-      if (!record || record.expiresAtMs <= nowMs) {
-        authorizationCodes.delete(code);
-        logger?.warn("OAuth token request rejected", {
-          reason: "unknown_or_expired_code",
-          clientId: authenticatedClientId,
-        });
-        writeOAuthJson(res, 400, { error: "invalid_grant" });
         return true;
       }
 

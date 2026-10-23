@@ -23,6 +23,7 @@ import type {
   SessionBindingStore,
   TelegramConsoleDeliveryRoute,
   TelegramAdminAuthStore,
+  TelegramGatewayAuthStore,
   TelegramMenuPayloadStore,
   TelegramUserLocaleStore,
   TelegramXchangeFileMetaStore,
@@ -32,6 +33,7 @@ import { redactSecrets } from "../../lib/redact-secrets/redactSecrets";
 export type RuntimeStateStore = SessionBindingStore &
   PendingRequestStore &
   TelegramAdminAuthStore &
+  TelegramGatewayAuthStore &
   TelegramUserLocaleStore &
   TelegramXchangeFileMetaStore &
   TelegramMenuPayloadStore &
@@ -64,7 +66,11 @@ export class ProcessLocalStateStore implements RuntimeStateStore {
     TelegramConsoleDeliveryRoute
   >();
   private readonly locales = new Map<number, string>();
-  private readonly authorizedPrincipals = new Map<string, TelegramPrincipal>();
+  private adminPrincipal: TelegramPrincipal | null = null;
+  private readonly gatewayAuthorizedPrincipals = new Map<
+    string,
+    TelegramPrincipal
+  >();
   private readonly requests = new Map<string, PendingRequestRecord>();
   private readonly requestQueue: string[] = [];
   private activeRequestId: string | null = null;
@@ -251,19 +257,44 @@ export class ProcessLocalStateStore implements RuntimeStateStore {
   }
 
   public async isAdminAuthorized(principal: TelegramPrincipal): Promise<boolean> {
-    return this.authorizedPrincipals.has(principalKey(principal));
+    return Boolean(
+      this.adminPrincipal &&
+        principalKey(this.adminPrincipal) === principalKey(principal),
+    );
   }
 
-  public async setAdminAuthorized(principal: TelegramPrincipal): Promise<void> {
-    this.authorizedPrincipals.set(principalKey(principal), principal);
+  public async claimAdminAuthorization(
+    principal: TelegramPrincipal,
+  ): Promise<"granted" | "already_admin" | "claimed_by_another"> {
+    if (!this.adminPrincipal) {
+      this.adminPrincipal = principal;
+      return "granted";
+    }
+    return principalKey(this.adminPrincipal) === principalKey(principal)
+      ? "already_admin"
+      : "claimed_by_another";
   }
 
   public async clearAdminAuthorized(principal: TelegramPrincipal): Promise<void> {
-    this.authorizedPrincipals.delete(principalKey(principal));
+    if (await this.isAdminAuthorized(principal)) {
+      this.adminPrincipal = null;
+    }
   }
 
   public async listAdminAuthorizedPrincipals(): Promise<TelegramPrincipal[]> {
-    return Array.from(this.authorizedPrincipals.values());
+    return this.adminPrincipal ? [this.adminPrincipal] : [];
+  }
+
+  public async isGatewayAuthorized(principal: TelegramPrincipal): Promise<boolean> {
+    return this.gatewayAuthorizedPrincipals.has(principalKey(principal));
+  }
+
+  public async setGatewayAuthorized(principal: TelegramPrincipal): Promise<void> {
+    this.gatewayAuthorizedPrincipals.set(principalKey(principal), principal);
+  }
+
+  public async clearGatewayAuthorized(principal: TelegramPrincipal): Promise<void> {
+    this.gatewayAuthorizedPrincipals.delete(principalKey(principal));
   }
 
   public async setXchangeFileMeta(meta: TelegramXchangeFileMeta): Promise<void> {
@@ -287,7 +318,8 @@ export class ProcessLocalStateStore implements RuntimeStateStore {
   public async pruneAll(): Promise<{ deletedKeys: number }> {
     const deletedKeys = this.countEntries();
     this.pairCodes.clear(); this.bindings.clear(); this.principalSessions.clear();
-    this.principalActiveSessions.clear(); this.locales.clear(); this.authorizedPrincipals.clear();
+    this.principalActiveSessions.clear(); this.locales.clear(); this.adminPrincipal = null;
+    this.gatewayAuthorizedPrincipals.clear();
     this.consoleDeliveryRoutes.clear();
     this.requests.clear(); this.requestQueue.length = 0; this.activeRequestId = null;
     this.menuPayloads.clear(); this.xchangeFileMetas.clear(); this.browserAttachments.clear();
@@ -361,7 +393,8 @@ export class ProcessLocalStateStore implements RuntimeStateStore {
 
   private countEntries(): number {
     return this.pairCodes.size + this.bindings.size + this.locales.size +
-      this.authorizedPrincipals.size + this.requests.size + this.menuPayloads.size +
+      (this.adminPrincipal ? 1 : 0) + this.gatewayAuthorizedPrincipals.size +
+      this.requests.size + this.menuPayloads.size +
       this.xchangeFileMetas.size + this.browserAttachments.size + this.browserRecordings.size +
       this.projectMenuViews.size + this.outgoingNotices.size +
       this.consoleDeliveryRoutes.size + (this.gatewayClientUuid ? 1 : 0);

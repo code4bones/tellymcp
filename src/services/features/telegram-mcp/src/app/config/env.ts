@@ -28,6 +28,9 @@ const envSchema = z.object({
   TELEGRAM_BOT_TOKEN: optionalNonEmptyString,
   TELEGRAM_BOT_USERNAME: optionalNonEmptyString,
   ADMIN_TOKEN: optionalNonEmptyString,
+  TELEGRAM_OAUTH_CLIENT_ID: optionalNonEmptyString,
+  TELEGRAM_OAUTH_CLIENT_SECRET: optionalNonEmptyString,
+  TELEGRAM_OAUTH_CALLBACK: optionalUrlString,
   TELEGRAM_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
   TELEGRAM_DEFAULT_TIMEOUT_SECONDS: z.coerce
     .number()
@@ -89,6 +92,11 @@ const envSchema = z.object({
     .int()
     .positive()
     .default(300),
+  TELLYMCP_OAUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(3600),
   TELLYMCP_OAUTH_SCOPES: z.string().min(1).default("tellymcp:read tellymcp:write"),
   TELLYMCP_OAUTH_KEY_ID: z.string().min(1).default("tellymcp-oauth"),
   MCP_HTTP_ENABLE_DEBUG_ROUTES: z
@@ -294,8 +302,14 @@ export type AppConfig = {
     allowedRedirectUris: string[];
     privateKeyPem?: string;
     authCodeTtlSeconds: number;
+    accessTokenTtlSeconds: number;
     scopes: string[];
     keyId: string;
+    telegramLogin?: {
+      clientId: string;
+      clientSecret: string;
+      callbackUrl: string;
+    };
   };
   distributed: {
     mode: "client" | "gateway" | "both";
@@ -492,6 +506,33 @@ export function loadConfig(): AppConfig {
     }
   }
 
+  const telegramLoginConfigured = Boolean(
+    parsed.TELEGRAM_OAUTH_CLIENT_ID ||
+      parsed.TELEGRAM_OAUTH_CLIENT_SECRET ||
+      parsed.TELEGRAM_OAUTH_CALLBACK,
+  );
+  if (telegramLoginConfigured) {
+    if (!oauthConfigured) {
+      throw new Error(
+        "TELEGRAM_OAUTH_CLIENT_ID/CLIENT_SECRET/CALLBACK require the OAuth connector (TELLYMCP_OAUTH_*/TELLYMCP_MAGIC_TOKEN settings) to also be configured.",
+      );
+    }
+    if (
+      !parsed.TELEGRAM_OAUTH_CLIENT_ID ||
+      !parsed.TELEGRAM_OAUTH_CLIENT_SECRET ||
+      !parsed.TELEGRAM_OAUTH_CALLBACK
+    ) {
+      throw new Error(
+        "TELEGRAM_OAUTH_CLIENT_ID, TELEGRAM_OAUTH_CLIENT_SECRET and TELEGRAM_OAUTH_CALLBACK must all be set together.",
+      );
+    }
+    if (!parsed.TELEGRAM_BOT_TOKEN) {
+      throw new Error(
+        "Telegram OAuth login requires TELEGRAM_BOT_TOKEN (the approval request is sent through the bot).",
+      );
+    }
+  }
+
   const oauthScopes = parsed.TELLYMCP_OAUTH_SCOPES
     .split(/[\s,]+/u)
     .map((scope) => scope.trim())
@@ -624,8 +665,19 @@ export function loadConfig(): AppConfig {
                 }
               : {}),
             authCodeTtlSeconds: parsed.TELLYMCP_AUTH_CODE_TTL_SECONDS,
+            accessTokenTtlSeconds:
+              parsed.TELLYMCP_OAUTH_ACCESS_TOKEN_TTL_SECONDS,
             scopes: oauthScopes,
             keyId: parsed.TELLYMCP_OAUTH_KEY_ID,
+            ...(telegramLoginConfigured
+              ? {
+                  telegramLogin: {
+                    clientId: parsed.TELEGRAM_OAUTH_CLIENT_ID as string,
+                    clientSecret: parsed.TELEGRAM_OAUTH_CLIENT_SECRET as string,
+                    callbackUrl: parsed.TELEGRAM_OAUTH_CALLBACK as string,
+                  },
+                }
+              : {}),
           },
         }
       : {}),

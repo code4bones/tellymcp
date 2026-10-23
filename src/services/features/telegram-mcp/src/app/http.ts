@@ -13,7 +13,11 @@ import type { Update } from "grammy/types";
 import ws from "ws";
 
 import type { AppRuntime } from "./bootstrap/runtime";
-import { createOAuthFacade, type OAuthFacade } from "./oauthFacade";
+import {
+  createOAuthFacade,
+  type OAuthAccessTokenClaims,
+  type OAuthFacade,
+} from "./oauthFacade";
 import {
   type TelegramWebAppInitDataUnsafe,
   validateTelegramWebAppInitData,
@@ -24,6 +28,14 @@ import {
   WEBAPP_STYLES_CSS,
   renderWebAppHtml,
 } from "./webapp/assets";
+import {
+  renderLandingHtml,
+  renderPrivacyPolicyHtml,
+  renderTermsOfServiceHtml,
+} from "./webapp/landing";
+import type { TelegramOidcIdentity } from "./telegramOidc";
+import { createRequestId } from "../shared/lib/ids/ids";
+import type { RichMessageBlock } from "../shared/integrations/telegram/transportTypes";
 import {
   isStreamableTerminalTarget,
   resizeForegroundTerminal,
@@ -45,6 +57,10 @@ import {
   MAX_BODY_SIZE_BYTES,
   readLimitedJsonBody,
 } from "../shared/lib/bodyLimits";
+
+const TELEGRAM_LOGIN_APPROVAL_TIMEOUT_SECONDS = 300;
+const TELEGRAM_LOGIN_APPROVE_OPTION = "Approve";
+const TELEGRAM_LOGIN_REJECT_OPTION = "Reject";
 
 type SessionEntry = {
   server: McpServer;
@@ -217,6 +233,28 @@ function readBearerToken(req: IncomingMessage): string | null {
   return header.slice("Bearer ".length).trim() || null;
 }
 
+function authInfoFromOAuth(
+  token: string,
+  claims: OAuthAccessTokenClaims,
+): AuthInfo {
+  return {
+    token,
+    // SDK's `clientId` is the authenticated subject exposed to tool handlers;
+    // the OAuth client is retained separately below for auditing/debugging.
+    clientId: claims.sub,
+    scopes: claims.scope.split(/\s+/u).filter(Boolean),
+    expiresAt: claims.exp,
+    resource: new URL(claims.aud),
+    extra: {
+      oauthClientId: claims.client_id,
+      ...(claims.telegram_id ? { telegramId: claims.telegram_id } : {}),
+      ...(claims.preferred_username
+        ? { telegramUsername: claims.preferred_username }
+        : {}),
+    },
+  };
+}
+
 export type McpHttpAuthorizationMode =
   | "public"
   | "internal_bearer"
@@ -333,6 +371,7 @@ export function createMcpHttpHandler(
     noServer: true,
     maxPayload: MAX_BODY_SIZE_BYTES,
   });
+  const landingBasePath = "/tellymcp";
   const webAppBasePath =
     runtime.config.webapp.basePath.replace(/\/+$/u, "") || "/webapp";
   const rootPrefix = normalizeBasePath(process.env.ROOT_PREFIX || "/api");
@@ -348,11 +387,61 @@ export function createMcpHttpHandler(
     "/telegram/webhook";
   const mcpHttpPath =
     runtime.config.mcp.httpPath.replace(/\/+$/u, "") || "/mcp";
+
+  const requestTelegramLoginApproval = async (
+    identity: TelegramOidcIdentity,
+  ): Promise<"approved" | "rejected" | "timeout" | "no_admin"> => {
+    const admins = await runtime.adminAuthStore.listAdminAuthorizedPrincipals();
+    const admin = admins[0];
+    if (!admin) {
+      return "no_admin";
+    }
+
+    const requestId = createRequestId();
+    const who = identity.firstName
+      ? `${identity.firstName}${identity.username ? ` (@${identity.username})` : ""}`
+      : identity.username
+        ? `@${identity.username}`
+        : `id ${identity.telegramId}`;
+    const blocks: RichMessageBlock[] = [
+      { type: "heading", size: 3, text: "OAuth connector login via Telegram" },
+      {
+        type: "paragraph",
+        text: `Telegram user ${who} (id ${identity.telegramId}) is requesting OAuth access to this gateway's MCP tools.`,
+      },
+    ];
+
+    await runtime.telegramTransport.sendRichRequest({
+      requestId,
+      sessionId: `oauth-tg:${identity.telegramId}`,
+      recipient: {
+        telegramChatId: admin.telegramChatId,
+        telegramUserId: admin.telegramUserId,
+      },
+      blocks,
+      options: [TELEGRAM_LOGIN_APPROVE_OPTION, TELEGRAM_LOGIN_REJECT_OPTION],
+    });
+
+    const reply = await runtime.telegramTransport.waitForReply(
+      requestId,
+      TELEGRAM_LOGIN_APPROVAL_TIMEOUT_SECONDS,
+    );
+    if (!reply) {
+      return "timeout";
+    }
+    return reply.answer === TELEGRAM_LOGIN_APPROVE_OPTION
+      ? "approved"
+      : "rejected";
+  };
+
   const oauthFacade = runtime.config.oauth
     ? createOAuthFacade(
         runtime.config.oauth,
         mcpHttpPath,
         runtime.logger,
+        runtime.config.oauth.telegramLogin
+          ? { requestApproval: requestTelegramLoginApproval }
+          : undefined,
       )
     : null;
 
@@ -705,6 +794,39 @@ export function createMcpHttpHandler(
         service: "tellymcp",
         transport: "streamable-http",
       });
+      return;
+    }
+
+    if (
+      requestUrl.pathname === landingBasePath ||
+      requestUrl.pathname === `${landingBasePath}/`
+    ) {
+      if (method !== "GET") {
+        writeText(res, 405, "Method not allowed");
+        return;
+      }
+
+      writeHtml(res, 200, renderLandingHtml(landingBasePath));
+      return;
+    }
+
+    if (requestUrl.pathname === `${landingBasePath}/policy`) {
+      if (method !== "GET") {
+        writeText(res, 405, "Method not allowed");
+        return;
+      }
+
+      writeHtml(res, 200, renderPrivacyPolicyHtml(landingBasePath));
+      return;
+    }
+
+    if (requestUrl.pathname === `${landingBasePath}/terms`) {
+      if (method !== "GET") {
+        writeText(res, 405, "Method not allowed");
+        return;
+      }
+
+      writeHtml(res, 200, renderTermsOfServiceHtml(landingBasePath));
       return;
     }
 
@@ -1427,6 +1549,21 @@ export function createMcpHttpHandler(
         clientId: "inbox-integration",
         scopes: ["inbox"],
       };
+    }
+    if (authorizationMode === "oauth") {
+      const token = readBearerToken(req);
+      const claims = token ? oauthFacade?.verifyAccessToken(token) : null;
+      // `resolveMcpHttpAuthorization` already verified this bearer. Keep the
+      // defensive check so a future authorization-mode change cannot attach
+      // unverified identity data to an SDK request context.
+      if (!token || !claims) {
+        writeText(res, 401, "Unauthorized");
+        return;
+      }
+      (req as IncomingMessage & { auth?: AuthInfo }).auth = authInfoFromOAuth(
+        token,
+        claims,
+      );
     }
     if (!authorizationMode) {
       const authorizationHeader = readHeader(req, "authorization");

@@ -15,6 +15,7 @@ import {
   isHelpCommand,
   isMenuEntryCommand,
   parseAdminAuthCommand,
+  parseGatewayAuthCommand,
 } from "./transportUtils";
 import type {
   StoredAttachmentRecord,
@@ -31,10 +32,18 @@ export interface TransportMessageFlowHost {
   bindingStore: SessionBindingStore;
   sessionStore: SessionStore;
   isAdminAuthEnabled(): boolean;
+  isGatewayAuthEnabled(): boolean;
   isPrincipalAdminAuthorized(
     principal: { telegramChatId: number; telegramUserId: number } | null,
   ): Promise<boolean>;
-  setPrincipalAdminAuthorized(principal: {
+  claimPrincipalAdminAuthorization(principal: {
+    telegramChatId: number;
+    telegramUserId: number;
+  }): Promise<"granted" | "already_admin" | "claimed_by_another">;
+  isPrincipalGatewayAuthorized(
+    principal: { telegramChatId: number; telegramUserId: number } | null,
+  ): Promise<boolean>;
+  setPrincipalGatewayAuthorized(principal: {
     telegramChatId: number;
     telegramUserId: number;
   }): Promise<void>;
@@ -179,21 +188,21 @@ export class TransportMessageFlow {
     text: string | null,
   ): Promise<boolean> {
     const principal = this.host.getPrincipalFromContext(ctx);
-    const authToken = text ? parseAdminAuthCommand(text) : null;
-    if (authToken !== null) {
-      if (!this.host.isAdminAuthEnabled()) {
+    const gatewayToken = text ? parseGatewayAuthCommand(text) : null;
+    if (gatewayToken !== null) {
+      if (!this.host.isGatewayAuthEnabled()) {
         await this.host.replyText(
           ctx,
-          await this.host.tForContext(ctx, "menu:admin.auth.disabled"),
+          await this.host.tForContext(ctx, "menu:admin.gateway_auth.disabled"),
           { sessionId: "gateway-auth", kind: "transport" },
         );
         return true;
       }
 
-      if (authToken !== this.host.config.distributed.gatewayScopeToken) {
+      if (gatewayToken !== this.host.config.distributed.gatewayScopeToken) {
         await this.host.replyText(
           ctx,
-          await this.host.tForContext(ctx, "menu:admin.auth.invalid"),
+          await this.host.tForContext(ctx, "menu:admin.gateway_auth.invalid"),
           { sessionId: "gateway-auth", kind: "transport" },
         );
         return true;
@@ -207,11 +216,11 @@ export class TransportMessageFlow {
         principal,
         ctx,
       });
-      await this.host.setPrincipalAdminAuthorized(principal);
+      await this.host.setPrincipalGatewayAuthorized(principal);
       await this.host.replyText(
         ctx,
         [
-          await this.host.tForContext(ctx, "menu:admin.auth.success"),
+          await this.host.tForContext(ctx, "menu:admin.gateway_auth.success"),
           "",
           `<code>GATEWAY_USER_UUID=${user.gateway_user_uuid}</code>`,
           "Set this in your agent .env.",
@@ -222,13 +231,63 @@ export class TransportMessageFlow {
       return true;
     }
 
+    const adminToken = text ? parseAdminAuthCommand(text) : null;
+    if (adminToken !== null) {
+      if (!this.host.isAdminAuthEnabled()) {
+        await this.host.replyText(
+          ctx,
+          await this.host.tForContext(ctx, "menu:admin.auth.disabled"),
+          { sessionId: "gateway-admin", kind: "transport" },
+        );
+        return true;
+      }
+
+      if (adminToken !== this.host.config.telegram.adminToken) {
+        await this.host.replyText(
+          ctx,
+          await this.host.tForContext(ctx, "menu:admin.auth.invalid"),
+          { sessionId: "gateway-admin", kind: "transport" },
+        );
+        return true;
+      }
+
+      if (!principal) {
+        return true;
+      }
+
+      if (!(await this.host.isPrincipalGatewayAuthorized(principal))) {
+        await this.host.replyText(
+          ctx,
+          await this.host.tForContext(ctx, "menu:admin.gateway_auth.required"),
+          { sessionId: "gateway-admin", kind: "transport" },
+        );
+        return true;
+      }
+
+      const claim = await this.host.claimPrincipalAdminAuthorization(principal);
+      if (claim === "claimed_by_another") {
+        await this.host.replyText(
+          ctx,
+          await this.host.tForContext(ctx, "menu:admin.auth.claimed"),
+          { sessionId: "gateway-admin", kind: "transport" },
+        );
+        return true;
+      }
+      await this.host.replyText(
+        ctx,
+        await this.host.tForContext(ctx, "menu:admin.auth.success"),
+        { sessionId: "gateway-admin", kind: "transport" },
+      );
+      return true;
+    }
+
     if (
-      this.host.isAdminAuthEnabled() &&
-      !(await this.host.isPrincipalAdminAuthorized(principal))
+      this.host.isGatewayAuthEnabled() &&
+      !(await this.host.isPrincipalGatewayAuthorized(principal))
     ) {
       await this.host.replyText(
         ctx,
-        await this.host.tForContext(ctx, "menu:admin.auth.prompt"),
+        await this.host.tForContext(ctx, "menu:admin.gateway_auth.prompt"),
         { sessionId: "gateway-auth", kind: "transport" },
       );
       return true;

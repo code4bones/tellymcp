@@ -38,6 +38,7 @@ TELLYMCP_OAUTH_CLIENT_ID=tellymcp
 TELLYMCP_OAUTH_CLIENT_SECRET=replace_with_client_secret
 TELLYMCP_ALLOWED_REDIRECT_URIS=https://chatgpt.com/connector/oauth/...,https://claude.ai/api/mcp/auth_callback
 TELLYMCP_AUTH_CODE_TTL_SECONDS=300
+TELLYMCP_OAUTH_ACCESS_TOKEN_TTL_SECONDS=3600
 TELLYMCP_OAUTH_SCOPES=tellymcp:read tellymcp:write
 TELLYMCP_OAUTH_KEY_ID=tellymcp-oauth
 ```
@@ -45,6 +46,24 @@ TELLYMCP_OAUTH_KEY_ID=tellymcp-oauth
 OAuth is enabled when a connector identity, credential, redirect, or signing-key
 setting is present. `TELLYMCP_PUBLIC_URL` and one magic-token form are then
 required. Redirect URIs are matched exactly when the allowlist is configured.
+
+## ChatGPT Plugins OAuth 2.1
+
+The facade supports the pinned OpenAI Client ID Metadata Document (CIMD)
+public clients for ChatGPT and Codex. Its discovery metadata advertises PKCE
+`S256`, `client_id_metadata_document_supported`, `none` token-endpoint
+authentication, and RFC 9207 issuer identification. TellyMCP retrieves only
+the known `https://chatgpt.com/oauth/client.json` and
+`https://chatgpt.com/oauth/codex/client.json` metadata documents, requires
+`none` to be an advertised client authentication method, and accepts only
+their declared callbacks. Codex's RFC 8252 loopback callback may use an
+ephemeral port. This bypasses the static redirect allowlist only for those
+verified OpenAI CIMD clients.
+
+`TELLYMCP_OAUTH_CLIENT_ID`, `TELLYMCP_OAUTH_CLIENT_SECRET`, and
+`TELLYMCP_ALLOWED_REDIRECT_URIS` remain the compatibility path for pre-registered
+clients such as existing Claude connections. Do not configure a ChatGPT client
+secret for CIMD: ChatGPT uses PKCE and no stored client secret in this mode.
 
 ## Reverse proxy
 
@@ -96,6 +115,34 @@ or client secret is configured in the host, it must match the gateway values.
 TellyMCP tool names already use Claude-compatible letters, digits, and
 underscores, and the tools publish output schemas.
 
+## Codex CLI OAuth login
+
+Codex can store a normal OAuth session for this MCP server; do not give it
+`MCP_HTTP_BEARER_TOKEN` and do not set `--bearer-token-env-var` for this
+connection:
+
+```bash
+codex mcp add tellyOAuth --url https://mcp.example.com/api/mcp
+codex mcp login tellyOAuth
+```
+
+The CLI uses its pinned CIMD public client
+`https://chatgpt.com/oauth/codex/client.json`, PKCE, and a loopback callback
+on an ephemeral `127.0.0.1` or `localhost` port. TellyMCP validates only that
+known OpenAI client and the matching callback shape; it never fetches arbitrary
+client metadata URLs.
+
+The browser flow is the same Telegram login and administrator approval used by
+ChatGPT. The resulting OAuth token is stored by Codex, not exposed in the CLI
+configuration. TellyMCP binds it to the verified Telegram identity, so the
+token's subject is `telegram:<id>` rather than the OAuth client ID. The
+read-only `get_authenticated_user` profile tool shows the connected Telegram
+identity without returning a token.
+
+Existing bearer-based entries continue to work during migration. After a
+successful `mcp login`, remove the old bearer-backed entry with
+`codex mcp remove <old-name>`.
+
 ## Verify before connecting
 
 ```bash
@@ -109,9 +156,10 @@ curl -i https://mcp.example.com/api/mcp
 The last response must be `401` and include a `WWW-Authenticate` header whose
 `resource_metadata` value points to the protected-resource metadata endpoint.
 
-Access tokens are RS256 JWTs without `exp`, matching the trusted internal
-connector model. Authorization codes remain short-lived, PKCE-bound, and
-one-time-use. Failed magic-token attempts are rate-limited per source address.
+Access tokens are RS256 JWTs with a bounded `exp` claim (one hour by default;
+adjust with `TELLYMCP_OAUTH_ACCESS_TOKEN_TTL_SECONDS`). Authorization codes
+remain short-lived, PKCE-bound, and one-time-use. Failed magic-token attempts
+are rate-limited per source address.
 
 ## Diagnostics
 

@@ -96,6 +96,8 @@ const fieldLabels: Record<string, string> = {
   TELLYMCP_ALLOWED_REDIRECT_URIS: "Разрешённые redirect URI",
   TELLYMCP_OAUTH_PRIVATE_KEY_PEM: "Приватный ключ OAuth",
   TELLYMCP_AUTH_CODE_TTL_SECONDS: "Срок жизни OAuth-кода, секунд",
+  TELLYMCP_OAUTH_ACCESS_TOKEN_TTL_SECONDS:
+    "Срок жизни OAuth access token, секунд",
   TELLYMCP_OAUTH_SCOPES: "OAuth scopes",
   TELLYMCP_OAUTH_KEY_ID: "ID ключа OAuth",
   RMQ_HOST: "Хост RabbitMQ",

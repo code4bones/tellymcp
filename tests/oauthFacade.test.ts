@@ -45,6 +45,7 @@ const oauthConfig = {
   privateKeyPem,
   authCodeTtlSeconds: 300,
   accessTokenTtlSeconds: 3600,
+  refreshTokenTtlSeconds: 30 * 24 * 60 * 60,
   scopes: ["tellymcp:read", "tellymcp:write"],
   keyId: "tellymcp-test",
 } satisfies NonNullable<AppConfig["oauth"]>;
@@ -317,6 +318,158 @@ describe("TellyMCP OAuth facade", () => {
     );
     expect(reusedResponse.statusCode).toBe(400);
     expect(JSON.parse(reusedResponse.body)).toEqual({ error: "invalid_grant" });
+  });
+
+  it("advertises refresh_token support in discovery metadata", async () => {
+    const facade = createOAuthFacade(oauthConfig, "/mcp");
+    const response = makeResponse();
+
+    await facade.handleRequest(
+      makeRequest({ url: "/.well-known/oauth-authorization-server" }),
+      response,
+      "/.well-known/oauth-authorization-server",
+    );
+
+    expect(JSON.parse(response.body)).toMatchObject({
+      grant_types_supported: ["authorization_code", "refresh_token"],
+    });
+  });
+
+  it("exchanges the authorization code's refresh_token for a new access token, rotating it", async () => {
+    const facade = createOAuthFacade(oauthConfig, "/mcp");
+    const verifier = "refresh-verifier-".padEnd(64, "x");
+    const code = await authorize(facade, verifier);
+    const firstTokenResponse = makeResponse();
+    await facade.handleRequest(
+      makeRequest({
+        method: "POST",
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: "https://chat.example/callback",
+          client_id: "chat-client",
+          code_verifier: verifier,
+          resource: "https://mcp.example.com/api/mcp",
+        }).toString(),
+      }),
+      firstTokenResponse,
+      "/oauth/token",
+    );
+    const firstPayload = JSON.parse(firstTokenResponse.body) as {
+      access_token: string;
+      refresh_token: string;
+    };
+    expect(firstPayload.refresh_token).toBeTruthy();
+
+    const refreshResponse = makeResponse();
+    await facade.handleRequest(
+      makeRequest({
+        method: "POST",
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: firstPayload.refresh_token,
+          client_id: "chat-client",
+        }).toString(),
+      }),
+      refreshResponse,
+      "/oauth/token",
+    );
+
+    expect(refreshResponse.statusCode).toBe(200);
+    const refreshedPayload = JSON.parse(refreshResponse.body) as {
+      access_token: string;
+      refresh_token: string;
+      scope: string;
+    };
+    expect(refreshedPayload.access_token).not.toBe(firstPayload.access_token);
+    expect(refreshedPayload.refresh_token).not.toBe(firstPayload.refresh_token);
+    expect(facade.verifyAccessToken(refreshedPayload.access_token)).toMatchObject({
+      client_id: "chat-client",
+      scope: "tellymcp:read tellymcp:write",
+    });
+
+    // Rotation means the original refresh_token is now consumed/dead.
+    const replayResponse = makeResponse();
+    await facade.handleRequest(
+      makeRequest({
+        method: "POST",
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: firstPayload.refresh_token,
+          client_id: "chat-client",
+        }).toString(),
+      }),
+      replayResponse,
+      "/oauth/token",
+    );
+    expect(replayResponse.statusCode).toBe(400);
+    expect(JSON.parse(replayResponse.body)).toEqual({ error: "invalid_grant" });
+  });
+
+  it("rejects an unknown or garbage refresh_token", async () => {
+    const facade = createOAuthFacade(oauthConfig, "/mcp");
+    const response = makeResponse();
+
+    await facade.handleRequest(
+      makeRequest({
+        method: "POST",
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: "not-a-real-token",
+          client_id: "chat-client",
+        }).toString(),
+      }),
+      response,
+      "/oauth/token",
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body)).toEqual({ error: "invalid_grant" });
+  });
+
+  it("requires the confidential client's secret to redeem its refresh_token", async () => {
+    const facade = createOAuthFacade(
+      { ...oauthConfig, clientId: "chat-client", clientSecret: "client-secret" },
+      "/mcp",
+    );
+    const verifier = "refresh-confidential-".padEnd(64, "x");
+    const code = await authorize(facade, verifier);
+    const tokenResponse = makeResponse();
+    await facade.handleRequest(
+      makeRequest({
+        method: "POST",
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: "https://chat.example/callback",
+          client_id: "chat-client",
+          client_secret: "client-secret",
+          code_verifier: verifier,
+          resource: "https://mcp.example.com/api/mcp",
+        }).toString(),
+      }),
+      tokenResponse,
+      "/oauth/token",
+    );
+    const { refresh_token: refreshToken } = JSON.parse(tokenResponse.body) as {
+      refresh_token: string;
+    };
+
+    const wrongSecretResponse = makeResponse();
+    await facade.handleRequest(
+      makeRequest({
+        method: "POST",
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: refreshToken,
+          client_id: "chat-client",
+          client_secret: "wrong-secret",
+        }).toString(),
+      }),
+      wrongSecretResponse,
+      "/oauth/token",
+    );
+    expect(wrongSecretResponse.statusCode).toBe(401);
   });
 
   it("requires the configured confidential-client secret", async () => {

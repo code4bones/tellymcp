@@ -39,6 +39,7 @@ TELLYMCP_OAUTH_CLIENT_SECRET=replace_with_client_secret
 TELLYMCP_ALLOWED_REDIRECT_URIS=https://chatgpt.com/connector/oauth/...,https://claude.ai/api/mcp/auth_callback
 TELLYMCP_AUTH_CODE_TTL_SECONDS=300
 TELLYMCP_OAUTH_ACCESS_TOKEN_TTL_SECONDS=3600
+TELLYMCP_OAUTH_REFRESH_TOKEN_TTL_SECONDS=2592000
 TELLYMCP_OAUTH_SCOPES=tellymcp:read tellymcp:write
 TELLYMCP_OAUTH_KEY_ID=tellymcp-oauth
 ```
@@ -160,6 +161,17 @@ Access tokens are RS256 JWTs with a bounded `exp` claim (one hour by default;
 adjust with `TELLYMCP_OAUTH_ACCESS_TOKEN_TTL_SECONDS`). Authorization codes
 remain short-lived, PKCE-bound, and one-time-use. Failed magic-token attempts
 are rate-limited per source address.
+
+A successful `authorization_code` exchange also returns a `refresh_token`
+(30 days by default; adjust with `TELLYMCP_OAUTH_REFRESH_TOKEN_TTL_SECONDS`),
+so a client doesn't need a full interactive re-authorization every time the
+much shorter access token expires. `POST /oauth/token` with
+`grant_type=refresh_token` issues a new access token and **rotates** the
+refresh token: the presented one is consumed and a fresh one is returned in
+its place, so a replayed old refresh token is rejected (`invalid_grant`).
+Refresh tokens live in the same process-local, gateway-restart-volatile
+store as authorization codes -- a gateway restart means every connected
+client falls back to a full re-authorization once, same as today.
 
 ## Diagnostics
 

@@ -97,6 +97,14 @@ const envSchema = z.object({
     .int()
     .positive()
     .default(3600),
+  // Long-lived on purpose: this is what lets a client silently renew past
+  // the much shorter access-token TTL above instead of forcing the human
+  // through a full Telegram re-authorization every time it expires.
+  TELLYMCP_OAUTH_REFRESH_TOKEN_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(30 * 24 * 60 * 60),
   TELLYMCP_OAUTH_SCOPES: z.string().min(1).default("tellymcp:read tellymcp:write"),
   TELLYMCP_OAUTH_KEY_ID: z.string().min(1).default("tellymcp-oauth"),
   MCP_HTTP_ENABLE_DEBUG_ROUTES: z
@@ -303,6 +311,7 @@ export type AppConfig = {
     privateKeyPem?: string;
     authCodeTtlSeconds: number;
     accessTokenTtlSeconds: number;
+    refreshTokenTtlSeconds: number;
     scopes: string[];
     keyId: string;
     telegramLogin?: {
@@ -667,6 +676,8 @@ export function loadConfig(): AppConfig {
             authCodeTtlSeconds: parsed.TELLYMCP_AUTH_CODE_TTL_SECONDS,
             accessTokenTtlSeconds:
               parsed.TELLYMCP_OAUTH_ACCESS_TOKEN_TTL_SECONDS,
+            refreshTokenTtlSeconds:
+              parsed.TELLYMCP_OAUTH_REFRESH_TOKEN_TTL_SECONDS,
             scopes: oauthScopes,
             keyId: parsed.TELLYMCP_OAUTH_KEY_ID,
             ...(telegramLoginConfigured

@@ -59,6 +59,19 @@ type AuthorizationCode = AuthorizationRequest & {
   telegramIdentity?: TelegramOidcIdentity;
 };
 
+// Deliberately narrower than AuthorizationCode: a refresh token has no
+// redirect_uri/state/code_challenge to re-check, only what's needed to
+// authenticate the client and re-issue an access token for the same grant.
+type RefreshTokenRecord = {
+  clientId: string;
+  clientAuthentication: AuthorizationRequest["clientAuthentication"];
+  scope: string;
+  resource: string;
+  subject: string;
+  telegramIdentity?: TelegramOidcIdentity;
+  expiresAtMs: number;
+};
+
 type PendingTelegramLogin = {
   authorizationRequest: AuthorizationRequest;
   codeVerifier: string;
@@ -485,6 +498,7 @@ export function createOAuthFacade(
     alg: "RS256",
   };
   const authorizationCodes = new Map<string, AuthorizationCode>();
+  const refreshTokens = new Map<string, RefreshTokenRecord>();
   const failedAttempts = new Map<string, FailedAttemptState>();
   const pendingTelegramLogins = new Map<string, PendingTelegramLogin>();
   const cimdClients = new Map<string, CimdClient>();
@@ -504,7 +518,7 @@ export function createOAuthFacade(
     token_endpoint: tokenEndpoint,
     jwks_uri: jwksUri,
     response_types_supported: ["code"],
-    grant_types_supported: ["authorization_code"],
+    grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
     // Keep `none` available for a public client that proves its identity with
     // ChatGPT's Client ID Metadata Document (CIMD). The legacy operator-owned
@@ -526,6 +540,28 @@ export function createOAuthFacade(
         authorizationCodes.delete(code);
       }
     }
+  };
+
+  const purgeExpiredRefreshTokens = (nowMs: number): void => {
+    for (const [token, record] of refreshTokens) {
+      if (record.expiresAtMs <= nowMs) {
+        refreshTokens.delete(token);
+      }
+    }
+  };
+
+  const issueRefreshToken = (
+    record: Pick<
+      RefreshTokenRecord,
+      "clientId" | "clientAuthentication" | "scope" | "resource" | "subject" | "telegramIdentity"
+    >,
+  ): string => {
+    const token = randomBytes(32).toString("base64url");
+    refreshTokens.set(token, {
+      ...record,
+      expiresAtMs: Date.now() + config.refreshTokenTtlSeconds * 1000,
+    });
+    return token;
   };
 
   const purgeExpiredTelegramLogins = (nowMs: number): void => {
@@ -747,7 +783,7 @@ export function createOAuthFacade(
   const authenticateTokenClient = (
     req: IncomingMessage,
     params: URLSearchParams,
-    record: AuthorizationCode,
+    record: Pick<AuthorizationCode, "clientId" | "clientAuthentication">,
   ): string | null => {
     const formClientId = params.get("client_id")?.trim() ?? "";
     if (formClientId !== record.clientId) {
@@ -799,7 +835,9 @@ export function createOAuthFacade(
     return null;
   };
 
-  const issueAccessToken = (record: AuthorizationCode): string => {
+  const issueAccessToken = (
+    record: Pick<AuthorizationCode, "resource" | "subject" | "clientId" | "telegramIdentity">,
+  ): string => {
     const header = base64UrlJson({
       alg: "RS256",
       typ: "JWT",
@@ -1270,11 +1308,67 @@ export function createOAuthFacade(
         writeOAuthJson(res, 413, { error: "invalid_request" });
         return true;
       }
-      if (params.get("grant_type") !== "authorization_code") {
+      const grantType = params.get("grant_type");
+      if (grantType !== "authorization_code" && grantType !== "refresh_token") {
         logger?.warn("OAuth token request rejected", {
           reason: "unsupported_grant_type",
         });
         writeOAuthJson(res, 400, { error: "unsupported_grant_type" });
+        return true;
+      }
+
+      if (grantType === "refresh_token") {
+        const presentedToken = params.get("refresh_token") ?? "";
+        const refreshRecord = refreshTokens.get(presentedToken);
+        const refreshNowMs = Date.now();
+        purgeExpiredRefreshTokens(refreshNowMs);
+        if (!refreshRecord || refreshRecord.expiresAtMs <= refreshNowMs) {
+          refreshTokens.delete(presentedToken);
+          logger?.warn("OAuth token request rejected", {
+            reason: "unknown_or_expired_refresh_token",
+            clientId: params.get("client_id")?.trim() || null,
+          });
+          writeOAuthJson(res, 400, { error: "invalid_grant" });
+          return true;
+        }
+
+        const authenticatedRefreshClientId = authenticateTokenClient(
+          req,
+          params,
+          refreshRecord,
+        );
+        if (
+          !authenticatedRefreshClientId ||
+          authenticatedRefreshClientId !== refreshRecord.clientId
+        ) {
+          logger?.warn("OAuth token request rejected", {
+            reason: "invalid_client",
+            clientId: params.get("client_id")?.trim() || null,
+            grantType: "refresh_token",
+          });
+          if (refreshRecord.clientAuthentication === "confidential") {
+            res.setHeader("www-authenticate", 'Basic realm="oauth/token"');
+          }
+          writeOAuthJson(res, 401, { error: "invalid_client" });
+          return true;
+        }
+
+        // Rotate on every use: the presented token is consumed here and a
+        // fresh one takes its place, so a stolen-and-replayed refresh token
+        // stops working the moment the legitimate client refreshes again.
+        refreshTokens.delete(presentedToken);
+        const rotatedRefreshToken = issueRefreshToken(refreshRecord);
+        logger?.info("OAuth access token refreshed", {
+          clientId: refreshRecord.clientId,
+          audience: refreshRecord.resource,
+          grantedScopes: scope,
+        });
+        writeOAuthJson(res, 200, {
+          access_token: issueAccessToken(refreshRecord),
+          token_type: "Bearer",
+          refresh_token: rotatedRefreshToken,
+          scope,
+        });
         return true;
       }
 
@@ -1342,6 +1436,7 @@ export function createOAuthFacade(
       writeOAuthJson(res, 200, {
         access_token: issueAccessToken(record),
         token_type: "Bearer",
+        refresh_token: issueRefreshToken(record),
         scope,
       });
       return true;

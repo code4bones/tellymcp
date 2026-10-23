@@ -4,6 +4,12 @@
 
 ### Added
 
+- OAuth token endpoint now also issues a `refresh_token` on the
+  `authorization_code` grant (`TELLYMCP_OAUTH_REFRESH_TOKEN_TTL_SECONDS`,
+  default 30 days) and supports `grant_type=refresh_token` to silently renew
+  past the much shorter access-token TTL, instead of forcing a full
+  interactive re-authorization every time it expires. Refresh tokens rotate
+  on every use, so a replayed old one is rejected.
 - Generic external inbox (`inbox_put`/`inbox_bind_identity`/`inbox_bind_route`,
   Marrow task-assignment integration): когда маршрут ни разу не привязан, но
   получатель уже известен Telly, воркер сам предлагает ему в Telegram выбрать

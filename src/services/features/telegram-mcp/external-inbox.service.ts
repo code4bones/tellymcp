@@ -37,6 +37,34 @@ export type InboxMessageStatusPatch = {
   xchangeMessageUuid?: string | null;
 };
 
+// Statuses a recipient can still act on -- excludes terminal outcomes
+// (delivered/rejected/failed) that a self-service "Входящие" list has no
+// reason to keep surfacing.
+const ACTIVE_INBOX_STATUSES = [
+  "pending",
+  "processing",
+  "offered",
+  "awaiting_route_binding",
+  "deferred",
+  "no_live_session",
+];
+
+export type InboxRouteSummary = {
+  namespace: string;
+  routeKey: string;
+  count: number;
+};
+
+export type InboxMessageSummary = {
+  id: string;
+  resourceKind: string;
+  resourceId: string;
+  status: string;
+  title: string;
+  summary: string;
+  createdAt: string;
+};
+
 export type TelegramMcpExternalInboxServiceInstance = Service & {
   putMessageRecord: (
     input: Record<string, unknown>,
@@ -80,6 +108,15 @@ export type TelegramMcpExternalInboxServiceInstance = Service & {
   ) => Promise<{ telegramChatId: number; telegramUserId: number } | null>;
   reconcileOrphanedMessages: () => Promise<number>;
   resetRetryableNoLiveSessionMessages: (maxAttempts: number) => Promise<number>;
+  getMessageById: (id: string) => Promise<InboxMessageRow | null>;
+  listActiveRoutesForTelegramUser: (
+    telegramUserId: string | number,
+  ) => Promise<InboxRouteSummary[]>;
+  listActiveMessagesForRoute: (
+    telegramUserId: string | number,
+    namespace: string,
+    routeKey: string,
+  ) => Promise<InboxMessageSummary[]>;
 };
 
 type ExternalInboxCarrier = Service & Partial<TelegramMcpExternalInboxServiceInstance> & {
@@ -501,6 +538,121 @@ const TelegramMcpExternalInboxService: ServiceSchema = {
         .update({ status: "pending", updated_at: new Date().toISOString() });
       return typeof result === "number" ? result : 0;
     },
+
+    async getMessageById(
+      this: ExternalInboxCarrier,
+      id: string,
+    ): Promise<InboxMessageRow | null> {
+      const row = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("inbox_messages")
+        .where({ id })
+        .first();
+      return row ? (row as InboxMessageRow) : null;
+    },
+
+    async listActiveRoutesForTelegramUser(
+      this: ExternalInboxCarrier,
+      telegramUserId: string | number,
+    ): Promise<InboxRouteSummary[]> {
+      const user = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_users")
+        .where({ telegram_user_id: telegramUserId })
+        .first("gateway_user_uuid");
+      if (!user?.gateway_user_uuid) {
+        return [];
+      }
+
+      const rows = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("inbox_messages as m")
+        .join("inbox_external_principals as p", function joinPrincipal() {
+          this.on("p.namespace", "=", "m.recipient_namespace").andOn(
+            "p.subject",
+            "=",
+            "m.recipient_subject",
+          );
+        })
+        .where("p.gateway_user_uuid", user.gateway_user_uuid)
+        .whereIn("m.status", ACTIVE_INBOX_STATUSES)
+        .groupBy("m.route_namespace", "m.route_key")
+        .select(
+          "m.route_namespace as namespace",
+          "m.route_key as route_key",
+          this.db.raw("count(*)::int as count"),
+          this.db.raw("max(m.updated_at) as last_activity_at"),
+        )
+        .orderBy("last_activity_at", "desc");
+
+      return rows.map((row) => ({
+        namespace: String(row.namespace),
+        routeKey: String(row.route_key),
+        count: Number(row.count),
+      }));
+    },
+
+    async listActiveMessagesForRoute(
+      this: ExternalInboxCarrier,
+      telegramUserId: string | number,
+      namespace: string,
+      routeKey: string,
+    ): Promise<InboxMessageSummary[]> {
+      const user = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("gateway_users")
+        .where({ telegram_user_id: telegramUserId })
+        .first("gateway_user_uuid");
+      if (!user?.gateway_user_uuid) {
+        return [];
+      }
+
+      const rows = await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("inbox_messages as m")
+        .join("inbox_external_principals as p", function joinPrincipal() {
+          this.on("p.namespace", "=", "m.recipient_namespace").andOn(
+            "p.subject",
+            "=",
+            "m.recipient_subject",
+          );
+        })
+        .where("p.gateway_user_uuid", user.gateway_user_uuid)
+        .andWhere("m.route_namespace", namespace)
+        .andWhere("m.route_key", routeKey)
+        .whereIn("m.status", ACTIVE_INBOX_STATUSES)
+        .orderBy("m.created_at", "asc")
+        .select(
+          "m.id",
+          "m.resource_kind",
+          "m.resource_id",
+          "m.status",
+          "m.payload",
+          "m.created_at",
+        );
+
+      return rows.map((row) => {
+        const payload = (
+          typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload
+        ) as Record<string, unknown> | null;
+        const display = (payload?.display ?? {}) as Record<string, unknown>;
+        const title =
+          typeof display.title === "string" && display.title.trim()
+            ? display.title.trim()
+            : String(row.resource_id);
+        const summary =
+          typeof display.summary === "string" ? display.summary.trim() : "";
+        return {
+          id: String(row.id),
+          resourceKind: String(row.resource_kind),
+          resourceId: String(row.resource_id),
+          status: String(row.status),
+          title,
+          summary,
+          createdAt: new Date(row.created_at as string).toISOString(),
+        };
+      });
+    },
   },
 
   actions: {
@@ -539,6 +691,28 @@ const TelegramMcpExternalInboxService: ServiceSchema = {
       },
       async handler(this: ExternalInboxCarrier, ctx) {
         return this.bindRouteRecord!(ctx.params as Record<string, unknown>);
+      },
+    },
+    listActiveRoutes: {
+      params: { telegram_user_id: { type: "any" } },
+      async handler(this: ExternalInboxCarrier, ctx) {
+        return this.listActiveRoutesForTelegramUser!(
+          ctx.params.telegram_user_id as string | number,
+        );
+      },
+    },
+    listActiveMessages: {
+      params: {
+        telegram_user_id: { type: "any" },
+        namespace: "string",
+        route_key: "string",
+      },
+      async handler(this: ExternalInboxCarrier, ctx) {
+        return this.listActiveMessagesForRoute!(
+          ctx.params.telegram_user_id as string | number,
+          ctx.params.namespace as string,
+          ctx.params.route_key as string,
+        );
       },
     },
   },

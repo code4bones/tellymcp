@@ -727,6 +727,59 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
     },
   },
 
+  actions: {
+    // Lets a self-service "Входящие" menu act on a message with no live
+    // waitForReply of its own -- re-resolves the route binding fresh
+    // (rather than trusting a possibly-stale one the caller might hold),
+    // since this can run long after the message's original offer prompt,
+    // if any, has already expired.
+    resolve: {
+      params: {
+        message_id: "string",
+        decision: { type: "enum", values: ["approve", "reject", "defer"] },
+      },
+      async handler(this: InboxWorkerCarrier, ctx) {
+        if (!this.isEnabled?.()) {
+          throw new Error("Inbox worker is disabled in client mode");
+        }
+        const inboxService = getInboxService.call(this);
+        if (!inboxService) {
+          throw new Error(
+            `Local Moleculer service '${TELEGRAM_MCP_EXTERNAL_INBOX_SERVICE_NAME}' is unavailable`,
+          );
+        }
+        const row = await inboxService.getMessageById(
+          ctx.params.message_id as string,
+        );
+        if (!row) {
+          throw new Error(`Inbox message '${ctx.params.message_id}' was not found.`);
+        }
+        const gatewayUserUuid = await inboxService.resolveRecipientGatewayUserUuid(
+          row.recipient_namespace,
+          row.recipient_subject,
+        );
+        if (!gatewayUserUuid) {
+          throw new Error("This message's recipient identity is no longer bound.");
+        }
+        const routeBinding = await inboxService.resolveRouteBinding(
+          row.route_namespace,
+          row.route_key,
+          gatewayUserUuid,
+        );
+        if (!routeBinding) {
+          throw new Error("This message's route is no longer bound to a console.");
+        }
+        await this.resolveInboxMessage?.(
+          row,
+          inboxService,
+          routeBinding,
+          ctx.params.decision as OfferDecision,
+        );
+        return { ok: true };
+      },
+    },
+  },
+
   async started(this: InboxWorkerCarrier) {
     if (!this.isEnabled?.()) {
       this.logger.info(

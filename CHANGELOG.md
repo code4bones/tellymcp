@@ -13,6 +13,13 @@
   `OAuthRefreshTokenStore` port as the rest of gateway state (Redis in
   gateway/`both` mode, process-local otherwise), so they survive a gateway
   restart instead of forcing re-auth on every redeploy too.
+- Backend groundwork for a self-service "Входящие" Telegram menu: generic
+  queries to list a recipient's active inbox routes and the active messages
+  within one (`telegramMcp.externalInbox.listActiveRoutes`/
+  `listActiveMessages`), a `telegramMcp.inboxWorker.resolve` action that
+  approves/rejects/defers a message independent of any live prompt (re-
+  resolving its route binding fresh), and matching `/gateway/inbox/*`
+  HTTP passthroughs. No menu UI yet -- that's the next slice.
 - Inbox offers now have a third Telegram option, "Postpone", alongside
   Approve/Reject -- marks the message `deferred` instead of losing it, and
   the approve/reject/defer decision is now its own reusable step

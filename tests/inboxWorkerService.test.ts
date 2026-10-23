@@ -414,3 +414,86 @@ describe("inbox worker retryNoLiveSessionMessages", () => {
     expect(getLocalService).not.toHaveBeenCalled();
   });
 });
+
+describe("inbox worker actions.resolve", () => {
+  const resolveHandler = (
+    InboxWorkerService.actions as unknown as {
+      resolve: { handler: (this: unknown, ctx: { params: Record<string, unknown> }) => Promise<unknown> };
+    }
+  ).resolve.handler;
+
+  it("re-resolves the current route binding fresh and applies the decision", async () => {
+    const resolveInboxMessage = vi.fn(async () => undefined);
+    const inboxServiceMock = {
+      getMessageById: vi.fn(async () => baseRow),
+      resolveRecipientGatewayUserUuid: vi.fn(async () => "gateway-user-uuid-1"),
+      resolveRouteBinding: vi.fn(async () => ({
+        clientUuid: "client-1",
+        localSessionId: "workspace",
+      })),
+    };
+    const harness = {
+      isEnabled: () => true,
+      broker: { getLocalService: vi.fn(() => inboxServiceMock) },
+      resolveInboxMessage,
+    };
+
+    const result = await resolveHandler.call(harness, {
+      params: { message_id: "msg-row-1", decision: "approve" },
+    });
+
+    expect(inboxServiceMock.getMessageById).toHaveBeenCalledWith("msg-row-1");
+    expect(inboxServiceMock.resolveRouteBinding).toHaveBeenCalledWith(
+      "marrow",
+      "P-1",
+      "gateway-user-uuid-1",
+    );
+    expect(resolveInboxMessage).toHaveBeenCalledWith(
+      baseRow,
+      inboxServiceMock,
+      { clientUuid: "client-1", localSessionId: "workspace" },
+      "approve",
+    );
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("throws when the message no longer exists", async () => {
+    const harness = {
+      isEnabled: () => true,
+      broker: {
+        getLocalService: vi.fn(() => ({ getMessageById: vi.fn(async () => null) })),
+      },
+    };
+
+    await expect(
+      resolveHandler.call(harness, { params: { message_id: "missing", decision: "approve" } }),
+    ).rejects.toThrow(/not found/);
+  });
+
+  it("throws when the route is no longer bound", async () => {
+    const harness = {
+      isEnabled: () => true,
+      broker: {
+        getLocalService: vi.fn(() => ({
+          getMessageById: vi.fn(async () => baseRow),
+          resolveRecipientGatewayUserUuid: vi.fn(async () => "gateway-user-uuid-1"),
+          resolveRouteBinding: vi.fn(async () => null),
+        })),
+      },
+    };
+
+    await expect(
+      resolveHandler.call(harness, { params: { message_id: "msg-row-1", decision: "defer" } }),
+    ).rejects.toThrow(/no longer bound/);
+  });
+
+  it("refuses to run when the worker is disabled", async () => {
+    const getLocalService = vi.fn();
+    const harness = { isEnabled: () => false, broker: { getLocalService } };
+
+    await expect(
+      resolveHandler.call(harness, { params: { message_id: "msg-row-1", decision: "approve" } }),
+    ).rejects.toThrow(/disabled/);
+    expect(getLocalService).not.toHaveBeenCalled();
+  });
+});

@@ -56,6 +56,8 @@ const ACTIVE_INBOX_STATUSES = [
 export type InboxRouteSummary = {
   namespace: string;
   routeKey: string;
+  label?: string;
+  slug?: string;
   count: number;
 };
 
@@ -67,6 +69,7 @@ export type InboxMessageSummary = {
   statusReason: string | null;
   title: string;
   summary: string;
+  sender?: string;
   createdAt: string;
 };
 
@@ -630,12 +633,18 @@ const TelegramMcpExternalInboxService: ServiceSchema = {
           "m.route_key as route_key",
           this.db.raw("count(*)::int as count"),
           this.db.raw("max(m.updated_at) as last_activity_at"),
+          this.db.raw(`(array_agg(nullif(trim(m.payload->'route'->>'label'), '')
+            order by m.updated_at desc) filter (where nullif(trim(m.payload->'route'->>'label'), '') is not null))[1] as label`),
+          this.db.raw(`(array_agg(nullif(trim(m.payload->'route'->>'slug'), '')
+            order by m.updated_at desc) filter (where nullif(trim(m.payload->'route'->>'slug'), '') is not null))[1] as slug`),
         )
         .orderBy("last_activity_at", "desc");
 
       return rows.map((row) => ({
         namespace: String(row.namespace),
         routeKey: String(row.route_key),
+        ...(row.label ? { label: String(row.label) } : {}),
+        ...(row.slug ? { slug: String(row.slug) } : {}),
         count: Number(row.count),
       }));
     },
@@ -700,6 +709,8 @@ const TelegramMcpExternalInboxService: ServiceSchema = {
             row.status_reason == null ? null : String(row.status_reason),
           title,
           summary,
+          ...(typeof display.sender === "string" && display.sender.trim()
+            ? { sender: display.sender.trim() } : {}),
           createdAt: new Date(row.created_at as string).toISOString(),
         };
       });

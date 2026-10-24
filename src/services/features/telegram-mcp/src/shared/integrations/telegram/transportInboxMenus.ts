@@ -179,7 +179,7 @@ export class TransportInboxMenus {
           range
             .text(
               {
-                text: `📥 ${route.namespace}:${route.routeKey} (${route.count})`,
+                text: `📥 ${route.routeKey}${route.label ? ` · ${route.label}` : ""} (${route.count})`,
                 payload: async () =>
                   this.host.createInboxRouteMenuPayload(
                     sessionId,
@@ -258,7 +258,7 @@ export class TransportInboxMenus {
     }
     await ctx.answerCallbackQuery({
       text: this.host.t(locale, "menu:externalInbox.actions.bound", {
-        route: `${route.namespace}:${route.routeKey}`,
+        route: route.routeKey,
       }),
     });
   }
@@ -288,7 +288,7 @@ export class TransportInboxMenus {
 
     const lines = [
       this.host.t(locale, "menu:externalInbox.route_screen.title", {
-        route: `${route.namespace}:${route.routeKey}`,
+        route: route.routeKey,
       }),
       "",
       messages.length > 0
@@ -381,6 +381,9 @@ export class TransportInboxMenus {
     const richMessage: TelegramRichMessage = {
       markdown: [
         `### ${escapeRichMarkdownText(current.title.replace(/\r?\n/gu, " "))}`,
+        ...(current.sender
+          ? [`**${escapeRichMarkdownText(this.host.t(locale, "menu:externalInbox.message_screen.from"))}:** ${escapeRichMarkdownText(current.sender)}`]
+          : []),
         ...(current.summary ? [current.summary] : []),
         ...(current.statusReason
           ? [`> ${escapeRichMarkdownText(current.statusReason).replace(/\n/gu, "\n> ")}`]

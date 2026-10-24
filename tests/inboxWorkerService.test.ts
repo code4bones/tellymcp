@@ -91,6 +91,8 @@ function createWorkerHarness(
   );
 
   const runtime = {
+    config: { telegram: { debugLanguage: undefined } },
+    localeStore: { getUserLocale: vi.fn(async () => "en") },
     telegramTransport: {
       sendRichRequest,
       waitForReply,

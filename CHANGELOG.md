@@ -4,6 +4,7 @@
 
 ### Added
 
+- Generic inbox offers accept optional `route.label`, `route.slug`, and `display.sender` snapshots. Active route summaries expose the supplied project name and slug, and Telegram renders project labels and assigning people without fetching data from the source integration. Older offers remain supported.
 - OAuth token endpoint now also issues a `refresh_token` on the
   `authorization_code` grant (`TELLYMCP_OAUTH_REFRESH_TOKEN_TTL_SECONDS`,
   default 30 days) and supports `grant_type=refresh_token` to silently renew

@@ -4,6 +4,12 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.34
+
+### Added
+
+- Inbox routes accept separate project name (`route.label`) and slug (`route.slug`) snapshots while preserving the routing key. Project menus show the supplied name, and message cards can show the assigning person through `display.sender`.
+
 ## 0.0.33
 
 ### Changed

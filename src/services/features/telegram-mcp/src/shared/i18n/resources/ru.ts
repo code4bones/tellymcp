@@ -176,6 +176,7 @@ export const ruMenu = {
       failed: "⚠️",
     },
     message_screen: {
+      from: "От кого",
       title: "{{title}}",
       resource: "{{kind}}: {{id}}",
     },

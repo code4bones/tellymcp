@@ -174,6 +174,7 @@ export const enMenu = {
       failed: "⚠️",
     },
     message_screen: {
+      from: "From",
       title: "{{title}}",
       resource: "{{kind}}: {{id}}",
     },

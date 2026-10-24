@@ -20,7 +20,7 @@ export class InboxPutTool implements ToolModule {
       {
         title: "Inbox Put",
         description:
-          "Durably place a generic work-offer message for a TellyMCP-bound recipient, deduplicated by (source.integration, source.messageId). Include a display.title/summary snapshot — TellyMCP does not call back into the source integration to hydrate one. Requires the dedicated inbox integration credential.",
+          "Durably place a generic work-offer message for a TellyMCP-bound recipient, deduplicated by (source.integration, source.messageId). Include a display.title/summary snapshot, optional display.sender (human-readable assigning person), route.label (project title), and route.slug. The stable route.key remains the routing identity. TellyMCP does not call back into the source integration to hydrate these. Requires the dedicated inbox integration credential.",
         inputSchema: inboxPutInputSchema,
         outputSchema: inboxPutOutputSchema,
       },

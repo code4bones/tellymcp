@@ -6,6 +6,8 @@ type Principal = { telegramChatId: number; telegramUserId: number };
 export type InboxRouteSummary = {
   namespace: string;
   routeKey: string;
+  label?: string;
+  slug?: string;
   count: number;
 };
 
@@ -17,6 +19,7 @@ export type InboxMessageSummary = {
   statusReason?: string | null;
   title: string;
   summary: string;
+  sender?: string;
   createdAt: string;
 };
 
@@ -70,7 +73,7 @@ export class TransportInboxState {
   public async buildInboxRoutesFingerprint(ctx: TelegramMenuContext): Promise<string> {
     const { sessionId, routes } = await this.loadInboxRoutesContext(ctx);
     const routesKey =
-      routes?.map((route) => `${route.namespace}:${route.routeKey}:${route.count}`).join(",") ??
+      routes?.map((route) => `${route.namespace}:${route.routeKey}:${route.label ?? ""}:${route.slug ?? ""}:${route.count}`).join(",") ??
       "none";
     return `${sessionId ?? "none"}:${routesKey}`;
   }

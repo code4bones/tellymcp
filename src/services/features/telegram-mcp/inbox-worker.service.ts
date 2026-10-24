@@ -11,6 +11,7 @@ import {
   type InboxMessageRow,
 } from "./external-inbox.service";
 import { createRequestId } from "./src/shared/lib/ids/ids";
+import { normalizeLocale, translate } from "./src/shared/i18n";
 
 export const TELEGRAM_MCP_INBOX_WORKER_SERVICE_NAME = "telegramMcp.inboxWorker";
 
@@ -91,6 +92,7 @@ type OfferDisplay = {
   summary: string;
   url: string | undefined;
   consoleText: string;
+  sender: string | undefined;
 };
 
 // Shared by deliverOffer's prompt and resolveInboxMessage's approve path --
@@ -113,7 +115,9 @@ function buildOfferDisplay(row: InboxMessageRow): OfferDisplay {
       : undefined;
   const consoleText =
     sanitizeConsoleText(payload.consoleText) ?? fallbackConsoleText(row);
-  return { title, summary, url, consoleText };
+  const sender = typeof display.sender === "string" && display.sender.trim()
+    ? display.sender.trim() : undefined;
+  return { title, summary, url, consoleText, sender };
 }
 
 function tableCell(
@@ -600,7 +604,9 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
         );
       }
       const runtime = await runtimeService.waitUntilReady();
-      const { title, summary, url } = buildOfferDisplay(row);
+      const { title, summary, url, sender } = buildOfferDisplay(row);
+      const locale = normalizeLocale(runtime.config.telegram.debugLanguage ??
+        await runtime.localeStore.getUserLocale(contact.telegramUserId));
 
       const blocks = [
         { type: "heading" as const, size: 3 as const, text: title },
@@ -608,12 +614,8 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
         {
           type: "table" as const,
           cells: [
-            [tableCell("Source", true), tableCell(row.source_integration)],
             [tableCell(row.resource_kind, true), tableCell(row.resource_id)],
-            [
-              tableCell("Route", true),
-              tableCell(`${row.route_namespace}:${row.route_key}`),
-            ],
+            ...(sender ? [[tableCell(translate(locale, "menu:externalInbox.message_screen.from"), true), tableCell(sender)]] : []),
           ],
           is_bordered: true as const,
         },

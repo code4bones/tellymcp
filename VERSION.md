@@ -4,6 +4,14 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.31
+
+### Fixed
+
+- Opening an inbox project maps it to the selected console automatically.
+- Accept reports delivery failures and keeps failed offers available for retry.
+- Ownership checks and delivery deduplication protect against stale buttons and repeated Accept actions.
+
 ## 0.0.10
 
 ### Added

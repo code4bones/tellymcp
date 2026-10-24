@@ -223,6 +223,11 @@ list|status|install`, `tellymcp run --agent codex|claude` и Telegram-меню
 
 ### Fixed
 
+- Inbox routing converts Telegram relay session IDs to canonical console IDs and
+  updates the recipient's project route when it is opened from a selected session.
+  Accept uses that exact owned console, reports actual delivery failures, keeps
+  failed offers available for retry, and deduplicates concurrent/repeated delivery.
+
 - Remote session-context actions больше не пытаются повторно уйти с client node
   обратно в gateway без `clientUuid`; backend error payload дополнительно
   ограничен по размеру, чтобы relay-сбой не создавал рекурсивный exception.

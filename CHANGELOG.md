@@ -48,6 +48,9 @@
 
 ### Changed
 
+- Inbox task IDs use the source-provided `display.url` in approval cards and Rich
+  Markdown details. No source address is constructed; missing URLs keep plain text.
+
 - Inbox message details use native Telegram Rich Markdown. The existing message
   is edited in place, preserving action buttons and navigation back to the project.
 

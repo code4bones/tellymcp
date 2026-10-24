@@ -378,6 +378,14 @@ export class TransportInboxMenus {
       message.routeKey,
     );
 
+    const resourceId = escapeRichMarkdownText(current.resourceId);
+    const resourceLink = current.url
+      ? `<a href="${escapeHtml(current.url).replace(/"/gu, "&quot;")}">${resourceId}</a>`
+      : resourceId;
+    const resourceLine = this.host.t(locale, "menu:externalInbox.message_screen.resource", {
+      kind: escapeRichMarkdownText(current.resourceKind),
+      id: resourceLink,
+    });
     const richMessage: TelegramRichMessage = {
       markdown: [
         `### ${escapeRichMarkdownText(current.title.replace(/\r?\n/gu, " "))}`,
@@ -389,12 +397,7 @@ export class TransportInboxMenus {
           ? [`> ${escapeRichMarkdownText(current.statusReason).replace(/\n/gu, "\n> ")}`]
           : []),
         "---",
-        escapeRichMarkdownText(
-          this.host.t(locale, "menu:externalInbox.message_screen.resource", {
-            kind: current.resourceKind,
-            id: current.resourceId,
-          }),
-        ),
+        resourceLine,
       ].join("\n\n"),
     };
 

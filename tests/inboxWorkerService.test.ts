@@ -692,3 +692,42 @@ describe("inbox resolution delivery safety", () => {
     expect(sendRichRequest).not.toHaveBeenCalled();
   });
 });
+
+describe("inbox task links", () => {
+  it.each([undefined, "https://tracker.example.test/items/T-1"])(
+    "uses the source-provided task URL, with plain-text fallback (%s)",
+    async (url) => {
+      const inboxService = createInboxServiceMock();
+      const { harness, sendRichRequest } = createWorkerHarness({
+        waitForReply: async () => null,
+      });
+      const row = {
+        ...baseRow,
+        payload: {
+          ...baseRow.payload,
+          display: { ...baseRow.payload.display, ...(url ? { url } : {}) },
+        },
+      };
+      await methods.deliverOffer.call(
+        harness,
+        row,
+        inboxService,
+        { clientUuid: "client-1", localSessionId: "workspace" },
+        { telegramChatId: 42, telegramUserId: 7 },
+      );
+      const [offer] = sendRichRequest.mock.calls[0] as unknown as [
+        {
+          blocks: Array<{
+            type: string;
+            cells?: Array<Array<{ text: unknown }>>;
+          }>;
+        },
+      ];
+      const table = offer.blocks.find((block) => block.type === "table")!;
+      expect(table.cells![0]![1]!.text).toEqual(
+        url ? { type: "url", text: "T-1", url } : "T-1",
+      );
+      expect(JSON.stringify(offer.blocks)).not.toContain("Open →");
+    },
+  );
+});

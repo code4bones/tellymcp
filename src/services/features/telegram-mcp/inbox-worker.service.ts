@@ -123,8 +123,19 @@ function buildOfferDisplay(row: InboxMessageRow): OfferDisplay {
 function tableCell(
   text: string,
   isHeader = false,
-): { text: string; is_header?: true; align: "left"; valign: "middle" } {
-  return { text, ...(isHeader ? { is_header: true as const } : {}), align: "left", valign: "middle" };
+  url?: string,
+): {
+  text: string | { type: "url"; text: string; url: string };
+  is_header?: true;
+  align: "left";
+  valign: "middle";
+} {
+  return {
+    text: url ? { type: "url", text, url } : text,
+    ...(isHeader ? { is_header: true as const } : {}),
+    align: "left",
+    valign: "middle",
+  };
 }
 
 const DBConfig = {
@@ -614,19 +625,11 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
         {
           type: "table" as const,
           cells: [
-            [tableCell(row.resource_kind, true), tableCell(row.resource_id)],
+            [tableCell(row.resource_kind, true), tableCell(row.resource_id, false, url)],
             ...(sender ? [[tableCell(translate(locale, "menu:externalInbox.message_screen.from"), true), tableCell(sender)]] : []),
           ],
           is_bordered: true as const,
         },
-        ...(url
-          ? [
-              {
-                type: "paragraph" as const,
-                text: { type: "url" as const, text: "Open →", url },
-              },
-            ]
-          : []),
       ];
 
       const requestId = createRequestId();

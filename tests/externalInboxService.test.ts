@@ -4,7 +4,10 @@ import ExternalInboxService from "../src/services/features/telegram-mcp/external
 
 type QueryRow = Record<string, unknown>;
 
-type FirstRowEntry = QueryRow | undefined | ((state: HarnessState) => QueryRow | undefined);
+type FirstRowEntry =
+  | QueryRow
+  | undefined
+  | ((state: HarnessState) => QueryRow | undefined);
 type FirstQueue = Record<string, FirstRowEntry[] | undefined>;
 
 type InsertCall = { tableName: string; payload: QueryRow };
@@ -248,12 +251,15 @@ describe("external-inbox service: inbox_bind_route", () => {
       local_session_id: "workspace",
     });
 
-    const result = await methods.bindRouteRecord.call(bindHarnessMethods(harness), {
-      namespace: "marrow",
-      route_key: "P-1",
-      telegram_user_id: 7,
-      session_id: "client-1:workspace",
-    });
+    const result = await methods.bindRouteRecord.call(
+      bindHarnessMethods(harness),
+      {
+        namespace: "marrow",
+        route_key: "P-1",
+        telegram_user_id: 7,
+        session_id: "client-1:workspace",
+      },
+    );
 
     expect(result).toEqual({
       namespace: "marrow",
@@ -316,5 +322,56 @@ describe("external-inbox service: resetRetryableNoLiveSessionMessages", () => {
     expect(update?.payload).toEqual(
       expect.objectContaining({ status: "pending" }),
     );
+  });
+});
+
+describe("inbox message URLs", () => {
+  it("preserves a source URL in message summaries and supports older records without one", async () => {
+    const row = {
+      id: "msg-1",
+      resource_kind: "task",
+      resource_id: "T-1",
+      status: "pending",
+      status_reason: null,
+      created_at: "2026-10-25T00:00:00.000Z",
+    };
+    const rows = [
+      {
+        ...row,
+        payload: JSON.stringify({
+          display: {
+            title: "Linked",
+            url: " https://tracker.example.test/T-1 ",
+          },
+        }),
+      },
+      { ...row, id: "msg-2", payload: { display: { title: "Legacy" } } },
+    ];
+    const query = {
+      first: async () => ({ gateway_user_uuid: "user-uuid-1" }),
+      join: () => query,
+      where: () => query,
+      andWhere: () => query,
+      whereIn: () => query,
+      orderBy: () => query,
+      select: async () => rows,
+    };
+    const harness = { db: { withSchema: () => ({ table: () => query }) } };
+    const list = (
+      ExternalInboxService.methods as unknown as {
+        listActiveMessagesForRoute(
+          this: unknown,
+          userId: number,
+          namespace: string,
+          route: string,
+        ): Promise<Array<Record<string, unknown>>>;
+      }
+    ).listActiveMessagesForRoute;
+    const messages = await list.call(harness, 7, "custom-source", "P-1");
+    expect(messages[0]).toMatchObject({
+      id: "msg-1",
+      url: "https://tracker.example.test/T-1",
+    });
+    expect(messages[1]).not.toHaveProperty("url");
   });
 });

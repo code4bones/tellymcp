@@ -502,3 +502,55 @@ describe("inbox rich message details", () => {
     expect(host.replyText).not.toHaveBeenCalled();
   });
 });
+
+describe("inbox task links", () => {
+  it.each([
+    undefined,
+    'https://tracker.example.test/work/T-1?label="a&b"&view=(full)',
+  ])(
+    "links the ID using the source URL without constructing an integration address (%s)",
+    async (url) => {
+      const payload = {
+        kind: "inbox-message-entry",
+        sessionId: "client-1:workspace",
+        namespace: "custom-source",
+        routeKey: "P-1",
+        messageId: "msg-1",
+      };
+      const host = createHost({
+        t: (_locale, key, vars) =>
+          key === "menu:externalInbox.message_screen.resource"
+            ? `${vars!.kind}: ${vars!.id}`
+            : t("en", key, vars),
+        listInboxMessages: vi.fn(async () => [
+          {
+            id: "msg-1",
+            resourceKind: "task",
+            resourceId: "T-1",
+            status: "pending",
+            title: "Task",
+            summary: "Details",
+            ...(url ? { url } : {}),
+            createdAt: new Date().toISOString(),
+          },
+        ]),
+        menuPayloadStore: {
+          createMenuPayload: vi.fn(),
+          getMenuPayload: vi.fn(async () => payload),
+        },
+      });
+      await new TransportInboxMenus(host).handleInboxMessageOpenCallback(
+        createContext("inbox-message-open:message-payload-key"),
+      );
+      const content = vi.mocked(host.sendRichMessage).mock.calls[0]![1];
+      if (url) {
+        expect(content.markdown).toContain(
+          'task: <a href="https://tracker.example.test/work/T-1?label=&quot;a&amp;b&quot;&amp;view=(full)">T\\-1</a>',
+        );
+      } else {
+        expect(content.markdown).toContain(String.raw`task: T\-1`);
+        expect(content.markdown).not.toContain("<a href=");
+      }
+    },
+  );
+});

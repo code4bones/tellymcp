@@ -20,6 +20,7 @@ export type InboxMessageSummary = {
   title: string;
   summary: string;
   sender?: string;
+  url?: string;
   createdAt: string;
 };
 

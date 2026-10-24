@@ -70,6 +70,7 @@ export type InboxMessageSummary = {
   title: string;
   summary: string;
   sender?: string;
+  url?: string;
   createdAt: string;
 };
 
@@ -711,6 +712,8 @@ const TelegramMcpExternalInboxService: ServiceSchema = {
           summary,
           ...(typeof display.sender === "string" && display.sender.trim()
             ? { sender: display.sender.trim() } : {}),
+          ...(typeof display.url === "string" && display.url.trim()
+            ? { url: display.url.trim() } : {}),
           createdAt: new Date(row.created_at as string).toISOString(),
         };
       });

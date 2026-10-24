@@ -870,8 +870,8 @@ export const inboxPutInputSchema = z.object({
     // Human-readable person who sent/assigned this offer, supplied by the source.
     sender: z.string().trim().min(1).optional(),
     // Deep link to this record in the source integration's own UI (e.g.
-    // Marrow's /projects/:slug/tasks/:id); rendered as a clickable "Open"
-    // link in the Telegram approval card.
+    // Marrow's /projects/:slug/tasks/:id); the resource ID links here in
+    // both the approval card and the inbox detail view.
     url: z.string().trim().url().optional(),
   }),
   // The exact text to type into the target console once approved. The

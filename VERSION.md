@@ -4,6 +4,12 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.35
+
+### Changed
+
+- Task IDs link directly to the source-provided `display.url` in approval cards and inbox details. Offers without a URL keep a plain-text ID.
+
 ## 0.0.34
 
 ### Added

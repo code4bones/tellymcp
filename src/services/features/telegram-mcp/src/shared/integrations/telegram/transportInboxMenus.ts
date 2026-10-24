@@ -298,7 +298,7 @@ export class TransportInboxMenus {
     keyboard
       .text(
         await this.host.tForContext(ctx, "common:menu.back"),
-        `inbox-route-back:${route.namespace}\u0000${route.routeKey}`,
+        "inbox-route-back:routes",
       )
       .row();
 
@@ -381,6 +381,11 @@ export class TransportInboxMenus {
       message.routeKey,
       message.messageId,
     );
+    const routePayloadKey = await this.host.createInboxRouteMenuPayload(
+      message.sessionId,
+      message.namespace,
+      message.routeKey,
+    );
     const keyboard = new InlineKeyboard()
       .text(
         await this.host.tForContext(ctx, "menu:externalInbox.buttons.approve"),
@@ -398,7 +403,7 @@ export class TransportInboxMenus {
       .row()
       .text(
         await this.host.tForContext(ctx, "common:menu.back"),
-        `inbox-route-back:${message.namespace}\u0000${message.routeKey}`,
+        `inbox-route-back:${routePayloadKey}`,
       );
 
     await this.renderScreen(ctx, lines.join("\n"), message.sessionId, keyboard);
@@ -467,7 +472,21 @@ export class TransportInboxMenus {
   ): Promise<void> {
     const suffix = extractCallbackSuffix(ctx, "inbox-route-back:");
     const locale = await this.host.resolveLocaleForContext(ctx);
-    const [namespace, routeKey] = suffix?.split("\u0000") ?? [];
+    if (suffix === "routes") {
+      await this.showInboxMenu(ctx);
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const payload = suffix
+      ? await this.host.menuPayloadStore.getMenuPayload(suffix)
+      : null;
+    const route =
+      payload?.kind === "inbox-route-entry"
+        ? (payload as unknown as InboxRoutePayload)
+        : null;
+    const [legacyNamespace, legacyRouteKey] = suffix?.split("\u0000") ?? [];
+    const namespace = route?.namespace ?? legacyNamespace;
+    const routeKey = route?.routeKey ?? legacyRouteKey;
     const principal = this.host.getPrincipalFromContext(ctx);
     if (!suffix || !namespace || !routeKey || !principal) {
       await ctx.answerCallbackQuery({
@@ -477,7 +496,11 @@ export class TransportInboxMenus {
       return;
     }
 
+    if (route && !(await this.isSelectedSession(ctx, route.sessionId))) {
+      return;
+    }
     const sessionId =
+      route?.sessionId ??
       (await this.host.loadInboxRoutesContext(ctx)).sessionId ?? undefined;
     if (!sessionId) {
       await ctx.answerCallbackQuery({

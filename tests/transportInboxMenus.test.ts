@@ -311,3 +311,101 @@ describe("inbox session/project mapping", () => {
     );
   });
 });
+
+describe("inbox Back button destinations", () => {
+  const message = {
+    kind: "inbox-message-entry",
+    sessionId: "client-1:workspace",
+    namespace: "marrow",
+    routeKey: "P-1",
+    messageId: "msg-1",
+  };
+  const route = {
+    kind: "inbox-route-entry",
+    sessionId: "client-1:workspace",
+    namespace: "marrow",
+    routeKey: "P-1",
+  };
+
+  function lastBackCallback(host: TransportInboxMenusHost): string {
+    const call = vi.mocked(host.replyText).mock.calls.at(-1)!;
+    const keyboard = call[3]!.reply_markup as {
+      inline_keyboard: Array<Array<{ callback_data: string }>>;
+    };
+    return keyboard.inline_keyboard.flat().at(-1)!.callback_data;
+  }
+
+  it("returns from the message list to the project list without reopening the same messages", async () => {
+    const host = createHost({
+      menuPayloadStore: {
+        createMenuPayload: vi.fn(),
+        getMenuPayload: vi.fn(async () => message),
+      },
+    });
+    const menus = new TransportInboxMenus(host);
+    await menus.handleInboxDecisionCallback(
+      createContext("inbox-decision:defer:message-payload-key"),
+    );
+    const back = lastBackCallback(host);
+    expect(back).toBe("inbox-route-back:routes");
+    vi.mocked(host.listInboxMessages).mockClear();
+    vi.mocked(host.bindCurrentSessionToRoute).mockClear();
+
+    const ctx = createContext(back);
+    await menus.handleInboxRouteBackCallback(ctx);
+    expect(host.renderMenuHtmlScreen).toHaveBeenCalledWith(
+      ctx,
+      "menu:externalInbox.screen.title",
+      { kind: "menu" },
+      expect.anything(),
+    );
+    expect(host.listInboxMessages).not.toHaveBeenCalled();
+    expect(host.bindCurrentSessionToRoute).not.toHaveBeenCalled();
+    expect(ctx.answerCallbackQuery).toHaveBeenCalledOnce();
+  });
+
+  it("returns from a message card to its messages, then back to projects", async () => {
+    const host = createHost({
+      menuPayloadStore: {
+        createMenuPayload: vi.fn(),
+        getMenuPayload: vi.fn(async (key) =>
+          key === "route-payload-key" ? route : message,
+        ),
+      },
+    });
+    const menus = new TransportInboxMenus(host);
+    await menus.handleInboxMessageOpenCallback(
+      createContext("inbox-message-open:message-payload-key"),
+    );
+    const back = lastBackCallback(host);
+    expect(back).toBe("inbox-route-back:route-payload-key");
+    expect(Buffer.byteLength(back, "utf8")).toBeLessThanOrEqual(64);
+    vi.mocked(host.listInboxMessages).mockClear();
+
+    await menus.handleInboxRouteBackCallback(createContext(back));
+    expect(host.listInboxMessages).toHaveBeenCalledWith(
+      { telegramChatId: 42, telegramUserId: 7 },
+      "marrow",
+      "P-1",
+    );
+    expect(lastBackCallback(host)).toBe("inbox-route-back:routes");
+  });
+
+  it("rejects a message-card Back button after switching the selected session", async () => {
+    const host = createHost({
+      menuPayloadStore: {
+        createMenuPayload: vi.fn(),
+        getMenuPayload: vi.fn(async () => ({
+          ...route,
+          sessionId: "old-client:WebTerm",
+        })),
+      },
+    });
+    const ctx = createContext("inbox-route-back:route-payload-key");
+    await new TransportInboxMenus(host).handleInboxRouteBackCallback(ctx);
+    expect(host.bindCurrentSessionToRoute).not.toHaveBeenCalled();
+    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith(
+      expect.objectContaining({ show_alert: true }),
+    );
+  });
+});

@@ -223,6 +223,10 @@ list|status|install`, `tellymcp run --agent codex|claude` и Telegram-меню
 
 ### Fixed
 
+- Inbox message-list Back buttons return to the project list instead of reopening
+  the same messages. Message-card Back buttons use stored route payloads to retain
+  the selected session and project.
+
 - Inbox routing converts Telegram relay session IDs to canonical console IDs and
   updates the recipient's project route when it is opened from a selected session.
   Accept uses that exact owned console, reports actual delivery failures, keeps

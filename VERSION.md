@@ -4,6 +4,12 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.32
+
+### Fixed
+
+- Inbox Back buttons now return from a message card to its project's messages, and from the message list to the project list.
+
 ## 0.0.31
 
 ### Fixed

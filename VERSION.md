@@ -4,6 +4,12 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.33
+
+### Changed
+
+- Inbox message details use native Telegram Rich Markdown for headings, lists, tables, and code while keeping action and Back buttons in the same message.
+
 ## 0.0.32
 
 ### Fixed

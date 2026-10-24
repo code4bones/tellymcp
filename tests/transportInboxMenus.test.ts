@@ -58,6 +58,7 @@ function createHost(
     renderMenuHtmlScreen: vi.fn(async () => undefined),
     editText: vi.fn(async () => undefined),
     replyText: vi.fn(async () => ({ message_id: 1 })),
+    sendRichMessage: vi.fn(async () => ({ message_id: 1 })),
     ...overrides,
   };
 }
@@ -101,16 +102,13 @@ describe("TransportInboxMenus.handleInboxMessageOpenCallback", () => {
 
     await menus.handleInboxMessageOpenCallback(ctx);
 
-    expect(host.replyText).toHaveBeenCalledOnce();
-    const [, text, , options] = (host.replyText as ReturnType<typeof vi.fn>)
-      .mock.calls[0] as [
-      unknown,
-      string,
-      unknown,
-      { reply_markup: { inline_keyboard: unknown[] } },
-    ];
-    expect(text).toContain("Fix the thing");
-    expect(options.reply_markup.inline_keyboard.flat()).toEqual(
+    expect(host.sendRichMessage).toHaveBeenCalledOnce();
+    expect(host.replyText).not.toHaveBeenCalled();
+    const [chatId, content, keyboard] = vi.mocked(host.sendRichMessage).mock
+      .calls[0]!;
+    expect(chatId).toBe(42);
+    expect(content.markdown).toContain("### Fix the thing");
+    expect(keyboard!.inline_keyboard.flat()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           callback_data: "inbox-decision:approve:message-payload-key",
@@ -328,8 +326,19 @@ describe("inbox Back button destinations", () => {
   };
 
   function lastBackCallback(host: TransportInboxMenusHost): string {
-    const call = vi.mocked(host.replyText).mock.calls.at(-1)!;
-    const keyboard = call[3]!.reply_markup as {
+    const replies = vi.mocked(host.replyText).mock;
+    const rich = vi.mocked(host.sendRichMessage).mock;
+    const renders = [
+      ...replies.calls.map((call, index) => ({
+        order: replies.invocationCallOrder[index]!,
+        keyboard: call[3]!.reply_markup,
+      })),
+      ...rich.calls.map((call, index) => ({
+        order: rich.invocationCallOrder[index]!,
+        keyboard: call[2],
+      })),
+    ].sort((a, b) => a.order - b.order);
+    const keyboard = renders.at(-1)!.keyboard as {
       inline_keyboard: Array<Array<{ callback_data: string }>>;
     };
     return keyboard.inline_keyboard.flat().at(-1)!.callback_data;
@@ -407,5 +416,89 @@ describe("inbox Back button destinations", () => {
     expect(ctx.answerCallbackQuery).toHaveBeenCalledWith(
       expect.objectContaining({ show_alert: true }),
     );
+  });
+});
+
+describe("inbox rich message details", () => {
+  it("edits the existing menu into a Rich Markdown card and keeps navigation in the same message", async () => {
+    const summary =
+      "## Checklist\n- [ ] **Fix** the bug\n\n| Key | Value |\n| --- | --- |\n| file | `app.ts` |\n\n```ts\nconst n = 1;\n```";
+    const payload = {
+      kind: "inbox-message-entry",
+      sessionId: "client-1:workspace",
+      namespace: "marrow",
+      routeKey: "P-1",
+      messageId: "msg-1",
+    };
+    const route = {
+      kind: "inbox-route-entry",
+      sessionId: payload.sessionId,
+      namespace: "marrow",
+      routeKey: "P-1",
+    };
+    const host = createHost({
+      listInboxMessages: vi.fn(async () => [
+        {
+          id: "msg-1",
+          resourceKind: "task",
+          resourceId: "T-1",
+          status: "failed",
+          title: "Fix [router] <config>",
+          summary,
+          statusReason: "Session <Vita> failed\nTry **again**",
+          createdAt: new Date().toISOString(),
+        },
+      ]),
+      menuPayloadStore: {
+        createMenuPayload: vi.fn(),
+        getMenuPayload: vi.fn(async (key) =>
+          key === "route-payload-key" ? route : payload,
+        ),
+      },
+    });
+    const menus = new TransportInboxMenus(host);
+    const ctx = createContext("inbox-message-open:message-payload-key");
+    Object.assign(ctx.callbackQuery!, { message: { message_id: 17 } });
+    await menus.handleInboxMessageOpenCallback(ctx);
+    expect(host.sendRichMessage).not.toHaveBeenCalled();
+    expect(host.replyText).not.toHaveBeenCalled();
+    const [, content, meta, options] = vi.mocked(host.editText).mock.calls[0]!;
+    expect(typeof content).toBe("object");
+    expect(content).toEqual({ markdown: expect.stringContaining(summary) });
+    expect((content as { markdown: string }).markdown).toContain(
+      String.raw`### Fix \[router\] &lt;config&gt;`,
+    );
+    expect((content as { markdown: string }).markdown).toContain(
+      String.raw`> Session &lt;Vita&gt; failed`,
+    );
+    expect((content as { markdown: string }).markdown).toContain(
+      String.raw`> Try \*\*again\*\*`,
+    );
+    expect(meta).toEqual({ kind: "menu", sessionId: "client-1:workspace" });
+    expect(options).not.toHaveProperty("parse_mode");
+    const keyboard = options!.reply_markup as {
+      inline_keyboard: Array<Array<{ callback_data: string }>>;
+    };
+    expect(
+      keyboard.inline_keyboard.flat().map((button) => button.callback_data),
+    ).toEqual([
+      "inbox-decision:approve:message-payload-key",
+      "inbox-decision:reject:message-payload-key",
+      "inbox-decision:defer:message-payload-key",
+      "inbox-route-back:route-payload-key",
+    ]);
+    Object.assign(ctx.callbackQuery!, {
+      data: "inbox-route-back:route-payload-key",
+    });
+    await menus.handleInboxRouteBackCallback(ctx);
+    expect(vi.mocked(host.editText).mock.calls[1]![1]).toEqual(
+      expect.any(String),
+    );
+    expect(vi.mocked(host.editText).mock.calls[1]![3]).toHaveProperty(
+      "parse_mode",
+      "HTML",
+    );
+    expect(host.sendRichMessage).not.toHaveBeenCalled();
+    expect(host.replyText).not.toHaveBeenCalled();
   });
 });

@@ -14,6 +14,7 @@ import type {
   SentChunk,
   TelegramEditMessageOptions,
   TelegramMenuContext,
+  TelegramRichMessage,
   TelegramSendMessageOptions,
 } from "./transportTypes";
 
@@ -131,12 +132,11 @@ export class TransportOutputActions {
     );
   }
 
-  // Structured blocks (heading/paragraph/table/url) instead of hand-escaped
-  // MarkdownV2 -- no chunking, since the inbox approval card this backs is
-  // always short and single-message.
+  // Accept explicit blocks or native Rich Markdown/HTML content. Existing
+  // block-based callers keep the same interface.
   public async sendRichMessage(
     telegramChatId: number,
-    blocks: RichMessageBlock[],
+    content: RichMessageBlock[] | TelegramRichMessage,
     replyMarkup: RichMessageReplyMarkup | undefined,
     meta: SendMessageMeta,
   ): Promise<{ message_id: number }> {
@@ -146,7 +146,7 @@ export class TransportOutputActions {
       try {
         return await this.host.bot.api.sendRichMessage(
           telegramChatId,
-          { blocks },
+          Array.isArray(content) ? { blocks: content } : content,
           replyMarkup ? { reply_markup: replyMarkup } : undefined,
         );
       } catch (error) {
@@ -210,7 +210,7 @@ export class TransportOutputActions {
 
   public async editText(
     ctx: TelegramMenuContext,
-    text: string,
+    text: string | TelegramRichMessage,
     meta: SendMessageMeta,
     options: TelegramEditMessageOptions = {},
   ): Promise<void> {

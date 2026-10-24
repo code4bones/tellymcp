@@ -403,6 +403,8 @@ export function buildTransportConstructorWiring(
       outputActions.editText(ctx, text, meta, options as TelegramEditMessageOptions),
     replyText: (ctx, text, meta, options) =>
       outputActions.replyText(ctx, text, meta, options as TelegramSendMessageOptions),
+    sendRichMessage: (chatId, content, replyMarkup, meta) =>
+      outputActions.sendRichMessage(chatId, content, replyMarkup, meta),
   });
 
   const menuFactories: TransportMenuFactories = new TransportMenuFactories({

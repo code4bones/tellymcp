@@ -47,6 +47,9 @@
 
 ### Changed
 
+- Inbox message details use native Telegram Rich Markdown. The existing message
+  is edited in place, preserving action buttons and navigation back to the project.
+
 - CLI больше не загружает `node-pty` до разбора команды: `tellymcp --help`,
   setup и diagnostics остаются доступны при отсутствующем native addon.
   `doctor`, `run` и postinstall теперь реально проверяют `pty.node` и выводят

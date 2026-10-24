@@ -2,7 +2,12 @@ import { InlineKeyboard } from "grammy";
 import { Menu, MenuRange } from "@grammyjs/menu";
 
 import { escapeHtml, extractCallbackSuffix, readMenuPayloadKey } from "./transportUtils";
-import type { TelegramMenuContext } from "./transportTypes";
+import type {
+  TelegramMenuContext,
+  TelegramRichMessage,
+  RichMessageReplyMarkup,
+  SendMessageMeta,
+} from "./transportTypes";
 import type { TelegramMenuPayloadStore } from "../../api/storage/contract";
 import type { SupportedLocale } from "../../i18n";
 import type { InboxMessageSummary, InboxRouteSummary } from "./transportInboxState";
@@ -88,10 +93,16 @@ export interface TransportInboxMenusHost {
   ): Promise<void>;
   editText(
     ctx: TelegramMenuContext,
-    text: string,
+    text: string | TelegramRichMessage,
     meta: { kind: "menu"; sessionId?: string },
     options?: Record<string, unknown>,
   ): Promise<void>;
+  sendRichMessage(
+    telegramChatId: number,
+    content: TelegramRichMessage,
+    replyMarkup: RichMessageReplyMarkup,
+    meta: SendMessageMeta,
+  ): Promise<{ message_id: number }>;
   replyText(
     ctx: TelegramMenuContext,
     text: string,
@@ -110,6 +121,11 @@ const STATUS_LABEL_KEYS: Record<string, string> = {
   failed: "menu:externalInbox.status.failed",
   delivering: "menu:externalInbox.status.pending",
 };
+
+// Labels and errors are literal text; the description itself remains Markdown.
+function escapeRichMarkdownText(text: string): string {
+  return escapeHtml(text).replace(/[\\`*_{}[\]()#+.!|~=$-]/gu, "\\$&");
+}
 
 // Generic by design -- this is a view over whatever (namespace, route_key)
 // pairs have messages addressed to the viewer, not a Marrow-specific
@@ -362,18 +378,22 @@ export class TransportInboxMenus {
       message.routeKey,
     );
 
-    const lines = [
-      this.host.t(locale, "menu:externalInbox.message_screen.title", {
-        title: current.title,
-      }),
-      "",
-      ...(current.summary ? [escapeHtml(current.summary), ""] : []),
-      ...(current.statusReason ? [escapeHtml(current.statusReason), ""] : []),
-      this.host.t(locale, "menu:externalInbox.message_screen.resource", {
-        kind: current.resourceKind,
-        id: current.resourceId,
-      }),
-    ];
+    const richMessage: TelegramRichMessage = {
+      markdown: [
+        `### ${escapeRichMarkdownText(current.title.replace(/\r?\n/gu, " "))}`,
+        ...(current.summary ? [current.summary] : []),
+        ...(current.statusReason
+          ? [`> ${escapeRichMarkdownText(current.statusReason).replace(/\n/gu, "\n> ")}`]
+          : []),
+        "---",
+        escapeRichMarkdownText(
+          this.host.t(locale, "menu:externalInbox.message_screen.resource", {
+            kind: current.resourceKind,
+            id: current.resourceId,
+          }),
+        ),
+      ].join("\n\n"),
+    };
 
     const payloadKey = await this.host.createInboxMessageMenuPayload(
       message.sessionId,
@@ -406,7 +426,14 @@ export class TransportInboxMenus {
         `inbox-route-back:${routePayloadKey}`,
       );
 
-    await this.renderScreen(ctx, lines.join("\n"), message.sessionId, keyboard);
+    const meta = { kind: "menu" as const, sessionId: message.sessionId };
+    if (ctx.callbackQuery?.message) {
+      await this.host.editText(ctx, richMessage, meta, { reply_markup: keyboard });
+    } else {
+      await this.host.sendRichMessage(
+        principal.telegramChatId, richMessage, keyboard, meta,
+      );
+    }
   }
 
   public async handleInboxDecisionCallback(

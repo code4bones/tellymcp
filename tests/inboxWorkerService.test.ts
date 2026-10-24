@@ -57,7 +57,12 @@ function createInboxServiceMock(
       telegramChatId: 42,
       telegramUserId: 7,
     })),
-    updateMessageStatus: vi.fn(async () => undefined),
+    updateMessageStatus: vi.fn(async () => true),
+    claimMessageResolution: vi.fn(async () => ({
+      ...baseRow,
+      status: "delivering",
+    })),
+    getMessageById: vi.fn(async () => baseRow),
     bindRouteRecord: vi.fn(async () => ({
       namespace: "marrow",
       route_key: "P-1",
@@ -78,11 +83,19 @@ function createWorkerHarness(
   } = {},
 ) {
   const sendRichRequest = vi.fn(async () => ({}));
-  const waitForReply = vi.fn(opts.waitForReply ?? (async () => ({ answer: "Approve" })));
-  const requestLiveRelayAction = vi.fn(opts.requestLiveRelayAction ?? (async () => ({})));
+  const waitForReply = vi.fn(
+    opts.waitForReply ?? (async () => ({ answer: "Approve" })),
+  );
+  const requestLiveRelayAction = vi.fn(
+    opts.requestLiveRelayAction ?? (async () => ({})),
+  );
 
   const runtime = {
-    telegramTransport: { sendRichRequest, waitForReply },
+    telegramTransport: {
+      sendRichRequest,
+      waitForReply,
+      sendNotification: vi.fn(async () => ({})),
+    },
     gatewayHttpService: { requestLiveRelayAction },
   };
   const runtimeService = { waitUntilReady: vi.fn(async () => runtime) };
@@ -102,7 +115,11 @@ function createWorkerHarness(
       return opts.listLiveConsoles === undefined
         ? {
             sessions: [
-              { client_uuid: "client-1", local_session_id: "workspace", cwd: "/repo" },
+              {
+                client_uuid: "client-1",
+                local_session_id: "workspace",
+                cwd: "/repo",
+              },
             ],
           }
         : opts.listLiveConsoles;
@@ -119,10 +136,17 @@ function createWorkerHarness(
     },
   };
   harness.deliverOffer = methods.deliverOffer.bind(harness);
-  harness.beginRouteBindingPrompt = methods.beginRouteBindingPrompt.bind(harness);
+  harness.beginRouteBindingPrompt =
+    methods.beginRouteBindingPrompt.bind(harness);
   harness.resolveInboxMessage = methods.resolveInboxMessage.bind(harness);
 
-  return { harness, sendRichRequest, waitForReply, requestLiveRelayAction, brokerCall };
+  return {
+    harness,
+    sendRichRequest,
+    waitForReply,
+    requestLiveRelayAction,
+    brokerCall,
+  };
 }
 
 describe("inbox worker handleClaimedMessage", () => {
@@ -145,26 +169,39 @@ describe("inbox worker handleClaimedMessage", () => {
     const inboxService = createInboxServiceMock({
       resolveRouteBinding: vi.fn(async () => null),
     });
-    const { harness } = createWorkerHarness({ listLiveConsoles: { sessions: [] } });
+    const { harness } = createWorkerHarness({
+      listLiveConsoles: { sessions: [] },
+    });
 
     await methods.handleClaimedMessage.call(harness, baseRow, inboxService);
 
-    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith("msg-row-1", {
-      status: "failed",
-      statusReason: "no live console to bind",
-    });
+    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith(
+      "msg-row-1",
+      {
+        status: "failed",
+        statusReason: "no live console to bind",
+      },
+    );
   });
 
   it("prompts for a console when the route is unbound, then binds and delivers the offer", async () => {
     const inboxService = createInboxServiceMock({
-      resolveRouteBinding: vi.fn(async () => null),
+      resolveRouteBinding: vi
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValue({
+          clientUuid: "client-1",
+          localSessionId: "workspace",
+        }),
     });
     const { harness, sendRichRequest, waitForReply, requestLiveRelayAction } =
       createWorkerHarness({
         waitForReply: vi
           .fn()
           .mockResolvedValueOnce({ answer: "workspace · /repo" })
-          .mockResolvedValueOnce({ answer: "Approve" }) as unknown as () => Promise<unknown>,
+          .mockResolvedValueOnce({
+            answer: "Approve",
+          }) as unknown as () => Promise<unknown>,
       });
 
     await methods.handleClaimedMessage.call(harness, baseRow, inboxService);
@@ -172,6 +209,7 @@ describe("inbox worker handleClaimedMessage", () => {
     expect(inboxService.updateMessageStatus).toHaveBeenCalledWith("msg-row-1", {
       status: "awaiting_route_binding",
       pendingRequestId: expect.any(String),
+      expectedStatus: "processing",
     });
     expect(sendRichRequest).toHaveBeenNthCalledWith(
       1,
@@ -186,10 +224,14 @@ describe("inbox worker handleClaimedMessage", () => {
     // Falls straight through into the normal offer flow on the same message.
     expect(requestLiveRelayAction).toHaveBeenCalled();
     expect(waitForReply).toHaveBeenCalledTimes(2);
-    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith("msg-row-1", {
-      status: "delivered",
-      xchangeMessageUuid: "msg-uuid-1",
-    });
+    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith(
+      "msg-row-1",
+      {
+        status: "delivered",
+        statusReason: null,
+        xchangeMessageUuid: "msg-uuid-1",
+      },
+    );
   });
 
   it("marks failed when the route-binding prompt times out", async () => {
@@ -200,29 +242,39 @@ describe("inbox worker handleClaimedMessage", () => {
 
     await methods.handleClaimedMessage.call(harness, baseRow, inboxService);
 
-    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith("msg-row-1", {
-      status: "failed",
-      statusReason: "route binding prompt timed out",
-    });
+    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith(
+      "msg-row-1",
+      {
+        status: "failed",
+        statusReason: "route binding prompt timed out",
+        expectedStatus: "awaiting_route_binding",
+        expectedPendingRequestId: expect.any(String),
+      },
+    );
     expect(inboxService.bindRouteRecord).not.toHaveBeenCalled();
   });
 
   it("marks no_live_session without ever sending a Telegram prompt when the console is offline", async () => {
     const inboxService = createInboxServiceMock();
-    const { harness, sendRichRequest } = createWorkerHarness({ resolveLiveConsole: null });
+    const { harness, sendRichRequest } = createWorkerHarness({
+      resolveLiveConsole: null,
+    });
 
     await methods.handleClaimedMessage.call(harness, baseRow, inboxService);
 
     expect(inboxService.updateMessageStatus).toHaveBeenCalledWith("msg-row-1", {
       status: "no_live_session",
       statusReason: "target console is not currently connected",
+      expectedStatus: "processing",
     });
     expect(sendRichRequest).not.toHaveBeenCalled();
   });
 
   it("gives up with failed once the console never reconnects within the retry budget", async () => {
     const inboxService = createInboxServiceMock();
-    const { harness, sendRichRequest } = createWorkerHarness({ resolveLiveConsole: null });
+    const { harness, sendRichRequest } = createWorkerHarness({
+      resolveLiveConsole: null,
+    });
 
     await methods.handleClaimedMessage.call(
       harness,
@@ -233,6 +285,7 @@ describe("inbox worker handleClaimedMessage", () => {
     expect(inboxService.updateMessageStatus).toHaveBeenCalledWith("msg-row-1", {
       status: "failed",
       statusReason: "console did not reconnect within retry budget",
+      expectedStatus: "processing",
     });
     expect(sendRichRequest).not.toHaveBeenCalled();
   });
@@ -273,23 +326,33 @@ describe("inbox worker handleClaimedMessage", () => {
       localSessionId: "workspace",
       action: "enter",
     });
-    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith("msg-row-1", {
-      status: "delivered",
-      xchangeMessageUuid: "msg-uuid-1",
-    });
+    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith(
+      "msg-row-1",
+      {
+        status: "delivered",
+        statusReason: null,
+        xchangeMessageUuid: "msg-uuid-1",
+      },
+    );
   });
 
   it("on Reject: records the rejection and never touches the console", async () => {
     const inboxService = createInboxServiceMock();
-    const { harness, requestLiveRelayAction, brokerCall } = createWorkerHarness({
-      waitForReply: async () => ({ answer: "Reject" }),
-    });
+    const { harness, requestLiveRelayAction, brokerCall } = createWorkerHarness(
+      {
+        waitForReply: async () => ({ answer: "Reject" }),
+      },
+    );
 
     await methods.handleClaimedMessage.call(harness, baseRow, inboxService);
 
-    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith("msg-row-1", {
-      status: "rejected",
-    });
+    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith(
+      "msg-row-1",
+      {
+        status: "rejected",
+        statusReason: null,
+      },
+    );
     expect(requestLiveRelayAction).not.toHaveBeenCalled();
     expect(brokerCall).not.toHaveBeenCalledWith(
       "telegramMcp.gateway.createInboxDelivery",
@@ -300,15 +363,21 @@ describe("inbox worker handleClaimedMessage", () => {
 
   it("on Postpone: marks the message deferred and never touches the console", async () => {
     const inboxService = createInboxServiceMock();
-    const { harness, requestLiveRelayAction, brokerCall } = createWorkerHarness({
-      waitForReply: async () => ({ answer: "Postpone" }),
-    });
+    const { harness, requestLiveRelayAction, brokerCall } = createWorkerHarness(
+      {
+        waitForReply: async () => ({ answer: "Postpone" }),
+      },
+    );
 
     await methods.handleClaimedMessage.call(harness, baseRow, inboxService);
 
-    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith("msg-row-1", {
-      status: "deferred",
-    });
+    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith(
+      "msg-row-1",
+      {
+        status: "deferred",
+        statusReason: null,
+      },
+    );
     expect(requestLiveRelayAction).not.toHaveBeenCalled();
     expect(brokerCall).not.toHaveBeenCalledWith(
       "telegramMcp.gateway.createInboxDelivery",
@@ -319,7 +388,8 @@ describe("inbox worker handleClaimedMessage", () => {
 
   it("resolveInboxMessage re-checks console liveness and nudges directly, with no prompt of its own (e.g. approving a previously deferred message from a menu)", async () => {
     const inboxService = createInboxServiceMock();
-    const { harness, sendRichRequest, requestLiveRelayAction } = createWorkerHarness();
+    const { harness, sendRichRequest, requestLiveRelayAction } =
+      createWorkerHarness();
 
     await methods.resolveInboxMessage.call(
       harness,
@@ -331,10 +401,14 @@ describe("inbox worker handleClaimedMessage", () => {
 
     expect(sendRichRequest).not.toHaveBeenCalled();
     expect(requestLiveRelayAction).toHaveBeenCalled();
-    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith("msg-row-1", {
-      status: "delivered",
-      xchangeMessageUuid: "msg-uuid-1",
-    });
+    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith(
+      "msg-row-1",
+      {
+        status: "delivered",
+        statusReason: null,
+        xchangeMessageUuid: "msg-uuid-1",
+      },
+    );
   });
 
   it("marks failed on approval timeout", async () => {
@@ -343,26 +417,36 @@ describe("inbox worker handleClaimedMessage", () => {
 
     await methods.handleClaimedMessage.call(harness, baseRow, inboxService);
 
-    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith("msg-row-1", {
-      status: "failed",
-      statusReason: "approval timed out",
-    });
+    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith(
+      "msg-row-1",
+      {
+        status: "failed",
+        statusReason: "approval timed out",
+        expectedStatus: "offered",
+        expectedPendingRequestId: expect.any(String),
+      },
+    );
   });
 
   it("reclassifies a race-lost nudge (console disconnected after the precheck) as no_live_session", async () => {
     const inboxService = createInboxServiceMock();
     const { harness } = createWorkerHarness({
       requestLiveRelayAction: async () => {
-        throw new Error("Gateway WS console 'client-1/workspace' is not connected");
+        throw new Error(
+          "Gateway WS console 'client-1/workspace' is not connected",
+        );
       },
     });
 
     await methods.handleClaimedMessage.call(harness, baseRow, inboxService);
 
-    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith("msg-row-1", {
-      status: "no_live_session",
-      statusReason: expect.stringContaining("is not connected"),
-    });
+    expect(inboxService.updateMessageStatus).toHaveBeenLastCalledWith(
+      "msg-row-1",
+      {
+        status: "no_live_session",
+        statusReason: expect.stringContaining("is not connected"),
+      },
+    );
   });
 });
 
@@ -370,7 +454,9 @@ describe("inbox worker retryNoLiveSessionMessages", () => {
   function createRetrySweepHarness(resetCount: number) {
     const resetRetryableNoLiveSessionMessages = vi.fn(async () => resetCount);
     const schedulePollSoon = vi.fn();
-    const getLocalService = vi.fn(() => ({ resetRetryableNoLiveSessionMessages }));
+    const getLocalService = vi.fn(() => ({
+      resetRetryableNoLiveSessionMessages,
+    }));
     const harness = {
       stopRequested: false,
       isEnabled: () => true,
@@ -418,73 +504,91 @@ describe("inbox worker retryNoLiveSessionMessages", () => {
 describe("inbox worker actions.resolve", () => {
   const resolveHandler = (
     InboxWorkerService.actions as unknown as {
-      resolve: { handler: (this: unknown, ctx: { params: Record<string, unknown> }) => Promise<unknown> };
+      resolve: {
+        handler: (
+          this: unknown,
+          ctx: { params: Record<string, unknown> },
+        ) => Promise<unknown>;
+      };
     }
   ).resolve.handler;
 
-  it("re-resolves the current route binding fresh and applies the decision", async () => {
-    const resolveInboxMessage = vi.fn(async () => undefined);
-    const inboxServiceMock = {
-      getMessageById: vi.fn(async () => baseRow),
-      resolveRecipientGatewayUserUuid: vi.fn(async () => "gateway-user-uuid-1"),
-      resolveRouteBinding: vi.fn(async () => ({
-        clientUuid: "client-1",
-        localSessionId: "workspace",
-      })),
-    };
+  it("binds the recipient's selected console and forwards the actual delivery result", async () => {
+    const resolveInboxMessage = vi.fn(async () => ({
+      ok: false,
+      status: "no_live_session",
+      status_reason: "Disconnected",
+    }));
+    const inboxServiceMock = createInboxServiceMock();
     const harness = {
       isEnabled: () => true,
       broker: { getLocalService: vi.fn(() => inboxServiceMock) },
       resolveInboxMessage,
     };
-
     const result = await resolveHandler.call(harness, {
-      params: { message_id: "msg-row-1", decision: "approve" },
+      params: {
+        message_id: "msg-row-1",
+        decision: "approve",
+        telegram_user_id: 7,
+        session_id: "client-1:workspace",
+      },
     });
-
-    expect(inboxServiceMock.getMessageById).toHaveBeenCalledWith("msg-row-1");
-    expect(inboxServiceMock.resolveRouteBinding).toHaveBeenCalledWith(
-      "marrow",
-      "P-1",
-      "gateway-user-uuid-1",
-    );
+    expect(inboxServiceMock.bindRouteRecord).toHaveBeenCalledWith({
+      namespace: "marrow",
+      route_key: "P-1",
+      telegram_user_id: 7,
+      session_id: "client-1:workspace",
+    });
     expect(resolveInboxMessage).toHaveBeenCalledWith(
       baseRow,
       inboxServiceMock,
       { clientUuid: "client-1", localSessionId: "workspace" },
       "approve",
     );
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({
+      ok: false,
+      status: "no_live_session",
+      status_reason: "Disconnected",
+    });
   });
 
   it("throws when the message no longer exists", async () => {
     const harness = {
       isEnabled: () => true,
       broker: {
-        getLocalService: vi.fn(() => ({ getMessageById: vi.fn(async () => null) })),
-      },
-    };
-
-    await expect(
-      resolveHandler.call(harness, { params: { message_id: "missing", decision: "approve" } }),
-    ).rejects.toThrow(/not found/);
-  });
-
-  it("throws when the route is no longer bound", async () => {
-    const harness = {
-      isEnabled: () => true,
-      broker: {
         getLocalService: vi.fn(() => ({
-          getMessageById: vi.fn(async () => baseRow),
-          resolveRecipientGatewayUserUuid: vi.fn(async () => "gateway-user-uuid-1"),
-          resolveRouteBinding: vi.fn(async () => null),
+          getMessageById: vi.fn(async () => null),
         })),
       },
     };
 
     await expect(
-      resolveHandler.call(harness, { params: { message_id: "msg-row-1", decision: "defer" } }),
-    ).rejects.toThrow(/no longer bound/);
+      resolveHandler.call(harness, {
+        params: { message_id: "missing", decision: "approve" },
+      }),
+    ).rejects.toThrow(/not found/);
+  });
+
+  it("refuses to resolve another recipient's message", async () => {
+    const inboxService = createInboxServiceMock();
+    const resolveInboxMessage = vi.fn();
+    const harness = {
+      isEnabled: () => true,
+      broker: { getLocalService: vi.fn(() => inboxService) },
+      resolveInboxMessage,
+    };
+    await expect(
+      resolveHandler.call(harness, {
+        params: {
+          message_id: "msg-row-1",
+          decision: "approve",
+          telegram_user_id: 999,
+          session_id: "client-1:workspace",
+        },
+      }),
+    ).rejects.toThrow(/another recipient/);
+    expect(inboxService.bindRouteRecord).not.toHaveBeenCalled();
+    expect(resolveInboxMessage).not.toHaveBeenCalled();
   });
 
   it("refuses to run when the worker is disabled", async () => {
@@ -492,8 +596,97 @@ describe("inbox worker actions.resolve", () => {
     const harness = { isEnabled: () => false, broker: { getLocalService } };
 
     await expect(
-      resolveHandler.call(harness, { params: { message_id: "msg-row-1", decision: "approve" } }),
+      resolveHandler.call(harness, {
+        params: { message_id: "msg-row-1", decision: "approve" },
+      }),
     ).rejects.toThrow(/disabled/);
     expect(getLocalService).not.toHaveBeenCalled();
+  });
+});
+
+describe("inbox resolution delivery safety", () => {
+  it("returns a real failure when the console is unavailable", async () => {
+    const inboxService = createInboxServiceMock();
+    const { harness, brokerCall } = createWorkerHarness({
+      resolveLiveConsole: null,
+    });
+    const result = await methods.resolveInboxMessage.call(
+      harness,
+      baseRow,
+      inboxService,
+      { clientUuid: "client-1", localSessionId: "workspace" },
+      "approve",
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        status: "no_live_session",
+        status_reason: expect.stringContaining("unavailable"),
+      }),
+    );
+    expect(brokerCall).toHaveBeenCalledWith(
+      "telegramMcp.gateway.resolveLiveConsole",
+      {
+        sessionId: "client-1:workspace",
+        owner_user_uuid: "gateway-user-uuid-1",
+      },
+      { meta: { internal_call: true } },
+    );
+    expect(brokerCall).not.toHaveBeenCalledWith(
+      "telegramMcp.gateway.createInboxDelivery",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("creates one delivery when Accept runs concurrently, then stays idempotent", async () => {
+    let current: InboxMessageRow = { ...baseRow };
+    const inboxService = createInboxServiceMock({
+      claimMessageResolution: vi.fn(async () => {
+        if (current.status === "delivering" || current.status === "delivered")
+          return null;
+        current = { ...current, status: "delivering" };
+        return { ...current };
+      }),
+      getMessageById: vi.fn(async () => ({ ...current })),
+      updateMessageStatus: vi.fn(async (_id, patch) => {
+        current = { ...current, status: patch.status };
+        return true;
+      }),
+    });
+    const { harness, brokerCall, requestLiveRelayAction } =
+      createWorkerHarness();
+    const accept = () =>
+      methods.resolveInboxMessage.call(
+        harness,
+        baseRow,
+        inboxService,
+        { clientUuid: "client-1", localSessionId: "workspace" },
+        "approve",
+      );
+    await Promise.all([accept(), accept()]);
+    await expect(accept()).resolves.toEqual({ ok: true, status: "delivered" });
+    expect(
+      brokerCall.mock.calls.filter(
+        ([action]) => action === "telegramMcp.gateway.createInboxDelivery",
+      ),
+    ).toHaveLength(1);
+    expect(requestLiveRelayAction).toHaveBeenCalledTimes(2);
+    expect(current.status).toBe("delivered");
+  });
+
+  it("does not offer again if a menu decision won the race before the prompt", async () => {
+    const inboxService = createInboxServiceMock({
+      updateMessageStatus: vi.fn(async () => false),
+    });
+    const { harness, sendRichRequest } = createWorkerHarness();
+    await methods.deliverOffer.call(
+      harness,
+      baseRow,
+      inboxService,
+      { clientUuid: "client-1", localSessionId: "workspace" },
+      { telegramChatId: 42, telegramUserId: 7 },
+    );
+    expect(sendRichRequest).not.toHaveBeenCalled();
   });
 });

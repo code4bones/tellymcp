@@ -49,6 +49,12 @@ const MAX_ATTEMPTS = 5;
 
 type OfferDecision = "approve" | "reject" | "defer";
 
+export type InboxResolutionResult = {
+  ok: boolean;
+  status: string;
+  status_reason?: string;
+};
+
 const MAX_CONSOLE_TEXT_LENGTH = 4000;
 const MAX_OPTION_LABEL_LENGTH = 60;
 
@@ -174,7 +180,8 @@ type InboxWorkerCarrier = Service & {
     inboxService: TelegramMcpExternalInboxServiceInstance,
     routeBinding: { clientUuid: string; localSessionId: string },
     decision: OfferDecision,
-  ) => Promise<void>;
+    requestId?: string,
+  ) => Promise<InboxResolutionResult>;
   beginRouteBindingPrompt?: (
     row: InboxMessageRow,
     inboxService: TelegramMcpExternalInboxServiceInstance,
@@ -356,6 +363,7 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
         await inboxService.updateMessageStatus(row.id, {
           status: row.attempts >= MAX_ATTEMPTS ? "failed" : "pending",
           statusReason: error instanceof Error ? error.message : String(error),
+          expectedStatus: "processing",
         });
       }
 
@@ -453,16 +461,24 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
       const runtime = await runtimeService.waitUntilReady();
 
       const requestId = createRequestId();
-      await inboxService.updateMessageStatus(row.id, {
+      const awaiting = await inboxService.updateMessageStatus(row.id, {
         status: "awaiting_route_binding",
         pendingRequestId: requestId,
+        expectedStatus: "processing",
       });
+      if (!awaiting) {
+        return;
+      }
 
       await runtime.telegramTransport.sendRichRequest({
         requestId,
         sessionId: `inbox-bind:${row.id}`,
         blocks: [
-          { type: "heading" as const, size: 3 as const, text: "Нужна привязка консоли" },
+          {
+            type: "heading" as const,
+            size: 3 as const,
+            text: "Нужна привязка консоли",
+          },
           {
             type: "paragraph" as const,
             text:
@@ -486,6 +502,8 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
         await inboxService.updateMessageStatus(row.id, {
           status: "failed",
           statusReason: "route binding prompt timed out",
+          expectedStatus: "awaiting_route_binding",
+          expectedPendingRequestId: requestId,
         });
         return;
       }
@@ -496,6 +514,15 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
           status: "failed",
           statusReason: "route binding prompt returned an unrecognized console",
         });
+        return;
+      }
+
+      const resumed = await inboxService.updateMessageStatus(row.id, {
+        status: "processing",
+        expectedStatus: "awaiting_route_binding",
+        expectedPendingRequestId: requestId,
+      });
+      if (!resumed) {
         return;
       }
 
@@ -517,7 +544,10 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
       await this.deliverOffer?.(
         row,
         inboxService,
-        { clientUuid: chosen.client_uuid, localSessionId: chosen.local_session_id },
+        {
+          clientUuid: chosen.client_uuid,
+          localSessionId: chosen.local_session_id,
+        },
         contact,
       );
     },
@@ -529,10 +559,16 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
       routeBinding: { clientUuid: string; localSessionId: string },
       contact: { telegramChatId: number; telegramUserId: number },
     ): Promise<void> {
+      const gatewayUserUuid =
+        await inboxService.resolveRecipientGatewayUserUuid(
+          row.recipient_namespace,
+          row.recipient_subject,
+        );
       const liveConsole = (await this.broker.call(
         "telegramMcp.gateway.resolveLiveConsole",
         {
           sessionId: `${routeBinding.clientUuid}:${routeBinding.localSessionId}`,
+          owner_user_uuid: gatewayUserUuid ?? "__missing_recipient__",
         },
         { meta: { internal_call: true } },
       )) as LiveConsole;
@@ -550,6 +586,7 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
             row.attempts >= MAX_ATTEMPTS
               ? "console did not reconnect within retry budget"
               : "target console is not currently connected",
+          expectedStatus: "processing",
         });
         return;
       }
@@ -573,7 +610,10 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
           cells: [
             [tableCell("Source", true), tableCell(row.source_integration)],
             [tableCell(row.resource_kind, true), tableCell(row.resource_id)],
-            [tableCell("Route", true), tableCell(`${row.route_namespace}:${row.route_key}`)],
+            [
+              tableCell("Route", true),
+              tableCell(`${row.route_namespace}:${row.route_key}`),
+            ],
           ],
           is_bordered: true as const,
         },
@@ -588,10 +628,14 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
       ];
 
       const requestId = createRequestId();
-      await inboxService.updateMessageStatus(row.id, {
+      const offered = await inboxService.updateMessageStatus(row.id, {
         status: "offered",
         pendingRequestId: requestId,
+        expectedStatus: "processing",
       });
+      if (!offered) {
+        return;
+      }
 
       await runtime.telegramTransport.sendRichRequest({
         requestId,
@@ -613,6 +657,8 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
         await inboxService.updateMessageStatus(row.id, {
           status: "failed",
           statusReason: "approval timed out",
+          expectedStatus: "offered",
+          expectedPendingRequestId: requestId,
         });
         return;
       }
@@ -623,7 +669,35 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
           : reply.answer === POSTPONE_OPTION
             ? "defer"
             : "reject";
-      await this.resolveInboxMessage?.(row, inboxService, routeBinding, decision);
+      // The route may have changed while this offer was on screen.
+      const currentBinding = await inboxService.resolveRouteBinding(
+        row.route_namespace,
+        row.route_key,
+        (await inboxService.resolveRecipientGatewayUserUuid(
+          row.recipient_namespace,
+          row.recipient_subject,
+        )) ?? "",
+      );
+      if (!currentBinding) {
+        return;
+      }
+      const result = await this.resolveInboxMessage?.(
+        row,
+        inboxService,
+        currentBinding,
+        decision,
+        requestId,
+      );
+      if (result && !result.ok) {
+        await runtime.telegramTransport.sendNotification({
+          sessionId: `${currentBinding.clientUuid}:${currentBinding.localSessionId}`,
+          recipient: {
+            telegramChatId: contact.telegramChatId,
+            telegramUserId: contact.telegramUserId,
+          },
+          message: result.status_reason || `Inbox: ${result.status}`,
+        });
+      }
     },
 
     // Approve/reject/defer a message independent of any live waitForReply --
@@ -637,46 +711,84 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
       inboxService: TelegramMcpExternalInboxServiceInstance,
       routeBinding: { clientUuid: string; localSessionId: string },
       decision: OfferDecision,
-    ): Promise<void> {
+      requestId?: string,
+    ): Promise<InboxResolutionResult> {
+      const claimed = await inboxService.claimMessageResolution(row.id, requestId);
+      if (!claimed) {
+        const current = await inboxService.getMessageById(row.id);
+        return {
+          ok: current?.status === "delivered" && decision === "approve",
+          status: current?.status ?? "missing",
+          ...(current?.status === "delivered"
+            ? {}
+            : {
+                status_reason:
+                  "This offer is already being processed or has been resolved. Refresh the inbox.",
+              }),
+        };
+      }
+      row = claimed;
       if (decision === "reject") {
-        await inboxService.updateMessageStatus(row.id, { status: "rejected" });
-        return;
+        await inboxService.updateMessageStatus(row.id, {
+          status: "rejected",
+          statusReason: null,
+        });
+        return { ok: true, status: "rejected" };
       }
       if (decision === "defer") {
-        await inboxService.updateMessageStatus(row.id, { status: "deferred" });
-        return;
-      }
-
-      const liveConsole = (await this.broker.call(
-        "telegramMcp.gateway.resolveLiveConsole",
-        {
-          sessionId: `${routeBinding.clientUuid}:${routeBinding.localSessionId}`,
-        },
-        { meta: { internal_call: true } },
-      )) as LiveConsole;
-      if (!liveConsole) {
         await inboxService.updateMessageStatus(row.id, {
-          status: row.attempts >= MAX_ATTEMPTS ? "failed" : "no_live_session",
-          statusReason:
-            row.attempts >= MAX_ATTEMPTS
-              ? "console did not reconnect within retry budget"
-              : "target console is not currently connected",
+          status: "deferred",
+          statusReason: null,
         });
-        return;
+        return { ok: true, status: "deferred" };
       }
-
-      const runtimeService = this.broker.getLocalService(
-        TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
-      ) as TelegramMcpRuntimeServiceInstance | null;
-      if (!runtimeService) {
-        throw new Error(
-          `Local Moleculer service '${TELEGRAM_MCP_RUNTIME_SERVICE_NAME}' is unavailable`,
-        );
-      }
-      const runtime = await runtimeService.waitUntilReady();
-      const { title, summary, consoleText } = buildOfferDisplay(row);
 
       try {
+        const gatewayUserUuid =
+          await inboxService.resolveRecipientGatewayUserUuid(
+            row.recipient_namespace,
+            row.recipient_subject,
+          );
+        if (!gatewayUserUuid) {
+          throw new Error(
+            "This message's recipient identity is no longer bound.",
+          );
+        }
+        const liveConsole = (await this.broker.call(
+          "telegramMcp.gateway.resolveLiveConsole",
+          {
+            sessionId: `${routeBinding.clientUuid}:${routeBinding.localSessionId}`,
+            owner_user_uuid: gatewayUserUuid,
+          },
+          { meta: { internal_call: true } },
+        )) as LiveConsole;
+        if (!liveConsole) {
+          await inboxService.updateMessageStatus(row.id, {
+            status: row.attempts >= MAX_ATTEMPTS ? "failed" : "no_live_session",
+            statusReason:
+              row.attempts >= MAX_ATTEMPTS
+                ? "console did not reconnect within retry budget"
+                : "target console is not currently connected",
+          });
+          return {
+            ok: false,
+            status: row.attempts >= MAX_ATTEMPTS ? "failed" : "no_live_session",
+            status_reason:
+              "Target console is unavailable. Open the project in a connected session and retry.",
+          };
+        }
+
+        const runtimeService = this.broker.getLocalService(
+          TELEGRAM_MCP_RUNTIME_SERVICE_NAME,
+        ) as TelegramMcpRuntimeServiceInstance | null;
+        if (!runtimeService) {
+          throw new Error(
+            `Local Moleculer service '${TELEGRAM_MCP_RUNTIME_SERVICE_NAME}' is unavailable`,
+          );
+        }
+        const runtime = await runtimeService.waitUntilReady();
+        const { title, summary, consoleText } = buildOfferDisplay(row);
+
         const xchangeMessage = [
           `Source: ${row.source_integration} (${row.resource_kind} ${row.resource_id})`,
           summary,
@@ -689,6 +801,8 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
         const delivery = (await this.broker.call(
           "telegramMcp.gateway.createInboxDelivery",
           {
+            inbox_message_id: row.id,
+            message_uuid: row.xchange_message_uuid ?? row.id,
             target_client_uuid: routeBinding.clientUuid,
             target_local_session_id: routeBinding.localSessionId,
             kind: "inbox-offer",
@@ -697,6 +811,11 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
           },
           { meta: { internal_call: true } },
         )) as { message_uuid: string; delivery_uuid: string };
+
+        await inboxService.updateMessageStatus(row.id, {
+          status: "delivering",
+          xchangeMessageUuid: delivery.message_uuid,
+        });
 
         await runtime.gatewayHttpService.requestLiveRelayAction({
           clientUuid: routeBinding.clientUuid,
@@ -713,8 +832,10 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
 
         await inboxService.updateMessageStatus(row.id, {
           status: "delivered",
+          statusReason: null,
           xchangeMessageUuid: delivery.message_uuid,
         });
+        return { ok: true, status: "delivered" };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         await inboxService.updateMessageStatus(row.id, {
@@ -723,19 +844,26 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
             : "failed",
           statusReason: message,
         });
+        return {
+          ok: false,
+          status: message.includes("is not connected")
+            ? "no_live_session"
+            : "failed",
+          status_reason: message,
+        };
       }
     },
   },
 
   actions: {
-    // Lets a self-service "Входящие" menu act on a message with no live
-    // waitForReply of its own -- re-resolves the route binding fresh
-    // (rather than trusting a possibly-stale one the caller might hold),
-    // since this can run long after the message's original offer prompt,
-    // if any, has already expired.
+    // Self-service decisions carry the session selected in Telegram. Bind
+    // that exact owned console and use the returned target for this delivery,
+    // even if another screen changes the route concurrently.
     resolve: {
       params: {
         message_id: "string",
+        telegram_user_id: { type: "any" },
+        session_id: "string",
         decision: { type: "enum", values: ["approve", "reject", "defer"] },
       },
       async handler(this: InboxWorkerCarrier, ctx) {
@@ -752,30 +880,45 @@ const TelegramMcpInboxWorkerService: ServiceSchema = {
           ctx.params.message_id as string,
         );
         if (!row) {
-          throw new Error(`Inbox message '${ctx.params.message_id}' was not found.`);
+          throw new Error(
+            `Inbox message '${ctx.params.message_id}' was not found.`,
+          );
         }
         const gatewayUserUuid = await inboxService.resolveRecipientGatewayUserUuid(
           row.recipient_namespace,
           row.recipient_subject,
         );
         if (!gatewayUserUuid) {
-          throw new Error("This message's recipient identity is no longer bound.");
+          throw new Error(
+            "This message's recipient identity is no longer bound.",
+          );
         }
-        const routeBinding = await inboxService.resolveRouteBinding(
-          row.route_namespace,
-          row.route_key,
-          gatewayUserUuid,
-        );
-        if (!routeBinding) {
-          throw new Error("This message's route is no longer bound to a console.");
+        const contact =
+          await inboxService.resolveGatewayUserContact(gatewayUserUuid);
+        if (
+          !contact ||
+          String(contact.telegramUserId) !== String(ctx.params.telegram_user_id)
+        ) {
+          throw new Error("This inbox message belongs to another recipient.");
         }
-        await this.resolveInboxMessage?.(
+        if (row.status === "delivered") {
+          return { ok: ctx.params.decision === "approve", status: "delivered" };
+        }
+        const bound = await inboxService.bindRouteRecord({
+          namespace: row.route_namespace,
+          route_key: row.route_key,
+          telegram_user_id: ctx.params.telegram_user_id,
+          session_id: ctx.params.session_id,
+        });
+        return this.resolveInboxMessage!(
           row,
           inboxService,
-          routeBinding,
+          {
+            clientUuid: bound.client_uuid,
+            localSessionId: bound.local_session_id,
+          },
           ctx.params.decision as OfferDecision,
         );
-        return { ok: true };
       },
     },
   },

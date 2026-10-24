@@ -171,6 +171,7 @@ export const enMenu = {
       offered: "❓",
       deferred: "⏸",
       no_live_session: "📴",
+      failed: "⚠️",
     },
     message_screen: {
       title: "{{title}}",

@@ -6,7 +6,11 @@ import {
 } from "../src/services/features/telegram-mcp/src/shared/integrations/telegram/transportInboxMenus";
 import type { TelegramMenuContext } from "../src/services/features/telegram-mcp/src/shared/integrations/telegram/transportTypes";
 
-function t(_locale: string, key: string, vars?: Record<string, unknown>): string {
+function t(
+  _locale: string,
+  key: string,
+  vars?: Record<string, unknown>,
+): string {
   return `${key}${vars ? ` ${JSON.stringify(vars)}` : ""}`;
 }
 
@@ -14,8 +18,13 @@ function createHost(
   overrides: Partial<TransportInboxMenusHost> = {},
 ): TransportInboxMenusHost {
   return {
-    createMenuOptions: vi.fn(() => ({ onMenuOutdated: vi.fn(async () => undefined) })),
-    getPrincipalFromContext: vi.fn(() => ({ telegramChatId: 42, telegramUserId: 7 })),
+    createMenuOptions: vi.fn(() => ({
+      onMenuOutdated: vi.fn(async () => undefined),
+    })),
+    getPrincipalFromContext: vi.fn(() => ({
+      telegramChatId: 42,
+      telegramUserId: 7,
+    })),
     resolveLocaleForContext: vi.fn(async () => "en"),
     t: vi.fn(t),
     tForContext: vi.fn(async (_ctx, key, vars) => t("en", key, vars)),
@@ -93,14 +102,25 @@ describe("TransportInboxMenus.handleInboxMessageOpenCallback", () => {
     await menus.handleInboxMessageOpenCallback(ctx);
 
     expect(host.replyText).toHaveBeenCalledOnce();
-    const [, text, , options] = (host.replyText as ReturnType<typeof vi.fn>).mock
-      .calls[0] as [unknown, string, unknown, { reply_markup: { inline_keyboard: unknown[] } }];
+    const [, text, , options] = (host.replyText as ReturnType<typeof vi.fn>)
+      .mock.calls[0] as [
+      unknown,
+      string,
+      unknown,
+      { reply_markup: { inline_keyboard: unknown[] } },
+    ];
     expect(text).toContain("Fix the thing");
     expect(options.reply_markup.inline_keyboard.flat()).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ callback_data: "inbox-decision:approve:message-payload-key" }),
-        expect.objectContaining({ callback_data: "inbox-decision:reject:message-payload-key" }),
-        expect.objectContaining({ callback_data: "inbox-decision:defer:message-payload-key" }),
+        expect.objectContaining({
+          callback_data: "inbox-decision:approve:message-payload-key",
+        }),
+        expect.objectContaining({
+          callback_data: "inbox-decision:reject:message-payload-key",
+        }),
+        expect.objectContaining({
+          callback_data: "inbox-decision:defer:message-payload-key",
+        }),
       ]),
     );
   });
@@ -127,7 +147,12 @@ describe("TransportInboxMenus.handleInboxDecisionCallback", () => {
 
     await menus.handleInboxDecisionCallback(ctx);
 
-    expect(host.resolveInboxMessage).toHaveBeenCalledWith("msg-1", "approve");
+    expect(host.resolveInboxMessage).toHaveBeenCalledWith(
+      "msg-1",
+      "approve",
+      { telegramChatId: 42, telegramUserId: 7 },
+      "client-1:workspace",
+    );
     expect(ctx.answerCallbackQuery).toHaveBeenCalledWith(
       expect.objectContaining({ text: expect.stringContaining("approved") }),
     );
@@ -207,6 +232,82 @@ describe("TransportInboxMenus.handleInboxRouteBackCallback", () => {
     expect(host.replyText).not.toHaveBeenCalled();
     expect(ctx.answerCallbackQuery).toHaveBeenCalledWith(
       expect.objectContaining({ show_alert: true }),
+    );
+  });
+});
+
+describe("inbox session/project mapping", () => {
+  it("binds the selected session when entering a project, before listing its messages", async () => {
+    const sessionId = "relay~vita-client~Vita";
+    const host = createHost({
+      loadInboxRoutesContext: vi.fn(async () => ({
+        principal: { telegramChatId: 42, telegramUserId: 7 },
+        sessionId,
+        routes: [],
+      })),
+      menuPayloadStore: {
+        createMenuPayload: vi.fn(),
+        getMenuPayload: vi.fn(async () => ({
+          kind: "inbox-route-entry",
+          sessionId,
+          namespace: "marrow",
+          routeKey: "P-SLIFE",
+        })),
+      },
+    });
+    const ctx = createContext("project-select");
+    Object.assign(ctx, { match: "project-payload" });
+    const menus = new TransportInboxMenus(host) as unknown as {
+      handleInboxRouteSelect(ctx: TelegramMenuContext): Promise<void>;
+    };
+    await menus.handleInboxRouteSelect(ctx);
+    expect(host.bindCurrentSessionToRoute).toHaveBeenCalledWith(
+      { telegramChatId: 42, telegramUserId: 7 },
+      sessionId,
+      "marrow",
+      "P-SLIFE",
+    );
+    expect(
+      vi.mocked(host.bindCurrentSessionToRoute).mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(host.listInboxMessages).mock.invocationCallOrder[0]!,
+    );
+    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith(
+      expect.objectContaining({ text: expect.stringContaining("bound") }),
+    );
+  });
+
+  it("refuses an old Accept button after the viewer selects another session", async () => {
+    const host = createHost({
+      menuPayloadStore: {
+        createMenuPayload: vi.fn(),
+        getMenuPayload: vi.fn(async () => ({
+          kind: "inbox-message-entry",
+          sessionId: "old-client:WebTerm",
+          namespace: "marrow",
+          routeKey: "P-1",
+          messageId: "msg-1",
+        })),
+      },
+    });
+    const ctx = createContext("inbox-decision:approve:old");
+    await new TransportInboxMenus(host).handleInboxDecisionCallback(ctx);
+    expect(host.resolveInboxMessage).not.toHaveBeenCalled();
+    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith(
+      expect.objectContaining({ show_alert: true }),
+    );
+  });
+
+  it("refreshes the binding to the current session on route-back navigation", async () => {
+    const host = createHost();
+    await new TransportInboxMenus(host).handleInboxRouteBackCallback(
+      createContext("inbox-route-back:marrow\u0000P-1"),
+    );
+    expect(host.bindCurrentSessionToRoute).toHaveBeenCalledWith(
+      { telegramChatId: 42, telegramUserId: 7 },
+      "client-1:workspace",
+      "marrow",
+      "P-1",
     );
   });
 });

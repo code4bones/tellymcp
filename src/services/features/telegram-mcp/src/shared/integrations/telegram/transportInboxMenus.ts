@@ -30,7 +30,11 @@ export interface TransportInboxMenusHost {
   ): { onMenuOutdated: (ctx: TelegramMenuContext) => Promise<void> };
   getPrincipalFromContext(ctx: TelegramMenuContext): Principal | null;
   resolveLocaleForContext(ctx: TelegramMenuContext): Promise<SupportedLocale>;
-  t(locale: SupportedLocale, key: string, vars?: Record<string, unknown>): string;
+  t(
+    locale: SupportedLocale,
+    key: string,
+    vars?: Record<string, unknown>,
+  ): string;
   tForContext(
     ctx: TelegramMenuContext,
     key: string,
@@ -68,6 +72,8 @@ export interface TransportInboxMenusHost {
   resolveInboxMessage(
     messageId: string,
     decision: "approve" | "reject" | "defer",
+    principal: Principal,
+    sessionId: string,
   ): Promise<void>;
   showMainMenu(ctx: TelegramMenuContext): Promise<void>;
   // Backed by a ref object set after createInboxMenu() runs -- mirrors the
@@ -101,6 +107,8 @@ const STATUS_LABEL_KEYS: Record<string, string> = {
   awaiting_route_binding: "menu:externalInbox.status.offered",
   deferred: "menu:externalInbox.status.deferred",
   no_live_session: "menu:externalInbox.status.no_live_session",
+  failed: "menu:externalInbox.status.failed",
+  delivering: "menu:externalInbox.status.pending",
 };
 
 // Generic by design -- this is a view over whatever (namespace, route_key)
@@ -108,6 +116,21 @@ const STATUS_LABEL_KEYS: Record<string, string> = {
 // screen. See TELLYMCP_INBOX_INTEGRATION.md for why that boundary matters.
 export class TransportInboxMenus {
   public constructor(private readonly host: TransportInboxMenusHost) {}
+
+  private async isSelectedSession(
+    ctx: TelegramMenuContext,
+    sessionId: string,
+  ): Promise<boolean> {
+    const current = await this.host.loadInboxRoutesContext(ctx);
+    if (current.principal && current.sessionId === sessionId) {
+      return true;
+    }
+    await ctx.answerCallbackQuery({
+      text: await this.host.tForContext(ctx, "menu:externalInbox.data_stale"),
+      show_alert: true,
+    });
+    return false;
+  }
 
   public createInboxMenu(): Menu<TelegramMenuContext> {
     return new Menu<TelegramMenuContext>("telegram-inbox-menu", {
@@ -179,7 +202,9 @@ export class TransportInboxMenus {
     );
   }
 
-  private async handleInboxRouteSelect(ctx: TelegramMenuContext): Promise<void> {
+  private async handleInboxRouteSelect(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
     const locale = await this.host.resolveLocaleForContext(ctx);
     const payloadKey = readMenuPayloadKey(ctx);
     const payload = payloadKey
@@ -203,18 +228,23 @@ export class TransportInboxMenus {
       return;
     }
 
-    await this.host.bindCurrentSessionToRoute(
-      principal,
-      route.sessionId,
-      route.namespace,
-      route.routeKey,
-    );
+    if (!(await this.isSelectedSession(ctx, route.sessionId))) {
+      return;
+    }
+    try {
+      await this.showInboxRouteMessages(ctx, route);
+    } catch (error) {
+      await ctx.answerCallbackQuery({
+        text: String(error instanceof Error ? error.message : error),
+        show_alert: true,
+      });
+      return;
+    }
     await ctx.answerCallbackQuery({
       text: this.host.t(locale, "menu:externalInbox.actions.bound", {
         route: `${route.namespace}:${route.routeKey}`,
       }),
     });
-    await this.showInboxRouteMessages(ctx, route);
   }
 
   private async showInboxRouteMessages(
@@ -226,6 +256,13 @@ export class TransportInboxMenus {
     if (!principal) {
       throw new Error("Telegram identity is unavailable.");
     }
+
+    await this.host.bindCurrentSessionToRoute(
+      principal,
+      route.sessionId,
+      route.namespace,
+      route.routeKey,
+    );
 
     const messages = await this.host.listInboxMessages(
       principal,
@@ -268,7 +305,9 @@ export class TransportInboxMenus {
     await this.renderScreen(ctx, lines.join("\n"), route.sessionId, keyboard);
   }
 
-  public async handleInboxMessageOpenCallback(ctx: TelegramMenuContext): Promise<void> {
+  public async handleInboxMessageOpenCallback(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
     const locale = await this.host.resolveLocaleForContext(ctx);
     const payloadKey = extractCallbackSuffix(ctx, "inbox-message-open:");
     const payload = payloadKey
@@ -281,8 +320,19 @@ export class TransportInboxMenus {
       });
       return;
     }
-    await ctx.answerCallbackQuery();
-    await this.showInboxMessageDetail(ctx, payload as unknown as InboxMessagePayload);
+    const message = payload as unknown as InboxMessagePayload;
+    if (!(await this.isSelectedSession(ctx, message.sessionId))) {
+      return;
+    }
+    try {
+      await this.showInboxMessageDetail(ctx, message);
+      await ctx.answerCallbackQuery();
+    } catch (error) {
+      await ctx.answerCallbackQuery({
+        text: String(error instanceof Error ? error.message : error),
+        show_alert: true,
+      });
+    }
   }
 
   private async showInboxMessageDetail(
@@ -302,17 +352,23 @@ export class TransportInboxMenus {
     );
     const current = messages.find((item) => item.id === message.messageId);
     if (!current) {
-      await ctx.answerCallbackQuery({
-        text: this.host.t(locale, "menu:externalInbox.data_stale"),
-        show_alert: true,
-      });
-      return;
+      throw new Error(this.host.t(locale, "menu:externalInbox.data_stale"));
     }
 
+    await this.host.bindCurrentSessionToRoute(
+      principal,
+      message.sessionId,
+      message.namespace,
+      message.routeKey,
+    );
+
     const lines = [
-      this.host.t(locale, "menu:externalInbox.message_screen.title", { title: current.title }),
+      this.host.t(locale, "menu:externalInbox.message_screen.title", {
+        title: current.title,
+      }),
       "",
       ...(current.summary ? [escapeHtml(current.summary), ""] : []),
+      ...(current.statusReason ? [escapeHtml(current.statusReason), ""] : []),
       this.host.t(locale, "menu:externalInbox.message_screen.resource", {
         kind: current.resourceKind,
         id: current.resourceId,
@@ -348,7 +404,9 @@ export class TransportInboxMenus {
     await this.renderScreen(ctx, lines.join("\n"), message.sessionId, keyboard);
   }
 
-  public async handleInboxDecisionCallback(ctx: TelegramMenuContext): Promise<void> {
+  public async handleInboxDecisionCallback(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
     const locale = await this.host.resolveLocaleForContext(ctx);
     const data = ctx.callbackQuery?.data ?? "";
     const match = data.match(/^inbox-decision:(approve|reject|defer):(.+)$/u);
@@ -370,9 +428,18 @@ export class TransportInboxMenus {
       return;
     }
     const message = payload as unknown as InboxMessagePayload;
+    const principal = this.host.getPrincipalFromContext(ctx);
+    if (!principal || !(await this.isSelectedSession(ctx, message.sessionId))) {
+      return;
+    }
 
     try {
-      await this.host.resolveInboxMessage(message.messageId, decision);
+      await this.host.resolveInboxMessage(
+        message.messageId,
+        decision,
+        principal,
+        message.sessionId,
+      );
     } catch (error) {
       await ctx.answerCallbackQuery({
         text: error instanceof Error ? error.message : String(error),
@@ -382,7 +449,10 @@ export class TransportInboxMenus {
     }
 
     await ctx.answerCallbackQuery({
-      text: this.host.t(locale, `menu:externalInbox.actions.${decision}d` as const),
+      text: this.host.t(
+        locale,
+        `menu:externalInbox.actions.${decision === "defer" ? "deferred" : `${decision}d`}`,
+      ),
     });
     await this.showInboxRouteMessages(ctx, {
       kind: "inbox-route-entry",
@@ -392,7 +462,9 @@ export class TransportInboxMenus {
     });
   }
 
-  public async handleInboxRouteBackCallback(ctx: TelegramMenuContext): Promise<void> {
+  public async handleInboxRouteBackCallback(
+    ctx: TelegramMenuContext,
+  ): Promise<void> {
     const suffix = extractCallbackSuffix(ctx, "inbox-route-back:");
     const locale = await this.host.resolveLocaleForContext(ctx);
     const [namespace, routeKey] = suffix?.split("\u0000") ?? [];
@@ -415,13 +487,20 @@ export class TransportInboxMenus {
       return;
     }
 
-    await ctx.answerCallbackQuery();
-    await this.showInboxRouteMessages(ctx, {
-      kind: "inbox-route-entry",
-      sessionId,
-      namespace,
-      routeKey,
-    });
+    try {
+      await this.showInboxRouteMessages(ctx, {
+        kind: "inbox-route-entry",
+        sessionId,
+        namespace,
+        routeKey,
+      });
+      await ctx.answerCallbackQuery();
+    } catch (error) {
+      await ctx.answerCallbackQuery({
+        text: String(error instanceof Error ? error.message : error),
+        show_alert: true,
+      });
+    }
   }
 
   private async renderScreen(

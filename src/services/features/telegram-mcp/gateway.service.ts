@@ -2249,31 +2249,69 @@ const TelegramMcpGatewayService: ServiceSchema = {
         throw new Error("Failed to ensure inbox system actor record.");
       }
 
-      const messageUuid = randomUUID();
-      const deliveryUuid = randomUUID();
+      // The inbox row UUID is stable across retries. Keep one xchange record
+      // even if the PTY disconnects after that record has been queued.
+      const messageUuid = this.requireText?.(
+        input.message_uuid ?? input.inbox_message_id,
+        "inbox_message_id",
+      ) as string;
+      let deliveryUuid = messageUuid;
       const now = new Date().toISOString();
 
-      await this.db.withSchema(MCP_SCHEMA).table("gateway_messages").insert({
-        message_uuid: messageUuid,
-        project_uuid: system.projectUuid,
-        from_session_uuid: system.sessionUuid,
-        to_session_uuid: targetSession.session_uuid,
-        kind,
-        summary,
-        body: message,
-        requires_reply: false,
-        created_at: now,
-      });
+      await this.db.transaction(async (trx) => {
+        await trx
+          .withSchema(MCP_SCHEMA)
+          .table("gateway_messages")
+          .insert({
+            message_uuid: messageUuid,
+            project_uuid: system.projectUuid,
+            from_session_uuid: system.sessionUuid,
+            to_session_uuid: targetSession.session_uuid,
+            kind,
+            summary,
+            body: message,
+            requires_reply: false,
+            created_at: now,
+          })
+          .onConflict("message_uuid")
+          .ignore();
 
-      await this.db.withSchema(MCP_SCHEMA).table("gateway_deliveries").insert({
-        delivery_uuid: deliveryUuid,
-        message_uuid: messageUuid,
-        target_client_uuid: targetSession.client_uuid,
-        target_session_uuid: targetSession.session_uuid,
-        status: "queued",
-        attempt_count: 0,
-        available_at: now,
-        created_at: now,
+        const existing = await trx
+          .withSchema(MCP_SCHEMA)
+          .table("gateway_messages")
+          .where({ message_uuid: messageUuid })
+          .first("to_session_uuid");
+        if (
+          String(existing?.to_session_uuid) !==
+          String(targetSession.session_uuid)
+        ) {
+          throw new Error(
+            "This offer is already queued for another console. Retry from its original session.",
+          );
+        }
+
+        const existingDelivery = await trx.withSchema(MCP_SCHEMA)
+          .table("gateway_deliveries").where({ message_uuid: messageUuid }).first("delivery_uuid");
+        if (existingDelivery) {
+          deliveryUuid = String(existingDelivery.delivery_uuid);
+          return;
+        }
+
+        await trx
+          .withSchema(MCP_SCHEMA)
+          .table("gateway_deliveries")
+          .insert({
+            delivery_uuid: deliveryUuid,
+            message_uuid: messageUuid,
+            target_client_uuid: targetSession.client_uuid,
+            target_session_uuid: targetSession.session_uuid,
+            status: "queued",
+            attempt_count: 0,
+            available_at: now,
+            created_at: now,
+          })
+          .onConflict("delivery_uuid")
+          .ignore();
       });
 
       return { message_uuid: messageUuid, delivery_uuid: deliveryUuid };

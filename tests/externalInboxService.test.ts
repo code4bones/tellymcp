@@ -263,7 +263,7 @@ describe("external-inbox service: inbox_bind_route", () => {
     });
     expect(harness.broker.call).toHaveBeenCalledWith(
       "telegramMcp.gateway.resolveLiveConsole",
-      { sessionId: "client-1:workspace" },
+      { sessionId: "client-1:workspace", owner_user_uuid: "user-uuid-1" },
       { meta: { internal_call: true } },
     );
   });

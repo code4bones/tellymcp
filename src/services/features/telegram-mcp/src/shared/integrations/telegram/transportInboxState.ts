@@ -1,4 +1,5 @@
 import type { TelegramMenuContext } from "./transportTypes";
+import { parseLiveRelaySessionId } from "../../../app/webapp/relay";
 
 type Principal = { telegramChatId: number; telegramUserId: number };
 
@@ -13,6 +14,7 @@ export type InboxMessageSummary = {
   resourceKind: string;
   resourceId: string;
   status: string;
+  statusReason?: string | null;
   title: string;
   summary: string;
   createdAt: string;
@@ -33,6 +35,17 @@ export interface TransportInboxStateHost {
 // "marrow"), and so does this client-side layer.
 export class TransportInboxState {
   public constructor(private readonly host: TransportInboxStateHost) {}
+
+  private canonicalSessionId(sessionId: string): string {
+    const relay = parseLiveRelaySessionId(sessionId);
+    if (relay) {
+      return `${relay.clientUuid}:${relay.localSessionId}`;
+    }
+    if (sessionId.startsWith("relay~") || !sessionId.includes(":")) {
+      throw new Error("A selected gateway console is required.");
+    }
+    return sessionId;
+  }
 
   public async loadInboxRoutesContext(ctx: TelegramMenuContext): Promise<{
     principal: Principal | null;
@@ -90,17 +103,30 @@ export class TransportInboxState {
       namespace,
       route_key: routeKey,
       telegram_user_id: principal.telegramUserId,
-      session_id: sessionId,
+      session_id: this.canonicalSessionId(sessionId),
     });
   }
 
   public async resolveInboxMessage(
     messageId: string,
     decision: "approve" | "reject" | "defer",
+    principal: Principal,
+    sessionId: string,
   ): Promise<void> {
-    await this.host.callGatewayJson("/inbox/resolve", {
+    const result = await this.host.callGatewayJson<{
+      ok: boolean;
+      status: string;
+      status_reason?: string;
+    }>("/inbox/resolve", {
       message_id: messageId,
       decision,
+      telegram_user_id: principal.telegramUserId,
+      session_id: this.canonicalSessionId(sessionId),
     });
+    if (!result.ok) {
+      throw new Error(
+        result.status_reason || `Inbox delivery: ${result.status}`,
+      );
+    }
   }
 }

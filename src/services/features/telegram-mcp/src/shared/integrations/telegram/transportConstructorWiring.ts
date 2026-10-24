@@ -388,8 +388,8 @@ export function buildTransportConstructorWiring(
       inboxState.listInboxMessages(principal, namespace, routeKey),
     bindCurrentSessionToRoute: (principal, sessionId, namespace, routeKey) =>
       inboxState.bindCurrentSessionToRoute(principal, sessionId, namespace, routeKey),
-    resolveInboxMessage: (messageId, decision) =>
-      inboxState.resolveInboxMessage(messageId, decision),
+    resolveInboxMessage: (messageId, decision, principal, sessionId) =>
+      inboxState.resolveInboxMessage(messageId, decision, principal, sessionId),
     showMainMenu: (ctx) => menuState.showMainMenu(ctx),
     getInboxMenu: () => {
       if (!inboxMenuRef.current) {

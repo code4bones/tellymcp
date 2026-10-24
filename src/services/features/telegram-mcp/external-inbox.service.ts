@@ -35,10 +35,12 @@ export type InboxMessageStatusPatch = {
   statusReason?: string | null;
   pendingRequestId?: string | null;
   xchangeMessageUuid?: string | null;
+  expectedStatus?: string;
+  expectedPendingRequestId?: string;
 };
 
 // Statuses a recipient can still act on -- excludes terminal outcomes
-// (delivered/rejected/failed) that a self-service "Входящие" list has no
+// (delivered/rejected) that a self-service "Входящие" list has no
 // reason to keep surfacing.
 const ACTIVE_INBOX_STATUSES = [
   "pending",
@@ -47,6 +49,8 @@ const ACTIVE_INBOX_STATUSES = [
   "awaiting_route_binding",
   "deferred",
   "no_live_session",
+  "failed",
+  "delivering",
 ];
 
 export type InboxRouteSummary = {
@@ -60,6 +64,7 @@ export type InboxMessageSummary = {
   resourceKind: string;
   resourceId: string;
   status: string;
+  statusReason: string | null;
   title: string;
   summary: string;
   createdAt: string;
@@ -90,6 +95,7 @@ export type TelegramMcpExternalInboxServiceInstance = Service & {
     local_session_id: string;
   }>;
   claimNextPendingMessage: () => Promise<InboxMessageRow | null>;
+  claimMessageResolution: (id: string, requestId?: string) => Promise<InboxMessageRow | null>;
   resolveRecipientGatewayUserUuid: (
     namespace: string,
     subject: string,
@@ -102,7 +108,7 @@ export type TelegramMcpExternalInboxServiceInstance = Service & {
   updateMessageStatus: (
     id: string,
     patch: InboxMessageStatusPatch,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   resolveGatewayUserContact: (
     gatewayUserUuid: string,
   ) => Promise<{ telegramChatId: number; telegramUserId: number } | null>;
@@ -343,7 +349,10 @@ const TelegramMcpExternalInboxService: ServiceSchema = {
       };
     },
 
-    async bindRouteRecord(this: ExternalInboxCarrier, input: Record<string, unknown>) {
+    async bindRouteRecord(
+      this: ExternalInboxCarrier,
+      input: Record<string, unknown>,
+    ) {
       const namespace = this.requireText!(input.namespace, "namespace");
       const routeKey = this.requireText!(input.route_key, "route_key");
       const telegramUserId = this.requireText!(
@@ -371,7 +380,7 @@ const TelegramMcpExternalInboxService: ServiceSchema = {
 
       const resolved = (await this.broker.call(
         "telegramMcp.gateway.resolveLiveConsole",
-        { sessionId },
+        { sessionId, owner_user_uuid: user.gateway_user_uuid },
         { meta: { internal_call: true } },
       )) as { client_uuid: string; local_session_id: string } | null;
       if (!resolved) {
@@ -427,6 +436,25 @@ const TelegramMcpExternalInboxService: ServiceSchema = {
       return row ? (row as InboxMessageRow) : null;
     },
 
+    // Reserve a decision across menu callbacks and the original offer waiter.
+    // A second Accept cannot create another delivery while the first is running.
+    async claimMessageResolution(
+      this: ExternalInboxCarrier,
+      id: string,
+      requestId?: string,
+    ): Promise<InboxMessageRow | null> {
+      const result = await this.db.raw(
+        `update "${MCP_SCHEMA}"."inbox_messages"
+            set status = 'delivering', updated_at = now()
+          where id = ? and status in ('pending', 'processing', 'offered',
+            'awaiting_route_binding', 'deferred', 'no_live_session', 'failed')
+            ${requestId ? "and status = 'offered' and pending_request_id = ?" : ""}
+          returning *`,
+        requestId ? [id, requestId] : [id],
+      );
+      return (result.rows?.[0] as InboxMessageRow | undefined) ?? null;
+    },
+
     async resolveRecipientGatewayUserUuid(
       this: ExternalInboxCarrier,
       namespace: string,
@@ -467,24 +495,31 @@ const TelegramMcpExternalInboxService: ServiceSchema = {
       this: ExternalInboxCarrier,
       id: string,
       patch: InboxMessageStatusPatch,
-    ): Promise<void> {
-      await this.db
+    ): Promise<boolean> {
+      const query = this.db
         .withSchema(MCP_SCHEMA)
         .table("inbox_messages")
-        .where({ id })
-        .update({
-          status: patch.status,
-          ...(patch.statusReason !== undefined
-            ? { status_reason: patch.statusReason }
-            : {}),
-          ...(patch.pendingRequestId !== undefined
-            ? { pending_request_id: patch.pendingRequestId }
-            : {}),
-          ...(patch.xchangeMessageUuid !== undefined
-            ? { xchange_message_uuid: patch.xchangeMessageUuid }
-            : {}),
-          updated_at: new Date().toISOString(),
-        });
+        .where({ id });
+      if (patch.expectedStatus) {
+        query.andWhere("status", patch.expectedStatus);
+      }
+      if (patch.expectedPendingRequestId) {
+        query.andWhere("pending_request_id", patch.expectedPendingRequestId);
+      }
+      const updated = await query.update({
+        status: patch.status,
+        ...(patch.statusReason !== undefined
+          ? { status_reason: patch.statusReason }
+          : {}),
+        ...(patch.pendingRequestId !== undefined
+          ? { pending_request_id: patch.pendingRequestId }
+          : {}),
+        ...(patch.xchangeMessageUuid !== undefined
+          ? { xchange_message_uuid: patch.xchangeMessageUuid }
+          : {}),
+        updated_at: new Date().toISOString(),
+      });
+      return updated > 0;
     },
 
     async resolveGatewayUserContact(
@@ -505,7 +540,20 @@ const TelegramMcpExternalInboxService: ServiceSchema = {
       };
     },
 
-    async reconcileOrphanedMessages(this: ExternalInboxCarrier): Promise<number> {
+    async reconcileOrphanedMessages(
+      this: ExternalInboxCarrier,
+    ): Promise<number> {
+      // Interrupted PTY delivery needs an explicit retry, never an automatic
+      // replay of an approval after restart.
+      await this.db
+        .withSchema(MCP_SCHEMA)
+        .table("inbox_messages")
+        .where({ status: "delivering" })
+        .update({
+          status: "failed",
+          status_reason: "Delivery interrupted; open the project and retry.",
+          updated_at: new Date().toISOString(),
+        });
       // A gateway restart loses any in-memory Telegram-reply waiter, so rows
       // left in "processing"/"offered"/"awaiting_route_binding" by a crashed
       // previous instance would otherwise wait forever. Reset them to
@@ -627,6 +675,7 @@ const TelegramMcpExternalInboxService: ServiceSchema = {
           "m.resource_kind",
           "m.resource_id",
           "m.status",
+          "m.status_reason",
           "m.payload",
           "m.created_at",
         );
@@ -647,6 +696,8 @@ const TelegramMcpExternalInboxService: ServiceSchema = {
           resourceKind: String(row.resource_kind),
           resourceId: String(row.resource_id),
           status: String(row.status),
+          statusReason:
+            row.status_reason == null ? null : String(row.status_reason),
           title,
           summary,
           createdAt: new Date(row.created_at as string).toISOString(),

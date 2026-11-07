@@ -1,7 +1,9 @@
 # Detached sessions in TellyMCP
 
-Status: proposed design, 2026-10-29. Branch: `feature/detached-sessions`.
-Current package baseline: `0.0.38`. The commands below describe proposed behavior.
+Status: design with an isolated stage-1 prototype, updated 2026-11-07.
+Branch: `feature/detached-sessions`, merged with `main` at `13a14e0` in
+`b34bb74`. Current package baseline: `0.0.43`; the original `0.0.38` baseline
+is historical. The public commands below still describe proposed behavior.
 
 TellyMCP should keep a running local console alive when its terminal disconnects,
 an SSH connection drops, or the user deliberately sends the session into the
@@ -312,8 +314,129 @@ be split into reusable console initialization and attachment behavior, while
 
 The first stage is a fidelity gate, before replacing the default launch path.
 If serialization or terminal-query handling fails, resolve that behavior before
-shipping a detach flag that cannot restore a working agent interface. No runtime
-behavior or dependency has been changed by this design document.
+shipping a detach flag that cannot restore a working agent interface.
+
+## Stage 1 prototype: T-TELLYMCP-040
+
+The isolated implementation is in
+`src/services/features/telegram-mcp/src/features/detached-terminal/model/`:
+`terminalRestorationPrototype.ts`, `terminalSnapshot.ts`, and `vtOutput.ts`.
+It takes an existing `node-pty` handle, owns its own experimental headless
+screen, and creates no processes or services. **It is not imported by the
+ordinary runtime or CLI.** Do not layer it onto an existing `ptyRegistry`
+screen as a second permanent parser: stage 2 must integrate one authoritative
+screen into that registry, keeping the existing capture and subscription APIs.
+
+`@xterm/addon-serialize` is pinned to **0.13.0**, the compatible addon listed
+in the upstream [xterm 5.5 release](https://github.com/xtermjs/xterm.js/releases/tag/5.5.0).
+Both headless and browser xterm stay at **5.5.0**. The addon works with headless
+at runtime; its typings import browser xterm and therefore introduce `lib.dom`.
+`tellyProxy.ts` now explicitly types the Node dispatcher extension to
+`RequestInit`; its actual dispatch behavior is unchanged.
+
+### Confirmed restoration contract
+
+- Owner instance UUID, controller generation, dimensions and monotonically
+  increasing output sequence accompany a snapshot. Generation changes on
+  reattach; the PTY PID and owner instance do not.
+- Headless writes, resize and snapshot serialization use one ordered queue.
+  Attach reserves its controller immediately, waits for preceding writes,
+  applies dimensions to the existing headless terminal and PTY, then serializes.
+  Later output starts at `snapshot.sequence + 1`, including empty display frames
+  for query-only output. Output arriving during snapshot delivery is queued.
+- The consumer applies the complete ANSI snapshot at its declared dimensions,
+  then acknowledges it. Input and live-frame draining are disabled before ACK.
+  No automatic input retry exists. Old handles cannot affect a new controller.
+- Incomplete VT controls and a trailing UTF-16 high surrogate remain buffered
+  until complete. They are not half-applied to a snapshot. Raw input uses a
+  per-attachment UTF-8 decoder; detach discards an unfinished input character
+  instead of moving it into the next controller's input.
+- Replay tests compare both buffers' cells, widths, wraps, colors and basic
+  SGR styles, cursor positions and subsequent output. Coverage includes normal
+  and alternate screens, returning to normal, saved cursors/attributes,
+  scroll regions/origin, tab stops, pending wrap, REP across the boundary,
+  ASCII/UK/DEC graphics, CJK, combining marks, emoji and resize during output.
+  Paste, focus, application cursor/keypad, insert, wrap, mouse tracking/encoding,
+  cursor visibility/style/blink and newline mode are restored.
+- The addon alone misses scroll regions, tab stops, saved state, mouse
+  encoding and cursor visibility. It also leaks active SGR into the start of
+  alternate-screen painting. A version-specific adapter supplements it and
+  corrects that bleed. All additional private xterm access is in
+  `terminalSnapshot.ts`; dependency changes require its replay tests.
+- Snapshots reset the display and repaint bounded screen/scrollback state.
+  They do not replay historical bells, clipboard operations or queries.
+  Live output preserves ordinary VT data except the query families below.
+- Detach and model disposal remove subscriptions without killing the caller's
+  PTY. Exit status follows already accepted output; the existing attachment
+  can drain final output after exit but cannot send more input.
+
+### Query ownership selected by the prototype
+
+This refines the earlier attached-terminal query proposal: **the headless
+owner supplies supported responses both attached and detached**. There is no
+handover to the physical terminal and no outstanding-response race at detach.
+The complete query controls are removed from display output before delivery,
+so the physical terminal cannot send a duplicate response. The attach client
+must render this filtered stream rather than subscribing directly to PTY data.
+
+Supported responses are DSR status/cursor (including private cursor DSR), primary
+and secondary DA, DECRQM, xterm DECRQSS, character-size query `CSI 18 t`, and
+individual OSC 10/11/12 color queries. Primary DA deliberately reports VT101
+with no optional capabilities. DECRQSS SGR uses the actual current attributes
+rather than xterm 5.5's hard-coded `0m` response. The experimental palette is
+fixed white foreground/cursor and black background; it is not a probe of the
+user's physical terminal theme.
+
+The filter also consumes unsupported queries in these CSI/OSC/DCS families
+(including pixel-size requests, palette queries, clipboard queries, XTGETTCAP,
+XTVERSION and keyboard-protocol queries) rather than allowing attached-only
+answers. Unsupported requests may receive no answer, or xterm's unsupported
+response; applications must use their normal capability fallback/timeouts.
+Do not advertise graphics, clipboard reading or enhanced keyboard protocols.
+This is not a universal VT security filter: extensions outside the recognized
+families need explicit handling before they become part of the contract.
+
+### Bounds and remaining release checks
+
+Defaults: 500 retained scrollback lines (configurable 0–5000), dimensions 2–500
+in each axis, one MiB/4096 frames per attachment, four MiB/4096 operations in
+the parser queue, 65536 UTF-16 units per unfinished control, and a four MiB
+snapshot limit. A slow consumer loses its attachment and must request a fresh
+snapshot; PTY parsing continues. Parser/control overflow records a terminal
+prototype fault and rejects further operations. Stage 2 must give those faults
+an explicit owner lifecycle policy; this in-process experiment does not claim
+to recover a screen after dropping parser input.
+
+Dynamic palette mutation, OSC 8 hyperlink metadata, extended underline variants,
+images and additional terminal protocols are not restoration guarantees.
+They need separate decisions/tests before advertising them. The manual harness
+resets common terminal modes on detach/exit; complete terminal cleanup belongs
+to stage 3. No SSH-disconnect survival, daemonization, account authorization,
+gateway attachment, real Codex/Claude fidelity or two-terminal-emulator check
+is implied by the automated fixtures. Those remain T-TELLYMCP-041..045.
+
+### Run the experiment
+
+```bash
+yarn vitest run tests/terminalRestoration.test.ts tests/terminalRestorationPty.test.ts
+yarn tsx tools/prototype-terminal-restoration.ts
+```
+
+The second command requires an interactive TTY and starts one clean Bash with
+no user startup files. Try `echo $$`, a streaming counter or a TUI. Press
+**Ctrl+]** to detach the display, **a** to reattach and **q** while detached to
+stop the experiment. While attached, normal `exit N` returns code N. These keys
+are harness controls, not the future public CLI interface; the harness reserves
+Ctrl+] and ignores input while applying a snapshot. It stays in the same
+foreground process, so closing it is not a daemon-survival test.
+
+Evidence: automated PTY integration keeps the same shell and interactive Node
+child PIDs, observes detached progress, checks split Unicode input after resize,
+requires exactly one reply for each attached/detached query, drains final child
+and shell output, and preserves shell exit 7. A manual PTY harness run also
+reported Bash PID `1411199` before and after detach/reattach, delivered final
+output `FINAL_OUTPUT` and propagated exit 7. This was terminal
+tool PTY evidence, not visual verification in two physical terminal emulators.
 
 ## Acceptance scenarios
 

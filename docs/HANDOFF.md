@@ -12,13 +12,13 @@ is archived in Marrow. Retain the research; resume only on a new request.
 - Runtime baseline: `main` at `be12ca8`, package and locally installed client
   **0.0.43**. GitLab and GitHub are synchronized. This documentation may have
   a newer commit; use the latest `main` when preparing the feature branch.
-- `feature/detached-sessions` at `5ef06a2` contains **design only**:
-  `docs/DETACHED_SESSIONS_DESIGN.md` and a development-doc pointer. The design
-  is on both remotes. Read it with `git show
-  feature/detached-sessions:docs/DETACHED_SESSIONS_DESIGN.md` before switching.
-- Before implementation, bring the feature branch up to date with `main`.
-  Its old **0.0.38** baseline is historical, not the future release number.
-  Do not lose the recent deployment/client changes while integrating it.
+- `feature/detached-sessions` was updated from latest `main` (`13a14e0`) by
+  merge **`b34bb74`**, preserving runtime baseline **0.0.43**. Stage-1 prototype
+  changes are in the local working tree; they have not been committed/pushed.
+  The earlier design-only commit `5ef06a2` remains on both remotes.
+- Read `docs/DETACHED_SESSIONS_DESIGN.md`, especially **Stage 1 prototype**,
+  for the confirmed restoration/query contract, bounds, evidence and limits.
+  The design's original **0.0.38** baseline is historical.
 - `autotests`, `gateway`, `onebot` and `ws` are already ancestors of `main`;
   they contain no unmerged commits. Branch audit found no stash or other worktree.
 - Canonical shared client profile: `~/.tellymcp/.env`, mode `0600`, directory
@@ -70,15 +70,22 @@ is archived in Marrow. Retain the research; resume only on a new request.
 - Detailed recovery paths, volume names and migration incidents:
   Marrow **`I-TELLYMCP-039`**. Client handoffs: **042**, **043**, **044**.
 
-### Next session: start with T-TELLYMCP-040
+### T-TELLYMCP-040 prototype and next steps
 
-1. Read this section, latest Marrow handoff and the design on the feature branch.
-   Refresh Git state and integrate latest `main` into the feature branch.
-2. Prototype terminal restoration before changing ordinary `tellymcp run`:
-   ANSI/VT snapshot, normal/alternate screen, styles/cursor/modes, ordered
-   snapshot-to-live boundary, Unicode, resize and terminal query ownership.
-   Check a compatible serialization addon against the current xterm 5.5 packages.
-   Require the same shell/agent PID, no missing/duplicated output or query replies.
+1. Read this section, Marrow result **I-TELLYMCP-046** (T040 is in review) and the design's prototype
+   contract. Refresh Git status; preserve the current uncommitted prototype.
+2. Stage 1 now has `TerminalRestorationPrototype`, a snapshot adapter and VT
+   query framing under `features/detached-terminal/model/`, plus replay and real
+   PTY integration tests. `@xterm/addon-serialize` **0.13.0** works with xterm
+   **5.5.0**, with tested corrections for omitted state and alternate SGR bleed.
+   One headless owner answers supported queries in both attached/detached
+   states; the display stream removes queries to avoid duplicate replies.
+   Ordered snapshot/live frames, input ACK, resize, Unicode, queue limits,
+   stale-controller rejection and draining final output before exit are tested.
+   The standalone manual harness is
+   `yarn tsx tools/prototype-terminal-restoration.ts`: Ctrl+] detaches, a attaches,
+   q while detached stops. It owns one clean Bash and no broker/identity/services.
+   Neither the prototype nor harness is connected to ordinary `tellymcp run`.
 3. Then follow existing Marrow tasks: **041** background owner/private local
    protocol/discovery; **042** `run --detach`, `sessions`, `attach`, `stop` and
    terminal cleanup; **043** account authorization and one controller lease;
@@ -91,15 +98,25 @@ is archived in Marrow. Retain the research; resume only on a new request.
    of the target account; the shared gateway bearer alone is insufficient.
    Disconnecting an attachment must leave the owner and PTY alive; actual shell
    exit or explicit stop must shut down owned services with the real exit status.
-6. This handoff prepares future work; implementation has not started. Do not
-   create a production release tag or deploy the experimental branch as part
-   of the restoration prototype.
+6. Stage 1 is a fidelity experiment, not a daemon or product detach command.
+   Its fixed palette and unsupported terminal extensions are documented in the
+   design. Integrate one authoritative screen into `ptyRegistry` in stage 2;
+   do not retain the prototype as a second screen/query owner. Do not create a
+   release tag or deploy the experimental branch as part of this prototype.
 
-Latest completed runtime checks: build/lint passed; **378 tests passed, 2 skipped**.
+Latest source checks including the prototype: build/lint passed;
+**396 tests passed, 2 skipped** (18 new restoration/PTY cases).
+Real PTY tests preserved shell/interactive-child PIDs, detached progress, raw
+Unicode input and one reply per query through attach/detach, final output and
+exit 7. The manual harness reported Bash PID `1411199` both before and after
+detach/reattach, delivered `FINAL_OUTPUT`, and propagated exit 7.
+This is tool-PTY evidence; two physical emulator and real provider checks
+are still pending. No package install, release or production mutation occurred.
 Installed client auto-discovery, authenticated gateway HTTPS/WSS and foreground
-shell exit were verified. Optional Playwright Chromium binaries are missing in
-the local installation. Actual SSH disconnect, detach/reattach, terminal fidelity
-and remote attach remain future acceptance checks.
+shell exit were verified in the previous client work. Optional Playwright Chromium
+binaries are missing in the local installation. Actual SSH disconnect survival,
+product detach/attach, Codex/Claude terminal fidelity and remote attach remain
+future acceptance checks.
 
 ## Historical snapshot (2026-08-07)
 

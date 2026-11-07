@@ -83,9 +83,11 @@ export function tellyFetch(
   // Set a dispatcher per request, never the global one used by agent SDKs.
   // Node bundles a separate Undici 7 type snapshot with different patch-level
   // methods; the dispatch protocol is compatible (covered by socket tests).
-  const options: RequestInit = {
+  // The browser xterm typings bring lib.dom into the program. Its RequestInit
+  // omits Node's dispatcher extension, so keep that extension explicit here.
+  const options: RequestInit & { dispatcher: Dispatcher } = {
     ...init,
-    dispatcher: dispatcher as unknown as NonNullable<RequestInit["dispatcher"]>,
+    dispatcher,
   };
   return globalThis.fetch(input, options);
 }

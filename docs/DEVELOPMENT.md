@@ -2,6 +2,11 @@
 
 This document describes the current architecture of `telegram_mcp`.
 
+The proposed local background-session architecture is described in
+[Detached sessions in TellyMCP](DETACHED_SESSIONS_DESIGN.md). It covers detach,
+reattach locally or through the gateway, terminal fidelity, and process ownership;
+it is not implemented yet.
+
 ## Current Product Model
 
 The repository no longer models Telegram as a per-session pairing tool.

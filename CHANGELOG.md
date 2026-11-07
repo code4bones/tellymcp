@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Client configuration
+
+- Add application-scoped HTTP/WSS proxy routing and bypass rules without modifying global proxy variables or dispatchers. Apply the same routing to gateway collaboration, TOOLS.md checks, temporary file uploads and HTTP-proxied Telegram file downloads.
+- Migrate `HTTP_PROXY`/`NO_PROXY` file keys to `TELLYMCP_HTTP_PROXY`/`TELLYMCP_NO_PROXY` and preserve parent-shell proxy settings for the agent.
+
 ### Deployment
 
 - Inherit the deployment error trap inside shell functions so Compose failures restore the saved release as well as HTTP health-check failures.

@@ -4,6 +4,13 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.41
+
+### Changed
+
+- Client networking uses `TELLYMCP_HTTP_PROXY` and `TELLYMCP_NO_PROXY` for gateway HTTP/WebSocket connections and file uploads. These settings do not replace the standard proxy environment inherited by the shell and agent.
+- `tellymcp migrate-env` renames proxy settings in configuration files while preserving explicitly configured values and defaults.
+
 ## 0.0.40
 
 ### Fixed

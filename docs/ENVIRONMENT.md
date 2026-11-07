@@ -103,6 +103,8 @@ are gateway/`both` settings. `tellymcp migrate-env` drops them from client outpu
 - local MCP: `MCP_HTTP_HOST`, `MCP_HTTP_PORT`, `MCP_HTTP_PATH`,
   `MCP_HTTP_BEARER_TOKEN`, `MCP_HTTP_ENABLE_DEBUG_ROUTES`,
   `MCP_HTTP_ENABLE_PRUNE_ROUTE`
+  (standalone/development listeners only; interactive `tellymcp run` does not
+  open a local MCP HTTP listener)
 - local storage: `MCP_XCHANGE_DIR`
 - PTY: `TERMINAL_SHELL`, `TERMINAL_COLS`, `TERMINAL_ROWS`,
   `TERMINAL_SCROLLBACK_LINES`, `TERMINAL_CAPTURE_MODE`, `TERMINAL_CAPTURE_LINES`
@@ -120,12 +122,30 @@ are gateway/`both` settings. `tellymcp migrate-env` drops them from client outpu
 ## Shared Optional Settings
 
 - request policy: `TELEGRAM_REQUEST_MODE=queue|reject`
-- proxy: `PROXY_USE=http|socks5`, `HTTP_PROXY`, `SOCKS5_PROXY`, `NO_PROXY`
+- Telly HTTP/WebSocket proxy: `TELLYMCP_HTTP_PROXY`, `TELLYMCP_NO_PROXY`
+- optional Telegram SOCKS proxy: `PROXY_USE=socks5`, `SOCKS5_PROXY`
 - logging: `LOG_LEVEL`, `LOG_STDERR_LEVEL`, `LOG_FILE_ENABLED`,
   `LOG_FILE_LEVEL`, `LOG_FILE_PATH`, `LOGFEED_ENABLED`
 - broker diagnostics: `TRANSPORT`, `MOLECULER_TRACE`, `MOLECULER_METRICS`,
   `METRICS_PORT`, `METRICS_PATH`
 - standalone HTTP internals: `ENV_FILE`, `TELLYMCP_STANDALONE_HTTP`
+
+`TELLYMCP_HTTP_PROXY` accepts an HTTP(S) proxy URL and applies to requests owned
+by Telly: gateway HTTP and WebSocket connections, collaboration, file uploads,
+and Telegram HTTP traffic. `TELLYMCP_NO_PROXY` is a comma-separated bypass list:
+exact hostnames/IPs, optional ports, `.example.com` or `*.example.com` for a domain
+and its subdomains, or `*` for every host. Add your local gateway hostname to the
+bypass list to keep its traffic direct. CIDR rules are not supported.
+
+These keys do not rewrite `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, or `NO_PROXY`,
+nor the global fetch dispatcher. The shell and agent retain the standard proxy
+environment inherited from their parent. Keep those standard variables in shell
+configuration when the agent needs them; use the Telly-prefixed keys in Telly env
+files. `migrate-env` renames old `HTTP_PROXY`/`NO_PROXY` file entries and preserves
+explicit canonical values. Standard variables in the parent process are not
+treated as forbidden legacy Telly keys. Existing Telegram gateway configurations
+with explicit `PROXY_USE=http` still accept their old `HTTP_PROXY` setting until
+their env file is migrated.
 
 ## Chat Connector OAuth
 

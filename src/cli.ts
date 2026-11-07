@@ -33,6 +33,7 @@ import {
   resolveAgentProvider,
 } from "./services/features/telegram-mcp/src/features/agent-runtime/model/agentProviderRegistry";
 import { inspectCodexRuntime } from "./services/features/telegram-mcp/src/features/agent-runtime/model/codexRuntimeDiagnostics";
+import { getTellyWebSocketAgent, tellyFetch, type TellyProxySettings } from "./services/features/telegram-mcp/src/shared/lib/http/tellyProxy";
 
 type InitMode = "client" | "gateway" | "both";
 type CliCommand =
@@ -791,15 +792,16 @@ async function checkTcpPort(
 async function checkHttpHealth(
   url: string,
   timeoutMs = 3000,
+  proxySettings?: TellyProxySettings,
 ): Promise<{ ok: boolean; message: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(url, {
+    const response = await tellyFetch(url, {
       method: "GET",
       signal: controller.signal,
-    });
+    }, proxySettings);
     clearTimeout(timer);
     return {
       ok: response.ok,
@@ -817,6 +819,8 @@ async function checkHttpHealth(
 async function checkWebSocketUrl(
   url: string,
   timeoutMs = 3000,
+  proxySettings?: TellyProxySettings,
+  authToken?: string,
 ): Promise<{ ok: boolean; message: string }> {
   return await new Promise((resolve) => {
     let settled = false;
@@ -836,7 +840,10 @@ async function checkWebSocketUrl(
       }
     };
 
-    const socket = new WebSocket(url);
+    const socket = new WebSocket(url, {
+      agent: getTellyWebSocketAgent(url, proxySettings),
+      ...(authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {}),
+    });
     const timer = setTimeout(() => {
       finish(false, `${url} timed out`);
     }, timeoutMs);
@@ -871,6 +878,13 @@ async function checkWebSocketUrl(
 
 async function runDoctor(args: string[]): Promise<void> {
   const { envPath, parsed } = loadCliEnv(args);
+  const proxySettings: TellyProxySettings = {
+    httpProxy: parsed.TELLYMCP_HTTP_PROXY,
+    noProxy: parsed.TELLYMCP_NO_PROXY,
+  };
+  const doctorHttpHealth = (url: string) => checkHttpHealth(url, 3000, proxySettings);
+  const doctorWebSocket = (url: string) => checkWebSocketUrl(url, 3000, proxySettings, parsed.GATEWAY_AUTH_TOKEN);
+
   const nativePtyStatus = await checkNativePtyRuntime();
 
   printBanner("doctor", "Local installation diagnostics");
@@ -977,7 +991,7 @@ async function runDoctor(args: string[]): Promise<void> {
   if (mode === "client") {
     const gatewayPublicUrl = parsed.GATEWAY_PUBLIC_URL?.trim();
     if (gatewayPublicUrl) {
-      const gatewayHealth = await checkHttpHealth(
+      const gatewayHealth = await doctorHttpHealth(
         `${gatewayPublicUrl.replace(/\/+$/u, "")}/healthz`,
       );
       checks.push(
@@ -996,7 +1010,7 @@ async function runDoctor(args: string[]): Promise<void> {
     }
 
     if (gatewayWsUrl) {
-      const gatewayWs = await checkWebSocketUrl(gatewayWsUrl);
+      const gatewayWs = await doctorWebSocket(gatewayWsUrl);
       checks.push(
         `${gatewayWs.ok ? pc.green("  OK") : pc.red("  ERROR")} gateway ws: ${gatewayWs.message}`,
       );
@@ -1011,7 +1025,7 @@ async function runDoctor(args: string[]): Promise<void> {
     }
 
     if (publicWebappUrl) {
-      const publicWebapp = await checkHttpHealth(publicWebappUrl);
+      const publicWebapp = await doctorHttpHealth(publicWebappUrl);
       checks.push(
         `${publicWebapp.ok ? pc.green("  OK") : pc.red("  ERROR")} public webapp: ${publicWebapp.message}`,
       );
@@ -1029,7 +1043,7 @@ async function runDoctor(args: string[]): Promise<void> {
   }
 
   if (mode === "gateway" || mode === "both") {
-    const localHealth = await checkHttpHealth(
+    const localHealth = await doctorHttpHealth(
       `http://${httpHost}:${httpPort}${healthUrlPath}`,
     );
     checks.push(
@@ -1040,7 +1054,7 @@ async function runDoctor(args: string[]): Promise<void> {
     );
 
     if (externalHealthUrl) {
-      const externalHealth = await checkHttpHealth(externalHealthUrl);
+      const externalHealth = await doctorHttpHealth(externalHealthUrl);
       checks.push(
         `${externalHealth.ok ? pc.green("  OK") : pc.red("  ERROR")} public healthz: ${externalHealth.message}`,
       );
@@ -1057,7 +1071,7 @@ async function runDoctor(args: string[]): Promise<void> {
     }
 
     if (gatewayWsUrl) {
-      const gatewayWs = await checkWebSocketUrl(gatewayWsUrl);
+      const gatewayWs = await doctorWebSocket(gatewayWsUrl);
       checks.push(
         `${gatewayWs.ok ? pc.green("  OK") : pc.red("  ERROR")} public ws: ${gatewayWs.message}`,
       );
@@ -1072,7 +1086,7 @@ async function runDoctor(args: string[]): Promise<void> {
     }
 
     if (publicWebappUrl) {
-      const publicWebapp = await checkHttpHealth(publicWebappUrl);
+      const publicWebapp = await doctorHttpHealth(publicWebappUrl);
       checks.push(
         `${publicWebapp.ok ? pc.green("  OK") : pc.red("  ERROR")} public webapp: ${publicWebapp.message}`,
       );

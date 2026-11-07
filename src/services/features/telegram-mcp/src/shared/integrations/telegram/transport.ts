@@ -30,6 +30,7 @@ import { writeLocalTaskXchangeRecord } from "../../lib/telegramXchangeRecords";
 import type { MinioExchangeStore } from "../object-storage/minioExchangeStore";
 import { isExecutorTargetKind } from "./collabSemantics";
 import { assertBodySize } from "../../lib/bodyLimits";
+import { tellyFetch } from "../../lib/http/tellyProxy";
 import type {
   AdminGatewayRegistrationSessionRecord,
   CurrentAttachmentTargetRecord,
@@ -404,7 +405,7 @@ export class TelegramTransport implements HumanTransport {
     const url = new URL(baseUrl);
     url.pathname = `${url.pathname}${endpointPath}`.replace(/\/{2,}/gu, "/");
 
-    const response = await fetch(url, {
+    const response = await tellyFetch(url, {
       method: "POST",
       headers: {
         "content-type": "application/json",

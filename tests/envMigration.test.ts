@@ -4,6 +4,22 @@ import { describe, expect, it } from "vitest";
 import { migrateEnvironmentContent } from "../src/envMigration";
 
 describe("environment migration", () => {
+  it("renames file-scoped proxy keys without changing the parent proxy environment", () => {
+    const before = { http: process.env.HTTP_PROXY, no: process.env.NO_PROXY };
+    const result = migrateEnvironmentContent(`DISTRIBUTED_MODE=client\nHTTP_PROXY=http://user:pass@proxy.local:3128\nNO_PROXY=localhost,127.0.0.1\n`);
+    const parsed = parseDotenv(result.content);
+    expect(parsed.TELLYMCP_HTTP_PROXY).toBe("http://user:pass@proxy.local:3128");
+    expect(parsed.TELLYMCP_NO_PROXY).toBe("localhost,127.0.0.1");
+    expect(parsed).not.toHaveProperty("HTTP_PROXY");
+    expect(parsed).not.toHaveProperty("NO_PROXY");
+    expect({ http: process.env.HTTP_PROXY, no: process.env.NO_PROXY }).toEqual(before);
+  });
+
+  it("preserves explicitly configured Telly proxy keys over their old file names", () => {
+    const parsed = parseDotenv(migrateEnvironmentContent(`HTTP_PROXY=http://old:3128\nTELLYMCP_HTTP_PROXY=http://new:3128\nNO_PROXY=old.local\nTELLYMCP_NO_PROXY=new.local\n`).content);
+    expect(parsed.TELLYMCP_HTTP_PROXY).toBe("http://new:3128");
+    expect(parsed.TELLYMCP_NO_PROXY).toBe("new.local");
+  });
   it("normalizes a gateway env and preserves secret values", () => {
     const result = migrateEnvironmentContent(`
 DISTRIBUTED_MODE=gateway

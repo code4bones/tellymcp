@@ -22,6 +22,7 @@ import {
 } from "../../../shared/lib/bodyLimits";
 import type { Logger } from "../../../shared/lib/logger/logger";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
+import { tellyFetch } from "../../../shared/lib/http/tellyProxy";
 import {
   TEMPORARY_FILE_LINK_MAX_BYTES,
   TemporaryFileLinkStore,
@@ -311,7 +312,7 @@ export class GetFileService {
     const filename = path.basename(relativeFilePath);
     const mimetype = resolveWorkspaceFileMimeType(filename);
     const body = Readable.toWeb(createReadStream(resolvedFile.filePath));
-    const response = await fetch(input.upload_url, {
+    const response = await tellyFetch(input.upload_url, {
       method: "PUT",
       headers: {
         "content-type": mimetype,

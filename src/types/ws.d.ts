@@ -6,6 +6,7 @@ declare module "ws" {
     public constructor(
       url: string,
       options?: {
+        agent?: import("node:http").Agent;
         headers?: Record<string, string>;
         handshakeTimeout?: number;
         perMessageDeflate?: boolean;

@@ -206,7 +206,7 @@ const environmentSections: EnvironmentSection[] = [
   {
     title: "Outbound proxy",
     roles: allRoles,
-    keys: ["PROXY_USE", "HTTP_PROXY", "SOCKS5_PROXY", "NO_PROXY"],
+    keys: ["PROXY_USE", "TELLYMCP_HTTP_PROXY", "SOCKS5_PROXY", "TELLYMCP_NO_PROXY"],
   },
   {
     title: "Moleculer identity and diagnostics",
@@ -283,7 +283,14 @@ export function migrateEnvironmentContent(
   const renamedKeys: Array<{ from: string; to: string }> = [];
   const handledLegacyKeys = new Set<string>();
 
-  for (const [from, to] of Object.entries(LEGACY_ENV_RENAMES)) {
+  // These aliases are migrated only in files: standard proxy variables remain
+  // valid in the parent shell and must not be rejected as legacy process env.
+  const fileRenames = {
+    ...LEGACY_ENV_RENAMES,
+    HTTP_PROXY: "TELLYMCP_HTTP_PROXY",
+    NO_PROXY: "TELLYMCP_NO_PROXY",
+  };
+  for (const [from, to] of Object.entries(fileRenames)) {
     if (!(from in parsed)) {
       continue;
     }

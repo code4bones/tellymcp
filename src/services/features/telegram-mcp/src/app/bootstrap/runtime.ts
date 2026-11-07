@@ -5,6 +5,7 @@ import {
   type RedisClient,
 } from "../providers/redis/client";
 import { createLogger, type Logger } from "../../shared/lib/logger/logger";
+import { closeTellyProxyAgents } from "../../shared/lib/http/tellyProxy";
 import {
   ProjectIdentityResolver,
   readSessionMarkerState,
@@ -345,6 +346,7 @@ export async function createAppRuntime(input: {
       await telegramTransport.stop();
       stopAllPtyTargets();
       redis?.disconnect();
+      await closeTellyProxyAgents();
       logger.info("Shutdown completed");
     },
   };

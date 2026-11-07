@@ -4,6 +4,7 @@ import type {
 } from "../../../entities/collaboration/model/types";
 import type { MaintenanceStore } from "../../../shared/api/storage/contract";
 import type { Logger } from "../../../shared/lib/logger/logger";
+import { tellyFetch } from "../../../shared/lib/http/tellyProxy";
 import type { ResolvedSessionDefaults } from "../../../shared/lib/project-identity/projectIdentity";
 import type { CollaborationBackend } from "../../collaboration/model/backend";
 import {
@@ -47,7 +48,7 @@ export class GatewayCollaborationBackend implements CollaborationBackend {
       ...(this.botUsername ? { botUsername: this.botUsername } : {}),
     });
 
-    const response = await fetch(url, {
+    const response = await tellyFetch(url, {
       method: "POST",
       headers: {
         "content-type": "application/json",

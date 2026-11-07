@@ -36,6 +36,7 @@ import {
 } from "./gateway-loopback";
 import { isGatewayAuthorizationValid } from "./src/shared/lib/gatewayAuth";
 import { MAX_BODY_SIZE_BYTES } from "./src/shared/lib/bodyLimits";
+import { getTellyWebSocketAgent, tellyFetch } from "./src/shared/lib/http/tellyProxy";
 import {
   TELLYMCP_CAPABILITIES,
   TELLYMCP_PROTOCOL_VERSION,
@@ -1421,7 +1422,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       url.pathname = `${url.pathname}/tools-md`.replace(/\/{2,}/gu, "/");
 
       try {
-        const response = await fetch(url, {
+        const response = await tellyFetch(url, {
           method: "GET",
           headers: {
             ...(runtime.config.distributed.gatewayAuthToken
@@ -3617,6 +3618,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       this.wsConnectionId = randomUUID();
 
       const socket = new wsLib.WebSocket(normalizedUrl, {
+        agent: getTellyWebSocketAgent(normalizedUrl),
         maxPayload: MAX_BODY_SIZE_BYTES,
         headers: runtime.config.distributed.gatewayAuthToken
           ? {

@@ -237,6 +237,11 @@ const envSchema = z.object({
     z.enum(["http", "socks5"]).optional(),
   ),
   HTTP_PROXY: optionalNonEmptyString,
+  TELLYMCP_HTTP_PROXY: optionalUrlString.refine(
+    (value) => !value || /^https?:\/\//iu.test(value),
+    "TELLYMCP_HTTP_PROXY must use http:// or https://",
+  ),
+  TELLYMCP_NO_PROXY: optionalNonEmptyString,
   SOCKS5_PROXY: optionalNonEmptyString,
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
@@ -568,17 +573,19 @@ export function loadConfig(): AppConfig {
     }
   }
 
+  const telegramProxyMode = parsed.PROXY_USE ?? (parsed.TELLYMCP_HTTP_PROXY ? "http" : undefined);
+  const telegramHttpProxy = parsed.TELLYMCP_HTTP_PROXY || parsed.HTTP_PROXY;
   const telegramProxy =
-    parsed.PROXY_USE === "http"
-      ? parsed.HTTP_PROXY
+    telegramProxyMode === "http"
+      ? telegramHttpProxy
         ? {
             type: "http" as const,
-            url: parsed.HTTP_PROXY,
+            url: telegramHttpProxy,
           }
         : (() => {
-            throw new Error("PROXY_USE=http requires HTTP_PROXY");
+            throw new Error("PROXY_USE=http requires TELLYMCP_HTTP_PROXY");
           })()
-      : parsed.PROXY_USE === "socks5"
+      : telegramProxyMode === "socks5"
         ? parsed.SOCKS5_PROXY
           ? {
               type: "socks5" as const,

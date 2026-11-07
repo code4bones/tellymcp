@@ -1,0 +1,6 @@
+FROM node:24-bookworm-slim
+
+# Dependency installation may need to compile node-pty for this Node version.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*

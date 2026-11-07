@@ -1,5 +1,111 @@
 # HANDOFF
 
+## Current continuation: detach/attach (2026-11-07)
+
+This section supersedes the historical snapshot below. The user selected
+detach/attach as the next feature. Single-binary packaging is off the active
+plan: `T-TELLYMCP-033` is cancelled and research decision `D-TELLYMCP-038`
+is archived in Marrow. Retain the research; resume only on a new request.
+
+### Repository and installed client
+
+- Runtime baseline: `main` at `be12ca8`, package and locally installed client
+  **0.0.43**. GitLab and GitHub are synchronized. This documentation may have
+  a newer commit; use the latest `main` when preparing the feature branch.
+- `feature/detached-sessions` at `5ef06a2` contains **design only**:
+  `docs/DETACHED_SESSIONS_DESIGN.md` and a development-doc pointer. The design
+  is on both remotes. Read it with `git show
+  feature/detached-sessions:docs/DETACHED_SESSIONS_DESIGN.md` before switching.
+- Before implementation, bring the feature branch up to date with `main`.
+  Its old **0.0.38** baseline is historical, not the future release number.
+  Do not lose the recent deployment/client changes while integrating it.
+- `autotests`, `gateway`, `onebot` and `ws` are already ancestors of `main`;
+  they contain no unmerged commits. Branch audit found no stash or other worktree.
+- Canonical shared client profile: `~/.tellymcp/.env`, mode `0600`, directory
+  `0700`. `~/.env-client` is a compatibility symlink. All 45 active settings
+  were preserved during migration. Never print credentials or replace user edits.
+- Config precedence: explicit `--env`, saved `.mcpsession.json` profile,
+  workspace `.env`, then the shared home profile. Workspace identity stays local.
+  Current workspace keeps session `New` and its stable gateway client UUID.
+- **0.0.41:** use `TELLYMCP_HTTP_PROXY` / `TELLYMCP_NO_PROXY`; preserve the
+  standard proxy environment inherited by the shell and agent.
+- **0.0.42:** `run --ws 9999` enables the extension bridge on that port for
+  this launch. **Without `--ws`, use env settings**, including enabled/port.
+  `init client` without a directory creates the shared home profile.
+- **0.0.43:** normal Unix PTY `read EIO` is quiet, including before `onExit`;
+  other fd errors and the actual shell exit status are preserved.
+- Local updates use `npm pack` (builds runtime and extensions), then
+  `npm install -g ./deadragdoll-tellymcp-<version>.tgz`, then a client restart.
+  Current install belongs to NVM Node **24.13.0**. No npm registry publication
+  or automatic local updater was added. Codex plugin and Playwright browsers
+  have separate CLI install commands.
+
+### Production deployment — keep distinct from the client version
+
+- Gateway remains **0.0.40**, image `tellymcp-gateway:0.0.40-39cd1273b39f` on
+  **savant**, not fr-vpn. Read-only inspection on 2026-11-07 found all five
+  Compose services running and healthy. No gateway release accompanied the
+  local client 0.0.41–0.0.43 updates.
+- `/opt/tellymcp`: `docker-compose.yml`, secret `.env-gateway` (`0600`),
+  `nginx/default.conf`, `state/`, `backups/`, `releases/`. PostgreSQL 16, Redis 7
+  and RabbitMQ 3 are dedicated private containers with persistent volumes.
+- HTTPS domain `tellymcp.deadragdoll.net` -> existing Nginx Proxy Manager ->
+  `192.168.1.68:18088` -> container nginx -> private gateway `8080`.
+  HTTP client endpoint: `https://tellymcp.deadragdoll.net/api/gateway`;
+  WSS: `wss://tellymcp.deadragdoll.net/api/gateway/ws`.
+- GitLab CI uses shell runner tag **`telly_savant`**. Main/MR builds produce
+  npm `.tgz` artifacts and gateway images. A matching **`vX.Y.Z` tag** deploys
+  production after main-ancestry/version checks. A main push alone does not
+  deploy. Latest production release: `v0.0.40`, pipeline **7527**.
+- Telegram uses **polling**, `TELEGRAM_WEBHOOK_ENABLED=false`: inbound webhook
+  traffic cannot reach this network. User confirmed messages, menu and Live work.
+  Keep polling during future deploys and rollbacks; older snapshots have webhook
+  enabled. Telegram egress still uses the existing HTTP proxy on fr-vpn:33128.
+- Old fr-vpn PM2 gateway, source infrastructure and temporary legacy URL proxy
+  are stopped; data/backups remain. The fr-vpn host/HTTP egress proxy still matters.
+  Do not use `dev2.sh` or PM2 to deploy the gateway again.
+- Manual recovery: `cd /opt/tellymcp`, then
+  `docker compose --env-file .env-gateway up -d`. Never print the full env or
+  interpolated Compose config. Deployment rollback restores app/config, not DB.
+- Detailed recovery paths, volume names and migration incidents:
+  Marrow **`I-TELLYMCP-039`**. Client handoffs: **042**, **043**, **044**.
+
+### Next session: start with T-TELLYMCP-040
+
+1. Read this section, latest Marrow handoff and the design on the feature branch.
+   Refresh Git state and integrate latest `main` into the feature branch.
+2. Prototype terminal restoration before changing ordinary `tellymcp run`:
+   ANSI/VT snapshot, normal/alternate screen, styles/cursor/modes, ordered
+   snapshot-to-live boundary, Unicode, resize and terminal query ownership.
+   Check a compatible serialization addon against the current xterm 5.5 packages.
+   Require the same shell/agent PID, no missing/duplicated output or query replies.
+3. Then follow existing Marrow tasks: **041** background owner/private local
+   protocol/discovery; **042** `run --detach`, `sessions`, `attach`, `stop` and
+   terminal cleanup; **043** account authorization and one controller lease;
+   **044** remote attach through the gateway; **045** real console checks/docs/release.
+4. Keep one package, one PTY/agent/console identity and the existing raw terminal
+   experience. No tmux dependency or client Redis. Attach starts no duplicate
+   shell, agent, broker or browser bridge. Preserve the shared profile, scoped
+   proxies, `--ws` semantics and workspace marker.
+5. Local detach/reattach comes first. Remote attach must authenticate ownership
+   of the target account; the shared gateway bearer alone is insufficient.
+   Disconnecting an attachment must leave the owner and PTY alive; actual shell
+   exit or explicit stop must shut down owned services with the real exit status.
+6. This handoff prepares future work; implementation has not started. Do not
+   create a production release tag or deploy the experimental branch as part
+   of the restoration prototype.
+
+Latest completed runtime checks: build/lint passed; **378 tests passed, 2 skipped**.
+Installed client auto-discovery, authenticated gateway HTTPS/WSS and foreground
+shell exit were verified. Optional Playwright Chromium binaries are missing in
+the local installation. Actual SSH disconnect, detach/reattach, terminal fidelity
+and remote attach remain future acceptance checks.
+
+## Historical snapshot (2026-08-07)
+
+The material below is retained for history. Its versions, deployment assumptions
+and backlog statuses are not current; use the continuation section above and Marrow.
+
 Operational snapshot for the next session.
 
 Last updated: `2026-08-07`

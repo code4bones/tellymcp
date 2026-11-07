@@ -3,6 +3,7 @@ import { SocksProxyAgent } from "socks-proxy-agent";
 
 import type { AppConfig } from "../../../app/config/env";
 import type { Logger } from "../../lib/logger/logger";
+import { bypassTellyProxy, tellyFetch } from "../../lib/http/tellyProxy";
 
 type FetchAgent = HttpsProxyAgent<string> | SocksProxyAgent;
 type TelegramBaseFetchConfig = Omit<
@@ -31,7 +32,8 @@ export function createTelegramBaseFetchConfig(
   config: AppConfig,
   logger: Logger,
 ): TelegramBaseFetchConfig {
-  const agent: FetchAgent | undefined = config.telegram.proxy
+  const bypass = bypassTellyProxy(new URL("https://api.telegram.org"), process.env.TELLYMCP_NO_PROXY);
+  const agent: FetchAgent | undefined = config.telegram.proxy && !bypass
     ? config.telegram.proxy.type === "http"
       ? new HttpsProxyAgent(config.telegram.proxy.url)
       : new SocksProxyAgent(config.telegram.proxy.url)
@@ -53,6 +55,12 @@ export function createTelegramFetch(
   logger: Logger,
 ): typeof globalThis.fetch {
   const baseFetchConfig = createTelegramBaseFetchConfig(config, logger);
+  if (config.telegram.proxy?.type === "http") {
+    return (input, init) => tellyFetch(input, init, {
+      httpProxy: config.telegram.proxy?.url,
+      noProxy: process.env.TELLYMCP_NO_PROXY,
+    });
+  }
   return async (input, init) =>
     globalThis.fetch(input, {
       ...baseFetchConfig,

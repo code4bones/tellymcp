@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { spawn } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import net from "node:net";
@@ -33,6 +34,8 @@ import {
   resolveAgentProvider,
 } from "./services/features/telegram-mcp/src/features/agent-runtime/model/agentProviderRegistry";
 import { inspectCodexRuntime } from "./services/features/telegram-mcp/src/features/agent-runtime/model/codexRuntimeDiagnostics";
+import { getTellyWebSocketAgent, tellyFetch, type TellyProxySettings } from "./services/features/telegram-mcp/src/shared/lib/http/tellyProxy";
+import { browserWsOverrides, defaultClientEnvPath, resolveRuntimeEnvPath } from "./cliRuntimeOptions";
 
 type InitMode = "client" | "gateway" | "both";
 type CliCommand =
@@ -156,11 +159,12 @@ function printHelp(): void {
     "  tellymcp init <client|gateway|both> [directory]",
     "  tellymcp configure [--no-open]",
     "  tellymcp migrate-env <input.env> > .migrated-env",
-    "  tellymcp run [--env <file>]",
+    "  tellymcp run [--env <file>] [--ws <port>]",
     "  tellymcp run [--env <file>] [--agent codex|claude]",
     "  tellymcp run --env=<file>",
     "  tellymcp run --env .env-client -s backendDev",
-    "  tellymcp run              # if .mcpsession.json already stores env_file + local_session_id",
+    "  tellymcp run --ws 9999 -s backendDev",
+    "  tellymcp run              # workspace settings or $HOME/.tellymcp/.env",
     "  tellymcp doctor [--env <file>]",
     "  tellymcp system-prune [--env <file>] --yes",
     "  tellymcp browser install",
@@ -181,6 +185,7 @@ function printHelp(): void {
     "  tellymcp configure",
     "  tellymcp migrate-env ./old.env > ./new.env",
     "  tellymcp run",
+    "  tellymcp run --ws 9999 -s backendDev",
     "  tellymcp run --env .env.client",
     "  tellymcp run --env .env-client -s backendDev",
     "  tellymcp run --env .env-client --agent codex",
@@ -207,10 +212,6 @@ type LoadedCliEnv = {
   envPath: string;
   parsed: Record<string, string>;
 };
-
-function resolveMarkerEnvPath(rawPath: string, cwd: string): string {
-  return path.isAbsolute(rawPath) ? rawPath : path.resolve(cwd, rawPath);
-}
 
 function formatMarkerEnvPath(envPath: string, cwd: string): string {
   const resolvedCwd = path.resolve(cwd);
@@ -301,6 +302,7 @@ function loadCliEnv(args: string[]): LoadedCliEnv {
     parsed: {
       ...fileEnv,
       ...runtimeEnvOverrides,
+      ...browserWsOverrides(args),
       ...(sessionOverride
         ? {
             TELLYMCP_SESSION_ID: sessionOverride,
@@ -556,8 +558,11 @@ async function runConfigure(args: string[]): Promise<void> {
 }
 
 function initWorkspace(mode: InitMode, directoryArg?: string): void {
-  const targetDir = path.resolve(directoryArg ?? process.cwd());
-  mkdirSync(targetDir, { recursive: true });
+  const globalClient = mode === "client" && directoryArg === undefined;
+  const targetDir = globalClient
+    ? path.dirname(defaultClientEnvPath(os.homedir()))
+    : path.resolve(directoryArg ?? process.cwd());
+  mkdirSync(targetDir, { recursive: true, ...(globalClient ? { mode: 0o700 } : {}) });
 
   const envPath = path.join(targetDir, ".env");
   if (existsSync(envPath)) {
@@ -565,7 +570,14 @@ function initWorkspace(mode: InitMode, directoryArg?: string): void {
   }
 
   const template = loadTemplate(mode);
-  writeFileSync(envPath, template, "utf8");
+  writeFileSync(envPath, template, { encoding: "utf8", mode: 0o600 });
+
+  if (globalClient) {
+    printBanner("client configuration initialized");
+    printSection("Created", [`  ${envPath}`]);
+    printSection("Next", [`  1. Edit ${envPath}`, "  2. In your workspace: tellymcp run --ws 9999"]);
+    return;
+  }
 
   for (const subdir of ["logs", "data", "artifacts"]) {
     mkdirSync(path.join(targetDir, subdir), { recursive: true });
@@ -626,29 +638,10 @@ function runMigrateEnv(args: string[]): void {
 }
 
 function resolveRunEnvPath(args: string[]): string {
-  const [firstArg, secondArg] = args;
   const marker = getSessionMarkerForCwd(process.cwd());
-
-  if (firstArg?.startsWith("--env=")) {
-    const value = firstArg.slice("--env=".length).trim();
-    if (!value) {
-      fail("Expected a file path after --env=");
-    }
-    return path.resolve(process.cwd(), value);
-  }
-
-  if (firstArg === "--env") {
-    if (!secondArg?.trim()) {
-      fail("Expected a file path after --env");
-    }
-    return path.resolve(process.cwd(), secondArg);
-  }
-
-  if (marker?.envFile?.trim()) {
-    return resolveMarkerEnvPath(marker.envFile.trim(), process.cwd());
-  }
-
-  return path.resolve(process.cwd(), ".env");
+  return resolveRuntimeEnvPath(args, {
+    cwd: process.cwd(), homeDir: os.homedir(), markerEnvFile: marker?.envFile,
+  });
 }
 
 function joinUrlPath(left: string, right: string): string {
@@ -791,15 +784,16 @@ async function checkTcpPort(
 async function checkHttpHealth(
   url: string,
   timeoutMs = 3000,
+  proxySettings?: TellyProxySettings,
 ): Promise<{ ok: boolean; message: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(url, {
+    const response = await tellyFetch(url, {
       method: "GET",
       signal: controller.signal,
-    });
+    }, proxySettings);
     clearTimeout(timer);
     return {
       ok: response.ok,
@@ -817,6 +811,8 @@ async function checkHttpHealth(
 async function checkWebSocketUrl(
   url: string,
   timeoutMs = 3000,
+  proxySettings?: TellyProxySettings,
+  authToken?: string,
 ): Promise<{ ok: boolean; message: string }> {
   return await new Promise((resolve) => {
     let settled = false;
@@ -836,7 +832,10 @@ async function checkWebSocketUrl(
       }
     };
 
-    const socket = new WebSocket(url);
+    const socket = new WebSocket(url, {
+      agent: getTellyWebSocketAgent(url, proxySettings),
+      ...(authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {}),
+    });
     const timer = setTimeout(() => {
       finish(false, `${url} timed out`);
     }, timeoutMs);
@@ -871,6 +870,13 @@ async function checkWebSocketUrl(
 
 async function runDoctor(args: string[]): Promise<void> {
   const { envPath, parsed } = loadCliEnv(args);
+  const proxySettings: TellyProxySettings = {
+    httpProxy: parsed.TELLYMCP_HTTP_PROXY,
+    noProxy: parsed.TELLYMCP_NO_PROXY,
+  };
+  const doctorHttpHealth = (url: string) => checkHttpHealth(url, 3000, proxySettings);
+  const doctorWebSocket = (url: string) => checkWebSocketUrl(url, 3000, proxySettings, parsed.GATEWAY_AUTH_TOKEN);
+
   const nativePtyStatus = await checkNativePtyRuntime();
 
   printBanner("doctor", "Local installation diagnostics");
@@ -977,7 +983,7 @@ async function runDoctor(args: string[]): Promise<void> {
   if (mode === "client") {
     const gatewayPublicUrl = parsed.GATEWAY_PUBLIC_URL?.trim();
     if (gatewayPublicUrl) {
-      const gatewayHealth = await checkHttpHealth(
+      const gatewayHealth = await doctorHttpHealth(
         `${gatewayPublicUrl.replace(/\/+$/u, "")}/healthz`,
       );
       checks.push(
@@ -996,7 +1002,7 @@ async function runDoctor(args: string[]): Promise<void> {
     }
 
     if (gatewayWsUrl) {
-      const gatewayWs = await checkWebSocketUrl(gatewayWsUrl);
+      const gatewayWs = await doctorWebSocket(gatewayWsUrl);
       checks.push(
         `${gatewayWs.ok ? pc.green("  OK") : pc.red("  ERROR")} gateway ws: ${gatewayWs.message}`,
       );
@@ -1011,7 +1017,7 @@ async function runDoctor(args: string[]): Promise<void> {
     }
 
     if (publicWebappUrl) {
-      const publicWebapp = await checkHttpHealth(publicWebappUrl);
+      const publicWebapp = await doctorHttpHealth(publicWebappUrl);
       checks.push(
         `${publicWebapp.ok ? pc.green("  OK") : pc.red("  ERROR")} public webapp: ${publicWebapp.message}`,
       );
@@ -1029,7 +1035,7 @@ async function runDoctor(args: string[]): Promise<void> {
   }
 
   if (mode === "gateway" || mode === "both") {
-    const localHealth = await checkHttpHealth(
+    const localHealth = await doctorHttpHealth(
       `http://${httpHost}:${httpPort}${healthUrlPath}`,
     );
     checks.push(
@@ -1040,7 +1046,7 @@ async function runDoctor(args: string[]): Promise<void> {
     );
 
     if (externalHealthUrl) {
-      const externalHealth = await checkHttpHealth(externalHealthUrl);
+      const externalHealth = await doctorHttpHealth(externalHealthUrl);
       checks.push(
         `${externalHealth.ok ? pc.green("  OK") : pc.red("  ERROR")} public healthz: ${externalHealth.message}`,
       );
@@ -1057,7 +1063,7 @@ async function runDoctor(args: string[]): Promise<void> {
     }
 
     if (gatewayWsUrl) {
-      const gatewayWs = await checkWebSocketUrl(gatewayWsUrl);
+      const gatewayWs = await doctorWebSocket(gatewayWsUrl);
       checks.push(
         `${gatewayWs.ok ? pc.green("  OK") : pc.red("  ERROR")} public ws: ${gatewayWs.message}`,
       );
@@ -1072,7 +1078,7 @@ async function runDoctor(args: string[]): Promise<void> {
     }
 
     if (publicWebappUrl) {
-      const publicWebapp = await checkHttpHealth(publicWebappUrl);
+      const publicWebapp = await doctorHttpHealth(publicWebappUrl);
       checks.push(
         `${publicWebapp.ok ? pc.green("  OK") : pc.red("  ERROR")} public webapp: ${publicWebapp.message}`,
       );
@@ -1690,6 +1696,7 @@ async function runRuntime(args: string[]): Promise<void> {
   if (agentProvider && !isForegroundPtyClientMode(parsed)) {
     fail("--agent is supported only when DISTRIBUTED_MODE=client");
   }
+  Object.assign(process.env, browserWsOverrides(args));
   if (parsed.TELLYMCP_SESSION_ID) {
     process.env.TELLYMCP_SESSION_ID = parsed.TELLYMCP_SESSION_ID;
   }

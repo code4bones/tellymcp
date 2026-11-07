@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Terminal shutdown
+
+- Treat the Unix PTY socket's `read EIO` as EOF, including when it arrives before the process exit notification. Keep other fd errors visible and preserve normal exit handling.
+
+### Client startup
+
+- Discover the default client profile in `$HOME/.tellymcp/.env`, preserve explicit/workspace overrides and migrate legacy home-profile marker paths.
+- Add validated `--ws <port>` / `--ws=<port>` per-process extension listener overrides without rewriting the shared env. Preserve env behavior when the flag is omitted.
+
+### Client configuration
+
+- Add application-scoped HTTP/WSS proxy routing and bypass rules without modifying global proxy variables or dispatchers. Apply the same routing to gateway collaboration, TOOLS.md checks, temporary file uploads and HTTP-proxied Telegram file downloads.
+- Migrate `HTTP_PROXY`/`NO_PROXY` file keys to `TELLYMCP_HTTP_PROXY`/`TELLYMCP_NO_PROXY` and preserve parent-shell proxy settings for the agent.
+
+### Deployment
+
+- Inherit the deployment error trap inside shell functions so Compose failures restore the saved release as well as HTTP health-check failures.
+
+- Add the `telly_savant` CI build and tagged deployment pipeline with versioned gateway images, native PTY checks, readiness checks, serialized releases, and configuration/image rollback.
+- Deploy a dedicated Compose stack and container nginx under `/opt/tellymcp`, using `.env-gateway`, private infrastructure ports, persistent data, dynamic gateway DNS, and NPM TLS forwarding.
+
 ### Fixed
 
 - Version compatibility events from the WebSocket startup/reconnect handshake no longer call the human-message terminal nudge. Diagnostics and Telegram version notifications remain available, including protocol rejection; reconnecting alone does not start an agent turn.

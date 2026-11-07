@@ -2,6 +2,7 @@ import os from "node:os";
 
 import type { MaintenanceStore } from "../../../shared/api/storage/contract";
 import { assertStringBodySize } from "../../../shared/lib/bodyLimits";
+import { tellyFetch } from "../../../shared/lib/http/tellyProxy";
 
 export function normalizeGatewayBaseUrl(value: string): URL {
   const url = new URL(value);
@@ -25,7 +26,7 @@ export async function callGatewayJson<T>(input: {
   const serializedBody = JSON.stringify(input.body);
   assertStringBodySize(serializedBody);
 
-  const response = await fetch(url, {
+  const response = await tellyFetch(url, {
     method: "POST",
     headers: {
       "content-type": "application/json",

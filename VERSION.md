@@ -4,6 +4,40 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.43
+
+### Fixed
+
+- Normal Unix terminal shutdown no longer prints a `pty fd error ... read EIO` stack trace. Exit status and other PTY error diagnostics are preserved.
+
+## 0.0.42
+
+### Added
+
+- Clients automatically find their shared configuration at `$HOME/.tellymcp/.env`. Explicit `--env`, saved workspace profiles and local `.env` files retain precedence; old markers pointing to `$HOME/.env-client` resolve to the migrated shared profile.
+- `tellymcp run --ws 9999` enables the extension WebSocket listener on that port for the current process. Without `--ws`, the env settings apply. The flag can be combined with `-s` and `--env` in any order.
+- `tellymcp init client` creates the shared home configuration; an explicit directory still creates a workspace configuration.
+
+## 0.0.41
+
+### Changed
+
+- Client networking uses `TELLYMCP_HTTP_PROXY` and `TELLYMCP_NO_PROXY` for gateway HTTP/WebSocket connections and file uploads. These settings do not replace the standard proxy environment inherited by the shell and agent.
+- `tellymcp migrate-env` renames proxy settings in configuration files while preserving explicitly configured values and defaults.
+
+## 0.0.40
+
+### Fixed
+
+- Deployment rollback also runs when a Docker Compose command fails inside the deployment helper function.
+
+## 0.0.39
+
+### Changed
+
+- Gateway releases are built and deployed through GitLab CI on the `telly_savant` shell runner. The gateway, nginx, PostgreSQL, Redis, and RabbitMQ run as a dedicated Docker Compose stack in `/opt/tellymcp`.
+- The public gateway address moves to `https://tellymcp.deadragdoll.net/api`. Update client gateway HTTP/WSS URLs and reconnect OAuth integrations using the new domain.
+
 ## 0.0.38
 
 ### Fixed

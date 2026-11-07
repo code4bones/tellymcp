@@ -10,6 +10,7 @@ import Redis from "ioredis";
 import { Client as PgClient } from "pg";
 import WebSocket from "ws";
 import { connect as connectAmqp } from "amqplib";
+import { getTellyWebSocketAgent, tellyFetch } from "./services/features/telegram-mcp/src/shared/lib/http/tellyProxy";
 
 export type ConfigureRole = "client" | "gateway";
 
@@ -633,8 +634,17 @@ export function validateConfiguredEnvironment(input: {
     if (!input.values.TELEGRAM_WEBHOOK_SECRET?.trim())
       errors.TELEGRAM_WEBHOOK_SECRET = "Секрет обязателен для webhook.";
   }
-  if (input.values.PROXY_USE === "http" && !input.values.HTTP_PROXY?.trim())
-    errors.HTTP_PROXY = "Укажите HTTP proxy для выбранного режима.";
+  if (input.values.PROXY_USE === "http" && !input.values.TELLYMCP_HTTP_PROXY?.trim())
+    errors.TELLYMCP_HTTP_PROXY = "Укажите HTTP proxy для выбранного режима.";
+  if (input.values.TELLYMCP_HTTP_PROXY?.trim()) {
+    try {
+      if (!["http:", "https:"].includes(new URL(input.values.TELLYMCP_HTTP_PROXY).protocol)) {
+        errors.TELLYMCP_HTTP_PROXY = "Допустимые протоколы proxy: http:, https:.";
+      }
+    } catch {
+      errors.TELLYMCP_HTTP_PROXY = "Укажите корректный абсолютный URL proxy.";
+    }
+  }
   if (input.values.PROXY_USE === "socks5" && !input.values.SOCKS5_PROXY?.trim())
     errors.SOCKS5_PROXY = "Укажите SOCKS5 proxy для выбранного режима.";
   const oauthConfigured = [
@@ -705,8 +715,11 @@ async function checkTelegramBot(
   const token = values.TELEGRAM_BOT_TOKEN?.trim();
   if (!token)
     return { ok: false, message: "Сначала укажите токен Telegram-бота." };
-  const response = await fetch(`https://api.telegram.org/bot${token}/getMe`, {
+  const response = await tellyFetch(`https://api.telegram.org/bot${token}/getMe`, {
     signal: AbortSignal.timeout(5_000),
+  }, {
+    httpProxy: values.TELLYMCP_HTTP_PROXY,
+    noProxy: values.TELLYMCP_NO_PROXY,
   });
   const payload = (await response.json()) as {
     ok?: boolean;
@@ -785,6 +798,10 @@ async function checkGatewayWebSocket(
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const socket = new WebSocket(values.GATEWAY_WS_URL!, {
+      agent: getTellyWebSocketAgent(values.GATEWAY_WS_URL!, {
+        httpProxy: values.TELLYMCP_HTTP_PROXY,
+        noProxy: values.TELLYMCP_NO_PROXY,
+      }),
       headers: {
         Authorization: `Bearer ${values.GATEWAY_AUTH_TOKEN}`,
       },
@@ -826,8 +843,11 @@ async function checkGateway(
   if (!base || !values.GATEWAY_WS_URL) {
     return { ok: false, message: "Сначала укажите публичный базовый URL." };
   }
-  const response = await fetch(`${base}/healthz`, {
+  const response = await tellyFetch(`${base}/healthz`, {
     signal: AbortSignal.timeout(5_000),
+  }, {
+    httpProxy: values.TELLYMCP_HTTP_PROXY,
+    noProxy: values.TELLYMCP_NO_PROXY,
   });
   if (!response.ok)
     throw new Error(`Gateway health вернул HTTP ${response.status}.`);

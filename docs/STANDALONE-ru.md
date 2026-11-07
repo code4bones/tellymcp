@@ -159,8 +159,13 @@ tellymcp run --env .env
 Agent:
 
 ```bash
-tellymcp run --env .env -s NEW
+tellymcp run --ws 9999 -s NEW
 ```
+
+Общий конфиг клиента `$HOME/.tellymcp/.env` находится автоматически. Явный
+`--env <file>`, сохранённый профиль workspace и локальный `.env` имеют приоритет.
+`--ws <port>` включает WebSocket для расширения на этом порту для текущего
+процесса. Без флага используются настройки из env.
 
 После того как в workspace появится `.mcpsession.json`, дальше обычно достаточно:
 
@@ -237,7 +242,66 @@ tellymcp system-prune --env .env --yes
 - browser screenshot для человека лучше отправлять через `browser_screenshot(send_to_telegram=true)`
 - файлы между консолями лучше отправлять через `send_partner_file`
 
-## 11. Чего не делать в новых setup
+## 11. Деплой через GitLab CI на savant
+
+Shell runner с тегом `telly_savant` проверяет и собирает npm-пакет в контейнере
+Node 24, затем собирает gateway image с версией и SHA коммита. Push в `main` и
+merge request выполняют только сборку. Тег `vX.Y.Z` запускает деплой после
+проверки версии пакета и принадлежности коммита к `main`. Обе job должны
+использовать Docker daemon на savant. При очистке Docker сохраняйте текущий и
+предыдущий образы.
+
+Постоянные файлы: `/opt/tellymcp/docker-compose.yml`,
+`/opt/tellymcp/.env-gateway`, `/opt/tellymcp/nginx/default.conf`.
+Nginx Proxy Manager обслуживает HTTPS для `tellymcp.deadragdoll.net` и направляет
+HTTP на `192.168.1.68:18088`. Порт на хосте публикует только nginx-контейнер;
+gateway, PostgreSQL, Redis и RabbitMQ работают в собственной Docker-сети.
+В NPM нужны WebSocket upgrade и передача MCP stream без буферизации.
+
+```bash
+cd /opt/tellymcp
+docker compose --env-file .env-gateway up -d
+docker compose --env-file .env-gateway ps
+docker compose --env-file .env-gateway logs --tail 100 tellymcp-gateway
+```
+
+В `.env-gateway` находятся пароли DB/RMQ, gateway secrets, публичные URL,
+`TELLYMCP_IMAGE` и необязательные `NGINX_BIND_IP`/`NGINX_PORT`. Compose задаёт
+внутренние адреса инфраструктуры и HTTP-порт. Проверяйте конфигурацию через
+`compose config --quiet`: полный вывод `config` содержит секреты.
+В `state/` сохраняются session marker, файлы обмена и файловые логи;
+данные инфраструктуры — в именованных volumes. `down -v` удаляет базы.
+
+При первом переносе подготовьте каталог для `gitlab-runner`, скопируйте и
+адаптируйте env действующего gateway, поднимите только `postgres redis rabbitmq`.
+До остановки исходного gateway проверьте, что целевые базы пусты. Затем
+остановите gateway, сохраните и восстановите PostgreSQL одной транзакцией
+(`pg_restore --single-transaction`) и восстановите Redis. Volumes имеют явные
+имена `tellymcp_savant_postgres_v1`, `tellymcp_savant_redis_v1` и
+`tellymcp_savant_rabbitmq_v1`; не используйте старые `tellymcp_*_data`.
+
+Для импорта RDB в Redis с включённым AOF загрузите backup во временный
+изолированный Redis без AOF и перенесите ключи через `DUMP`/`RESTORE` с сохранением
+оставшегося TTL. До запуска gateway проверьте содержимое ключей: одного
+копирования `dump.rdb` рядом с AOF-файлами недостаточно.
+
+Проверьте/опустошите очереди RabbitMQ перед переносом. Gateway создаёт свои
+очереди автоматически. Перенесите session marker в `state/.mcpsession.json`.
+Файл `.migration-ready` создавайте после восстановления данных — без него CI
+не выполняет деплой. После запуска приложения и nginx проверьте публичный
+health endpoint и bot webhook, обновите HTTP/WSS URL клиентов и переподключите
+OAuth-интеграции. Сохраните исходный env и дампы в защищённом backup-каталоге.
+
+Обычный деплой обновляет только gateway и nginx, проверяет публичный endpoint
+и инфраструктуру, при ошибке возвращает прошлую конфигурацию и образ.
+Снимки сохраняются в `releases/` с ограниченными правами. Для ручного отката
+восстановите `.env-gateway`, `docker-compose.yml` и `default.conf` (в `nginx/`)
+из снимка, затем выполните с теми же Compose flags
+`up -d --no-deps tellymcp-gateway nginx` и `exec nginx nginx -s reload`.
+Откат образа не отменяет изменения схемы БД: при необходимости нужен
+соответствующий backup базы. Не копируйте старый снимок поверх работающего volume.
+
+## 12. Чего не делать в новых setup
 
 Не строй новые setup вокруг:
 

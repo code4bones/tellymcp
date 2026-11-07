@@ -1,78 +1,120 @@
-services:
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+name: tellymcp
 
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: mydb
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${DB_USER:?Set DB_USER in .env-gateway}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env-gateway}
+      POSTGRES_DB: ${DB_NAME:?Set DB_NAME in .env-gateway}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 10s
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 12
+    logging: *logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: [redis-server, --appendonly, "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    logging: *logging
 
   rabbitmq:
     image: rabbitmq:3-management
+    hostname: rabbitmq
     restart: unless-stopped
     environment:
-      RABBITMQ_DEFAULT_USER: user
-      RABBITMQ_DEFAULT_PASS: password
-    ports:
-      - "5672:5672"
-      - "15672:15672"
+      RABBITMQ_DEFAULT_USER: ${RMQ_USER:?Set RMQ_USER in .env-gateway}
+      RABBITMQ_DEFAULT_PASS: ${RMQ_PASSWORD:?Set RMQ_PASSWORD in .env-gateway}
+      RABBITMQ_DEFAULT_VHOST: ${RMQ_VHOST:-/}
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
       interval: 10s
-      timeout: 5s
-      retries: 5
+      timeout: 10s
+      retries: 12
+    logging: *logging
 
   tellymcp-gateway:
-    container_name: gw
-    build:
-      context: .
-      dockerfile: Dockerfile.gateway
-      args:
-        TELLYMCP_VERSION: ${TELLYMCP_VERSION:-0.0.10}
+    image: ${TELLYMCP_IMAGE:?Set TELLYMCP_IMAGE in .env-gateway or the environment}
+    init: true
     restart: unless-stopped
+    stop_grace_period: 30s
     depends_on:
-      redis:
-        condition: service_healthy
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     environment:
-      # The mounted gateway env file must define GATEWAY_AUTH_TOKEN.
       ENV_FILE: /app/.env-gateway
       MCP_HTTP_HOST: 0.0.0.0
+      PORT: "8080"
+      ROOT_PREFIX: /api
       REDIS_HOST: redis
+      REDIS_PORT: "6379"
       DB_HOST: postgres
-    ports:
-      - "8090:8080"
+      DB_PORT: "5432"
+      RMQ_HOST: rabbitmq
+      RMQ_PORT: "5672"
+      MCP_XCHANGE_DIR: /app/state/.mcp-xchange
+      LOG_FILE_PATH: /app/state/.tellymcp/log.jsonl
+      TINI_KILL_PROCESS_GROUP: "1"
     volumes:
-      - ${GATEWAY_ENV_FILE:-./.env-gateway}:/app/.env-gateway:ro
-      - ${LOG_HOST_DIR:-./.tellymcp}:/app/.tellymcp
+      - ./.env-gateway:/app/.env-gateway:ro
+      - ./state:/app/state
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8080/api/gateway/healthz', {signal: AbortSignal.timeout(4000)}).then(r => {if (!r.ok) process.exit(1)}).catch(() => process.exit(1))"
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 24
+    logging: *logging
+
+  nginx:
+    image: nginx:1.28-alpine
+    restart: unless-stopped
+    depends_on:
+      tellymcp-gateway:
+        condition: service_healthy
+    ports:
+      - "${NGINX_BIND_IP:-192.168.1.68}:${NGINX_PORT:-18088}:80"
+    volumes:
+      - ./nginx:/etc/nginx/conf.d:ro
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1/api/healthz]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    logging: *logging
 
 volumes:
-  redis_data:
   postgres_data:
+    name: tellymcp_savant_postgres_v1
+  redis_data:
+    name: tellymcp_savant_redis_v1
   rabbitmq_data:
+    name: tellymcp_savant_rabbitmq_v1

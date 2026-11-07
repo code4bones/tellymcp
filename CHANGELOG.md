@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Terminal shutdown
+
+- Treat the Unix PTY socket's `read EIO` as EOF, including when it arrives before the process exit notification. Keep other fd errors visible and preserve normal exit handling.
+
 ### Client startup
 
 - Discover the default client profile in `$HOME/.tellymcp/.env`, preserve explicit/workspace overrides and migrate legacy home-profile marker paths.

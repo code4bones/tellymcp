@@ -4,6 +4,12 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.43
+
+### Fixed
+
+- Normal Unix terminal shutdown no longer prints a `pty fd error ... read EIO` stack trace. Exit status and other PTY error diagnostics are preserved.
+
 ## 0.0.42
 
 ### Added

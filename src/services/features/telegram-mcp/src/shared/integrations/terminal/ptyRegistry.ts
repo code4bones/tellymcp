@@ -280,6 +280,12 @@ function createSessionRecord(
   (pty as unknown as { on(event: "error", listener: (error: unknown) => void): void }).on(
     "error",
     (error: unknown) => {
+      // Unix PTYs report EOF as read EIO when their last child closes. The
+      // socket error can arrive before onExit; node-pty handles the close.
+      const fdError = error as NodeJS.ErrnoException | null | undefined;
+      if (fdError?.code === "EIO" && fdError.syscall === "read") {
+        return;
+      }
       console.error("pty fd error", record.target, error);
     },
   );

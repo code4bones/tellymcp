@@ -9,17 +9,19 @@ is archived in Marrow. Retain the research; resume only on a new request.
 
 ### Repository and installed client
 
-- Runtime baseline: `main` at `be12ca8`, package and locally installed client
-  **0.0.43**. GitLab and GitHub are synchronized. This documentation may have
-  a newer commit; use the latest `main` when preparing the feature branch.
+- Package and locally installed client remain **0.0.43** (last stable client fix
+  `be12ca8`). Current `main` includes unreleased Linux local detach/attach, merged
+  as **`f377ea7`** from `feature/detached-sessions` at **`968698e`**. Source
+  integration does not update the global installation or deploy the gateway.
 - `feature/detached-sessions` was updated from latest `main` (`13a14e0`) by
   merge **`b34bb74`**, preserving runtime baseline **0.0.43**. Stage-1 prototype
   is committed as **`9e2d636`**, accepted after the user's manual check; T040 is
   done. Stage-2 owner implementation is committed as **`9f67959`**. Stage-3 public
-  CLI/frontend changes include the session picker, formatted listing and scoped
+  CLI/frontend commit **`968698e`** includes the session picker, formatted listing and scoped
   SQLite warning suppression. The user accepted local terminal/buffer restoration,
   switching between two sessions and the picker, then requested integration into
-  `main` on 2026-11-08. This is source integration; installed client stays 0.0.43.
+  `main` on 2026-11-08; merge **`f377ea7`** completed without conflicts and retains
+  the tested feature tree. Continue new development from `main`.
   The earlier design-only commit `5ef06a2` remains on both remotes.
 - Read `docs/DETACHED_SESSIONS_DESIGN.md`, especially **Stage 1 prototype** and
   **Stage 2 implementation** and **Stage 3 implementation**,
@@ -32,7 +34,7 @@ is archived in Marrow. Retain the research; resume only on a new request.
   were preserved during migration. Never print credentials or replace user edits.
 - Config precedence: explicit `--env`, saved `.mcpsession.json` profile,
   workspace `.env`, then the shared home profile. Workspace identity stays local.
-  Current workspace keeps session `New` and its stable gateway client UUID.
+  Preserve each workspace's current marker and stable gateway client UUID.
 - **0.0.41:** use `TELLYMCP_HTTP_PROXY` / `TELLYMCP_NO_PROXY`; preserve the
   standard proxy environment inherited by the shell and agent.
 - **0.0.42:** `run --ws 9999` enables the extension bridge on that port for
@@ -171,6 +173,9 @@ extensions. Extracted tarball contains the owner/frontend, picker, formatter and
 SQLite loader; help, attach help and isolated sessions JSON work using the existing
 workspace dependencies. The package is a temporary verification artifact, not a
 release or global install. Remote main refs were checked at `13a14e0` before merge.
+T041/T042 remain in review because their documented SSH/provider/authenticated
+integration acceptance is still open; merging the accepted local CLI scope does
+not complete remote attach or the entire detach/attach milestone.
 Real PTY tests preserved shell/interactive-child PIDs, detached progress, raw
 Unicode input and one reply per query through attach/detach, final output and
 exit 7. The manual harness reported Bash PID `1411199` both before and after

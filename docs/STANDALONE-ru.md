@@ -274,7 +274,13 @@ docker compose --env-file .env-gateway logs --tail 100 tellymcp-gateway
 (`pg_restore --single-transaction`) и восстановите Redis. Volumes имеют явные
 имена `tellymcp_savant_postgres_v1`, `tellymcp_savant_redis_v1` и
 `tellymcp_savant_rabbitmq_v1`; не используйте старые `tellymcp_*_data`.
-проверьте/опустошите очереди RabbitMQ перед переносом. Gateway создаёт свои
+
+Для импорта RDB в Redis с включённым AOF загрузите backup во временный
+изолированный Redis без AOF и перенесите ключи через `DUMP`/`RESTORE` с сохранением
+оставшегося TTL. До запуска gateway проверьте содержимое ключей: одного
+копирования `dump.rdb` рядом с AOF-файлами недостаточно.
+
+Проверьте/опустошите очереди RabbitMQ перед переносом. Gateway создаёт свои
 очереди автоматически. Перенесите session marker в `state/.mcpsession.json`.
 Файл `.migration-ready` создавайте после восстановления данных — без него CI
 не выполняет деплой. После запуска приложения и nginx проверьте публичный

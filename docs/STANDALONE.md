@@ -159,8 +159,13 @@ tellymcp run --env .env
 Agent:
 
 ```bash
-tellymcp run --env .env -s NEW
+tellymcp run --ws 9999 -s NEW
 ```
+
+The shared client config lives in `$HOME/.tellymcp/.env` and is found automatically.
+Use `--env <file>` for a specific profile; saved workspace profiles and a local
+`.env` take precedence over the shared default. `--ws <port>` enables the extension
+listener on that port for this process. Without it, the env settings apply.
 
 After `.mcpsession.json` is created in the workspace, later runs can usually use:
 

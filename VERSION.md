@@ -4,6 +4,14 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.42
+
+### Added
+
+- Clients automatically find their shared configuration at `$HOME/.tellymcp/.env`. Explicit `--env`, saved workspace profiles and local `.env` files retain precedence; old markers pointing to `$HOME/.env-client` resolve to the migrated shared profile.
+- `tellymcp run --ws 9999` enables the extension WebSocket listener on that port for the current process. Without `--ws`, the env settings apply. The flag can be combined with `-s` and `--env` in any order.
+- `tellymcp init client` creates the shared home configuration; an explicit directory still creates a workspace configuration.
+
 ## 0.0.41
 
 ### Changed

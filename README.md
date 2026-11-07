@@ -246,13 +246,19 @@ Required client values:
 Recommended:
 
 - built-in PTY terminal runtime is used by default
-- explicit `TELLYMCP_SESSION_ID` and `TELLYMCP_SESSION_LABEL` for the first run
+- name the console with `-s`; its identity is saved in the workspace marker
 
 First run:
 
 ```bash
-tellymcp run --env .env -s NEW
+tellymcp run --ws 9999 -s NEW
 ```
+
+The shared client profile is `$HOME/.tellymcp/.env`; `tellymcp init client`
+creates it. An explicit `--env` takes precedence, followed by the workspace's
+saved profile and local `.env`, then the shared home profile.
+`--ws 9999` enables the browser-extension listener on that port for this launch.
+Without `--ws`, browser attach uses the env settings; the flag does not rewrite them.
 
 After that, `.mcpsession.json` stores:
 

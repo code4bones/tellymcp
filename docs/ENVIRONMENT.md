@@ -80,6 +80,26 @@ Common optional gateway groups:
 
 ## Client / Agent Console
 
+The default shared profile is `$HOME/.tellymcp/.env`. `tellymcp init client`
+creates this file without changing the working directory; an explicit init
+directory still creates a workspace `.env`. Runtime discovery order is:
+
+1. Explicit `--env <file>` / `--env=<file>` anywhere among the run arguments.
+2. The workspace `.mcpsession.json` saved profile.
+3. A local workspace `.env`.
+4. `$HOME/.tellymcp/.env`.
+
+Old markers pointing to `$HOME/.env-client` use the new shared profile when it
+exists. A missing custom saved profile still reports an error, rather than
+silently switching credentials. State, session identity and workspace artifacts
+remain local to each workspace.
+
+`tellymcp run --ws 9999` enables browser attach and overrides
+`BROWSER_ATTACH_WS_PORT` for this process. Port values must be integers 1–65535.
+Both `--ws 9999` and `--ws=9999` work with `-s`, `--agent` and `--env` in any order.
+Without this flag, `BROWSER_ATTACH_ENABLED` and the configured/default port apply.
+This per-launch override is not saved back into the shared env file.
+
 Required for a gateway-connected console:
 
 ```env

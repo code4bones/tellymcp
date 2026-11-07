@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Client startup
+
+- Discover the default client profile in `$HOME/.tellymcp/.env`, preserve explicit/workspace overrides and migrate legacy home-profile marker paths.
+- Add validated `--ws <port>` / `--ws=<port>` per-process extension listener overrides without rewriting the shared env. Preserve env behavior when the flag is omitted.
+
 ### Client configuration
 
 - Add application-scoped HTTP/WSS proxy routing and bypass rules without modifying global proxy variables or dispatchers. Apply the same routing to gateway collaboration, TOOLS.md checks, temporary file uploads and HTTP-proxied Telegram file downloads.

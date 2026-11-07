@@ -159,8 +159,13 @@ tellymcp run --env .env
 Agent:
 
 ```bash
-tellymcp run --env .env -s NEW
+tellymcp run --ws 9999 -s NEW
 ```
+
+Общий конфиг клиента `$HOME/.tellymcp/.env` находится автоматически. Явный
+`--env <file>`, сохранённый профиль workspace и локальный `.env` имеют приоритет.
+`--ws <port>` включает WebSocket для расширения на этом порту для текущего
+процесса. Без флага используются настройки из env.
 
 После того как в workspace появится `.mcpsession.json`, дальше обычно достаточно:
 

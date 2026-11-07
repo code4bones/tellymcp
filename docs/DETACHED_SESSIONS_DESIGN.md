@@ -1,6 +1,7 @@
 # Detached sessions in TellyMCP
 
-Status: design with an isolated stage-1 prototype, updated 2026-11-07.
+Status: stage-1 prototype accepted; stage-2 owner implementation under review,
+updated 2026-11-07.
 Branch: `feature/detached-sessions`, merged with `main` at `13a14e0` in
 `b34bb74`. Current package baseline: `0.0.43`; the original `0.0.38` baseline
 is historical. The public commands below still describe proposed behavior.
@@ -437,6 +438,122 @@ and shell output, and preserves shell exit 7. A manual PTY harness run also
 reported Bash PID `1411199` before and after detach/reattach, delivered final
 output `FINAL_OUTPUT` and propagated exit 7. This was terminal
 tool PTY evidence, not visual verification in two physical terminal emulators.
+
+## Stage 2 implementation: T-TELLYMCP-041
+
+Stage 1 is committed as `9e2d636`; the user confirmed its manual detach/attach/exit
+test. Stage 2 adds `sessionOwner.ts`, `localProtocol.ts`, `localConnection.ts`,
+`localRegistry.ts`, `ownerLauncher.ts` and `ownerRuntime.ts` in the same model
+directory. These are internal APIs. Public `run --detach`, `sessions`, `attach`
+and `stop`, plus the foreground attachment loop, remain T-TELLYMCP-042.
+Ordinary `run` still uses its existing foreground path.
+
+### Process and screen ownership
+
+`launchSessionOwner` starts `process.execPath` from this package with the hidden
+`__session-owner` CLI entrypoint, `detached: true`, ignored standard descriptors
+and `unref()`. A private launch file contains only validated identity, cwd,
+profile/package paths and optional agent/bridge choices. Profile contents and
+credentials never enter discovery or argv. Source mode resolves the package's
+absolute tsx loader; compiled packages use `dist/cli.js`.
+
+The child takes its startup claim **before** creating the embedded broker or
+PTY. Its factory validates the saved marker UUID/session against the launcher,
+starts the existing embedded runtime, obtains its existing PTY, refreshes the
+gateway hello and optionally starts the managed provider once. Socket clients
+execute none of those initialization steps. UUID, marker/profile precedence,
+inherited proxies and absence-of-`--ws` env behavior are retained. Initial startup
+still performs the existing configured gateway registration; reconnecting to an
+already running owner uses only local IPC.
+
+Owner mode is enabled in `ptyRegistry` before bootstrap creates the terminal.
+The restoration stream takes the registry's existing headless terminal; the old
+raw-output parsing path is skipped in this mode. Capture and Live read that same
+screen, and output subscribers receive query-filtered data. Ordered attachment
+resize updates that screen and PTY. Foreground sessions retain their old parser.
+
+EOF, socket errors and controller disconnect only detach that controller.
+The owner ignores SIGHUP. SIGTERM/SIGINT, explicit stop, parser faults and actual
+shell exit shut down this owner's broker/services and PTY. Final output precedes
+the exit frame. Slow clients cannot hold shutdown open beyond the socket grace
+period. Startup cancellation keeps its claim until its in-flight factory finishes
+cleanup. Early runtime readiness rejections now have an immediate observer, and
+embedded broker startup failures run cleanup before propagating.
+
+### Registry and recovery
+
+Default location: `/tmp/tellymcp-<uid>` (respecting Node's temp directory), owned
+by the current Linux user, mode `0700`. Symlink/public registries are rejected.
+Sockets, metadata and launch files use `0600`; socket paths must fit Linux limits.
+Only ready records are listed, after socket binding and runtime initialization.
+Claims cover both canonical `client_uuid:local_session_id` and real workspace
+path plus session ID, preventing duplicate consoles even across workspace paths.
+
+Short filesystem mutations run inside `BEGIN IMMEDIATE` transactions using Node's
+built-in SQLite module. Its small database is an **OS-backed mutex only** and
+stores no application/session data. This adds no client Redis. The OS releases
+the lock on process death; async probes and runtime startup never hold that lock.
+
+Recovery checks Linux boot ID and `/proc/<pid>/stat` start ticks, probes the old
+socket, then rechecks process identity and claims under the mutex. A reused PID
+alone cannot preserve a stale claim. Any reachable listener, permission failure,
+conflicting new claim or ambiguous probe prevents deletion. Cleanup verifies the
+instance and only removes that instance's own socket and claims. A readiness
+timeout retains a live owner's claim instead of killing an unverified PID or
+starting a replacement shell.
+
+The existing Pino target uses a private owner log transport: one MiB current log
+plus one rotation, with capped chunks. The startup journal records errors while
+stdio is ignored. Runtime rejection/exception handling retains the foreground
+reliability policy. Unsafe existing log permissions are rejected.
+
+### Local protocol version 1
+
+Frames contain a one-byte type and four-byte big-endian payload length. Types
+are JSON control, raw UTF-8 input, output and snapshot data; each payload is at
+most 65536 bytes. Split headers/characters, coalesced frames, malformed types or
+lengths, and truncated EOF are handled explicitly.
+
+`hello` supplies protocol version, random owner instance and canonical identity.
+`ready` confirms the record and PTY PID without taking control. `attach` reserves
+one controller and returns `snapshot_begin`, data chunks, then `snapshot_end`.
+Input requires an ACK matching generation and sequence. Resize/detach/stop use
+validated controls. Version/identity mismatch rejects only that connection.
+This is private same-OS-user IPC; remote account authorization remains T043.
+
+Output payloads start with an eight-byte sequence, four-byte byte offset and
+one-byte final-chunk flag. Reassemble a sequence before applying its boundary;
+do not decode UTF-8 independently per socket read. Query-only empty frames still
+advance sequence. Wire snapshot metadata uses the owner's instance ID.
+
+Additional bounds: sixteen connections, 256 pending inbound frames/256 KiB per
+connection, five MiB socket output queue, plus stage-1 bounds. Slow consumers
+disconnect and obtain a fresh snapshot. Rejected/detached sockets have a bounded
+close grace period.
+
+### Evidence and remaining acceptance
+
+Build/lint pass; full suite **408 passed, 2 skipped**. New coverage includes two
+concurrent launchers creating one runtime, a separate launcher exiting with its
+controlling PTY while owner stdio stays `/dev/null`, frontend loss/SIGHUP,
+same-PID reattach, final output/exit, independent-owner stop isolation, permissions,
+PID reuse/probe ambiguity, startup cancellation/failure cleanup, framing and
+backpressure, bounded logs and early readiness rejection.
+
+A separate smoke check ran the actual compiled internal CLI and embedded broker
+against a disposable local HTTP gateway fixture. Owner PID `1490425` and shell
+PID `1490435` survived gateway drop and frontend disconnect; reattach reached
+that same shell, delivered final output, propagated exit 9, cleaned discovery
+and preserved the temporary workspace marker. No real gateway/profile was used.
+The fixture served registration HTTP and rejected WebSocket upgrades; this is
+not authenticated WSS reconnect evidence.
+
+Actual `ssh localhost` verified sshd's host key through its local public-key file,
+but authentication was denied. SSH disconnect/login/cgroup-policy survival remains
+unverified and is still required before closing T041 acceptance. Provider TUI and
+two-physical-emulator checks, public CLI cleanup, remote auth/relay and release
+remain T042–045. No release, global install, gateway deployment or default launch
+change is included.
 
 ## Acceptance scenarios
 

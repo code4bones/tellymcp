@@ -29,7 +29,7 @@ type RunForegroundPtyRuntimeInput = {
   agentId?: "codex" | "claude" | undefined;
 };
 
-async function createForegroundBroker(
+export async function createForegroundBroker(
   envPath: string,
   packageRoot: string,
 ): Promise<ForegroundRuntimeHandle> {
@@ -49,7 +49,7 @@ async function createForegroundBroker(
   });
 }
 
-async function ensureForegroundPtySession(
+export async function ensureForegroundPtySession(
   runtime: ForegroundRuntimeHandle["runtime"],
 ): Promise<{ sessionId: string; sessionLabel: string; target: string }> {
   const resolved = runtime.projectIdentityResolver.resolveSessionDefaults({

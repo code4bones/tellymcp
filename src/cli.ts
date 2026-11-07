@@ -1797,6 +1797,12 @@ async function runRuntime(args: string[]): Promise<void> {
 
 async function main(argv: string[]): Promise<void> {
   const [rawCommand, firstArg, secondArg] = argv;
+  if (rawCommand === "__session-owner") {
+    if (!firstArg || argv.length !== 2) throw new Error("Invalid internal owner invocation");
+    const { runOwnerEntrypoint } = await import("./services/features/telegram-mcp/src/features/detached-terminal/model/ownerRuntime.js");
+    await runOwnerEntrypoint(path.resolve(firstArg));
+    return;
+  }
   const command: CliCommand =
     rawCommand === "init" ||
     rawCommand === "configure" ||

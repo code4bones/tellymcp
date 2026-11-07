@@ -41,7 +41,7 @@ function validateSize(cols: number, rows: number): void {
   }
 }
 
-/** Fidelity experiment only. No broker, discovery, daemon, CLI or process spawning. */
+/** Ordered terminal state/I/O. Process and transport lifetime belong to its caller. */
 export class TerminalRestorationPrototype {
   readonly instance = randomUUID();
   private readonly terminal: InstanceType<typeof XtermHeadless.Terminal>;
@@ -57,6 +57,8 @@ export class TerminalRestorationPrototype {
   private failure: Error | undefined;
   private disposed = false;
   private ptyClosed = false;
+  private readonly ownsTerminal: boolean;
+  private readonly observers = new Set<(data: string) => void>();
   private exit: { exitCode: number; signal?: number } | undefined;
 
   constructor(
@@ -66,6 +68,7 @@ export class TerminalRestorationPrototype {
       rows: number;
       scrollback?: number;
       maxQueueBytes?: number;
+      terminal?: InstanceType<typeof XtermHeadless.Terminal>;
     },
   ) {
     validateSize(options.cols, options.rows);
@@ -79,13 +82,17 @@ export class TerminalRestorationPrototype {
       scrollback > 5000
     )
       throw new Error("Invalid scrollback limit");
-    this.terminal = new XtermHeadless.Terminal({
-      cols: options.cols,
-      rows: options.rows,
-      scrollback,
-      allowProposedApi: true,
-      windowOptions: { getWinSizeChars: true },
-    });
+    this.ownsTerminal = !options.terminal;
+    this.terminal =
+      options.terminal ??
+      new XtermHeadless.Terminal({
+        cols: options.cols,
+        rows: options.rows,
+        scrollback,
+        allowProposedApi: true,
+        windowOptions: { getWinSizeChars: true },
+      });
+    this.terminal.options.windowOptions = { getWinSizeChars: true };
     this.terminal.loadAddon(this.addon);
     // One query authority for the full lifetime, independent of attachment ACKs.
     this.terminal.parser.registerCsiHandler({ final: "c" }, (params) => {
@@ -199,6 +206,13 @@ export class TerminalRestorationPrototype {
           .map((token) => token.data)
           .join("");
         const current = this.attachment;
+        for (const observer of this.observers) {
+          try {
+            observer(display);
+          } catch {
+            this.observers.delete(observer);
+          }
+        }
         if (current) {
           const frameBytes = Buffer.byteLength(display);
           if (
@@ -223,6 +237,21 @@ export class TerminalRestorationPrototype {
   async settled(): Promise<void> {
     await this.pipeline;
     if (this.failure) throw this.failure;
+  }
+
+  subscribeOutput(observer: (data: string) => void): () => void {
+    this.observers.add(observer);
+    return () => {
+      this.observers.delete(observer);
+    };
+  }
+
+  resize(cols: number, rows: number): Promise<void> {
+    validateSize(cols, rows);
+    return this.enqueue(() => {
+      this.terminal.resize(cols, rows);
+      this.pty.resize(cols, rows);
+    });
   }
 
   async attach(cols: number, rows: number): Promise<PrototypeAttachment> {
@@ -316,6 +345,7 @@ export class TerminalRestorationPrototype {
     await this.pipeline;
     this.disposed = true;
     this.attachment = undefined;
-    this.terminal.dispose(); // The PTY belongs to the caller; never kill it on detach/dispose.
+    this.observers.clear();
+    if (this.ownsTerminal) this.terminal.dispose(); // Never kill the caller's PTY.
   }
 }

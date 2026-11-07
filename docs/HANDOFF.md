@@ -14,9 +14,11 @@ is archived in Marrow. Retain the research; resume only on a new request.
   a newer commit; use the latest `main` when preparing the feature branch.
 - `feature/detached-sessions` was updated from latest `main` (`13a14e0`) by
   merge **`b34bb74`**, preserving runtime baseline **0.0.43**. Stage-1 prototype
-  changes are in the local working tree; they have not been committed/pushed.
+  is committed as **`9e2d636`**, accepted after the user's manual check; T040 is
+  done. Stage-2 owner changes are in the working tree, uncommitted/unpushed.
   The earlier design-only commit `5ef06a2` remains on both remotes.
-- Read `docs/DETACHED_SESSIONS_DESIGN.md`, especially **Stage 1 prototype**,
+- Read `docs/DETACHED_SESSIONS_DESIGN.md`, especially **Stage 1 prototype** and
+  **Stage 2 implementation**,
   for the confirmed restoration/query contract, bounds, evidence and limits.
   The design's original **0.0.38** baseline is historical.
 - `autotests`, `gateway`, `onebot` and `ws` are already ancestors of `main`;
@@ -70,10 +72,11 @@ is archived in Marrow. Retain the research; resume only on a new request.
 - Detailed recovery paths, volume names and migration incidents:
   Marrow **`I-TELLYMCP-039`**. Client handoffs: **042**, **043**, **044**.
 
-### T-TELLYMCP-040 prototype and next steps
+### T-TELLYMCP-040/041 implementation and next steps
 
-1. Read this section, Marrow result **I-TELLYMCP-046** (T040 is in review) and the design's prototype
-   contract. Refresh Git status; preserve the current uncommitted prototype.
+1. Read this section, T041 implementation note **I-TELLYMCP-048** (review), T040 result **I-TELLYMCP-046**
+   and user acceptance **I-TELLYMCP-047**, plus the design's two implementation
+   sections. Refresh Git status and preserve the uncommitted stage-2 work.
 2. Stage 1 now has `TerminalRestorationPrototype`, a snapshot adapter and VT
    query framing under `features/detached-terminal/model/`, plus replay and real
    PTY integration tests. `@xterm/addon-serialize` **0.13.0** works with xterm
@@ -85,9 +88,21 @@ is archived in Marrow. Retain the research; resume only on a new request.
    The standalone manual harness is
    `yarn tsx tools/prototype-terminal-restoration.ts`: Ctrl+] detaches, a attaches,
    q while detached stops. It owns one clean Bash and no broker/identity/services.
-   Neither the prototype nor harness is connected to ordinary `tellymcp run`.
-3. Then follow existing Marrow tasks: **041** background owner/private local
-   protocol/discovery; **042** `run --detach`, `sessions`, `attach`, `stop` and
+   That harness is still foreground; it intentionally waits for a/q after detach.
+3. Stage 2 adds internal owner/launcher, Unix framing/connection, private registry
+   and readiness/discovery. The hidden same-package `__session-owner` entrypoint
+   owns the real embedded broker and the existing PTY/screen in `ptyRegistry`.
+   The stream now shares that registry screen; no second parser is retained.
+   One startup claim covers canonical console identity and real workspace/session;
+   a short built-in SQLite transaction serializes claim mutations (mutex only,
+   no application data). Recovery checks boot/start identity and socket reachability
+   before rechecking under the lock. The child has independent stdio, ignores
+   SIGHUP, and bounded private logs/queues. Startup failure/cancellation and shell
+   exit/explicit stop clean up only their owner's resources. See design for protocol.
+   T041 implementation is ready for review, but actual SSH disconnect acceptance
+   remains unverified: localhost sshd host key was checked using its local public
+   key; login for the current account was denied. Do not claim cgroup/login survival.
+   Next: **042** `run --detach`, `sessions`, `attach`, `stop` and
    terminal cleanup; **043** account authorization and one controller lease;
    **044** remote attach through the gateway; **045** real console checks/docs/release.
 4. Keep one package, one PTY/agent/console identity and the existing raw terminal
@@ -98,20 +113,34 @@ is archived in Marrow. Retain the research; resume only on a new request.
    of the target account; the shared gateway bearer alone is insufficient.
    Disconnecting an attachment must leave the owner and PTY alive; actual shell
    exit or explicit stop must shut down owned services with the real exit status.
-6. Stage 1 is a fidelity experiment, not a daemon or product detach command.
+6. Stage 1 remains a fidelity experiment; stage 2 provides the internal daemon
+   and protocol, while ordinary `run` still uses the old foreground path.
    Its fixed palette and unsupported terminal extensions are documented in the
-   design. Integrate one authoritative screen into `ptyRegistry` in stage 2;
-   do not retain the prototype as a second screen/query owner. Do not create a
+   design. Keep the shared `ptyRegistry` screen/query owner during CLI integration.
+   Do not create a
    release tag or deploy the experimental branch as part of this prototype.
 
 Latest source checks including the prototype: build/lint passed;
-**396 tests passed, 2 skipped** (18 new restoration/PTY cases).
+**408 tests passed, 2 skipped** (18 stage-1 and 12 stage-2/readiness/log cases).
 Real PTY tests preserved shell/interactive-child PIDs, detached progress, raw
 Unicode input and one reply per query through attach/detach, final output and
 exit 7. The manual harness reported Bash PID `1411199` both before and after
 detach/reattach, delivered `FINAL_OUTPUT`, and propagated exit 7.
-This is tool-PTY evidence; two physical emulator and real provider checks
-are still pending. No package install, release or production mutation occurred.
+Stage-2 tests additionally cover separate launcher exit with its controlling PTY,
+owner stdio `/dev/null`, concurrent launches creating one runtime, broken frontend/
+SIGHUP, private discovery, stale PID/start identity, input/output framing and
+bounds, startup cancellation/failure, isolated stop, bounded logs and early runtime
+readiness rejection. That last regression could previously crash before embedded
+broker startup returned; it now propagates through cleanup and private logging.
+Actual compiled internal CLI + embedded broker smoke used a disposable local
+HTTP gateway and temporary profile: owner PID `1490425`, shell PID `1490435`.
+After gateway drop and frontend disconnect, local reattach reached the same shell,
+received final output and exit9, cleaned discovery and preserved the temporary
+marker. The fixture supplied HTTP registration and rejected WebSocket upgrades;
+this was not authenticated real WSS reconnect evidence.
+No real gateway/shared profile/workspace marker was used or changed.
+This is tool-PTY evidence; two physical emulator and real provider checks remain
+pending. No package install, release or production mutation occurred.
 Installed client auto-discovery, authenticated gateway HTTPS/WSS and foreground
 shell exit were verified in the previous client work. Optional Playwright Chromium
 binaries are missing in the local installation. Actual SSH disconnect survival,

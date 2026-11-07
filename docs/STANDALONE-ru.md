@@ -173,6 +173,19 @@ tellymcp run --ws 9999 -s NEW
 tellymcp run
 ```
 
+### Локальные сессии Linux (ещё не выпущены)
+
+Команды: `tellymcp run --detach`, `tellymcp sessions [--json]`,
+`tellymcp attach [handle]`, `tellymcp stop [handle]`. Без handle attach открывает
+меню (стрелки/Enter, Esc или Ctrl+C для отмены); доступная сессия текущего workspace
+выделена по умолчанию. Занятые и недоступные сессии выбрать нельзя. Stop без handle
+использует marker текущего workspace. Ctrl+], затем d возвращает в исходную
+консоль; двойной Ctrl+] передаёт буквальный префикс. Интерактивный attach использует
+Linux `stty`. Старую foreground-сессию нужно запустить заново из исходной консоли.
+Локальная проверка: `yarn build`, затем `node /полный/путь/tellymcp/dist/cli.js`
+вместо `tellymcp`; это не релиз и не глобальная установка.
+[Контракт реализации](DETACHED_SESSIONS_DESIGN.md).
+
 ## 7. Webhook
 
 Gateway поддерживает polling и webhook.

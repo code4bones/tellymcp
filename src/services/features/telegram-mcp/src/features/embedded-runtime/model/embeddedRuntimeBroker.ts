@@ -6,7 +6,10 @@ import type { AppRuntime } from "../../../app/bootstrap/runtime";
 
 export type EmbeddedRuntimeBrokerHandle = {
   broker: {
-    call(actionName: string, params?: Record<string, unknown>): Promise<unknown>;
+    call(
+      actionName: string,
+      params?: Record<string, unknown>,
+    ): Promise<unknown>;
     stop(): Promise<void>;
     getLocalService(name: string): unknown;
   };
@@ -73,7 +76,9 @@ function unwrapCjsDefault(value: unknown): unknown {
   return current;
 }
 
-function resolveServiceSchemaExport(moduleNamespace: Record<string, unknown>): unknown {
+function resolveServiceSchemaExport(
+  moduleNamespace: Record<string, unknown>,
+): unknown {
   const unwrappedModule = unwrapCjsDefault(moduleNamespace);
   if (
     unwrappedModule &&
@@ -88,7 +93,9 @@ function resolveServiceSchemaExport(moduleNamespace: Record<string, unknown>): u
     typeof unwrappedModule === "object" &&
     "default" in (unwrappedModule as Record<string, unknown>)
   ) {
-    return unwrapCjsDefault((unwrappedModule as Record<string, unknown>).default);
+    return unwrapCjsDefault(
+      (unwrappedModule as Record<string, unknown>).default,
+    );
   }
 
   return unwrappedModule;
@@ -100,15 +107,29 @@ export async function createEmbeddedRuntimeBroker(input: {
   standaloneHttp: boolean;
 }): Promise<EmbeddedRuntimeBrokerHandle> {
   process.env.ENV_FILE = input.envPath;
-  process.env.TELLYMCP_STANDALONE_HTTP = input.standaloneHttp ? "true" : "false";
+  process.env.TELLYMCP_STANDALONE_HTTP = input.standaloneHttp
+    ? "true"
+    : "false";
 
   const sourceRuntime = isSourceRuntimeMode();
   const brokerConfigPath = sourceRuntime
     ? path.join(input.packageRoot, "src", "moleculer.config.ts")
     : path.join(input.packageRoot, "dist", "moleculer.config.js");
   const servicesRoot = sourceRuntime
-    ? path.join(input.packageRoot, "src", "services", "features", "telegram-mcp")
-    : path.join(input.packageRoot, "dist", "services", "features", "telegram-mcp");
+    ? path.join(
+        input.packageRoot,
+        "src",
+        "services",
+        "features",
+        "telegram-mcp",
+      )
+    : path.join(
+        input.packageRoot,
+        "dist",
+        "services",
+        "features",
+        "telegram-mcp",
+      );
   const serviceExtension = sourceRuntime ? ".service.ts" : ".service.js";
 
   const { ServiceBroker } = (await import("moleculer")) as unknown as {
@@ -117,33 +138,43 @@ export async function createEmbeddedRuntimeBroker(input: {
   const brokerConfigModule = (await import(
     pathToFileURL(brokerConfigPath).href
   )) as Record<string, unknown>;
-  const brokerConfig = unwrapCjsDefault(brokerConfigModule) as Record<string, unknown>;
+  const brokerConfig = unwrapCjsDefault(brokerConfigModule) as Record<
+    string,
+    unknown
+  >;
 
   const broker = new ServiceBroker(brokerConfig);
-  const serviceFiles = collectServiceSchemaFiles(servicesRoot, serviceExtension);
+  const serviceFiles = collectServiceSchemaFiles(
+    servicesRoot,
+    serviceExtension,
+  );
 
   for (const serviceFile of serviceFiles) {
-    const serviceModule = (await import(pathToFileURL(serviceFile).href)) as Record<
-      string,
-      unknown
-    >;
+    const serviceModule = (await import(
+      pathToFileURL(serviceFile).href
+    )) as Record<string, unknown>;
     const schema = resolveServiceSchemaExport(serviceModule);
     broker.createService(schema);
   }
 
-  await broker.start();
+  try {
+    await broker.start();
 
-  const runtimeService = broker.getLocalService("telegramMcp.runtime") as
-    | {
-        waitUntilReady(): Promise<AppRuntime>;
-      }
-    | undefined;
+    const runtimeService = broker.getLocalService("telegramMcp.runtime") as
+      | {
+          waitUntilReady(): Promise<AppRuntime>;
+        }
+      | undefined;
 
-  if (!runtimeService?.waitUntilReady) {
-    await broker.stop();
-    throw new Error("Embedded runtime service is unavailable");
+    if (!runtimeService?.waitUntilReady) {
+      await broker.stop();
+      throw new Error("Embedded runtime service is unavailable");
+    }
+
+    const runtime = await runtimeService.waitUntilReady();
+    return { broker, runtime };
+  } catch (error) {
+    await broker.stop().catch(() => {});
+    throw error;
   }
-
-  const runtime = await runtimeService.waitUntilReady();
-  return { broker, runtime };
 }

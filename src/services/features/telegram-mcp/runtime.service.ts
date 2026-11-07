@@ -35,6 +35,10 @@ const TelegramMcpRuntimeService: ServiceSchema = {
       this.resolveReady = resolve;
       this.rejectReady = reject;
     });
+    // Startup can fail before embedded broker.start() returns and a caller can
+    // await readiness. Observe the rejection immediately; later waiters still
+    // receive the original error and owner startup can clean up normally.
+    void this.readyPromise.catch(() => {});
   },
 
   methods: {

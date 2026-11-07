@@ -276,6 +276,35 @@ So later the same workspace can usually start with:
 tellymcp run
 ```
 
+### Local detach/attach (Linux; unreleased)
+
+Client-mode `run` now starts or reuses a background owner and attaches to its
+existing shell. `run --detach` returns after readiness without requiring a TTY.
+
+```bash
+tellymcp run --detach
+tellymcp sessions           # add --json for machine-readable output
+tellymcp attach             # choose a session, or attach <handle> directly
+tellymcp stop               # current workspace, or stop <handle>
+```
+
+Without a handle, attach opens an interactive session picker: arrows to move,
+Enter to attach, Esc or Ctrl+C to cancel. The current workspace is selected by
+default when available; busy and unavailable sessions cannot be selected.
+
+Press **Ctrl+]**, then **d** to return to the outer shell. Double Ctrl+] forwards
+a literal prefix; bracketed paste preserves pasted prefix bytes. One interactive
+controller is allowed. Frontend loss keeps the owner and services alive; shell
+exit or stop ends them. Attach/list/stop need no profile or gateway connection.
+Changed startup configuration or a different explicit provider/bridge setting
+requires stopping the old owner first. Managed agents still use `--agent`.
+
+Launch from the outer shell: old foreground sessions cannot be converted in place.
+Interactive attach needs Linux `stty`. These changes are not globally installed:
+after `yarn build`, use `node /absolute/path/to/tellymcp/dist/cli.js` instead of
+`tellymcp`. SSH/cgroup, real agent TUIs and remote attach remain separate acceptance
+checks. See [the contract](docs/DETACHED_SESSIONS_DESIGN.md).
+
 ### Start and continue a coding agent
 
 TellyMCP has built-in provider adapters for Codex and Claude Code. The vendor

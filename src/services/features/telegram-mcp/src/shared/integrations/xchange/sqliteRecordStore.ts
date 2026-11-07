@@ -1,5 +1,5 @@
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync } from "../../lib/sqlite";
 
 import type {
   XchangeRecord,

@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { spawn, type IPty } from "node-pty";
 import * as XtermHeadless from "@xterm/headless";
+import { TerminalRestorationPrototype } from "../../../features/detached-terminal/model/terminalRestorationPrototype";
 
 export type PtySessionConfig = {
   shell: string;
@@ -28,6 +29,7 @@ type PtySessionRecord = {
   scrollbackLines: number;
   terminal: InstanceType<typeof XtermHeadless.Terminal>;
   pendingWrite: Promise<void>;
+  restoration?: TerminalRestorationPrototype;
   pty: IPty | null;
   exited: boolean;
   exitCode?: number | undefined;
@@ -42,6 +44,20 @@ export type PtyExitInfo = {
 
 const PTY_TARGET_PREFIX = "pty:";
 const sessions = new Map<string, PtySessionRecord>();
+let ownedSessionsEnabled = false;
+
+/** Call before starting an owner runtime, before bootstrap creates its one PTY. */
+export function enableOwnedPtySessions(): void {
+  ownedSessionsEnabled = true;
+}
+
+export function getOwnedPtySession(
+  target: string,
+): TerminalRestorationPrototype {
+  const stream = getSessionRecord(target).restoration;
+  if (!stream) throw new Error("PTY was not created in owner mode");
+  return stream;
+}
 
 type CellStyleState = {
   fg: string | null;
@@ -96,9 +112,7 @@ function prepareBashLaunch(record: PtySessionRecord): {
   env: Record<string, string>;
   tempPaths: string[];
 } {
-  const tempDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "tellymcp-pty-bash-"),
-  );
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "tellymcp-pty-bash-"));
   const rcPath = path.join(
     tempDir,
     `${sanitizeFileNameSegment(record.sessionId)}.bashrc`,
@@ -126,9 +140,7 @@ function prepareZshLaunch(record: PtySessionRecord): {
   env: Record<string, string>;
   tempPaths: string[];
 } {
-  const tempDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "tellymcp-pty-zsh-"),
-  );
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "tellymcp-pty-zsh-"));
   const promptPrefix = buildContextPromptPrefix(record);
   fs.writeFileSync(
     path.join(tempDir, ".zshenv"),
@@ -199,7 +211,9 @@ function createHeadlessTerminal(
   return new XtermHeadless.Terminal({
     cols: config.cols,
     rows: config.rows,
-    scrollback: config.scrollbackLines,
+    scrollback: ownedSessionsEnabled
+      ? Math.min(config.scrollbackLines, 5000)
+      : config.scrollbackLines,
     allowProposedApi: true,
   });
 }
@@ -229,30 +243,54 @@ function createSessionRecord(
   const launch = prepareShellLaunch(record);
   record.tempPaths = [...launch.tempPaths];
 
-  const pty = spawn(record.shell, launch.args, {
-    name: "xterm-color",
-    cols: record.cols,
-    rows: record.rows,
-    cwd: record.cwd,
-    env: launch.env,
-  });
+  let pty: IPty;
+  try {
+    pty = spawn(record.shell, launch.args, {
+      name: "xterm-color",
+      cols: record.terminal.cols,
+      rows: record.terminal.rows,
+      cwd: record.cwd,
+      env: launch.env,
+    });
+  } catch (error) {
+    cleanupRecordTempPaths(record);
+    terminal.dispose();
+    throw error;
+  }
 
-  pty.onData((data) => {
-    record.pendingWrite = record.pendingWrite
-      .then(
-        () =>
-          new Promise<void>((resolve) => {
-            record.terminal.write(data, resolve);
-          }),
-      )
-      .catch((error: unknown) => {
-        // Recover so the chain keeps accepting new writes; without this
-        // .catch attached synchronously, a write failure on the last link
-        // (e.g. right as the pty exits, with no further onData to chain
-        // another .then onto it) would be an unhandled rejection.
-        console.error("pty terminal write failed", record.target, error);
+  if (ownedSessionsEnabled) {
+    try {
+      record.restoration = new TerminalRestorationPrototype(pty, {
+        cols: record.terminal.cols,
+        rows: record.terminal.rows,
+        scrollback: Math.min(record.scrollbackLines, 5000),
+        terminal,
       });
-  });
+    } catch (error) {
+      pty.kill();
+      cleanupRecordTempPaths(record);
+      terminal.dispose();
+      throw error;
+    }
+  }
+
+  if (!record.restoration)
+    pty.onData((data) => {
+      record.pendingWrite = record.pendingWrite
+        .then(
+          () =>
+            new Promise<void>((resolve) => {
+              record.terminal.write(data, resolve);
+            }),
+        )
+        .catch((error: unknown) => {
+          // Recover so the chain keeps accepting new writes; without this
+          // .catch attached synchronously, a write failure on the last link
+          // (e.g. right as the pty exits, with no further onData to chain
+          // another .then onto it) would be an unhandled rejection.
+          console.error("pty terminal write failed", record.target, error);
+        });
+    });
 
   pty.onExit(({ exitCode, signal }) => {
     record.pty = null;
@@ -260,6 +298,7 @@ function createSessionRecord(
     record.exitCode = exitCode;
     record.signal = signal;
     cleanupRecordTempPaths(record);
+    if (record.restoration) return;
     record.pendingWrite = record.pendingWrite
       .then(
         () =>
@@ -277,18 +316,19 @@ function createSessionRecord(
   // synchronously unless at least two "error" listeners are attached (see
   // node_modules/node-pty/lib/unixTerminal.js) — without this, a non-EAGAIN/
   // EIO fd error on an active session crashes the whole process.
-  (pty as unknown as { on(event: "error", listener: (error: unknown) => void): void }).on(
-    "error",
-    (error: unknown) => {
-      // Unix PTYs report EOF as read EIO when their last child closes. The
-      // socket error can arrive before onExit; node-pty handles the close.
-      const fdError = error as NodeJS.ErrnoException | null | undefined;
-      if (fdError?.code === "EIO" && fdError.syscall === "read") {
-        return;
-      }
-      console.error("pty fd error", record.target, error);
-    },
-  );
+  (
+    pty as unknown as {
+      on(event: "error", listener: (error: unknown) => void): void;
+    }
+  ).on("error", (error: unknown) => {
+    // Unix PTYs report EOF as read EIO when their last child closes. The
+    // socket error can arrive before onExit; node-pty handles the close.
+    const fdError = error as NodeJS.ErrnoException | null | undefined;
+    if (fdError?.code === "EIO" && fdError.syscall === "read") {
+      return;
+    }
+    console.error("pty fd error", record.target, error);
+  });
 
   record.pty = pty;
   return record;
@@ -400,7 +440,10 @@ function cellColor(
   return rgbColor(colorValue);
 }
 
-function styleStateEquals(left: CellStyleState, right: CellStyleState): boolean {
+function styleStateEquals(
+  left: CellStyleState,
+  right: CellStyleState,
+): boolean {
   return (
     left.fg === right.fg &&
     left.bg === right.bg &&
@@ -455,9 +498,13 @@ function getVisibleWindowRange(
   const buffer = record.terminal.buffer.active;
   const lineCount = Math.max(
     1,
-    (record.rows > 0 ? record.rows : fallbackLines) * Math.max(1, visibleScreens),
+    (record.terminal.rows > 0 ? record.terminal.rows : fallbackLines) *
+      Math.max(1, visibleScreens),
   );
-  const start = Math.max(0, buffer.viewportY + record.rows - lineCount);
+  const start = Math.max(
+    0,
+    buffer.viewportY + record.terminal.rows - lineCount,
+  );
   const end = Math.min(buffer.length, start + lineCount);
   return { start, end };
 }
@@ -500,15 +547,23 @@ function renderVisiblePtyHtmlFromRecord(
       chunk = "";
     };
 
-    for (let x = 0; x < record.cols; x += 1) {
+    for (let x = 0; x < record.terminal.cols; x += 1) {
       const cell = line.getCell(x);
       if (!cell || cell.getWidth() === 0) {
         continue;
       }
 
       const nextStyle: CellStyleState = {
-        fg: cellColor(cell.isFgDefault(), cell.isFgPalette(), cell.getFgColor()),
-        bg: cellColor(cell.isBgDefault(), cell.isBgPalette(), cell.getBgColor()),
+        fg: cellColor(
+          cell.isFgDefault(),
+          cell.isFgPalette(),
+          cell.getFgColor(),
+        ),
+        bg: cellColor(
+          cell.isBgDefault(),
+          cell.isBgPalette(),
+          cell.getBgColor(),
+        ),
         bold: cell.isBold() > 0,
         underline: cell.isUnderline() > 0,
         italic: cell.isItalic() > 0,
@@ -602,15 +657,23 @@ function renderVisiblePtyAnsiFromRecord(
     let row = "";
     let currentStyle: CellStyleState | null = null;
 
-    for (let x = 0; x < record.cols; x += 1) {
+    for (let x = 0; x < record.terminal.cols; x += 1) {
       const cell = line.getCell(x);
       if (!cell || cell.getWidth() === 0) {
         continue;
       }
 
       const nextStyle: CellStyleState = {
-        fg: cellColor(cell.isFgDefault(), cell.isFgPalette(), cell.getFgColor()),
-        bg: cellColor(cell.isBgDefault(), cell.isBgPalette(), cell.getBgColor()),
+        fg: cellColor(
+          cell.isFgDefault(),
+          cell.isFgPalette(),
+          cell.getFgColor(),
+        ),
+        bg: cellColor(
+          cell.isBgDefault(),
+          cell.isBgPalette(),
+          cell.getBgColor(),
+        ),
         bold: cell.isBold() > 0,
         underline: cell.isUnderline() > 0,
         italic: cell.isItalic() > 0,
@@ -678,7 +741,7 @@ export function ensurePtySession(
 
 export function getPtyWindowHeight(target: string): number | null {
   const record = getSessionRecord(target);
-  return record.rows;
+  return record.terminal.rows;
 }
 
 export function getPtyWindowSize(
@@ -690,8 +753,8 @@ export function getPtyWindowSize(
   }
 
   return {
-    cols: record.cols,
-    rows: record.rows,
+    cols: record.terminal.cols,
+    rows: record.terminal.rows,
   };
 }
 
@@ -700,7 +763,7 @@ export async function capturePtyRange(
   start: string,
 ): Promise<string> {
   const record = getSessionRecord(target);
-  await record.pendingWrite;
+  await (record.restoration?.settled() ?? record.pendingWrite);
   const captureStart = parseCaptureStart(start);
   const lines = snapshotTerminalContentLines(record);
 
@@ -725,13 +788,17 @@ export async function captureVisiblePty(
   visibleScreens: number,
 ): Promise<string> {
   const record = getSessionRecord(target);
-  await record.pendingWrite;
+  await (record.restoration?.settled() ?? record.pendingWrite);
   const buffer = record.terminal.buffer.active;
   const lineCount = Math.max(
     1,
-    (record.rows > 0 ? record.rows : fallbackLines) * Math.max(1, visibleScreens),
+    (record.terminal.rows > 0 ? record.terminal.rows : fallbackLines) *
+      Math.max(1, visibleScreens),
   );
-  const start = Math.max(0, buffer.viewportY + record.rows - lineCount);
+  const start = Math.max(
+    0,
+    buffer.viewportY + record.terminal.rows - lineCount,
+  );
   const end = Math.min(buffer.length, start + lineCount);
   const lines: string[] = [];
 
@@ -748,7 +815,7 @@ export async function renderVisiblePtyHtml(
   visibleScreens: number,
 ): Promise<string> {
   const record = getSessionRecord(target);
-  await record.pendingWrite;
+  await (record.restoration?.settled() ?? record.pendingWrite);
   return renderVisiblePtyHtmlFromRecord(record, fallbackLines, visibleScreens);
 }
 
@@ -758,7 +825,7 @@ export async function renderVisiblePtyAnsi(
   visibleScreens: number,
 ): Promise<string> {
   const record = getSessionRecord(target);
-  await record.pendingWrite;
+  await (record.restoration?.settled() ?? record.pendingWrite);
   return renderVisiblePtyAnsiFromRecord(record, fallbackLines, visibleScreens);
 }
 
@@ -806,8 +873,12 @@ export function resizePtyTarget(
 ): void {
   const record = getSessionRecord(target);
   const pty = ensureRunningPty(record);
-  record.cols = cols;
-  record.rows = rows;
+  if (record.restoration) {
+    void record.restoration.resize(cols, rows).catch((error: unknown) => {
+      console.error("owner PTY resize failed", record.target, error);
+    });
+    return;
+  }
   record.terminal.resize(cols, rows);
   pty.resize(cols, rows);
 }
@@ -824,22 +895,28 @@ export function subscribePtyTarget(
   const disposers: Array<() => void> = [];
 
   if (input.onData) {
-    const disposable = pty.onData(input.onData);
-    disposers.push(() => {
-      disposable.dispose();
-    });
+    if (record.restoration)
+      disposers.push(record.restoration.subscribeOutput(input.onData));
+    else {
+      const disposable = pty.onData(input.onData);
+      disposers.push(() => {
+        disposable.dispose();
+      });
+    }
   }
 
   if (input.onExit) {
-    const disposable = pty.onExit(({
-      exitCode,
-      signal,
-    }: {
-      exitCode: number;
-      signal?: number | undefined;
-    }) => {
-      input.onExit?.({ exitCode, signal });
-    });
+    const disposable = pty.onExit(
+      ({
+        exitCode,
+        signal,
+      }: {
+        exitCode: number;
+        signal?: number | undefined;
+      }) => {
+        input.onExit?.({ exitCode, signal });
+      },
+    );
     disposers.push(() => {
       disposable.dispose();
     });
@@ -861,7 +938,10 @@ export function stopPtyTarget(target: string): boolean {
   record.pty = null;
   record.exited = true;
   cleanupRecordTempPaths(record);
-  record.terminal.dispose();
+  if (record.restoration)
+    void record.restoration.dispose().then(() => record.terminal.dispose());
+  else record.terminal.dispose();
+  sessions.delete(target);
   return true;
 }
 

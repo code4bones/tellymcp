@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Local detached sessions (Linux)
+
+- Client-mode `run` starts or reuses a background owner for the existing console,
+  shell, provider and services; `run --detach` returns after readiness. Ctrl+] then d
+  returns to the outer shell while the session continues running.
+- Add `sessions [--json]`, `attach [handle]` and `stop [handle]`, faithful screen and
+  buffered-output restoration, raw input/resize handling, private local discovery,
+  startup conflict checks and one local interactive controller.
+- Show an interactive Clack picker for attach without a handle and align/color
+  the sessions table, with a compact layout in narrow terminals.
+- Silence only Node's SQLite startup ExperimentalWarning; retain other warnings.
+- Remote attach and shared controller authorization remain future stages.
+
 ### Terminal shutdown
 
 - Treat the Unix PTY socket's `read EIO` as EOF, including when it arrives before the process exit notification. Keep other fd errors visible and preserve normal exit handling.
@@ -43,7 +56,7 @@
   restart instead of forcing re-auth on every redeploy too.
 - Self-service "📬 Входящие" Telegram menu (same row as Settings in the
   session menu): lists projects/routes with pending tasks addressed to you,
-  picking one binds the *current* console to that route and shows its
+  picking one binds the _current_ console to that route and shows its
   active tasks, and each task's card offers Approve/Reject/Postpone
   directly -- no need to wait for the reactive first-event prompt or stay
   on the console that received it. Fully generic (works for any inbox

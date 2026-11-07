@@ -1,6 +1,6 @@
 # HANDOFF
 
-## Current continuation: detach/attach (2026-11-07)
+## Current continuation: local detach/attach integration (2026-11-08)
 
 This section supersedes the historical snapshot below. The user selected
 detach/attach as the next feature. Single-binary packaging is off the active
@@ -12,13 +12,19 @@ is archived in Marrow. Retain the research; resume only on a new request.
 - Runtime baseline: `main` at `be12ca8`, package and locally installed client
   **0.0.43**. GitLab and GitHub are synchronized. This documentation may have
   a newer commit; use the latest `main` when preparing the feature branch.
-- `feature/detached-sessions` at `5ef06a2` contains **design only**:
-  `docs/DETACHED_SESSIONS_DESIGN.md` and a development-doc pointer. The design
-  is on both remotes. Read it with `git show
-  feature/detached-sessions:docs/DETACHED_SESSIONS_DESIGN.md` before switching.
-- Before implementation, bring the feature branch up to date with `main`.
-  Its old **0.0.38** baseline is historical, not the future release number.
-  Do not lose the recent deployment/client changes while integrating it.
+- `feature/detached-sessions` was updated from latest `main` (`13a14e0`) by
+  merge **`b34bb74`**, preserving runtime baseline **0.0.43**. Stage-1 prototype
+  is committed as **`9e2d636`**, accepted after the user's manual check; T040 is
+  done. Stage-2 owner implementation is committed as **`9f67959`**. Stage-3 public
+  CLI/frontend changes include the session picker, formatted listing and scoped
+  SQLite warning suppression. The user accepted local terminal/buffer restoration,
+  switching between two sessions and the picker, then requested integration into
+  `main` on 2026-11-08. This is source integration; installed client stays 0.0.43.
+  The earlier design-only commit `5ef06a2` remains on both remotes.
+- Read `docs/DETACHED_SESSIONS_DESIGN.md`, especially **Stage 1 prototype** and
+  **Stage 2 implementation** and **Stage 3 implementation**,
+  for the confirmed restoration/query contract, bounds, evidence and limits.
+  The design's original **0.0.38** baseline is historical.
 - `autotests`, `gateway`, `onebot` and `ws` are already ancestors of `main`;
   they contain no unmerged commits. Branch audit found no stash or other worktree.
 - Canonical shared client profile: `~/.tellymcp/.env`, mode `0600`, directory
@@ -70,18 +76,54 @@ is archived in Marrow. Retain the research; resume only on a new request.
 - Detailed recovery paths, volume names and migration incidents:
   Marrow **`I-TELLYMCP-039`**. Client handoffs: **042**, **043**, **044**.
 
-### Next session: start with T-TELLYMCP-040
+### T-TELLYMCP-040/041/042 implementation and next steps
 
-1. Read this section, latest Marrow handoff and the design on the feature branch.
-   Refresh Git state and integrate latest `main` into the feature branch.
-2. Prototype terminal restoration before changing ordinary `tellymcp run`:
-   ANSI/VT snapshot, normal/alternate screen, styles/cursor/modes, ordered
-   snapshot-to-live boundary, Unicode, resize and terminal query ownership.
-   Check a compatible serialization addon against the current xterm 5.5 packages.
-   Require the same shell/agent PID, no missing/duplicated output or query replies.
-3. Then follow existing Marrow tasks: **041** background owner/private local
-   protocol/discovery; **042** `run --detach`, `sessions`, `attach`, `stop` and
-   terminal cleanup; **043** account authorization and one controller lease;
+1. Read this section, T041 implementation note **I-TELLYMCP-048** (review), T040 result **I-TELLYMCP-046**
+   and user acceptance **I-TELLYMCP-047**, plus the design's two implementation
+   sections and T042 review result **I-TELLYMCP-049**. Refresh Git status and
+   preserve the stage-3 work. User acceptance and UI follow-ups are recorded in
+   I-TELLYMCP-050 through I-TELLYMCP-054.
+2. Stage 1 now has `TerminalRestorationPrototype`, a snapshot adapter and VT
+   query framing under `features/detached-terminal/model/`, plus replay and real
+   PTY integration tests. `@xterm/addon-serialize` **0.13.0** works with xterm
+   **5.5.0**, with tested corrections for omitted state and alternate SGR bleed.
+   One headless owner answers supported queries in both attached/detached
+   states; the display stream removes queries to avoid duplicate replies.
+   Ordered snapshot/live frames, input ACK, resize, Unicode, queue limits,
+   stale-controller rejection and draining final output before exit are tested.
+   The standalone manual harness is
+   `yarn tsx tools/prototype-terminal-restoration.ts`: Ctrl+] detaches, a attaches,
+   q while detached stops. It owns one clean Bash and no broker/identity/services.
+   That harness is still foreground; it intentionally waits for a/q after detach.
+3. Stage 2 adds internal owner/launcher, Unix framing/connection, private registry
+   and readiness/discovery. The hidden same-package `__session-owner` entrypoint
+   owns the real embedded broker and the existing PTY/screen in `ptyRegistry`.
+   The stream now shares that registry screen; no second parser is retained.
+   One startup claim covers canonical console identity and real workspace/session;
+   a short built-in SQLite transaction serializes claim mutations (mutex only,
+   no application data). Recovery checks boot/start identity and socket reachability
+   before rechecking under the lock. The child has independent stdio, ignores
+   SIGHUP, and bounded private logs/queues. Startup failure/cancellation and shell
+   exit/explicit stop clean up only their owner's resources. See design for protocol.
+   T041 implementation is ready for review, but actual SSH disconnect acceptance
+   remains unverified: localhost sshd host key was checked using its local public
+   key; login for the current account was denied. Do not claim cgroup/login survival.
+   Stage 3 now routes client-mode `run` through that owner and a thin native
+   attachment. `run --detach` returns after ready without a TTY; `sessions [--json]`,
+   `attach [handle]`, and `stop [handle]` are public. Without a handle, attach opens
+   a Clack session picker (arrows/Enter, Esc/Ctrl+C to cancel); the available current
+   workspace owner is initially selected and busy/unavailable owners are disabled.
+   Stop without a handle uses the workspace marker. Neither needs a profile/gateway.
+   Ctrl+], then d exits the
+   frontend to the outer shell; doubled Ctrl+] forwards the literal prefix.
+   Bracketed paste is protected, input stays raw, output is sequenced/reassembled,
+   exact outer termios is saved/restored with Linux stty, and own mode-query replies
+   are consumed locally, including late replies. Concurrent first launch serializes
+   marker UUID creation; repeated run checks a private startup fingerprint and
+   explicit provider/bridge choices without launching a second runtime.
+   Nested run inside its own Telly console is rejected; an old foreground process
+   cannot transfer its live PTY into an owner. Busy native controllers are rejected.
+   Next: **043** account authorization and one controller lease across interfaces;
    **044** remote attach through the gateway; **045** real console checks/docs/release.
 4. Keep one package, one PTY/agent/console identity and the existing raw terminal
    experience. No tmux dependency or client Redis. Attach starts no duplicate
@@ -91,15 +133,80 @@ is archived in Marrow. Retain the research; resume only on a new request.
    of the target account; the shared gateway bearer alone is insufficient.
    Disconnecting an attachment must leave the owner and PTY alive; actual shell
    exit or explicit stop must shut down owned services with the real exit status.
-6. This handoff prepares future work; implementation has not started. Do not
-   create a production release tag or deploy the experimental branch as part
-   of the restoration prototype.
+6. Stage 1 remains a standalone fidelity harness; stage 2 provides the daemon
+   and stage 3 switches Linux client-mode run to owner + frontend. Gateway/both
+   runner behavior stays separate. Public CLI testing uses `yarn build`, then
+   `node /absolute/path/to/telegram_mcp/dist/cli.js run` from an outer console.
+   The globally installed client remains 0.0.43 without these branch changes.
+   Its fixed palette and unsupported terminal extensions are documented in the
+   design. Keep the shared `ptyRegistry` screen/query owner during CLI integration.
+   Do not create a
+   release tag or deploy the experimental branch as part of this prototype.
 
-Latest completed runtime checks: build/lint passed; **378 tests passed, 2 skipped**.
+Latest source checks including the prototype: build/lint passed;
+**431 tests passed, 2 skipped** (18 stage-1, 12 stage-2, 20 stage-3 and 3 SQLite-warning cases).
+Follow-up: both registry and xchange SQLite imports use the shared
+`shared/lib/sqlite.ts` loader. It suppresses only the exact startup SQLite
+ExperimentalWarning during synchronous module loading and restores the warning
+handler in finally. Other warnings and load errors are retained; no global
+NODE_OPTIONS/NODE_NO_WARNINGS changes. Compiled sessions/plain JSON stdout and
+empty stderr verified on Node24.13.0.
+The sessions display now pads columns before applying picocolors, preserves full
+handles, and uses a compact per-session layout when the terminal is too narrow.
+Long paths are shortened only in the terminal display; JSON remains complete and
+uncolored. This display follow-up passed build/lint and manual 160/100/80-column,
+color/plain alignment, and actual two-session JSON checks (no new test cases).
+Attach without a handle now uses lazy-loaded `@clack/prompts` **1.8.1**. The
+picker keeps full owner handles as values, works outside a workspace, defaults
+to the available workspace owner, and disables busy/unavailable/exited entries.
+Esc/Ctrl+C cancel; catchable signals abort with their exit status. Exact termios
+is restored before attach or cancellation. Four new real-PTY cases cover another
+owner selection, busy skipping/all-busy rejection, non-TTY rejection, Esc/Ctrl+C
+termios restoration, and SIGTERM cancellation; existing attach tests confirm the
+menu-to-attachment transition. Build/lint and the full suite passed. Compiled-menu
+smoke listed the user's two actual owners and cancelled via Esc without attaching;
+both remained detached with their original shell PIDs. See I-TELLYMCP-054.
+Pre-merge packaging check also passed: `npm pack` rebuilt runtime and both browser
+extensions. Extracted tarball contains the owner/frontend, picker, formatter and
+SQLite loader; help, attach help and isolated sessions JSON work using the existing
+workspace dependencies. The package is a temporary verification artifact, not a
+release or global install. Remote main refs were checked at `13a14e0` before merge.
+Real PTY tests preserved shell/interactive-child PIDs, detached progress, raw
+Unicode input and one reply per query through attach/detach, final output and
+exit 7. The manual harness reported Bash PID `1411199` both before and after
+detach/reattach, delivered `FINAL_OUTPUT`, and propagated exit 7.
+Stage-2 tests additionally cover separate launcher exit with its controlling PTY,
+owner stdio `/dev/null`, concurrent launches creating one runtime, broken frontend/
+SIGHUP, private discovery, stale PID/start identity, input/output framing and
+bounds, startup cancellation/failure, isolated stop, bounded logs and early runtime
+readiness rejection. That last regression could previously crash before embedded
+broker startup returned; it now propagates through cleanup and private logging.
+Actual compiled internal CLI + embedded broker smoke used a disposable local
+HTTP gateway and temporary profile: owner PID `1490425`, shell PID `1490435`.
+After gateway drop and frontend disconnect, local reattach reached the same shell,
+received final output and exit9, cleaned discovery and preserved the temporary
+marker. The fixture supplied HTTP registration and rejected WebSocket upgrades;
+this was not authenticated real WSS reconnect evidence.
+No real gateway/shared profile/workspace marker was used or changed.
+Stage-3 public source-CLI tests verify first concurrent launches => one registration,
+profile/provider/bridge conflicts without extra runtime or marker mutation,
+normal run, ready/attach/resize/busy, profile-free reattach, final output/exit7,
+exact termios in an outer Bash, active-controller stop, SIGTERM/SIGKILL survival,
+Ctrl+C/Z/D, and browser bridge TCP continuity until owner exit. Stream tests cover
+byte splits, bracketed paste, prefix escaping, late mode-query replies and output
+sequence validation. A regression covers shell exit before snapshot ACK.
+Manual compiled CLI run --detach and repeat returned one handle; owner1555986,
+shell1556062. Split Ctrl+] then d exited frontend0; reattach reached shell1556062,
+delivered CLI_FINAL and returned shell exit7. Its temporary registry was cleaned.
+This is tool-PTY evidence; two physical emulator and real provider checks remain
+pending. No package install, release or production mutation occurred.
 Installed client auto-discovery, authenticated gateway HTTPS/WSS and foreground
-shell exit were verified. Optional Playwright Chromium binaries are missing in
-the local installation. Actual SSH disconnect, detach/reattach, terminal fidelity
-and remote attach remain future acceptance checks.
+shell exit were verified in the previous client work. Optional Playwright Chromium
+binaries are missing in the local installation. Actual SSH disconnect survival,
+two physical emulators, managed Codex/Claude terminal fidelity, authenticated
+Telegram/MCP/Live continuity, real WSS reconnect and remote attach remain future
+acceptance checks. Current busy enforcement covers local native attachments;
+shared local/remote/writable-Live lease enforcement remains T043.
 
 ## Historical snapshot (2026-08-07)
 

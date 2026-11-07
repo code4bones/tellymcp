@@ -2,6 +2,12 @@
 
 This document describes the current architecture of `telegram_mcp`.
 
+The local background-session architecture is described in
+[Detached sessions in TellyMCP](DETACHED_SESSIONS_DESIGN.md). It covers detach,
+terminal fidelity and process ownership. Current source implements Linux local
+owner/CLI attachment; account authorization and gateway attachment remain future
+stages. It is not yet a released or globally installed client update.
+
 ## Current Product Model
 
 The repository no longer models Telegram as a per-session pairing tool.
@@ -49,6 +55,9 @@ Key runtime entrypoints:
 
 - `runtime.ts`
 - `foregroundTerminalRuntime.ts`
+- `detached-terminal/model/ownerRuntime.ts` — client-mode broker/PTY owner
+- `detached-terminal/model/terminalAttachment.ts` — thin local raw terminal
+- `detached-terminal/model/localRegistry.ts` — private discovery/startup claims
 - `browserService.ts`
 - `xchangeService.ts`
 - `agent-runtime.service.ts`

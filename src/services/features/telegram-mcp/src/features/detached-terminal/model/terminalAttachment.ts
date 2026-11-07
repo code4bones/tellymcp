@@ -1,6 +1,12 @@
 import type { ReadStream, WriteStream } from "node:tty";
+import type { Duplex } from "node:stream";
 import { connectOwner } from "./localConnection";
-import { FrameType, type LocalFrame } from "./localProtocol";
+import {
+  FrameType,
+  type LocalFrame,
+  type LocalWriter,
+  type FrameDecoder,
+} from "./localProtocol";
 import type { OwnerRecord } from "./localRegistry";
 import { AttachmentInput } from "./attachmentInput";
 import {
@@ -32,19 +38,38 @@ function dimensions(stdout: WriteStream) {
 }
 
 /** Thin native frontend: this process owns no shell, broker, provider or bridge. */
+type TerminalIo = {
+  stdin?: ReadStream & { fd: number };
+  stdout?: WriteStream;
+  probeMs?: number;
+};
+
 export async function attachTerminal(
   record: OwnerRecord,
-  io: {
-    stdin?: ReadStream & { fd: number };
-    stdout?: WriteStream;
-    probeMs?: number;
-  } = {},
+  io: TerminalIo = {},
+): Promise<{ exitCode: number; detached: boolean }> {
+  requireInteractiveTerminal(
+    io.stdin ?? process.stdin,
+    io.stdout ?? process.stdout,
+  );
+  return attachTerminalConnection(
+    record.instance,
+    await connectOwner(record),
+    io,
+  );
+}
+
+/** Same renderer and raw I/O for local sockets and gateway streams. */
+export async function attachTerminalConnection(
+  instance: string,
+  connection: { socket: Duplex; writer: LocalWriter; decoder: FrameDecoder },
+  io: TerminalIo = {},
 ): Promise<{ exitCode: number; detached: boolean }> {
   const stdin = io.stdin ?? process.stdin,
     stdout = io.stdout ?? process.stdout;
   requireInteractiveTerminal(stdin, stdout);
   const requested = dimensions(stdout);
-  const { socket, writer, decoder } = await connectOwner(record);
+  const { socket, writer, decoder } = connection;
   let finished = false,
     detaching = false,
     peerEnded = false;
@@ -191,7 +216,7 @@ export async function attachTerminal(
       if (snapshot) throw new Error("Duplicate snapshot");
       snapshot = snapshotBeginSchema.parse(message);
       if (
-        snapshot.instance !== record.instance ||
+        snapshot.instance !== instance ||
         snapshot.cols !== requested.cols ||
         snapshot.rows !== requested.rows
       )
@@ -200,7 +225,7 @@ export async function attachTerminal(
       if (
         !snapshot ||
         output ||
-        message.instance !== record.instance ||
+        message.instance !== instance ||
         message.generation !== snapshot.generation ||
         message.sequence !== snapshot.sequence ||
         bytes !== snapshot.bytes

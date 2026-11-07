@@ -173,18 +173,32 @@ After `.mcpsession.json` is created in the workspace, later runs can usually use
 tellymcp run
 ```
 
-### Linux local sessions (unreleased)
+### Linux local sessions
 
 Use `tellymcp run --detach`, `tellymcp sessions [--json]`,
 `tellymcp attach [handle]` and `tellymcp stop [handle]`. Without a handle,
 attach opens a session picker (arrows/Enter, Esc or Ctrl+C to cancel), initially
 selecting the available current workspace session. Busy/unavailable sessions are
-disabled. Stop uses the current workspace marker. Ctrl+] then d returns to the outer
+disabled. Stop without a handle shows a repeating picker, including attached
+sessions: stop one, refresh the list, and choose again until empty or Esc/Ctrl+C.
+Errors return to selection; cancellation leaves remaining sessions running.
+`stop <handle>` stops exactly one session. Ctrl+] then d returns to the outer
 shell; doubled Ctrl+] forwards the literal prefix. Interactive attach needs
 Linux `stty`. Old foreground sessions require a fresh launch from the outer shell.
 For local build testing, use `node /absolute/path/to/tellymcp/dist/cli.js` after
 `yarn build`; no release/global install is implied. See
 [the implementation contract](DETACHED_SESSIONS_DESIGN.md).
+
+### Native terminal through the gateway
+
+In Telegram Live, press **Attach** beside **Open in browser**. The owner receives
+a private single-use eight-digit code, valid for five minutes:
+`tellymcp attach --code <code> [--gateway <url>] [--env <file>]`.
+The same owner/shell/screen is restored; the viewing machine creates no console
+or workspace marker. Native attach is exclusive, while Live remains mirrored and
+writable. Ctrl+] then d detaches. Reconnect needs a fresh code, with no input replay.
+Gateway, owner and client builds **0.0.44** or newer are required; see
+[the authorization contract](DETACHED_SESSIONS_DESIGN.md#remote-attach-through-the-gateway).
 
 ## 7. Webhook
 

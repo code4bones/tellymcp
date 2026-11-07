@@ -11,9 +11,10 @@ import { createOAuthFacade } from "../src/services/features/telegram-mcp/src/app
 vi.mock(
   "../src/services/features/telegram-mcp/src/app/telegramOidc",
   async (importOriginal) => {
-    const original = await importOriginal<
-      typeof import("../src/services/features/telegram-mcp/src/app/telegramOidc")
-    >();
+    const original =
+      await importOriginal<
+        typeof import("../src/services/features/telegram-mcp/src/app/telegramOidc")
+      >();
     return {
       ...original,
       exchangeTelegramOidcCode: vi.fn(),
@@ -131,9 +132,7 @@ async function authorize(
   expect(location).toBeDefined();
   const redirect = new URL(location ?? "https://invalid.example");
   expect(redirect.searchParams.get("state")).toBe("original-state");
-  expect(redirect.searchParams.get("iss")).toBe(
-    "https://mcp.example.com/api",
-  );
+  expect(redirect.searchParams.get("iss")).toBe("https://mcp.example.com/api");
   return redirect.searchParams.get("code") ?? "";
 }
 
@@ -383,7 +382,9 @@ describe("TellyMCP OAuth facade", () => {
     };
     expect(refreshedPayload.access_token).not.toBe(firstPayload.access_token);
     expect(refreshedPayload.refresh_token).not.toBe(firstPayload.refresh_token);
-    expect(facade.verifyAccessToken(refreshedPayload.access_token)).toMatchObject({
+    expect(
+      facade.verifyAccessToken(refreshedPayload.access_token),
+    ).toMatchObject({
       client_id: "chat-client",
       scope: "tellymcp:read tellymcp:write",
     });
@@ -429,7 +430,11 @@ describe("TellyMCP OAuth facade", () => {
 
   it("requires the confidential client's secret to redeem its refresh_token", async () => {
     const facade = createOAuthFacade(
-      { ...oauthConfig, clientId: "chat-client", clientSecret: "client-secret" },
+      {
+        ...oauthConfig,
+        clientId: "chat-client",
+        clientSecret: "client-secret",
+      },
       "/mcp",
     );
     const verifier = "refresh-confidential-".padEnd(64, "x");
@@ -478,7 +483,9 @@ describe("TellyMCP OAuth facade", () => {
       createRefreshToken: vi.fn(async (token: string, record: unknown) => {
         backing.set(token, record);
       }),
-      getRefreshToken: vi.fn(async (token: string) => backing.get(token) ?? null),
+      getRefreshToken: vi.fn(
+        async (token: string) => backing.get(token) ?? null,
+      ),
       deleteRefreshToken: vi.fn(async (token: string) => {
         backing.delete(token);
       }),
@@ -604,8 +611,7 @@ describe("TellyMCP OAuth facade", () => {
 
   it("accepts ChatGPT's CIMD public client and its declared redirect URI", async () => {
     const clientId = "https://chatgpt.com/oauth/client.json";
-    const redirectUri =
-      "https://chatgpt.com/connector_platform_oauth_redirect";
+    const redirectUri = "https://chatgpt.com/connector_platform_oauth_redirect";
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -670,7 +676,9 @@ describe("TellyMCP OAuth facade", () => {
       vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
-          redirect_uris: ["https://chatgpt.com/connector_platform_oauth_redirect"],
+          redirect_uris: [
+            "https://chatgpt.com/connector_platform_oauth_redirect",
+          ],
           token_endpoint_auth_methods_supported: ["none"],
         }),
       }),
@@ -699,7 +707,10 @@ describe("TellyMCP OAuth facade", () => {
       vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
-          redirect_uris: ["http://127.0.0.1/callback", "http://localhost/callback"],
+          redirect_uris: [
+            "http://127.0.0.1/callback",
+            "http://localhost/callback",
+          ],
           token_endpoint_auth_methods_supported: ["none"],
         }),
       }),
@@ -874,12 +885,13 @@ describe("Telegram login sub-flow", () => {
   });
 
   it("approves and completes the outer authorization code flow", async () => {
+    const transportFetch = vi.fn();
     const requestApproval = vi.fn().mockResolvedValue("approved");
     const facade = createOAuthFacade(
       { ...oauthConfig, telegramLogin: telegramLoginConfig },
       "/mcp",
       undefined,
-      { requestApproval },
+      { requestApproval, transportFetch },
     );
     const telegramState = await startTelegramLogin(facade);
 
@@ -899,6 +911,16 @@ describe("Telegram login sub-flow", () => {
     );
 
     expect(callbackResponse.statusCode).toBe(302);
+    expect(exchangeTelegramOidcCode).toHaveBeenCalledWith(
+      telegramLoginConfig,
+      expect.any(Object),
+      transportFetch,
+    );
+    expect(verifyTelegramOidcIdToken).toHaveBeenCalledWith(
+      "fake-id-token",
+      telegramLoginConfig.clientId,
+      transportFetch,
+    );
     expect(requestApproval).toHaveBeenCalledWith(
       expect.objectContaining({ telegramId: "4242" }),
     );
@@ -935,6 +957,52 @@ describe("Telegram login sub-flow", () => {
       preferred_username: "someone",
       client_id: "chat-client",
     });
+  });
+
+  it("starts the outer authorization-code TTL after slow identity/admin approval", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const requestApproval = vi.fn(async () => {
+      vi.setSystemTime(Date.now() + 301000);
+      return "approved" as const;
+    });
+    const facade = createOAuthFacade(
+      { ...oauthConfig, telegramLogin: telegramLoginConfig },
+      "/mcp",
+      undefined,
+      { requestApproval },
+    );
+    const state = await startTelegramLogin(facade);
+    vi.mocked(exchangeTelegramOidcCode).mockResolvedValue("fake-id-token");
+    vi.mocked(verifyTelegramOidcIdToken).mockResolvedValue({
+      telegramId: "4242",
+    });
+    const callback = makeResponse();
+    await facade.handleRequest(
+      makeRequest({
+        url: `/api/oauth/tg/callback?code=telegram-code&state=${state}`,
+      }),
+      callback,
+      "/oauth/tg/callback",
+    );
+    expect(callback.statusCode).toBe(302);
+    const redirect = new URL(callback.headers.get("location") ?? "");
+    const token = makeResponse();
+    await facade.handleRequest(
+      makeRequest({
+        method: "POST",
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: redirect.searchParams.get("code") ?? "",
+          redirect_uri: "https://chat.example/callback",
+          client_id: "chat-client",
+          code_verifier: "tg-verifier-".padEnd(64, "x"),
+          resource: "https://mcp.example.com/api/mcp",
+        }).toString(),
+      }),
+      token,
+      "/oauth/token",
+    );
+    expect(token.statusCode).toBe(200);
   });
 
   it("rejects the flow when the admin declines", async () => {
@@ -988,7 +1056,7 @@ describe("Telegram login sub-flow", () => {
     );
 
     expect(response.statusCode).toBe(403);
-    expect(response.body).toContain("/auth");
+    expect(response.body).toContain("/admin");
   });
 
   it("rejects an unknown or expired Telegram login state", async () => {

@@ -41,11 +41,13 @@ export type TelegramMenuPayloadRecord = {
     | "project-member"
     | "live-approval"
     | "terminal-prompt-action"
+    | "terminal-attach"
     | "project-file-target"
     | "partner-file-target"
     | "inbox-route-entry"
     | "inbox-message-entry";
   sessionId?: string | undefined;
+  telegramUserId?: number | undefined;
   ownerKey?: string | undefined;
   ownerLabel?: string | undefined;
   messageId?: string | undefined;

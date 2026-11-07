@@ -77,6 +77,7 @@ export type TelegramLoginApprovalOutcome =
   | "no_admin";
 
 export type TelegramLoginApprovalGate = {
+  transportFetch?: typeof globalThis.fetch;
   requestApproval: (
     identity: TelegramOidcIdentity,
   ) => Promise<TelegramLoginApprovalOutcome>;
@@ -1230,10 +1231,11 @@ export function createOAuthFacade(
         const idToken = await exchangeTelegramOidcCode(config.telegramLogin, {
           code,
           codeVerifier: pending.codeVerifier,
-        });
+        }, telegramLoginApproval.transportFetch);
         identity = await verifyTelegramOidcIdToken(
           idToken,
           config.telegramLogin.clientId,
+          telegramLoginApproval.transportFetch,
         );
       } catch (error) {
         logger?.warn("Telegram OIDC login verification failed", {
@@ -1265,7 +1267,7 @@ export function createOAuthFacade(
           403,
           renderTelegramLoginErrorPage(
             outcome === "no_admin"
-              ? "No gateway admin is currently authorized to approve this login. Authorize an admin on the bot first (/auth)."
+              ? "No gateway admin is currently authorized to approve this login. Authorize an admin on the bot first (/admin <ADMIN_TOKEN>)."
               : outcome === "timeout"
                 ? "The login request timed out waiting for admin approval."
                 : "The admin rejected this login request.",
@@ -1274,11 +1276,12 @@ export function createOAuthFacade(
         return true;
       }
 
-      purgeExpiredCodes(nowMs);
+      const issuedAtMs = Date.now();
+      purgeExpiredCodes(issuedAtMs);
       const issuedCode = randomBytes(32).toString("base64url");
       authorizationCodes.set(issuedCode, {
         ...pending.authorizationRequest,
-        expiresAtMs: nowMs + config.authCodeTtlSeconds * 1000,
+        expiresAtMs: issuedAtMs + config.authCodeTtlSeconds * 1000,
         subject: `telegram:${identity.telegramId}`,
         telegramIdentity: identity,
       });

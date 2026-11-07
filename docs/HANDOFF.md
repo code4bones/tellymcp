@@ -1,5 +1,16 @@
 # HANDOFF
 
+## Authorized gateway update in progress (2026-11-08)
+
+The user explicitly authorized updating the production gateway after the T046
+OAuth diagnosis. Preparing **0.0.44** on main with the already tested local/remote
+attach source and OAuth proxy/TTL fixes. Release through the existing GitLab
+`v0.0.44` tag pipeline on savant; preserve polling, credentials, URLs, admin grants
+and named data volumes. Browser extension versions are independent and unchanged.
+Below is the pre-release snapshot; record the final pipeline/image and post-deploy
+verification here once deployment succeeds. Global local client is still the
+earlier custom0.0.43 build until a separate installation step.
+
 ## Current continuation: local detach/attach integration (2026-11-08)
 
 This section supersedes the historical snapshot below. The user selected
@@ -9,10 +20,11 @@ is archived in Marrow. Retain the research; resume only on a new request.
 
 ### Repository and installed client
 
-- Package and locally installed client remain **0.0.43** (last stable client fix
-  `be12ca8`). Current `main` includes unreleased Linux local detach/attach, merged
+- Package version remains **0.0.43**. The user authorized a local package install
+  on 2026-11-08; the global command now includes detach/attach and the stop-menu
+  working-tree follow-up. Current `main` includes unreleased Linux local detach/attach, merged
   as **`f377ea7`** from `feature/detached-sessions` at **`968698e`**. Source
-  integration does not update the global installation or deploy the gateway.
+  integration and the local installation are separate from gateway deployment.
 - `feature/detached-sessions` was updated from latest `main` (`13a14e0`) by
   merge **`b34bb74`**, preserving runtime baseline **0.0.43**. Stage-1 prototype
   is committed as **`9e2d636`**, accepted after the user's manual check; T040 is
@@ -22,6 +34,9 @@ is archived in Marrow. Retain the research; resume only on a new request.
   switching between two sessions and the picker, then requested integration into
   `main` on 2026-11-08; merge **`f377ea7`** completed without conflicts and retains
   the tested feature tree. Continue new development from `main`.
+  Post-merge follow-up in the working tree: stop without a handle now uses a
+  repeating picker instead of workspace-marker selection. It is included in the
+  local global installation, but is not committed or pushed yet.
   The earlier design-only commit `5ef06a2` remains on both remotes.
 - Read `docs/DETACHED_SESSIONS_DESIGN.md`, especially **Stage 1 prototype** and
   **Stage 2 implementation** and **Stage 3 implementation**,
@@ -47,6 +62,76 @@ is archived in Marrow. Retain the research; resume only on a new request.
   Current install belongs to NVM Node **24.13.0**. No npm registry publication
   or automatic local updater was added. Codex plugin and Playwright browsers
   have separate CLI install commands.
+
+### Current T043/T044 source work (2026-11-08)
+
+- User selected Telegram authorization: **Attach** beside **Open in browser** in
+  the same Live keyboard row, eight-digit one-use code valid for five minutes,
+  then `tellymcp attach --code <code> [--gateway <url>] [--env <file>]`.
+- **Policy correction:** Live View remains mirrored and writable alongside native
+  attach. Only native local/remote attachments share exclusive control. Do not
+  implement the old proposed read-only-Live restriction. Marrow T043/T044 scope
+  and acceptance were updated to the user's selected contract.
+- Source implements private in-process Telegram issuance, original-user button
+  binding, gateway DB ownership checks at issuance/redemption, hash-only Redis
+  grants with 300s TTL and atomic GETDEL, bounded issuance/attempt limits, exact
+  owner-instance binding and denial of stop/admin protocol operations. The code
+  travels in the initial websocket message, never a URL; WSS is required outside
+  loopback. A code permits one redemption, not repeated reconnects.
+- Gateway viewer endpoint is `<GATEWAY_WS_PATH>/attach`. The existing owner WSS
+  connection carries scoped terminal envelopes into the same private owner socket;
+  no new console/services/marker on the viewing machine. Local and remote reuse
+  one raw renderer and snapshot/sequence protocol. Viewer ping/pong and owner-side
+  keepalive expiry release native control without killing the shell. Reconnect
+  needs a fresh Telegram code; uncertain input is never replayed automatically.
+- Latest build/lint/full suite: **449 passed, 2 skipped**. Four Telegram tests
+  verify the same keyboard row, identity binding/private delivery, callback expiry
+  and omission of URL credentials. Ten real-WS/PTY cases verify one-use/expiry,
+  ownership/instance changes, limits/scope, raw I/O/resize, same PID/screen across
+  detach, native busy, writable mirror input, network loss, lease expiry and exit7.
+- A private real Redis probe passed NX allocation, 300s TTL, atomic GETDEL across
+  eight concurrent redemptions, expiry and counter windows. A separate compiled
+  smoke used real `gateway-socket.service`, embedded owner/client and CLI with
+  private Redis and stubbed gateway identity/database methods: one registration,
+  same shell PID **1989565**, detach/fresh-code reattach, final output/exit7 and
+  no viewer marker/runtime. Temporary owner and Redis were cleaned up.
+- All remote-attach work is in the working tree. Installed global 0.0.43 still
+  contains the previously installed **local** attach/stop menus only. Production
+  gateway remains 0.0.40. No commit/push/install/version bump/tag/deployment for
+  T043/T044 yet. Real Telegram/account/WSS and separate-host acceptance remain
+  pending; updating gateway, owner and viewer builds is necessary to use the button.
+  Implementation/review records: **I-TELLYMCP-060** (authorization and policy),
+  **I-TELLYMCP-061** (remote transport); T043/T044 are in review.
+
+### Current T046: ChatGPT Telegram login diagnosis and fix
+
+- User reported Telegram account confirmation followed by missing bot approval
+  and eventual expiration after the domain/polling migration. Production remains
+  gateway0.0.40 on savant; this investigation has made **no production changes**.
+- Read-only evidence: three `Telegram OIDC login verification failed` warnings
+  with `reason: fetch failed` at 2026-11-07 22:04:18, 22:05:49 and 22:09:43 UTC.
+  Code fails before sending the separate gateway-admin approval request.
+- Inside that exact container, direct Telegram OAuth JWKS GET timed out at
+  6003ms; the same GET through the configured HTTP proxy returned200 in307ms.
+  The bot's proxy was configured but token exchange used raw global fetch and
+  jose's JWKS loader also used its default direct transport.
+- Host/container env-file fingerprints match. Public/issuer/audience/callback,
+  gateway and WebApp URLs all use `tellymcp.deadragdoll.net`; actual running OAuth
+  discovery also reports that issuer. Polling is enabled, and the Redis v3 admin
+  principal exists. No credentials or raw OAuth codes were printed or changed.
+- Source fix: inject `createTelegramFetch(config, logger)` into both OIDC token
+  exchange and jose custom JWKS fetch. Cache keysets per fetch transport; use
+  15s token/10s JWKS timeouts. After approval, start the outer authorization-code
+  TTL at issuance, and refer missing-admin users to `/admin`, not `/auth`.
+- Build/lint and full suite passed: **454 tests passed, 2 skipped**. Four new
+  signed-JWT/transport cases cover proxy routing for both backchannel steps,
+  cached-key isolation, audience/signature checks and redacted failures; a facade
+  regression covers delayed approval and fresh code TTL. T046 is in review;
+  production diagnosis and source verification are recorded in I-TELLYMCP-062.
+- Production still needs a separately authorized gateway update and real-account
+  ChatGPT -> Telegram -> bot approval -> connector acceptance. Do not claim that
+  the current deployed gateway is fixed. Preserve polling and the existing env,
+  admin identity, data volumes and all uncommitted T043/T044 source work.
 
 ### Production deployment — keep distinct from the client version
 
@@ -115,7 +200,9 @@ is archived in Marrow. Retain the research; resume only on a new request.
    `attach [handle]`, and `stop [handle]` are public. Without a handle, attach opens
    a Clack session picker (arrows/Enter, Esc/Ctrl+C to cancel); the available current
    workspace owner is initially selected and busy/unavailable owners are disabled.
-   Stop without a handle uses the workspace marker. Neither needs a profile/gateway.
+   Stop without a handle opens a repeating picker, including attached sessions;
+   after each stop it refreshes until empty or Esc/Ctrl+C. Errors return to the
+   menu. An explicit handle stops one owner. Neither needs a profile/gateway.
    Ctrl+], then d exits the
    frontend to the outer shell; doubled Ctrl+] forwards the literal prefix.
    Bracketed paste is protected, input stays raw, output is sequenced/reassembled,
@@ -125,8 +212,8 @@ is archived in Marrow. Retain the research; resume only on a new request.
    explicit provider/bridge choices without launching a second runtime.
    Nested run inside its own Telly console is rejected; an old foreground process
    cannot transfer its live PTY into an owner. Busy native controllers are rejected.
-   Next: **043** account authorization and one controller lease across interfaces;
-   **044** remote attach through the gateway; **045** real console checks/docs/release.
+   T043/T044 source implementation is described above. Next: **045** real account,
+   separate-host/provider/SSH acceptance, docs and an explicitly authorized release.
 4. Keep one package, one PTY/agent/console identity and the existing raw terminal
    experience. No tmux dependency or client Redis. Attach starts no duplicate
    shell, agent, broker or browser bridge. Preserve the shared profile, scoped
@@ -139,14 +226,15 @@ is archived in Marrow. Retain the research; resume only on a new request.
    and stage 3 switches Linux client-mode run to owner + frontend. Gateway/both
    runner behavior stays separate. Public CLI testing uses `yarn build`, then
    `node /absolute/path/to/telegram_mcp/dist/cli.js run` from an outer console.
-   The globally installed client remains 0.0.43 without these branch changes.
+   The globally installed client is now a local 0.0.43 build with detach/attach,
+   including the repeating stop picker. The package version was not bumped.
    Its fixed palette and unsupported terminal extensions are documented in the
    design. Keep the shared `ptyRegistry` screen/query owner during CLI integration.
    Do not create a
    release tag or deploy the experimental branch as part of this prototype.
 
 Latest source checks including the prototype: build/lint passed;
-**431 tests passed, 2 skipped** (18 stage-1, 12 stage-2, 20 stage-3 and 3 SQLite-warning cases).
+**454 tests passed, 2 skipped** (18 stage-1, 12 stage-2, 24 stage-3, 14 remote/code, 5 OAuth-repair and 3 SQLite-warning cases).
 Follow-up: both registry and xchange SQLite imports use the shared
 `shared/lib/sqlite.ts` loader. It suppresses only the exact startup SQLite
 ExperimentalWarning during synchronous module loading and restores the warning
@@ -176,6 +264,30 @@ release or global install. Remote main refs were checked at `13a14e0` before mer
 T041/T042 remain in review because their documented SSH/provider/authenticated
 integration acceptance is still open; merging the accepted local CLI scope does
 not complete remote attach or the entire detach/attach milestone.
+Stop-menu follow-up: the shared picker accepts attach/stop actions. Stop allows
+attached owners and stale/unavailable entries so the existing safe-stop/recovery
+path can handle them. Each selection waits for stop, probes a fresh list and
+reopens the menu; errors are printed and retain exit status 1, while selection
+continues. Empty list ends the menu; Esc/Ctrl+C leaves remaining sessions alive.
+An explicit handle still stops one owner without a TTY. Four new PTY cases verify
+two-owner iteration (including an attached frontend), Esc/Ctrl+C exact termios,
+and error-to-menu recovery without signalling an unverified process. Build/lint
+and the full suite passed; actual compiled stop/help also verified with the user's
+now-empty registry. The user reported stopping both of their prior sessions.
+
+Local package installation (explicitly authorized 2026-11-08): `npm pack` rebuilt
+runtime and both browser extensions, then `npm install --global --omit=dev` installed
+the archive into NVM Node24.13.0. Global binary:
+`~/.nvm/versions/node/v24.13.0/bin/tellymcp`; package under its `lib/node_modules`.
+Artifact: `/tmp/tellymcp-local-install.vNBBQW/deadragdoll-tellymcp-0.0.43.tgz`,
+SHA256 `189cee7a7e0a1b4ba508099efca3b925da13b1a61bb7d9b37fdca90ce118cb7e`.
+Installed CLI/picker/formatter/frontend/SQLite modules match the compiled source.
+Installed-package smoke used its own production dependencies and an isolated local
+HTTP registration fixture: run --detach, sessions JSON, raw attach/detach, picker
+reattach to the same shell PID1854198, stop picker and empty-list cleanup all passed,
+with one registration. Global attach/stop help and actual empty sessions JSON passed.
+Profile/legacy symlink target/workspace-marker content fingerprints were unchanged.
+Version stays 0.0.43; no release tag, registry publication or production deployment.
 Real PTY tests preserved shell/interactive-child PIDs, detached progress, raw
 Unicode input and one reply per query through attach/detach, final output and
 exit 7. The manual harness reported Bash PID `1411199` both before and after
@@ -204,14 +316,16 @@ Manual compiled CLI run --detach and repeat returned one handle; owner1555986,
 shell1556062. Split Ctrl+] then d exited frontend0; reattach reached shell1556062,
 delivered CLI_FINAL and returned shell exit7. Its temporary registry was cleaned.
 This is tool-PTY evidence; two physical emulator and real provider checks remain
-pending. No package install, release or production mutation occurred.
+pending. This earlier smoke preceded the separately authorized local install above;
+no release or production mutation occurred.
 Installed client auto-discovery, authenticated gateway HTTPS/WSS and foreground
 shell exit were verified in the previous client work. Optional Playwright Chromium
 binaries are missing in the local installation. Actual SSH disconnect survival,
 two physical emulators, managed Codex/Claude terminal fidelity, authenticated
 Telegram/MCP/Live continuity, real WSS reconnect and remote attach remain future
 acceptance checks. Current busy enforcement covers local native attachments;
-shared local/remote/writable-Live lease enforcement remains T043.
+shared native local/remote lease enforcement is now implemented in source, while
+Live remains mirrored and writable by the user's explicit decision.
 
 ## Historical snapshot (2026-08-07)
 

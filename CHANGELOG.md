@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## 0.0.44 — 2026-11-08
+
+### Telegram OAuth login
+
+- Use the configured Telegram proxy for both authorization-code exchange and
+  remote JWKS retrieval; direct OAuth fetches could time out before the bot's
+  administrator approval appeared. Bound network waits and keep the signing-key
+  cache per transport without changing global proxy settings.
+- Start the connector authorization-code TTL after Telegram/admin approval so a
+  slow approval does not issue an already expired code. Point missing-admin
+  guidance to `/admin` instead of `/auth`.
+
+### Remote terminal attach
+
+- Add an Attach button beside Open in browser in Telegram Live. The owner receives
+  a private eight-digit, one-use code valid for five minutes, with ready CLI commands.
+- Add `attach --code <code> [--gateway <url>] [--env <file>]` through the gateway
+  WSS relay, reusing the local terminal renderer and owner protocol. The viewer
+  creates no shell, agent, runtime, console registration or workspace marker.
+- Bind codes to server-verified ownership and the exact owner instance; store
+  hashes with Redis TTL/atomic redemption and limit issuance/guessing attempts.
+- Share native local/remote attach exclusivity, expire broken remote leases, and
+  preserve existing mirrored writable Live View. Reconnect requires a fresh code
+  and never automatically replays uncertain keystrokes.
+
 ### Local detached sessions (Linux)
 
 - Client-mode `run` starts or reuses a background owner for the existing console,
@@ -10,10 +35,11 @@
 - Add `sessions [--json]`, `attach [handle]` and `stop [handle]`, faithful screen and
   buffered-output restoration, raw input/resize handling, private local discovery,
   startup conflict checks and one local interactive controller.
-- Show an interactive Clack picker for attach without a handle and align/color
-  the sessions table, with a compact layout in narrow terminals.
+- Show interactive Clack pickers for attach and stop without a handle. Stop
+  refreshes selection after each operation until no sessions remain or the user
+  cancels. Align/color the sessions table, with a compact layout in narrow terminals.
 - Silence only Node's SQLite startup ExperimentalWarning; retain other warnings.
-- Remote attach and shared controller authorization remain future stages.
+- Native remote attach and Telegram code authorization are included in this release.
 
 ### Terminal shutdown
 

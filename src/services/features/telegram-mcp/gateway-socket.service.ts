@@ -47,6 +47,10 @@ import {
   type VersionCompatibility,
 } from "./src/shared/lib/version/versionHandshake";
 import type { PartnerArtifactRef } from "./src/entities/collaboration/model/types";
+import { GatewayTerminalAttach } from "./src/features/remote-terminal/model/gatewayAttach";
+import { RedisAttachCodeStore } from "./src/features/remote-terminal/model/attachCodes";
+import { TerminalOwnerBridge } from "./src/features/remote-terminal/model/ownerBridge";
+import { parseLiveRelaySessionId } from "./src/app/webapp/relay";
 
 const wsLib = require("ws") as {
   WebSocket: new (
@@ -392,6 +396,8 @@ type StandaloneHttpServiceCarrier = Service & {
 };
 
 type GatewaySocketCarrier = Service & {
+  terminalGateway?: GatewayTerminalAttach;
+  terminalOwner?: TerminalOwnerBridge;
   runtimeService?: TelegramMcpRuntimeServiceInstance | null;
   standaloneHttpService?: StandaloneHttpServiceCarrier | null;
   wsServer?: any;
@@ -2132,6 +2138,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       raw: unknown,
     ): Promise<void> {
       const runtime = this.getRuntimeOrThrow!();
+      if (this.terminalGateway?.handle(socket, raw)) return;
       const parsed = JSON.parse(String(raw)) as Partial<GatewaySocketMessage>;
 
       if (parsed.type === "hello") {
@@ -2655,6 +2662,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       raw: unknown,
     ): Promise<void> {
       const runtime = this.getRuntimeOrThrow!();
+      if (await this.terminalOwner?.handle(raw)) return;
       const parsed = JSON.parse(String(raw)) as Partial<GatewaySocketMessage>;
 
       if (parsed.type === "hello_ack") {
@@ -3440,6 +3448,23 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         maxPayload: MAX_BODY_SIZE_BYTES,
       });
 
+      if (runtime.redis) this.terminalGateway = new GatewayTerminalAttach({
+        path: wsPath + "/attach",
+        codes: new RedisAttachCodeStore(runtime.redis),
+        ownerSocket: clientUuid => this.connectedClientsByUuid?.get(clientUuid),
+        ownedTarget: async (telegramUserId, sessionId) => {
+          const relay = parseLiveRelaySessionId(sessionId);
+          const canonical = relay ? relay.clientUuid + ":" + relay.localSessionId : sessionId;
+          const result = await this.broker.call("telegramMcp.gateway.resolveLiveConsole", {
+            sessionId: canonical, telegram_user_id: String(telegramUserId),
+          }) as { client_uuid?: string; local_session_id?: string } | null;
+          return result?.client_uuid && result.local_session_id
+            ? { clientUuid: result.client_uuid, sessionId: result.local_session_id } : null;
+        },
+      });
+      if (runtime.terminalAttach && this.terminalGateway)
+        runtime.terminalAttach.issueCode = (telegramUserId, sessionId) => this.terminalGateway!.issue(telegramUserId, sessionId);
+
       wsServer.on("connection", (socket: any, req: any) => {
         runtime.logger.warn("Gateway WS client connected", {
           remoteAddress: req.socket.remoteAddress,
@@ -3462,6 +3487,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         });
 
         socket.on("close", () => {
+          this.terminalGateway?.backendClosed(socket);
           const hello = this.connectedClients?.get(socket);
           if (hello?.connection_id) {
             void this.broker
@@ -3516,6 +3542,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
         socket: Socket,
         head: Buffer,
       ) => {
+        if (this.terminalGateway?.upgrade(req, socket, head)) return;
         const requestUrl = new URL(req.url ?? "/", "http://gateway.local");
         const requestPath = requestUrl.pathname.replace(/\/+$/u, "") || "/";
         if (requestPath !== wsPath) {
@@ -3626,6 +3653,9 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             }
           : undefined,
       });
+      this.terminalOwner?.close();
+      const terminalOwner = new TerminalOwnerBridge(socket);
+      this.terminalOwner = terminalOwner;
 
       socket.on("open", () => {
         runtime.logger.warn(
@@ -3653,6 +3683,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       });
 
       socket.on("message", (raw: unknown) => {
+        if (this.wsClient !== socket) return;
         void this.handleGatewayWsClientMessage?.(raw).catch((error) => {
           runtime.logger.warn("Gateway WS client message handling failed", {
             error:
@@ -3675,6 +3706,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
       });
 
       socket.on("close", () => {
+        terminalOwner.close();
         runtime.logger.warn("Gateway WS connection to gateway closed", {
           url: normalizedUrl,
           clientUuid: this.wsHelloClientUuid,
@@ -3793,6 +3825,12 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
     },
 
     async closeGatewayWsResources(this: GatewaySocketCarrier): Promise<void> {
+      const runtime = this.getRuntimeOrThrow?.();
+      if (runtime?.terminalAttach) delete runtime.terminalAttach.issueCode;
+      this.terminalOwner?.close();
+      delete this.terminalOwner;
+      this.terminalGateway?.close();
+      delete this.terminalGateway;
       if (this.wsReconnectTimer) {
         clearTimeout(this.wsReconnectTimer);
         this.wsReconnectTimer = null;

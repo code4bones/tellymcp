@@ -5,8 +5,10 @@ This document describes the current architecture of `telegram_mcp`.
 The local background-session architecture is described in
 [Detached sessions in TellyMCP](DETACHED_SESSIONS_DESIGN.md). It covers detach,
 terminal fidelity and process ownership. Current source implements Linux local
-owner/CLI attachment; account authorization and gateway attachment remain future
-stages. It is not yet a released or globally installed client update.
+owner/CLI attachment and Telegram-code authorization for native gateway attach.
+Native local/remote attachments share exclusivity; Live View remains mirrored and
+writable by explicit user decision. These changes are unreleased; a local client build can be installed from
+the `npm pack` archive. See HANDOFF for the current local installation.
 
 ## Current Product Model
 

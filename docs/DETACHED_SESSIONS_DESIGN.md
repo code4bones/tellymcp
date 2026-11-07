@@ -4,8 +4,8 @@ Status: stage-1 accepted; Linux local owner and public CLI implemented under rev
 updated 2026-11-07.
 Branch: `feature/detached-sessions`, merged with `main` at `13a14e0` in
 `b34bb74`. Current package baseline: `0.0.43`; the original `0.0.38` baseline
-is historical. Local commands are implemented on this branch; remote commands
-and release acceptance remain proposed.
+is historical. Local commands and Telegram-code remote attach are implemented
+in source; real deployment/release acceptance remains pending.
 
 TellyMCP should keep a running local console alive when its terminal disconnects,
 an SSH connection drops, or the user deliberately sends the session into the
@@ -65,7 +65,7 @@ flowchart LR
     Owner <--> PTY[Existing PTY and headless screen]
     PTY <--> Shell[Shell and agent TUI]
     Owner <-->|existing connection| Gateway[Gateway]
-    RemoteTerminal[Terminal on another workstation] <--> RemoteAttach[tellymcp remote attach]
+    RemoteTerminal[Terminal on another workstation] <--> RemoteAttach[tellymcp attach --code]
     RemoteAttach <-->|authenticated WSS| Gateway
     Browser[Browser or Telegram WebApp] <--> Gateway
     Owner --> Services[Existing MCP browser and agent services]
@@ -101,7 +101,7 @@ against the project's supported Node 24 runtime during implementation.
 | `tellymcp run --agent codex --detach` | Start the managed agent once within the new owner. Reuse existing provider launch semantics.                                                                                             |
 | `tellymcp sessions`                   | List this OS user's local owners, with an opaque local handle, console identity, label, cwd, lifecycle state, and attachment state.                                                      |
 | `tellymcp attach [handle]`            | Attach to the exact existing owner; never create or resume a different process. Without a handle, show an interactive picker, initially selecting the available current workspace owner. |
-| `tellymcp stop <handle>`              | Explicitly stop the owner, its agent backends, shell, PTY, and embedded services. Without a handle, use the workspace marker.                                                            |
+| `tellymcp stop [handle]`              | Explicitly stop the owner, its agent backends, shell, PTY, and embedded services. Without a handle, show a repeating picker until empty or cancelled.                                    |
 | `Ctrl+]` followed by `d`              | Detach locally and restore the outer terminal. The owner continues. `Ctrl+]` twice forwards a literal prefix.                                                                            |
 | `Ctrl+C` / `Ctrl+D` typed normally    | Forward to the PTY so the foreground program and shell retain their normal behavior.                                                                                                     |
 
@@ -139,13 +139,11 @@ settings on every recoverable exit path, without calling broker shutdown.
 An uncatchable frontend kill must still leave the owner alive; terminal recovery
 after such a kill may require the user to reset the outer terminal.
 
-Only one interactive attachment owns input and resize, whether local, remote,
-or a writable Live View. A second controller request reports busy; no implicit
-takeover. Read-only observers do not send input or resize the PTY. Keep the
-last size while no controller is present. The owner enforces this policy for
-all transports, including existing Live View action paths. Telegram task
-delivery retains its existing explicit routing and ordering; it does not become
-an implicit controller or steal the terminal size.
+Only one native terminal attachment owns input and resize, either local or remote.
+A second native attachment reports busy; there is no implicit takeover. **User
+decision on 2026-11-08: Live View remains mirrored and writable alongside native
+attach.** It does not acquire the native attachment lease. Existing Live actions,
+resize behavior and Telegram task delivery retain their routing and ordering.
 
 ## Local discovery and identity
 
@@ -238,12 +236,15 @@ corrupt stdin. Unsupported capabilities must not be advertised as supported.
 
 ## Remote attach through the gateway
 
-Proposed additional commands are `tellymcp sessions --remote` and
-`tellymcp attach --remote <client_uuid:local_session_id>`. They use the configured
-gateway and an authenticated account. Local attach remains available without
-network access. A remote attachment is a viewer/controller connection, not a
-new routable agent console: it starts no shell, agent, browser bridge, or MCP
-server and does not register a duplicate source console.
+The user selected `tellymcp attach --code <code>` with an optional
+`--gateway <url>` and `--env <file>`. In Telegram Live, **Attach** sits in the same
+row as **Open in browser** and sends an eight-digit code privately to the original
+Telegram user. The code is single-use and expires after five minutes. The message
+includes a ready command with the public gateway URL for a new workstation.
+No account/owner credentials or full env need copying. `sessions --remote` and
+`attach --remote <target>` are not part of the selected CLI. Local attach remains
+available offline. A remote viewer starts no shell, agent, bridge, MCP server or
+routable console, and never writes a workspace marker.
 
 The existing relay already carries PTY output. In
 [`gateway-socket.service.ts`](../src/services/features/telegram-mcp/gateway-socket.service.ts),
@@ -283,14 +284,31 @@ authenticates with that shared bearer; it is not by itself a per-account CLI
 login mechanism. Do not copy browser/WebApp launch tokens or the client's full
 env file to another workstation to provide remote attach.
 
-Proposed authorization is a short-lived attachment capability issued after
-account authentication, scoped to the canonical target, allowed operations and
-expiry. The gateway creates the stream only after validating it. Select the
-CLI account-login integration before implementing remote attach; existing MCP
-OAuth credentials cannot be assumed to authorize terminal control without an
-explicit scope and audience contract. A remote attachment capability does not
-grant stop or arbitrary gateway actions. Use the existing WSS deployment and
-keep credentials out of URLs and logs.
+Code issuance is an in-process callback from the verified Telegram interaction;
+there is no HTTP or broker action that accepts an asserted Telegram identity to
+mint codes. The button payload is bound to its original Telegram user. Issuance
+and redemption both resolve the canonical target through the gateway database's
+Telegram-owner filter. The grant binds client UUID, local session ID, exact owner
+instance, issuing Telegram ID and expiry. Redemption accepts only the code, never
+caller-supplied owner/target fields. Redis stores the hash and grant with a 300s
+TTL; atomic GETDEL consumes it exactly once. Issuance is limited to five per user
+per five minutes; redemptions to ten per socket-peer address per minute and 100
+globally per minute. Forwarded-IP headers are not trusted for these limits.
+
+The public viewer upgrades at `<GATEWAY_WS_PATH>/attach`, then submits the code in
+its first message. URLs contain no codes or credentials. HTTPS/WSS is required
+outside loopback. The existing authenticated owner WSS connection multiplexes
+bounded terminal envelopes; the owner bridges them into its own private socket.
+Both directions reuse the local restoration/frame protocol. Only attach, ACK,
+resize, detach and raw input are permitted; hello/stop/admin operations are denied.
+Owner-instance changes reject an old grant. Five minutes limits redemption, not
+the duration of an already authenticated connection.
+
+Viewer ping/pong every ten seconds and owner-side thirty-second keepalive expiry
+release the native attachment on network loss. Closing either leg preserves the
+owner and PTY. Reconnect requires a fresh Telegram code and a new snapshot;
+uncertain keystrokes are never automatically replayed. The same renderer handles
+local/remote raw input, termios restoration, snapshot/stream boundaries and exit.
 
 Guest/project-member terminal access keeps its separate explicit approval path.
 This feature's automatic authorization is limited to the same verified account.
@@ -580,6 +598,11 @@ The installed client and production gateway have not been updated or released.
   cancellation; SIGINT/SIGTERM/SIGHUP abort the prompt and retain exit status.
 - `stop [handle]` waits for that owner's cleanup; it does not signal guessed PIDs.
   An already dead owner can have stale metadata removed only after safe recovery.
+  Without a handle, the Clack picker allows stopping attached as well as detached
+  owners. After each stop it probes a fresh list and reopens selection until no
+  sessions remain. Errors are reported and return to the menu; a failed operation
+  retains exit status 1. Esc/Ctrl+C closes the menu without stopping remaining
+  sessions. An explicit handle remains a one-session operation and needs no TTY.
 
 Attach/list/stop need neither the env file nor the gateway connection. Startup
 still uses existing gateway registration. Gateway/both mode keeps its former
@@ -637,10 +660,13 @@ when the shell exits before the initial snapshot ACK, without enabling input.
 
 ### Validation and remaining checks
 
-Build/lint pass; full suite **431 passed, 2 skipped**, including the SQLite-warning
+Build/lint pass; full suite **449 passed, 2 skipped**, including the SQLite-warning
 and interactive-picker follow-ups. Picker PTY tests cover another owner selection,
 disabled busy entries/all-busy rejection, selection outside a workspace,
 non-TTY rejection, exact termios after Esc/Ctrl+C, and SIGTERM cancellation.
+Stop-picker cases additionally cover two-owner iteration through an empty list,
+stopping an attached frontend, Esc/Ctrl+C retaining remaining owners with exact
+termios, and error-to-menu recovery without signalling an unverified process.
 New stream tests cover byte
 splits, prefix escaping, paste, control keys, late query replies and sequence
 validation. Source-runtime public CLI tests start the actual embedded runtime
@@ -659,8 +685,9 @@ reported shell `1556062`, delivered `CLI_FINAL` and propagated exit7.
 These are tool-PTY checks on temporary profiles. Real SSH/login/cgroup survival,
 two physical emulators, managed Codex/Claude TUIs, authenticated Telegram/MCP/Live
 continuity and real WSS reconnect remain acceptance work. The HTTP fixture rejects
-WebSocket upgrades. Shared controller authorization across local/remote/writable
-Live paths remains T043; current busy enforcement covers local native attachments.
+WebSocket upgrades. The shared lease proposal across local/remote/writable Live
+was superseded by the user's mirrored-Live decision. Native local and remote
+attachments share the owner's busy check; Live keeps its writable mirror.
 No npm publication, package version bump, global install or deployment is
 part of this stage.
 

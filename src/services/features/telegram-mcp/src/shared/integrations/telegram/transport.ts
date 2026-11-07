@@ -210,6 +210,7 @@ export class TelegramTransport implements HumanTransport {
     private readonly webAppLaunchRegistry: WebAppLaunchRegistry,
     private readonly webAppSessions: WebAppSessionRegistry,
     private readonly logger: Logger,
+    private readonly issueTerminalAttachCode?: (telegramUserId: number, sessionId: string) => Promise<{ code: string; expiresAt: number }>,
   ) {
     const composition = buildTransportConstructorWiring({
       config: this.config,
@@ -225,6 +226,7 @@ export class TelegramTransport implements HumanTransport {
       webAppLaunchRegistry: this.webAppLaunchRegistry,
       webAppSessions: this.webAppSessions,
       logger: this.logger,
+      ...(this.issueTerminalAttachCode ? { issueTerminalAttachCode: this.issueTerminalAttachCode } : {}),
       waiters: this.waiters,
       terminalNudgeDebounceTimers: this.terminalNudgeDebounceTimers,
       terminalNudgeFailureNoticeAt: this.terminalNudgeFailureNoticeAt,

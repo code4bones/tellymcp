@@ -14,18 +14,26 @@ const clean = (value: string) =>
 /** Select by owner handle; listing and cancellation never acquire a controller. */
 export async function pickLocalSession(
   registry: LocalRegistry,
+  options: { action?: "attach" | "stop"; showIntro?: boolean } = {},
 ): Promise<string | undefined> {
+  const action = options.action ?? "attach";
   const sessions = await listLocalSessions(registry);
   if (!sessions.length) {
-    process.stdout.write("No local sessions. Start one with tellymcp run.\n");
+    process.stdout.write(
+      action === "stop"
+        ? "No local sessions.\n"
+        : "No local sessions. Start one with tellymcp run.\n",
+    );
     return;
   }
   if (!process.stdin.isTTY || !process.stdout.isTTY)
     throw new Error(
-      "Session selection requires an interactive TTY. Use tellymcp attach <handle> from a terminal.",
+      `Session selection requires an interactive TTY. Use tellymcp ${action} <handle> from a terminal.`,
     );
   const available = sessions.filter(
-    (session) => session.state === "running" && session.attached === false,
+    (session) =>
+      action === "stop" ||
+      (session.state === "running" && session.attached === false),
   );
   if (!available.length) {
     process.stdout.write(
@@ -63,37 +71,43 @@ export async function pickLocalSession(
   for (const signal of signals) process.on(signal, onSignal);
   stdin.once("end", onEnd);
   try {
-    intro(pc.bgCyan(pc.black(" TellyMCP · attach ")));
+    if (options.showIntro !== false)
+      intro(pc.bgCyan(pc.black(` TellyMCP · ${action} `)));
     const handle = await select({
-      message: "Select a session (Esc to cancel)",
+      message:
+        action === "stop"
+          ? "Select a session to stop (Esc to finish)"
+          : "Select a session (Esc to cancel)",
       initialValue,
       maxItems: 8,
       signal: controller.signal,
       options: sessions.map((session) => {
-        const detached = available.some(
+        const selectable = available.some(
           (candidate) => candidate.handle === session.handle,
         );
         const status =
           session.state !== "running"
             ? session.state
             : session.attached
-              ? "attached · busy"
+              ? action === "attach"
+                ? "attached · busy"
+                : "attached"
               : "detached";
         return {
           value: session.handle,
           label:
             clean(session.session_label) +
             "  " +
-            (detached ? pc.green(status) : pc.dim(status)) +
+            (selectable ? pc.green(status) : pc.dim(status)) +
             "  " +
             pc.dim(session.handle.slice(0, 8)),
           hint: clean(session.cwd) + " · " + session.handle,
-          disabled: !detached,
+          disabled: !selectable,
         };
       }),
     });
     if (isCancel(handle)) {
-      cancel("Attach cancelled.");
+      cancel(action === "stop" ? "Stop menu closed." : "Attach cancelled.");
       return;
     }
     return handle;

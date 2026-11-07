@@ -276,7 +276,7 @@ So later the same workspace can usually start with:
 tellymcp run
 ```
 
-### Local detach/attach (Linux; unreleased)
+### Local detach/attach (Linux)
 
 Client-mode `run` now starts or reuses a background owner and attaches to its
 existing shell. `run --detach` returns after readiness without requiring a TTY.
@@ -285,12 +285,16 @@ existing shell. `run --detach` returns after readiness without requiring a TTY.
 tellymcp run --detach
 tellymcp sessions           # add --json for machine-readable output
 tellymcp attach             # choose a session, or attach <handle> directly
-tellymcp stop               # current workspace, or stop <handle>
+tellymcp stop               # choose sessions to stop, or stop <handle> directly
 ```
 
 Without a handle, attach opens an interactive session picker: arrows to move,
 Enter to attach, Esc or Ctrl+C to cancel. The current workspace is selected by
 default when available; busy and unavailable sessions cannot be selected.
+Stop without a handle opens a repeating picker: each selection stops that session
+and refreshes the list. Attached sessions can also be stopped. The menu ends when
+no sessions remain, or with Esc/Ctrl+C; cancellation leaves the remaining sessions
+running. A stop error is shown and returns to selection.
 
 Press **Ctrl+]**, then **d** to return to the outer shell. Double Ctrl+] forwards
 a literal prefix; bracketed paste preserves pasted prefix bytes. One interactive
@@ -300,10 +304,34 @@ Changed startup configuration or a different explicit provider/bridge setting
 requires stopping the old owner first. Managed agents still use `--agent`.
 
 Launch from the outer shell: old foreground sessions cannot be converted in place.
-Interactive attach needs Linux `stty`. These changes are not globally installed:
-after `yarn build`, use `node /absolute/path/to/tellymcp/dist/cli.js` instead of
-`tellymcp`. SSH/cgroup, real agent TUIs and remote attach remain separate acceptance
+Interactive attach needs Linux `stty`. For source testing, run `yarn build`, then
+use `node /absolute/path/to/tellymcp/dist/cli.js`. To install a local build, run
+`npm pack`, then `npm install -g /path/to/deadragdoll-tellymcp-<version>.tgz`.
+SSH/cgroup, real agent TUIs and remote attach remain separate acceptance
 checks. See [the contract](docs/DETACHED_SESSIONS_DESIGN.md).
+
+### Terminal attach through the gateway
+
+In Telegram, open the session's Live menu and press **Attach**, beside **Open in
+browser**. The owner receives an eight-digit, single-use code valid for five
+minutes, with a ready command for another workstation:
+
+```bash
+tellymcp attach --code 12345678
+tellymcp attach --code 12345678 --gateway https://example.com/api/gateway
+```
+
+Use the command with `--gateway` if no gateway is configured on that machine;
+`--env <file>` can select gateway/proxy settings. The code supplies session access,
+so the owner's credentials and workspace marker are not needed. One native local
+or remote attach is allowed; detach the previous one first. Live View keeps its
+mirrored screen and input. Ctrl+] then d disconnects while the owner keeps running.
+After disconnection, generate a fresh code; keystrokes are never automatically
+replayed. The five-minute limit applies to code redemption, not connection length.
+
+This needs gateway, session-owner and viewing-client builds **0.0.44 or newer**.
+Restart an existing owner when ready to load the new bridge; installing a package
+does not replace code in an already running owner.
 
 ### Start and continue a coding agent
 

@@ -1,14 +1,28 @@
 import { createHash, randomBytes } from "node:crypto";
 
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { createRemoteJWKSet, customFetch, jwtVerify } from "jose";
 
 const AUTHORIZE_URL = "https://oauth.telegram.org/auth";
 const TOKEN_URL = "https://oauth.telegram.org/token";
 const JWKS_URL = "https://oauth.telegram.org/.well-known/jwks.json";
 
-// Module-level singleton: jose caches keys internally and only refetches on
-// an unrecognized `kid`, so this must not be reconstructed per request.
-const jwks = createRemoteJWKSet(new URL(JWKS_URL));
+// Keep jose's key cache, but isolate it by transport so a proxied gateway never
+// falls back to the default direct fetch when it needs to retrieve signing keys.
+const keysets = new WeakMap<
+  typeof globalThis.fetch,
+  ReturnType<typeof createRemoteJWKSet>
+>();
+function keyset(fetcher: typeof globalThis.fetch) {
+  let keys = keysets.get(fetcher);
+  if (!keys) {
+    keys = createRemoteJWKSet(new URL(JWKS_URL), {
+      timeoutDuration: 10000,
+      [customFetch]: (url, options) => fetcher(url, options),
+    });
+    keysets.set(fetcher, keys);
+  }
+  return keys;
+}
 
 export type TelegramOidcConfig = {
   clientId: string;
@@ -49,6 +63,7 @@ export function buildTelegramAuthorizeUrl(
 export async function exchangeTelegramOidcCode(
   config: TelegramOidcConfig,
   params: { code: string; codeVerifier: string },
+  fetcher: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<string> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
@@ -58,10 +73,12 @@ export async function exchangeTelegramOidcCode(
     client_secret: config.clientSecret,
     code_verifier: params.codeVerifier,
   });
-  const response = await fetch(TOKEN_URL, {
+  const response = await fetcher(TOKEN_URL, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: body.toString(),
+    signal: AbortSignal.timeout(15000),
+    redirect: "error",
   });
   if (!response.ok) {
     throw new Error(
@@ -70,9 +87,7 @@ export async function exchangeTelegramOidcCode(
   }
   const payload = (await response.json()) as { id_token?: string };
   if (!payload.id_token) {
-    throw new Error(
-      "Telegram OIDC token response did not include an id_token",
-    );
+    throw new Error("Telegram OIDC token response did not include an id_token");
   }
   return payload.id_token;
 }
@@ -107,8 +122,11 @@ function readIdentifierClaim(
 export async function verifyTelegramOidcIdToken(
   idToken: string,
   clientId: string,
+  fetcher: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<TelegramOidcIdentity> {
-  const { payload } = await jwtVerify(idToken, jwks, { audience: clientId });
+  const { payload } = await jwtVerify(idToken, keyset(fetcher), {
+    audience: clientId,
+  });
   const claims = payload as Record<string, unknown>;
   // `sub` is a separate OIDC subject id that does NOT match the Bot API's
   // numeric user id; the real Telegram user id is the `id` claim, which

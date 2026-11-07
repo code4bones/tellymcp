@@ -44,6 +44,7 @@ export type AppRuntime = {
     options?: { meta?: Record<string, unknown> },
   ) => Promise<T>;
   config: AppConfig;
+  terminalAttach: { issueCode?: (telegramUserId: number, sessionId: string) => Promise<{ code: string; expiresAt: number }> };
   logger: Logger;
   redis: RedisClient | null;
   stateStore: RuntimeStateStore;
@@ -280,6 +281,7 @@ export async function createAppRuntime(input: {
   }
   logger.info("PTY terminal sessions recovered", { recoveredCount });
 
+  const terminalAttach: AppRuntime["terminalAttach"] = {};
   const telegramTransport = new TelegramTransport(
     config,
     sessionStore,
@@ -294,6 +296,10 @@ export async function createAppRuntime(input: {
     webAppLaunchRegistry,
     webAppSessions,
     logger,
+    async (telegramUserId, sessionId) => {
+      if (!terminalAttach.issueCode) throw new Error("Remote terminal attach is not ready on this gateway");
+      return terminalAttach.issueCode(telegramUserId, sessionId);
+    },
   );
   await telegramTransport.start();
   logger.info("Telegram transport ready");
@@ -320,6 +326,7 @@ export async function createAppRuntime(input: {
 
   return {
     callBroker: input.callBroker,
+    terminalAttach,
     config,
     logger,
     redis,

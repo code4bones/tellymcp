@@ -175,6 +175,22 @@ client falls back to a full re-authorization once, same as today.
 
 ## Diagnostics
 
+Telegram login has two separate confirmations: Telegram first authenticates the
+account, then TellyMCP verifies that identity and asks the gateway administrator
+to approve access in the bot. The bot request is sent only after token exchange
+and Telegram JWKS verification succeed. Polling versus webhook does not change
+this browser-to-gateway OAuth callback flow.
+
+If Telegram confirms login but no bot Approve/Decline request arrives, inspect
+`Telegram OIDC login verification failed` before changing origins or admin grants.
+Token exchange and JWKS retrieval use the configured Telegram fetch transport,
+including its HTTP proxy and Telly bypass rules. Raw direct fetch can fail on a
+host where the bot itself works through a proxy. Token exchange has a 15-second
+timeout; JWKS retrieval has a 10-second timeout and caches keys per transport.
+`/admin <ADMIN_TOKEN>` authorizes the approval administrator; `/auth` is separate
+gateway-scope access. A new outer OAuth code receives its full lifetime after
+identity verification and admin approval, not before those waits.
+
 OAuth discovery, authorization, token exchange, MCP `initialize`, and
 `tools/list` milestones are logged at `info`. Rejections are logged at `warn`
 without credentials, authorization codes, PKCE verifiers, or access tokens.

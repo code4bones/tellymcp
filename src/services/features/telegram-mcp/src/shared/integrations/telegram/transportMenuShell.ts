@@ -4,6 +4,7 @@ import type { Logger } from "../../lib/logger/logger";
 import type { TelegramMenuContext } from "./transportTypes";
 
 type TransportMenuShellHost = {
+  handleTerminalAttachCallback: (ctx: TelegramMenuContext) => Promise<void>;
   logger: Logger;
   tForContext: (
     ctx: TelegramMenuContext,
@@ -42,6 +43,9 @@ export class TransportMenuShell {
   public constructor(private readonly host: TransportMenuShellHost) {}
 
   public register(bot: Bot<TelegramMenuContext>): void {
+    bot.callbackQuery(/^terminal-attach:(.+)$/u, async ctx => {
+      await this.host.handleTerminalAttachCallback(ctx);
+    });
     bot.catch((error) => {
       this.host.logger.error("Telegram polling error", {
         error:

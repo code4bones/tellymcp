@@ -418,6 +418,13 @@ export const enMenu = {
       expand: "Expand",
       default: "Default",
       open_in_browser: "🌐 Open in browser",
+      attach: "🔗 Attach",
+    },
+    attach: {
+      instructions: "This one-use code connects your terminal to this session and expires in 5 minutes. Run the command on another machine. If its gateway is not configured, use the command with --gateway:",
+      creating: "Creating attach code…",
+      denied: "Open Live for your own session and press Attach again.",
+      failed: "Could not create a code: the session is unavailable, ownership was denied, or the limit was reached. Try again later from Live.",
     },
     actions: {
       opening: "Opening Live View.",

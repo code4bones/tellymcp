@@ -5,11 +5,16 @@ import type { AppConfig } from "../../../app/config/env";
 import type { WebAppLaunchRegistry, WebAppSessionRegistry } from "../../../app/webapp/auth";
 import type { Logger } from "../../lib/logger/logger";
 import type { SupportedLocale } from "../../i18n";
-import type { GatewayActorProfile, SendMessageMeta, TelegramSendMessageOptions, WebAppLaunchMode } from "./transportTypes";
+import type { GatewayActorProfile, SendMessageMeta, TelegramSendMessageOptions, WebAppLaunchMode, TelegramMenuContext } from "./transportTypes";
 import { buildLiveLauncherText, buildLiveViewLaunchKeyboard, buildLiveViewUrlForSessionTarget, canRenderLiveView } from "./transportLive";
-import { resolveWebAppPublicBaseUrl } from "./transportUtils";
+import { resolveWebAppPublicBaseUrl, escapeHtml } from "./transportUtils";
+import { createMenuPayloadKey } from "../../lib/ids/ids";
+import type { TelegramMenuPayloadStore } from "../../api/storage/contract";
 
 export interface TransportLiveHost {
+  menuPayloadStore: TelegramMenuPayloadStore;
+  resolveLocaleForContext(ctx: TelegramMenuContext): Promise<SupportedLocale>;
+  issueTerminalAttachCode?: (telegramUserId: number, sessionId: string) => Promise<{ code: string; expiresAt: number }>;
   config: AppConfig;
   webAppLaunchRegistry: WebAppLaunchRegistry;
   webAppSessions: WebAppSessionRegistry;
@@ -121,6 +126,16 @@ export class TransportLiveActions {
         this.host.t(input.locale, "menu:live.buttons.open_in_browser"),
         directBrowserUrl.toString(),
       );
+    if (this.host.config.distributed.mode !== "client" && this.host.issueTerminalAttachCode) {
+      const key = createMenuPayloadKey();
+      const now = Date.now();
+      await this.host.menuPayloadStore.createMenuPayload({
+        key, kind: "terminal-attach", sessionId: input.sessionId,
+        telegramUserId: input.principal.telegramUserId,
+        createdAt: new Date(now).toISOString(), expiresAt: new Date(now + 86400000).toISOString(),
+      }, 86400);
+      keyboard.text(this.host.t(input.locale, "menu:live.buttons.attach"), "terminal-attach:" + key);
+    }
 
     const sent = await this.host.sendChatMessage(
       input.principal.telegramChatId,
@@ -151,5 +166,35 @@ export class TransportLiveActions {
     );
 
     return sent;
+  }
+
+  public async handleAttachCallback(ctx: TelegramMenuContext): Promise<void> {
+    const locale = await this.host.resolveLocaleForContext(ctx);
+    const key = ctx.callbackQuery?.data?.slice("terminal-attach:".length);
+    const payload = key ? await this.host.menuPayloadStore.getMenuPayload(key) : null;
+    if (!payload || payload.kind !== "terminal-attach" || !payload.sessionId ||
+      payload.telegramUserId !== ctx.from?.id || Date.parse(payload.expiresAt) <= Date.now() ||
+      !this.host.issueTerminalAttachCode) {
+      await ctx.answerCallbackQuery({ text: this.host.t(locale, "menu:live.attach.denied"), show_alert: true });
+      return;
+    }
+    await ctx.answerCallbackQuery({ text: this.host.t(locale, "menu:live.attach.creating") });
+    try {
+      const result = await this.host.issueTerminalAttachCode(ctx.from!.id, payload.sessionId);
+      const command = "tellymcp attach --code " + result.code;
+      const gatewayUrl = this.host.config.distributed.gatewayPublicUrl;
+      const publicUrl = gatewayUrl ? new URL(gatewayUrl) : null;
+      if (publicUrl) { publicUrl.username = ""; publicUrl.password = ""; publicUrl.search = ""; publicUrl.hash = ""; }
+      const withGateway = publicUrl ? command + " --gateway " + publicUrl.toString().replace(/\/$/u, "") : command;
+      // Always private, even if the Live launcher was posted in a group.
+      await this.host.sendChatMessage(ctx.from!.id,
+        escapeHtml(this.host.t(locale, "menu:live.attach.instructions")) +
+          "\n\n<code>" + escapeHtml(command) + "</code>" +
+          (withGateway !== command ? "\n\n<code>" + escapeHtml(withGateway) + "</code>" : ""),
+        { parse_mode: "HTML" }, { kind: "notification", sessionId: payload.sessionId });
+    } catch {
+      await this.host.sendChatMessage(ctx.from!.id, this.host.t(locale, "menu:live.attach.failed"),
+        {}, { kind: "notification", sessionId: payload.sessionId });
+    }
   }
 }

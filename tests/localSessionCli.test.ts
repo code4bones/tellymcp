@@ -326,7 +326,7 @@ it("ordinary run returns to an outer shell with exact termios after detach; stop
     () => outer.text.slice(start).includes("\x1bc"),
     "active stop attachment",
   );
-  const stopped = await ctx.run(["stop"]);
+  const stopped = await ctx.run(["stop", list[0]!.handle]);
   expect(stopped.code, stopped.err).toBe(0);
   await until(
     () => outer.text.includes("ACTIVE_STOP_RETURNED\r\n"),
@@ -477,6 +477,156 @@ it("SIGTERM aborts the attach picker without acquiring control or leaving the CL
   expect(sessions).toHaveLength(1);
   expect(sessions[0]!.attached).toBe(false);
   expect(ctx.registrations).toBe(1);
+}, 30000);
+
+it("stop menu stops an attached owner, refreshes for the remaining owner and exits only when empty", async () => {
+  const ctx = await setup();
+  expect((await ctx.run(["stop"])).out).toContain("No local sessions.");
+  expect((await ctx.run(["run", "--detach", "-s", "First"])).code).toBe(0);
+  const first = (
+    JSON.parse((await ctx.run(["sessions", "--json"])).out) as Session[]
+  )[0]!;
+  const secondCwd = path.join(ctx.root, "second");
+  fs.mkdirSync(secondCwd);
+  const started = await ctx.run(
+    ["run", "--detach", "--env", ctx.envPath, "-s", "Second"],
+    secondCwd,
+  );
+  expect(started.code, started.err).toBe(0);
+  const sessions = JSON.parse(
+    (await ctx.run(["sessions", "--json"])).out,
+  ) as Session[];
+  const second = sessions.find((session) => session.handle !== first.handle)!;
+  const headless = await ctx.run(["stop"]);
+  expect(headless.code).toBe(1);
+  expect(headless.err).toContain("tellymcp stop <handle>");
+  const attached = ctx.pty(["attach", first.handle]);
+  await until(
+    () => attached.text.includes("\x1bc"),
+    "owner attached before stop",
+  );
+  const menu = ctx.pty(["stop"]);
+  await until(
+    () => menu.text.includes("Select a session to stop"),
+    "stop menu",
+  );
+  expect(menu.text).toContain("First");
+  expect(menu.text).toContain("Second");
+  expect(menu.text).not.toContain("attached · busy");
+  menu.pty.write("\r");
+  const stopped = "Stopped: " + first.handle;
+  await until(
+    () =>
+      menu.text.includes(stopped) &&
+      menu.text
+        .slice(menu.text.indexOf(stopped) + stopped.length)
+        .includes("Select a session to stop"),
+    "stop menu refreshes after first owner",
+  );
+  await until(() => attached.code !== undefined, "attached frontend exits");
+  expect(attached.code).toBe(0);
+  expect(menu.code).toBeUndefined();
+  const remaining = JSON.parse(
+    (await ctx.run(["sessions", "--json"])).out,
+  ) as Session[];
+  expect(remaining).toHaveLength(1);
+  expect(remaining[0]!.handle).toBe(second.handle);
+  expect(remaining[0]!.pty_pid).toBe(second.pty_pid);
+  menu.pty.write("\r");
+  await until(() => menu.code !== undefined, "stop menu ends when empty");
+  expect(menu.code).toBe(0);
+  expect(menu.text).toContain("Stopped: " + second.handle);
+  expect(menu.text).toContain("No local sessions.");
+  expect(menu.text.match(/TellyMCP · stop/gu)).toHaveLength(1);
+  expect(JSON.parse((await ctx.run(["sessions", "--json"])).out)).toEqual([]);
+  expect(ctx.registrations).toBe(2);
+}, 45000);
+
+it.each(["\x1b", "\x03"])(
+  "stop menu cancellation %j keeps the remaining session and restores outer termios",
+  async (key) => {
+    const ctx = await setup();
+    expect((await ctx.run(["run", "--detach"])).code).toBe(0);
+    const before = JSON.parse(
+      (await ctx.run(["sessions", "--json"])).out,
+    ) as Session[];
+    const command = [process.execPath, ...ctx.prefix, "stop"]
+      .map(shellQuote)
+      .join(" ");
+    const outer = frontend(
+      "/bin/bash",
+      [
+        "-c",
+        "stty -ixon; printf 'BEFORE_TERMIOS='; stty -g; " +
+          command +
+          "; printf 'MENU_STATUS=%s\\n' $?; printf 'AFTER_TERMIOS='; stty -g",
+      ],
+      ctx.cwd,
+      ctx.env,
+    );
+    await until(
+      () => outer.text.includes("Select a session to stop"),
+      "stop cancel menu",
+    );
+    outer.pty.write(key);
+    await until(() => outer.code !== undefined, "stop menu cancellation");
+    expect(outer.text).toContain("Stop menu closed.");
+    expect(outer.text).toContain("MENU_STATUS=0");
+    expect(/AFTER_TERMIOS=([a-f0-9:]+)/u.exec(outer.text)?.[1]).toBe(
+      /BEFORE_TERMIOS=([a-f0-9:]+)/u.exec(outer.text)?.[1],
+    );
+    const after = JSON.parse(
+      (await ctx.run(["sessions", "--json"])).out,
+    ) as Session[];
+    expect(after[0]!.handle).toBe(before[0]!.handle);
+    expect(after[0]!.pty_pid).toBe(before[0]!.pty_pid);
+    expect(after[0]!.attached).toBe(false);
+    expect(ctx.registrations).toBe(1);
+  },
+  30000,
+);
+
+it("stop menu remains open after a failed stop and allows cancellation", async () => {
+  const ctx = await setup();
+  const registry = new LocalRegistry(
+    path.join(ctx.root, "tellymcp-" + process.getuid!()),
+  );
+  // A live process identity with no owner socket: stop must report the error,
+  // never signal that PID, and return to selection instead of exiting or spinning.
+  const record = registry.createRecord(
+    {
+      cwd: ctx.cwd,
+      envPath: ctx.envPath,
+      packageRoot: process.cwd(),
+      clientUuid: randomUUID(),
+      sessionId: "unavailable",
+      sessionLabel: "Unavailable",
+    },
+    "0.0.43",
+  );
+  registry.reserve(record);
+  registry.publish(record);
+  cleanup.push(() => registry.release(record));
+  const menu = ctx.pty(["stop"]);
+  await until(
+    () => menu.text.includes("Select a session to stop"),
+    "unavailable stop menu",
+  );
+  menu.pty.write("\r");
+  await until(
+    () =>
+      menu.text.includes("connect ENOENT") &&
+      menu.text
+        .slice(menu.text.indexOf("connect ENOENT"))
+        .includes("Select a session to stop"),
+    "stop error returns to menu",
+  );
+  expect(menu.code).toBeUndefined();
+  menu.pty.write("\x1b");
+  await until(() => menu.code !== undefined, "failed stop menu cancellation");
+  expect(menu.code).toBe(1);
+  expect(registry.list()).toHaveLength(1);
+  expect(ctx.registrations).toBe(0);
 }, 30000);
 
 async function tcpOpen(port: number): Promise<boolean> {

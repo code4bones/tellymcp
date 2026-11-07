@@ -1,4 +1,4 @@
-import type { Socket } from "node:net";
+import type { Duplex } from "node:stream";
 import { z } from "zod";
 
 export const LOCAL_PROTOCOL_VERSION = 1;
@@ -82,7 +82,7 @@ export class LocalWriter {
   private blocked = false;
   private ending = false;
   constructor(
-    private readonly socket: Socket,
+    private readonly socket: Duplex,
     private readonly limit = 5 * 1024 * 1024,
   ) {
     socket.on("drain", () => {

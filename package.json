@@ -1,6 +1,6 @@
 {
   "name": "@deadragdoll/tellymcp",
-  "version": "0.0.43",
+  "version": "0.0.44",
   "description": "TellyMCP - Telegram control plane for MCP-connected coding agents",
   "main": "dist/services/features/telegram-mcp/runtime.service.js",
   "bin": {
@@ -115,6 +115,7 @@
     "@types/mime-types": "^3.0.1",
     "@types/node": "24.12.4",
     "@types/pg": "^8.20.0",
+    "@types/ws": "8.18.2",
     "eslint": "^9.34.0",
     "eslint-import-resolver-typescript": "^4.4.4",
     "eslint-plugin-import": "^2.32.0",

@@ -4,6 +4,33 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.44
+
+### Fixed
+
+- Telegram OAuth token exchange and signing-key retrieval use the configured
+  Telegram proxy, allowing the bot's administrator approval to appear on gateways
+  with restricted direct egress. Network waits are bounded, and the connector
+  authorization-code lifetime starts after approval.
+- Missing OAuth administrator guidance points to `/admin` rather than `/auth`.
+- SQLite's startup experimental notice is quiet; other warnings remain visible.
+
+### Added
+
+- Linux background sessions with `run --detach`, screen/buffer restoration,
+  `sessions`, `attach`, and `stop`. Interactive pickers select sessions, and the
+  stop picker refreshes until empty or cancelled.
+- Telegram Live has an Attach button beside Open in browser. The owner receives
+  a private one-use eight-digit code valid for five minutes for
+  `tellymcp attach --code <code> [--gateway <url>]` on another workstation.
+- Native local and remote attach share one controller; Live View retains its
+  mirrored writable behavior. Detach or connection loss preserves the owner,
+  shell and services. Reconnect uses a fresh code without replaying input.
+
+Gateway, session-owner and viewer builds must be updated for remote attach.
+Existing owners load the new bridge when restarted; package installation alone
+does not replace a running owner's code. Browser extensions keep their own versions.
+
 ## 0.0.43
 
 ### Fixed
@@ -92,18 +119,21 @@ For detailed engineering history, refactors, and internal development notes, see
 ## 0.0.10
 
 ### Added
+
 - Telegram UI localization for the bot layer:
   - English and Russian catalogs for user-facing bot screens
   - locale resolution from Telegram profile with persisted user preference
   - `DEBUG_LANGUAGE=en|ru` override for fast testing without changing the Telegram profile
 
 ### Changed
+
 - Localization scope is now explicit:
   - Telegram bot UI is localized
   - MCP tools, logs, `TOOLS.md`, and the Live Mini App remain canonical English by design
 - Telegram menus, callbacks, project/collaboration screens, startup notices, and operational bot notices now render through a shared translation layer instead of ad hoc inline strings
 
 ### Fixed
+
 - Builder startup is more robust:
   - runtime-dependent services now wait for full runtime readiness instead of racing broker registration
   - this avoids `telegram_mcp runtime is not initialized yet` failures during `yarn dev:builder`
@@ -118,6 +148,7 @@ For detailed engineering history, refactors, and internal development notes, see
 ## 0.0.9
 
 ### Added
+
 - Public screenshot docs:
   - full screenshot index in `screenshots/README.md`
   - shorter public gallery in `screenshots/GALLERY.md`
@@ -127,6 +158,7 @@ For detailed engineering history, refactors, and internal development notes, see
   - `Default`
 
 ### Changed
+
 - README and README-RU now surface screenshot links directly in the top navigation.
 - The `Live` Mini App UI is more practical on phones:
   - wrap/unwrap toggle moved into the status bar
@@ -135,6 +167,7 @@ For detailed engineering history, refactors, and internal development notes, see
   - local `Live` screenshots are documented in a clearer flow near the launcher step
 
 ### Fixed
+
 - `Live` now reconnects more gracefully after a gateway restart:
   - short `502/503` gaps recover through polling
   - expired in-process WebApp sessions (`401/403`) trigger automatic re-bootstrap
@@ -146,6 +179,7 @@ For detailed engineering history, refactors, and internal development notes, see
 ## 0.0.8
 
 ### Added
+
 - Unified logging model based on `pino`:
   - pretty console output by default
   - optional JSONL file sink for Alloy or other collectors
@@ -160,6 +194,7 @@ For detailed engineering history, refactors, and internal development notes, see
   - it must not forward the original task to the target session as a new assignment
 
 ### Changed
+
 - Runtime identity and service labels now use `tellymcp` naming consistently instead of older `telegram-human-mcp` tags.
 - MCP server metadata now reports the current package version and `tellymcp` service name.
 - Logging config is now simpler:
@@ -168,6 +203,7 @@ For detailed engineering history, refactors, and internal development notes, see
   - optional `LogFeed` buffer for UI diagnostics
 
 ### Fixed
+
 - Stale terminal target ids no longer require manual user understanding before the service can try to wake the session again.
 - Broken terminal nudge targets are now visible to the user in Telegram, not only in backend logs.
 - `Share` inbox instructions are now explicit enough to reduce the chance that one agent re-delegates the task back into the collaboration graph.
@@ -179,6 +215,7 @@ For detailed engineering history, refactors, and internal development notes, see
 ## 0.0.3
 
 ### Added
+
 - Standalone CLI workflow:
   - `tellymcp init <client|gateway|both>`
   - `tellymcp run`
@@ -204,6 +241,7 @@ For detailed engineering history, refactors, and internal development notes, see
   - sends literal text to the terminal without pressing `Enter`
 
 ### Changed
+
 - Default installation path is now npm-first:
   - `npm install -g @deadragdoll/tellymcp`
 - Standalone client mode is documented first, before gateway/both deployment.
@@ -216,6 +254,7 @@ For detailed engineering history, refactors, and internal development notes, see
 - CLI now shows package version directly in banners and startup output.
 
 ### Collaboration
+
 - Project collaboration works across local and remote sessions.
 - `Collab` now includes:
   - `Broadcast`
@@ -226,6 +265,7 @@ For detailed engineering history, refactors, and internal development notes, see
   - `Share` tells the current session to send something to the selected session
 
 ### Live View
+
 - Telegram Mini App Live View supports:
   - fullscreen/expand launch policy
   - bottom toolbar layout
@@ -251,11 +291,13 @@ For detailed engineering history, refactors, and internal development notes, see
 - Mobile toolbar layout now wraps cleanly into two rows instead of collapsing into a centered stack.
 
 ### Browser
+
 - Browser tools use Playwright Chromium.
 - Headless mode is the recommended default for remote and SSH-based environments.
 - `doctor` now helps detect missing browser runtime and connectivity issues.
 
 ### Compatibility
+
 - Gateway and clients now compare:
   - package version
   - protocol version
@@ -263,6 +305,7 @@ For detailed engineering history, refactors, and internal development notes, see
 - `TOOLS.md` sync now detects outdated or missing local instructions and asks the session to refresh them.
 
 ### Removed
+
 - Legacy Go/HTTP terminal proxy path was removed.
 - Direct product path is now the local built-in terminal runtime only.
 
@@ -274,14 +317,18 @@ Copy this block for the next published version:
 ## x.y.z
 
 ### Added
+
 - ...
 
 ### Changed
+
 - ...
 
 ### Fixed
+
 - ...
 
 ### Removed
+
 - ...
 ```

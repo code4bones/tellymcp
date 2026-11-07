@@ -177,7 +177,8 @@ function printHelp(): void {
     "  tellymcp run [--env <file>] [--agent codex|claude] --detach",
     "  tellymcp sessions [--json]",
     "  tellymcp attach [handle] # interactive session picker when omitted",
-    "  tellymcp stop [handle]",
+    "  tellymcp attach --code <code> [--gateway <url>] [--env <file>]",
+    "  tellymcp stop [handle]   # repeating session picker when omitted",
     "  tellymcp run --env=<file>",
     "  tellymcp run --env .env-client -s backendDev",
     "  tellymcp run --ws 9999 -s backendDev",
@@ -1915,8 +1916,20 @@ async function localSessionCommand(
     );
     if (command === "attach")
       process.stdout.write(
-        "Without a handle, choose a local session with arrows and Enter; Esc cancels.\n",
+        "Without a handle, choose a local session with arrows and Enter; Esc cancels.\nRemote: tellymcp attach --code <code> [--gateway <url>] [--env <file>]\n",
       );
+    if (command === "stop")
+      process.stdout.write(
+        "Without a handle, choose sessions to stop; the menu refreshes until empty. Esc cancels.\n",
+      );
+    return;
+  }
+  if (
+    command === "attach" &&
+    args.some((value) => value === "--code" || value.startsWith("--code="))
+  ) {
+    const { runRemoteAttach } = await import("./cliRemoteAttach.js");
+    await runRemoteAttach(args);
     return;
   }
   if (
@@ -1930,7 +1943,9 @@ async function localSessionCommand(
     throw new Error(
       "Unsupported " +
         command +
-        " arguments. Remote sessions are not available yet.",
+        " arguments. Use tellymcp " +
+        command +
+        " --help.",
     );
   const { LocalRegistry, processStartIdentity } =
     await import("./services/features/telegram-mcp/src/features/detached-terminal/model/localRegistry.js");
@@ -1955,6 +1970,28 @@ async function localSessionCommand(
     return;
   }
   let handle = args[0];
+  if (command === "stop" && !handle) {
+    const { pickLocalSession } = await import("./cliSessionPicker.js");
+    let showIntro = true;
+    for (;;) {
+      const selected = await pickLocalSession(registry, {
+        action: "stop",
+        showIntro,
+      });
+      if (!selected) return;
+      showIntro = false;
+      try {
+        const record = resolveLocalOwner(registry, selected);
+        await stopLocalOwner(registry, record);
+        process.stdout.write(pc.green("Stopped: " + record.instance) + "\n");
+      } catch (error) {
+        process.stderr.write(
+          pc.red(error instanceof Error ? error.message : String(error)) + "\n",
+        );
+        process.exitCode = 1;
+      }
+    }
+  }
   if (command === "attach" && !handle) {
     const { pickLocalSession } = await import("./cliSessionPicker.js");
     handle = await pickLocalSession(registry);

@@ -83,6 +83,7 @@ import { TransportXchangeState } from "./transportXchangeState";
 import { extractCallbackSuffix, readMenuPayloadKey } from "./transportUtils";
 
 export interface TransportConstructorWiringHost {
+  issueTerminalAttachCode?: (telegramUserId: number, sessionId: string) => Promise<{ code: string; expiresAt: number }>;
   config: AppConfig;
   sessionStore: SessionStore;
   adminAuthStore: TelegramAdminAuthStore;
@@ -275,6 +276,9 @@ export function buildTransportConstructorWiring(
   });
 
   const liveActions = new TransportLiveActions({
+    resolveLocaleForContext: ctx => context.resolveLocaleForContext(ctx),
+    menuPayloadStore: host.menuPayloadStore,
+    ...(host.issueTerminalAttachCode ? { issueTerminalAttachCode: host.issueTerminalAttachCode } : {}),
     config: host.config,
     webAppLaunchRegistry: host.webAppLaunchRegistry,
     webAppSessions: host.webAppSessions,
@@ -991,6 +995,7 @@ export function buildTransportConstructorWiring(
   });
 
   const menuShell = new TransportMenuShell({
+    handleTerminalAttachCallback: ctx => liveActions.handleAttachCallback(ctx),
     logger: host.logger,
     tForContext: (ctx, key) => context.tForContext(ctx, key),
     showProjectsMenu: (ctx) => menuFlow.showProjectsMenu(ctx),

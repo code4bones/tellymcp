@@ -13,6 +13,7 @@ import type { Update } from "grammy/types";
 import ws from "ws";
 
 import type { AppRuntime } from "./bootstrap/runtime";
+import { createTelegramFetch } from "../shared/integrations/telegram/proxyFetch";
 import {
   createOAuthFacade,
   type OAuthAccessTokenClaims,
@@ -440,7 +441,10 @@ export function createMcpHttpHandler(
         mcpHttpPath,
         runtime.logger,
         runtime.config.oauth.telegramLogin
-          ? { requestApproval: requestTelegramLoginApproval }
+          ? {
+              requestApproval: requestTelegramLoginApproval,
+              transportFetch: createTelegramFetch(runtime.config, runtime.logger),
+            }
           : undefined,
         runtime.stateStore,
       )

@@ -237,7 +237,56 @@ tellymcp system-prune --env .env --yes
 - browser screenshot для человека лучше отправлять через `browser_screenshot(send_to_telegram=true)`
 - файлы между консолями лучше отправлять через `send_partner_file`
 
-## 11. Чего не делать в новых setup
+## 11. Деплой через GitLab CI на savant
+
+Shell runner с тегом `telly_savant` проверяет и собирает npm-пакет в контейнере
+Node 24, затем собирает gateway image с версией и SHA коммита. Push в `main` и
+merge request выполняют только сборку. Тег `vX.Y.Z` запускает деплой после
+проверки версии пакета и принадлежности коммита к `main`. Обе job должны
+использовать Docker daemon на savant. При очистке Docker сохраняйте текущий и
+предыдущий образы.
+
+Постоянные файлы: `/opt/tellymcp/docker-compose.yml`,
+`/opt/tellymcp/.env-gateway`, `/opt/tellymcp/nginx/default.conf`.
+Nginx Proxy Manager обслуживает HTTPS для `tellymcp.deadragdoll.net` и направляет
+HTTP на `192.168.1.68:18088`. Порт на хосте публикует только nginx-контейнер;
+gateway, PostgreSQL, Redis и RabbitMQ работают в собственной Docker-сети.
+В NPM нужны WebSocket upgrade и передача MCP stream без буферизации.
+
+```bash
+cd /opt/tellymcp
+docker compose --env-file .env-gateway up -d
+docker compose --env-file .env-gateway ps
+docker compose --env-file .env-gateway logs --tail 100 tellymcp-gateway
+```
+
+В `.env-gateway` находятся пароли DB/RMQ, gateway secrets, публичные URL,
+`TELLYMCP_IMAGE` и необязательные `NGINX_BIND_IP`/`NGINX_PORT`. Compose задаёт
+внутренние адреса инфраструктуры и HTTP-порт. Проверяйте конфигурацию через
+`compose config --quiet`: полный вывод `config` содержит секреты.
+В `state/` сохраняются session marker, файлы обмена и файловые логи;
+данные инфраструктуры — в именованных volumes. `down -v` удаляет базы.
+
+При первом переносе подготовьте каталог для `gitlab-runner`, скопируйте и
+адаптируйте env действующего gateway, поднимите только `postgres redis rabbitmq`.
+Остановите исходный gateway, сохраните и восстановите PostgreSQL и Redis;
+проверьте/опустошите очереди RabbitMQ перед переносом. Gateway создаёт свои
+очереди автоматически. Перенесите session marker в `state/.mcpsession.json`.
+Файл `.migration-ready` создавайте после восстановления данных — без него CI
+не выполняет деплой. После запуска приложения и nginx проверьте публичный
+health endpoint и bot webhook, обновите HTTP/WSS URL клиентов и переподключите
+OAuth-интеграции. Сохраните исходный env и дампы в защищённом backup-каталоге.
+
+Обычный деплой обновляет только gateway и nginx, проверяет публичный endpoint
+и инфраструктуру, при ошибке возвращает прошлую конфигурацию и образ.
+Снимки сохраняются в `releases/` с ограниченными правами. Для ручного отката
+восстановите `.env-gateway`, `docker-compose.yml` и `default.conf` (в `nginx/`)
+из снимка, затем выполните с теми же Compose flags
+`up -d --no-deps tellymcp-gateway nginx` и `exec nginx nginx -s reload`.
+Откат образа не отменяет изменения схемы БД: при необходимости нужен
+соответствующий backup базы. Не копируйте старый снимок поверх работающего volume.
+
+## 12. Чего не делать в новых setup
 
 Не строй новые setup вокруг:
 

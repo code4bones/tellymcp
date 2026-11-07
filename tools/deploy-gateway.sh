@@ -1,64 +1,74 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
-GATEWAY_ENV_FILE="${GATEWAY_ENV_FILE:-}"
-DEPLOY_TAG="${CI_COMMIT_TAG:-}"
-LOG_HOST_DIR="${LOG_HOST_DIR:-}"
+source_dir="${CI_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+deploy_dir="${DEPLOY_DIR:-/opt/tellymcp}"
+: "${TELLYMCP_IMAGE:?Use the image produced by build-gateway-image.sh}"
+health_url="${DEPLOY_HEALTH_URL:-https://tellymcp.deadragdoll.net/api/healthz}"
 
-if [[ -z "${GATEWAY_ENV_FILE}" ]]; then
-  echo "GATEWAY_ENV_FILE is required." >&2
+if [[ ! -f "${deploy_dir}/.migration-ready" ]]; then
+  echo "Complete the initial data migration and create ${deploy_dir}/.migration-ready first." >&2
   exit 1
 fi
+test -f "${deploy_dir}/.env-gateway"
+docker image inspect "${TELLYMCP_IMAGE}" >/dev/null
 
-if [[ ! -f "${GATEWAY_ENV_FILE}" ]]; then
-  echo "Missing gateway env file: ${GATEWAY_ENV_FILE}" >&2
-  exit 1
+exec 9>"${deploy_dir}/.deploy.lock"
+flock -n 9 || { echo 'Another deployment is running.' >&2; exit 1; }
+
+snapshot="${deploy_dir}/releases/$(date -u +%Y%m%dT%H%M%SZ)-${CI_JOB_ID:-manual}"
+mkdir -p "${snapshot}" "${deploy_dir}/nginx" "${deploy_dir}/state"
+cp "${deploy_dir}/.env-gateway" "${snapshot}/.env-gateway"
+if [[ -f "${deploy_dir}/docker-compose.yml" ]]; then
+  cp "${deploy_dir}/docker-compose.yml" "${snapshot}/docker-compose.yml"
+fi
+if [[ -f "${deploy_dir}/nginx/default.conf" ]]; then
+  cp "${deploy_dir}/nginx/default.conf" "${snapshot}/default.conf"
 fi
 
-ARCHIVE="$(find . -maxdepth 1 -type f -name 'deadragdoll-tellymcp-*.tgz' | sort | tail -n 1)"
-if [[ -z "${ARCHIVE}" ]]; then
-  echo "No deadragdoll-tellymcp-*.tgz artifact found in current workspace." >&2
-  exit 1
-fi
-
-extract_package_version() {
-  local package_json
-  package_json="$(<package.json)"
-  sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*$/\1/p' \
-    <<<"${package_json}" \
-    | head -n 1
+compose() {
+  docker compose --project-directory "${deploy_dir}" --env-file "${deploy_dir}/.env-gateway" "$@"
 }
 
-PACKAGE_VERSION="$(extract_package_version)"
-if [[ -z "${PACKAGE_VERSION}" ]]; then
-  echo "Failed to extract version from package.json" >&2
-  exit 1
-fi
-if [[ -n "${DEPLOY_TAG}" ]]; then
-  if [[ "${DEPLOY_TAG}" != "${PACKAGE_VERSION}" && "${DEPLOY_TAG}" != "v${PACKAGE_VERSION}" ]]; then
-    echo "Tag ${DEPLOY_TAG} does not match package.json version ${PACKAGE_VERSION}" >&2
-    exit 1
+rollback() {
+  trap - ERR
+  echo 'Deployment failed; restoring the previous image and configuration.' >&2
+  cp "${snapshot}/.env-gateway" "${deploy_dir}/.env-gateway"
+  if [[ -f "${snapshot}/docker-compose.yml" && -f "${snapshot}/default.conf" ]]; then
+    cp "${snapshot}/docker-compose.yml" "${deploy_dir}/docker-compose.yml"
+    cp "${snapshot}/default.conf" "${deploy_dir}/nginx/default.conf"
+    # The previous image comes from the restored file, not the CI dotenv variable.
+    unset TELLYMCP_IMAGE
+    compose up -d --no-deps --wait --wait-timeout 180 tellymcp-gateway nginx || true
+    compose exec -T nginx nginx -s reload || true
   fi
-fi
+  echo "Previous configuration saved in ${snapshot}. Database volumes were not rolled back." >&2
+  exit 1
+}
+trap rollback ERR
 
-if [[ -z "${LOG_HOST_DIR}" ]]; then
-  LOG_HOST_DIR="$(dirname "${GATEWAY_ENV_FILE}")/.tellymcp"
-fi
+install -m 644 "${source_dir}/docker-compose.yml" "${deploy_dir}/docker-compose.yml"
+install -m 644 "${source_dir}/nginx/default.conf" "${deploy_dir}/nginx/default.conf"
+python3 - "${deploy_dir}/.env-gateway" "${TELLYMCP_IMAGE}" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+lines = [line for line in p.read_text().splitlines() if not line.startswith('TELLYMCP_IMAGE=')]
+p.write_text('\n'.join(lines) + '\nTELLYMCP_IMAGE=' + sys.argv[2] + '\n')
+PY
 
-mkdir -p "${LOG_HOST_DIR}"
+compose config --quiet
+# Only the application and its proxy are reconciled during a normal release.
+compose up -d --no-deps --wait --wait-timeout 180 tellymcp-gateway nginx
+# Reload configuration even when only the bind-mounted nginx file changed.
+compose exec -T nginx nginx -t
+compose exec -T nginx nginx -s reload
+compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -Atc "SELECT 1"' >/dev/null
+[[ "$(compose exec -T redis redis-cli ping)" == PONG ]]
+compose exec -T rabbitmq rabbitmq-diagnostics -q check_running
+curl --noproxy '*' --fail --silent --show-error --retry 5 --retry-delay 2 --max-time 15 "${health_url}"
 
-export TELLYMCP_VERSION="${PACKAGE_VERSION}"
-export GATEWAY_ENV_FILE
-export LOG_HOST_DIR
-
-echo "Deploying TellyMCP gateway ${TELLYMCP_VERSION}"
-echo "Artifact: ${ARCHIVE}"
-echo "Gateway env: ${GATEWAY_ENV_FILE}"
-echo "Log host dir: ${LOG_HOST_DIR}"
-
-echo "Rebuilding gateway container stack"
-docker compose build --pull tellymcp-gateway
-docker compose up -d --force-recreate
-
-echo "Gateway deployment completed"
-docker compose ps
+trap - ERR
+echo
+echo "Deployed ${TELLYMCP_IMAGE}; previous configuration: ${snapshot}"
+compose ps

@@ -4,6 +4,13 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.39
+
+### Changed
+
+- Gateway releases are built and deployed through GitLab CI on the `telly_savant` shell runner. The gateway, nginx, PostgreSQL, Redis, and RabbitMQ run as a dedicated Docker Compose stack in `/opt/tellymcp`.
+- The public gateway address moves to `https://tellymcp.deadragdoll.net/api`. Update client gateway HTTP/WSS URLs and reconnect OAuth integrations using the new domain.
+
 ## 0.0.38
 
 ### Fixed

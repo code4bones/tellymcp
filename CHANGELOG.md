@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Deployment
+
+- Add the `telly_savant` CI build and tagged deployment pipeline with versioned gateway images, native PTY checks, readiness checks, serialized releases, and configuration/image rollback.
+- Deploy a dedicated Compose stack and container nginx under `/opt/tellymcp`, using `.env-gateway`, private infrastructure ports, persistent data, dynamic gateway DNS, and NPM TLS forwarding.
+
 ### Fixed
 
 - Version compatibility events from the WebSocket startup/reconnect handshake no longer call the human-message terminal nudge. Diagnostics and Telegram version notifications remain available, including protocol rejection; reconnecting alone does not start an agent turn.

@@ -1,23 +1,29 @@
+FROM node:24-bookworm-slim AS install
+
+# node-pty is also checked by gateway startup; build it when no prebuild exists.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY deadragdoll-tellymcp-*.tgz /tmp/package/
+RUN set -eu; \
+    set -- /tmp/package/*.tgz; \
+    test "$#" -eq 1; \
+    npm install -g --omit=dev --no-audit --no-fund "$1"; \
+    node -e "require('/usr/local/lib/node_modules/@deadragdoll/tellymcp/node_modules/node-pty')"
+
 FROM node:24-bookworm-slim
 
-WORKDIR /app
+ARG TELLYMCP_VERSION
+ARG VCS_REF
+LABEL org.opencontainers.image.title="TellyMCP gateway" \
+      org.opencontainers.image.version="$TELLYMCP_VERSION" \
+      org.opencontainers.image.revision="$VCS_REF"
 
 ENV NODE_ENV=production
-ARG TELLYMCP_VERSION=0.0.10
+COPY --from=install /usr/local/lib/node_modules/@deadragdoll/tellymcp /usr/local/lib/node_modules/@deadragdoll/tellymcp
+RUN ln -s /usr/local/lib/node_modules/@deadragdoll/tellymcp/dist/cli.js /usr/local/bin/tellymcp
 
-COPY . /tmp/tellymcp-build-context
-
-RUN set -eu; \
-    archive="$(find /tmp/tellymcp-build-context -maxdepth 1 -type f -name 'deadragdoll-tellymcp-*.tgz' | sort | tail -n 1)"; \
-    if [ -n "${archive}" ]; then \
-      echo "Installing TellyMCP from local archive: ${archive}"; \
-      npm install -g "${archive}"; \
-    else \
-      echo "Installing TellyMCP from npm: @deadragdoll/tellymcp@${TELLYMCP_VERSION}"; \
-      npm install -g "@deadragdoll/tellymcp@${TELLYMCP_VERSION}"; \
-    fi; \
-    rm -rf /tmp/tellymcp-build-context
-
+WORKDIR /app/state
 EXPOSE 8080
-
 CMD ["tellymcp", "run", "--env", "/app/.env-gateway"]

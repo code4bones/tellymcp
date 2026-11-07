@@ -237,7 +237,56 @@ tellymcp system-prune --env .env --yes
 - browser screenshot replies to humans should use `browser_screenshot(send_to_telegram=true)`
 - file results between consoles should use `send_partner_file`
 
-## 11. Legacy Concepts To Avoid
+## 11. GitLab CI deployment on savant
+
+The `telly_savant` shell runner builds and tests the npm package in a Node 24
+build container, then builds a gateway image tagged with the package version and
+commit. Pushes to `main` and merge requests build only. A `vX.Y.Z` tag deploys
+after verifying that its commit belongs to `main` and its version matches the
+package. Both jobs must run on the same savant Docker daemon; keep deployed and
+previous images when cleaning up Docker storage.
+
+The persistent installation is `/opt/tellymcp/docker-compose.yml`,
+`/opt/tellymcp/.env-gateway`, and `/opt/tellymcp/nginx/default.conf`.
+Nginx Proxy Manager terminates HTTPS for `tellymcp.deadragdoll.net` and forwards
+HTTP to `192.168.1.68:18088`. Only container nginx publishes a host port; the
+gateway, PostgreSQL, Redis, and RabbitMQ use the private Compose network.
+NPM must allow WebSocket upgrades and unbuffered MCP streaming.
+
+```bash
+cd /opt/tellymcp
+docker compose --env-file .env-gateway up -d
+docker compose --env-file .env-gateway ps
+docker compose --env-file .env-gateway logs --tail 100 tellymcp-gateway
+```
+
+`.env-gateway` supplies DB/RMQ credentials, gateway secrets and public URLs,
+`TELLYMCP_IMAGE`, and optional `NGINX_BIND_IP`/`NGINX_PORT`. Infrastructure hosts
+and the internal HTTP port are overridden by Compose. Never print `compose
+config` without `--quiet` on this installation: the output includes credentials.
+The gateway's session marker, exchange files, and file logs persist in `state/`;
+database data persists in named volumes. `down -v` deletes these databases.
+
+For an initial migration, provision the directory for `gitlab-runner`, copy and
+adapt the existing gateway env file, start only `postgres redis rabbitmq`, and
+restore PostgreSQL and Redis while the source gateway is stopped. Check/drain
+RabbitMQ queues before moving; gateway queues are recreated automatically.
+Copy the source session marker into `state/.mcpsession.json`. Create
+`.migration-ready` only after data restoration; this marker gates CI deployment.
+Start the application and proxy, check the public health endpoint and bot webhook,
+then update clients to the new HTTP/WSS URLs and reconnect OAuth integrations.
+Keep a protected backup of the original configuration and database dumps.
+
+Normal tagged deployments update only the gateway and nginx, check the public
+endpoint and infrastructure, and restore the previous configuration/image on
+failure. Snapshots are stored under `releases/` with restricted permissions.
+To roll back manually, restore the snapshot's `.env-gateway`, `docker-compose.yml`
+and `default.conf` (into `nginx/`), then run `up -d --no-deps tellymcp-gateway nginx`
+and `exec nginx nginx -s reload` with the same Compose flags. Image rollback does
+not reverse database schema changes: restore the matching database backup when
+required. Never copy an older snapshot over a live database volume.
+
+## 12. Legacy Concepts To Avoid
 
 Do not build new setups around:
 

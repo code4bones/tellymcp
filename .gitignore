@@ -21,6 +21,10 @@ logs
 .env-dev
 .resume
 *.tgz
+build.env
+/state/
+/releases/
+/backups/
 dev2.sh
 current
 .resume-old

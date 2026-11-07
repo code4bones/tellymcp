@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DOCKER_IMAGE="${DOCKER_IMAGE:-node:24-bookworm-slim}"
+DOCKER_IMAGE="${DOCKER_IMAGE:-tellymcp-build:node24}"
+
+docker build --pull -f Dockerfile.build -t "${DOCKER_IMAGE}" .
 
 echo "Building TellyMCP package artifact inside ${DOCKER_IMAGE}"
 

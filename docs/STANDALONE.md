@@ -269,7 +269,11 @@ database data persists in named volumes. `down -v` deletes these databases.
 
 For an initial migration, provision the directory for `gitlab-runner`, copy and
 adapt the existing gateway env file, start only `postgres redis rabbitmq`, and
-restore PostgreSQL and Redis while the source gateway is stopped. Check/drain
+verify that the destination databases are empty before stopping the source, then
+restore PostgreSQL with `pg_restore --single-transaction` and restore Redis while
+the source gateway is stopped. The dedicated volumes are explicitly named
+`tellymcp_savant_postgres_v1`, `tellymcp_savant_redis_v1`, and
+`tellymcp_savant_rabbitmq_v1`; do not reuse legacy `tellymcp_*_data` volumes. Check/drain
 RabbitMQ queues before moving; gateway queues are recreated automatically.
 Copy the source session marker into `state/.mcpsession.json`. Create
 `.migration-ready` only after data restoration; this marker gates CI deployment.

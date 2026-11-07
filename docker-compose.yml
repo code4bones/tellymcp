@@ -113,5 +113,8 @@ services:
 
 volumes:
   postgres_data:
+    name: tellymcp_savant_postgres_v1
   redis_data:
+    name: tellymcp_savant_redis_v1
   rabbitmq_data:
+    name: tellymcp_savant_rabbitmq_v1

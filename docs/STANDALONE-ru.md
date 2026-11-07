@@ -269,7 +269,11 @@ docker compose --env-file .env-gateway logs --tail 100 tellymcp-gateway
 
 При первом переносе подготовьте каталог для `gitlab-runner`, скопируйте и
 адаптируйте env действующего gateway, поднимите только `postgres redis rabbitmq`.
-Остановите исходный gateway, сохраните и восстановите PostgreSQL и Redis;
+До остановки исходного gateway проверьте, что целевые базы пусты. Затем
+остановите gateway, сохраните и восстановите PostgreSQL одной транзакцией
+(`pg_restore --single-transaction`) и восстановите Redis. Volumes имеют явные
+имена `tellymcp_savant_postgres_v1`, `tellymcp_savant_redis_v1` и
+`tellymcp_savant_rabbitmq_v1`; не используйте старые `tellymcp_*_data`.
 проверьте/опустошите очереди RabbitMQ перед переносом. Gateway создаёт свои
 очереди автоматически. Перенесите session marker в `state/.mcpsession.json`.
 Файл `.migration-ready` создавайте после восстановления данных — без него CI

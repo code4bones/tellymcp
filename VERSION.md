@@ -4,6 +4,12 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.40
+
+### Fixed
+
+- Deployment rollback also runs when a Docker Compose command fails inside the deployment helper function.
+
 ## 0.0.39
 
 ### Changed

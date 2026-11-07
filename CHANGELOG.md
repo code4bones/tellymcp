@@ -4,6 +4,8 @@
 
 ### Deployment
 
+- Inherit the deployment error trap inside shell functions so Compose failures restore the saved release as well as HTTP health-check failures.
+
 - Add the `telly_savant` CI build and tagged deployment pipeline with versioned gateway images, native PTY checks, readiness checks, serialized releases, and configuration/image rollback.
 - Deploy a dedicated Compose stack and container nginx under `/opt/tellymcp`, using `.env-gateway`, private infrastructure ports, persistent data, dynamic gateway DNS, and NPM TLS forwarding.
 

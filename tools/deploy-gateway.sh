@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 umask 077
 
 source_dir="${CI_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -15,7 +15,7 @@ test -f "${deploy_dir}/.env-gateway"
 docker image inspect "${TELLYMCP_IMAGE}" >/dev/null
 
 exec 9>"${deploy_dir}/.deploy.lock"
-flock -n 9 || { echo 'Another deployment is running.' >&2; exit 1; }
+flock -w 60 9 || { echo 'Another deployment is still running after 60 seconds.' >&2; exit 1; }
 
 snapshot="${deploy_dir}/releases/$(date -u +%Y%m%dT%H%M%SZ)-${CI_JOB_ID:-manual}"
 mkdir -p "${snapshot}" "${deploy_dir}/nginx" "${deploy_dir}/state"

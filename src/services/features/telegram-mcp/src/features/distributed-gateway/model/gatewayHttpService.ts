@@ -1657,6 +1657,7 @@ export class GatewayHttpService {
             sessions?: Array<{
               session_id: string;
               client_uuid: string;
+              owner_user_uuid?: string | null;
               local_session_id: string;
               cwd?: string | null;
               session_label?: string | null;

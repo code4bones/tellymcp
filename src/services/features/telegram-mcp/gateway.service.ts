@@ -85,6 +85,7 @@ type GatewayServiceCarrier = Service & {
     sessions: Array<{
       session_id: string;
       client_uuid: string;
+      owner_user_uuid?: string | null;
       local_session_id: string;
       session_label?: string | null;
       client_label?: string | null;
@@ -831,6 +832,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
         })
         .select(
           "lc.client_uuid",
+          "c.owner_user_uuid",
           "lc.local_session_id",
           "lc.cwd",
           "lc.session_label",
@@ -855,6 +857,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
         {
           session_id: string;
           client_uuid: string;
+          owner_user_uuid?: string | null;
           local_session_id: string;
           cwd?: string | null;
           session_label?: string | null;
@@ -887,6 +890,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
         merged.set(key, {
           session_id: key,
           client_uuid: String(row.client_uuid),
+          owner_user_uuid: row.owner_user_uuid ? String(row.owner_user_uuid) : null,
           local_session_id: String(row.local_session_id),
           cwd: current?.cwd ?? (row.cwd ? String(row.cwd) : null),
           session_label:

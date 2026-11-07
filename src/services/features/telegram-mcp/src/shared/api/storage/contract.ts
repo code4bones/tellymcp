@@ -53,7 +53,11 @@ export interface SessionBindingStore {
   createPairCode(record: PairCodeRecord, ttlSeconds: number): Promise<boolean>;
   consumePairCode(code: string): Promise<PairCodeRecord | null>;
   getBinding(sessionId: string): Promise<SessionBinding | null>;
-  setBinding(binding: SessionBinding): Promise<void>;
+  // Background synchronization must use activate:false to preserve user selection.
+  setBinding(
+    binding: SessionBinding,
+    options?: { activate?: boolean },
+  ): Promise<void>;
   clearBinding(sessionId: string): Promise<void>;
   getActiveSessionIdForPrincipal(
     principal: TelegramPrincipal,

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixed
+
+- Version compatibility events from the WebSocket startup/reconnect handshake no longer call the human-message terminal nudge. Diagnostics and Telegram version notifications remain available, including protocol rejection; reconnecting alone does not start an agent turn.
+- Background console synchronization updates bindings without activating each console in turn. Both Redis and process-local stores support preserving the selected session; synchronization chooses a fallback only when needed. Live and nested menus keep the user's selected console across polling cycles and newly discovered connections.
+- Active-session navigation groups relay sessions by the gateway account UUID instead of the connection UUID. Console synchronization retains the owner UUID; older records fall back to the owner label. Session-menu Back uses the same grouping, and existing connection-based buttons resolve to the account's full session list.
+
 ### Added
 
 - Generic inbox offers accept optional `route.label`, `route.slug`, and `display.sender` snapshots. Active route summaries expose the supplied project name and slug, and Telegram renders project labels and assigning people without fetching data from the source integration. Older offers remain supported.

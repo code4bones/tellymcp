@@ -1,6 +1,7 @@
 export type SessionContext = {
   sessionId: string;
   label?: string | undefined;
+  ownerUserUuid?: string | undefined;
   cwd?: string | undefined;
   activeProjectUuid?: string | undefined;
   activeProjectName?: string | undefined;

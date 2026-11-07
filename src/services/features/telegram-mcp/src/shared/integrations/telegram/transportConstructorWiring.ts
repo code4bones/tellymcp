@@ -977,7 +977,6 @@ export function buildTransportConstructorWiring(
     webAppLaunchRegistry: host.webAppLaunchRegistry,
     createLiveApprovalMenuPayload: (input) =>
       payloadState.createLiveApprovalMenuPayload(input),
-    nudgeSessionInbox: (sessionId) => host.nudgeSessionInbox(sessionId),
     sendNotification: (input) => host.sendNotification(input),
     resolveLocaleForTelegramUserId: (telegramUserId, telegramLanguageCode) =>
       context.resolveLocaleForTelegramUserId(telegramUserId, telegramLanguageCode),

@@ -118,7 +118,7 @@ export class TransportMenuFingerprints {
         }
       }
 
-      return `${locale}:${selectedOwnerLabel}:${sessionIds.join(",")}`;
+      return `${locale}:accounts:${selectedOwnerLabel}:${sessionIds.join(",")}`;
     } catch (error) {
       this.host.logger.warn("Failed to build Telegram sessions menu fingerprint", {
         chatId: ctx.chat?.id,

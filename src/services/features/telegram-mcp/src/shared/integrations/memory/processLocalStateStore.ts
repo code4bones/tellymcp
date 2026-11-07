@@ -115,7 +115,10 @@ export class ProcessLocalStateStore implements RuntimeStateStore {
     return this.bindings.get(sessionId) ?? null;
   }
 
-  public async setBinding(binding: SessionBinding): Promise<void> {
+  public async setBinding(
+    binding: SessionBinding,
+    options?: { activate?: boolean },
+  ): Promise<void> {
     const previous = this.bindings.get(binding.sessionId);
     if (
       previous &&
@@ -129,7 +132,9 @@ export class ProcessLocalStateStore implements RuntimeStateStore {
     const sessions = this.principalSessions.get(key) ?? new Set<string>();
     sessions.add(binding.sessionId);
     this.principalSessions.set(key, sessions);
-    this.principalActiveSessions.set(key, binding.sessionId);
+    if (options?.activate !== false) {
+      this.principalActiveSessions.set(key, binding.sessionId);
+    }
   }
 
   public async clearBinding(sessionId: string): Promise<void> {

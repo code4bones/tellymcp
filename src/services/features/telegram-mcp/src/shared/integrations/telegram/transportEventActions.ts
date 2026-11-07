@@ -29,7 +29,6 @@ export interface TransportEventActionsHost {
     projectUuid?: string;
     projectName?: string;
   }): Promise<string>;
-  nudgeSessionInbox(sessionId: string): Promise<void>;
   sendNotification(input: {
     sessionId: string;
     sessionLabel?: string;
@@ -207,7 +206,7 @@ export class TransportEventActions {
       tools: ["get_xchange_record", "mark_xchange_record_read", "refresh_tools_markdown"],
       tags: ["system", "version", input.compatibility],
     });
-    await this.host.nudgeSessionInbox(session.sessionId);
+    // Handshake diagnostics must not start an agent turn on startup or reconnect.
 
     const binding = await this.host.bindingStore.getBinding(session.sessionId);
     if (!binding) {

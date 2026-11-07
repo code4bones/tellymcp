@@ -13,6 +13,7 @@ type Principal = { telegramChatId: number; telegramUserId: number };
 type GatewayKnownSessionRecord = {
   session_id: string;
   client_uuid: string;
+  owner_user_uuid?: string | null;
   local_session_id: string;
   cwd?: string | null;
   session_label?: string | null;
@@ -145,7 +146,7 @@ export class TransportConsoleRegistry {
       existingActive && nextBound.has(existingActive)
         ? existingActive
         : relaySessionIds[0] ?? existingActive ?? null;
-    if (nextActive) {
+    if (nextActive && nextActive !== existingActive) {
       await this.host.bindingStore.setActiveSessionIdForPrincipal(
         input.principal,
         nextActive,
@@ -179,6 +180,7 @@ export class TransportConsoleRegistry {
     const nextSession: SessionContext = {
       sessionId: input.relaySessionId,
       label,
+      ownerUserUuid: input.consoleSession.owner_user_uuid?.trim() || undefined,
       activeProjectUuid: input.consoleSession.project_uuids[0] ?? undefined,
       activeProjectName: projectName ?? undefined,
       ...(input.consoleSession.cwd?.trim()
@@ -210,15 +212,18 @@ export class TransportConsoleRegistry {
         : {}),
     });
 
-    await this.host.bindingStore.setBinding({
-      sessionId: input.relaySessionId,
-      telegramChatId: input.principal.telegramChatId,
-      telegramUserId: input.principal.telegramUserId,
-      ...(input.ctx?.from?.username
-        ? { telegramUsername: input.ctx.from.username }
-        : {}),
-      linkedAt: new Date().toISOString(),
-    });
+    await this.host.bindingStore.setBinding(
+      {
+        sessionId: input.relaySessionId,
+        telegramChatId: input.principal.telegramChatId,
+        telegramUserId: input.principal.telegramUserId,
+        ...(input.ctx?.from?.username
+          ? { telegramUsername: input.ctx.from.username }
+          : {}),
+        linkedAt: new Date().toISOString(),
+      },
+      { activate: false },
+    );
 
     return nextSession;
   }

@@ -321,7 +321,10 @@ export class RedisStateStore
     await this.redis.del(gatewayAuthorizedKey(principal));
   }
 
-  public async setBinding(binding: SessionBinding): Promise<void> {
+  public async setBinding(
+    binding: SessionBinding,
+    options?: { activate?: boolean },
+  ): Promise<void> {
     const previous = await this.getBinding(binding.sessionId);
     if (
       previous &&
@@ -336,7 +339,9 @@ export class RedisStateStore
       JSON.stringify(binding),
     );
     await this.redis.sadd(principalSessionsKey(binding), binding.sessionId);
-    await this.redis.set(principalActiveSessionKey(binding), binding.sessionId);
+    if (options?.activate !== false) {
+      await this.redis.set(principalActiveSessionKey(binding), binding.sessionId);
+    }
   }
 
   public async clearBinding(sessionId: string): Promise<void> {

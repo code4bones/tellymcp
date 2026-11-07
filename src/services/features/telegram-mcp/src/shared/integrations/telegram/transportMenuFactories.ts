@@ -38,6 +38,16 @@ function splitSessionDisplayLabel(input: {
   };
 }
 
+function sessionOwnerKey(
+  sessionId: string,
+  ownerUserUuid: string | undefined,
+  ownerLabel: string | null,
+): string {
+  return ownerUserUuid?.trim()
+    ? `account:${ownerUserUuid.trim()}`
+    : ownerLabel ?? parseLiveRelaySessionId(sessionId)?.clientUuid ?? sessionId;
+}
+
 export interface TransportMenuFactoriesHost {
   logger: Logger;
   bindingStore: SessionBindingStore;
@@ -145,10 +155,11 @@ export class TransportMenuFactories {
       sessionId: activeSessionId,
       ...(session?.label ? { sessionLabel: session.label } : {}),
     });
-    const ownerKey =
-      parseLiveRelaySessionId(activeSessionId)?.clientUuid ??
-      display.ownerLabel ??
-      activeSessionId;
+    const ownerKey = sessionOwnerKey(
+      activeSessionId,
+      session?.ownerUserUuid,
+      display.ownerLabel,
+    );
     const ownerLabel =
       display.ownerLabel ??
       display.shortLabel ??
@@ -743,10 +754,11 @@ export class TransportMenuFactories {
               sessionId,
               ...(session?.label ? { sessionLabel: session.label } : {}),
             });
-            const groupKey =
-              parseLiveRelaySessionId(sessionId)?.clientUuid ??
-              display.ownerLabel ??
-              sessionId;
+            const groupKey = sessionOwnerKey(
+              sessionId,
+              session?.ownerUserUuid,
+              display.ownerLabel,
+            );
             const items = groupedSessions.get(groupKey) ?? [];
             items.push({
               sessionId,
@@ -770,6 +782,15 @@ export class TransportMenuFactories {
             ) {
               selectedOwnerLabel = payload.ownerKey;
             }
+          }
+
+          // Buttons sent before account grouping used the connection UUID.
+          if (selectedOwnerLabel && !groupedSessions.has(selectedOwnerLabel)) {
+            selectedOwnerLabel = [...groupedSessions.entries()].find(([, items]) =>
+              items.some((item) =>
+                parseLiveRelaySessionId(item.sessionId)?.clientUuid === selectedOwnerLabel,
+              ),
+            )?.[0] ?? null;
           }
 
           const sortedGroups = [...groupedSessions.entries()].sort((left, right) => {

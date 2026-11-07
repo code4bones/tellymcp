@@ -4,6 +4,25 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.38
+
+### Fixed
+
+- Starting or reconnecting a client after a gateway restart no longer injects a Telegram-task instruction into the console when versions differ. Version warnings remain available in Telegram and local diagnostics.
+- Update local clients as well as the gateway to apply this fix: the unwanted console instruction originated in the client handshake handler.
+
+## 0.0.37
+
+### Fixed
+
+- Background console synchronization preserves the selected session, so Live, Browser, Settings, and Storage continue to use the console chosen in the session menu.
+
+## 0.0.36
+
+### Fixed
+
+- The active-session menu groups connections belonging to the same account under one owner button, with all sessions inside. Back returns to that account's session list.
+
 ## 0.0.35
 
 ### Changed

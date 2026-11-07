@@ -46,7 +46,7 @@ export async function startSessionOwner(input: {
   let ready = false;
   let stopping: Promise<void> | undefined;
   const sockets = new Set<Socket>();
-  const flushers = new Map<Socket, () => void>();
+  const flushers = new Map<Socket, (final?: boolean) => void>();
   const writers = new Map<Socket, LocalWriter>();
   let resolveFinished!: (code: number) => void;
   const finished = new Promise<number>((resolve) => {
@@ -140,6 +140,7 @@ export async function startSessionOwner(input: {
           type: "ready",
           ...record,
           ptyPid: session.stream.status.pid,
+          attached: session.stream.status.attached,
         });
         return;
       }
@@ -226,9 +227,10 @@ export async function startSessionOwner(input: {
         fail("INVALID_FRAME");
       }
     });
-    flushers.set(socket, () => {
-      if (!attachment || !acknowledged || closed) return;
+    flushers.set(socket, (final = false) => {
+      if (!attachment || (!acknowledged && !final) || closed) return;
       try {
+        if (final && !acknowledged) attachment.acknowledge();
         for (const frame of attachment.drain()) {
           writer.output(frame.sequence, Buffer.from(frame.data));
         }
@@ -255,7 +257,7 @@ export async function startSessionOwner(input: {
     ready = false;
     stopping = (async () => {
       if (timer) clearInterval(timer);
-      for (const flush of flushers.values()) flush();
+      for (const flush of flushers.values()) flush(true);
       for (const socket of sockets) {
         try {
           const writer = writers.get(socket)!;

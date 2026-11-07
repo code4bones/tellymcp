@@ -156,6 +156,7 @@ export class TerminalRestorationPrototype {
       sequence: this.sequence,
       exit: this.exit,
       failure: this.failure?.message,
+      attached: !!this.attachment,
     };
   }
 

@@ -276,6 +276,35 @@ Runtime-состояние клиента локальное и не требу�
 tellymcp run
 ```
 
+### Локальный detach/attach (Linux, ещё не выпущен)
+
+В client mode обычный `run` запускает или повторно использует фонового owner и
+подключается к прежнему shell. `run --detach` возвращает после ready без TTY.
+
+```bash
+tellymcp run --detach
+tellymcp sessions           # --json для машинного вывода
+tellymcp attach             # выбор сессии, либо сразу attach <handle>
+tellymcp stop               # текущий workspace, либо stop <handle>
+```
+
+Без handle attach открывает меню: стрелки для выбора, Enter для подключения,
+Esc или Ctrl+C для отмены. Доступная сессия текущего workspace выделена по
+умолчанию; занятые и недоступные сессии выбрать нельзя.
+
+Для возврата в исходную консоль нажми **Ctrl+]**, затем **d**. Двойной Ctrl+]
+передаёт буквальный префикс; bracketed paste сохраняет префикс внутри вставки.
+Одновременно доступен один controller. Потеря frontend сохраняет owner и сервисы;
+выход shell или stop завершает их. Attach/list/stop не требуют профиля и связи
+с gateway. Смена конфигурации или явного provider/bridge требует сначала остановить
+старый owner. Управляемые агенты запускаются через прежний `--agent`.
+
+Запускай из исходной консоли: старую foreground-сессию нельзя преобразовать на
+месте. Интерактивный attach использует Linux `stty`. Изменения ещё не установлены
+глобально: после `yarn build` используй `node /полный/путь/tellymcp/dist/cli.js`
+вместо `tellymcp`. SSH/cgroup, настоящие TUI агентов и remote attach требуют отдельной
+приёмки. [Контракт реализации](docs/DETACHED_SESSIONS_DESIGN.md).
+
 ### Запуск и продолжение coding agent
 
 В TellyMCP встроены provider adapters для Codex и Claude Code. Vendor CLI

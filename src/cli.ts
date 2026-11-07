@@ -11,11 +11,12 @@ import {
 import path from "node:path";
 import os from "node:os";
 import { spawn } from "node:child_process";
-import { generateKeyPairSync } from "node:crypto";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
 import net from "node:net";
 import { parse as parseDotenv } from "dotenv";
 import Redis from "ioredis";
 import pc from "picocolors";
+import { formatSessionsTable } from "./cliSessionsTable";
 import WebSocket from "ws";
 import {
   getCodexPluginStatus,
@@ -34,8 +35,17 @@ import {
   resolveAgentProvider,
 } from "./services/features/telegram-mcp/src/features/agent-runtime/model/agentProviderRegistry";
 import { inspectCodexRuntime } from "./services/features/telegram-mcp/src/features/agent-runtime/model/codexRuntimeDiagnostics";
-import { getTellyWebSocketAgent, tellyFetch, type TellyProxySettings } from "./services/features/telegram-mcp/src/shared/lib/http/tellyProxy";
-import { browserWsOverrides, defaultClientEnvPath, resolveRuntimeEnvPath } from "./cliRuntimeOptions";
+import {
+  getTellyWebSocketAgent,
+  tellyFetch,
+  type TellyProxySettings,
+} from "./services/features/telegram-mcp/src/shared/lib/http/tellyProxy";
+import {
+  browserWsOverrides,
+  defaultClientEnvPath,
+  resolveRuntimeEnvPath,
+  validateRunOptions,
+} from "./cliRuntimeOptions";
 
 type InitMode = "client" | "gateway" | "both";
 type CliCommand =
@@ -44,6 +54,9 @@ type CliCommand =
   | "configure"
   | "migrate-env"
   | "run"
+  | "sessions"
+  | "attach"
+  | "stop"
   | "mcp"
   | "oauth"
   | "doctor"
@@ -161,6 +174,10 @@ function printHelp(): void {
     "  tellymcp migrate-env <input.env> > .migrated-env",
     "  tellymcp run [--env <file>] [--ws <port>]",
     "  tellymcp run [--env <file>] [--agent codex|claude]",
+    "  tellymcp run [--env <file>] [--agent codex|claude] --detach",
+    "  tellymcp sessions [--json]",
+    "  tellymcp attach [handle] # interactive session picker when omitted",
+    "  tellymcp stop [handle]",
     "  tellymcp run --env=<file>",
     "  tellymcp run --env .env-client -s backendDev",
     "  tellymcp run --ws 9999 -s backendDev",
@@ -205,6 +222,7 @@ function printHelp(): void {
   printSection("terminal", [
     "  built-in PTY runtime (validated by tellymcp doctor and tellymcp run)",
     "  Live view, session nudges and browser flows use the built-in terminal runtime.",
+    "  Client sessions stay alive after detach. Press Ctrl+] then d; Ctrl+] twice sends the literal prefix.",
   ]);
 }
 
@@ -562,7 +580,10 @@ function initWorkspace(mode: InitMode, directoryArg?: string): void {
   const targetDir = globalClient
     ? path.dirname(defaultClientEnvPath(os.homedir()))
     : path.resolve(directoryArg ?? process.cwd());
-  mkdirSync(targetDir, { recursive: true, ...(globalClient ? { mode: 0o700 } : {}) });
+  mkdirSync(targetDir, {
+    recursive: true,
+    ...(globalClient ? { mode: 0o700 } : {}),
+  });
 
   const envPath = path.join(targetDir, ".env");
   if (existsSync(envPath)) {
@@ -575,7 +596,10 @@ function initWorkspace(mode: InitMode, directoryArg?: string): void {
   if (globalClient) {
     printBanner("client configuration initialized");
     printSection("Created", [`  ${envPath}`]);
-    printSection("Next", [`  1. Edit ${envPath}`, "  2. In your workspace: tellymcp run --ws 9999"]);
+    printSection("Next", [
+      `  1. Edit ${envPath}`,
+      "  2. In your workspace: tellymcp run --ws 9999",
+    ]);
     return;
   }
 
@@ -640,7 +664,9 @@ function runMigrateEnv(args: string[]): void {
 function resolveRunEnvPath(args: string[]): string {
   const marker = getSessionMarkerForCwd(process.cwd());
   return resolveRuntimeEnvPath(args, {
-    cwd: process.cwd(), homeDir: os.homedir(), markerEnvFile: marker?.envFile,
+    cwd: process.cwd(),
+    homeDir: os.homedir(),
+    markerEnvFile: marker?.envFile,
   });
 }
 
@@ -790,10 +816,14 @@ async function checkHttpHealth(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await tellyFetch(url, {
-      method: "GET",
-      signal: controller.signal,
-    }, proxySettings);
+    const response = await tellyFetch(
+      url,
+      {
+        method: "GET",
+        signal: controller.signal,
+      },
+      proxySettings,
+    );
     clearTimeout(timer);
     return {
       ok: response.ok,
@@ -834,7 +864,9 @@ async function checkWebSocketUrl(
 
     const socket = new WebSocket(url, {
       agent: getTellyWebSocketAgent(url, proxySettings),
-      ...(authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {}),
+      ...(authToken
+        ? { headers: { Authorization: `Bearer ${authToken}` } }
+        : {}),
     });
     const timer = setTimeout(() => {
       finish(false, `${url} timed out`);
@@ -874,8 +906,10 @@ async function runDoctor(args: string[]): Promise<void> {
     httpProxy: parsed.TELLYMCP_HTTP_PROXY,
     noProxy: parsed.TELLYMCP_NO_PROXY,
   };
-  const doctorHttpHealth = (url: string) => checkHttpHealth(url, 3000, proxySettings);
-  const doctorWebSocket = (url: string) => checkWebSocketUrl(url, 3000, proxySettings, parsed.GATEWAY_AUTH_TOKEN);
+  const doctorHttpHealth = (url: string) =>
+    checkHttpHealth(url, 3000, proxySettings);
+  const doctorWebSocket = (url: string) =>
+    checkWebSocketUrl(url, 3000, proxySettings, parsed.GATEWAY_AUTH_TOKEN);
 
   const nativePtyStatus = await checkNativePtyRuntime();
 
@@ -1683,6 +1717,7 @@ function runProviderCommand(args: string[]): void {
 }
 
 async function runRuntime(args: string[]): Promise<void> {
+  const { detached } = validateRunOptions(args);
   const { envPath, parsed } = loadCliEnv(args);
   const requestedAgent = readFlagValue(args, "--agent");
   const agentProvider = requestedAgent
@@ -1695,6 +1730,91 @@ async function runRuntime(args: string[]): Promise<void> {
   }
   if (agentProvider && !isForegroundPtyClientMode(parsed)) {
     fail("--agent is supported only when DISTRIBUTED_MODE=client");
+  }
+  if (detached && !isForegroundPtyClientMode(parsed))
+    fail("--detach is supported only when DISTRIBUTED_MODE=client");
+  if (isForegroundPtyClientMode(parsed)) {
+    const { attachTerminal, requireInteractiveTerminal } =
+      await import("./services/features/telegram-mcp/src/features/detached-terminal/model/terminalAttachment.js");
+    if (!detached) requireInteractiveTerminal();
+    const nativePtyStatus = await checkNativePtyRuntime();
+    if (!nativePtyStatus.available)
+      fail([nativePtyStatus.message, ...nativePtyRecoveryLines()].join("\n"));
+    const { LocalRegistry, processStartIdentity } =
+      await import("./services/features/telegram-mcp/src/features/detached-terminal/model/localRegistry.js");
+    const { launchSessionOwner, assertCompatibleOwner } =
+      await import("./services/features/telegram-mcp/src/features/detached-terminal/model/ownerLauncher.js");
+    const { startupFingerprint } =
+      await import("./services/features/telegram-mcp/src/features/detached-terminal/model/localSessions.js");
+    const registry = new LocalRegistry();
+    const fingerprint = startupFingerprint(envPath, process.env);
+    const overrides = browserWsOverrides(args);
+    if (
+      process.env.TELLYMCP_TERMINAL_CONTEXT === "1" &&
+      path.resolve(process.env.TELLYMCP_TERMINAL_CWD || "/") ===
+        path.resolve(process.cwd()) &&
+      process.env.TELLYMCP_SESSION_ID === parsed.TELLYMCP_SESSION_ID
+    )
+      throw new Error(
+        "This terminal already belongs to that TellyMCP console. Detach or exit it, then run/attach from the outer shell.",
+      );
+    const spec = registry.updateWorkspaceIdentity((find) => {
+      const current = getSessionMarkerForCwd(process.cwd());
+      const resolved = resolveCliSessionDefaults({
+        envPath,
+        sessionId: parsed.TELLYMCP_SESSION_ID,
+        sessionLabel: parsed.TELLYMCP_SESSION_LABEL,
+      });
+      const candidate = {
+        cwd: process.cwd(),
+        envPath: path.resolve(envPath),
+        packageRoot,
+        clientUuid: current?.gatewayClientUuid || randomUUID(),
+        sessionId: resolved.sessionId,
+        sessionLabel: resolved.sessionLabel,
+        startupHash: fingerprint,
+        ...(agentProvider ? { agentId: agentProvider.agentId } : {}),
+        ...(overrides.BROWSER_ATTACH_WS_PORT
+          ? { browserWsPort: Number(overrides.BROWSER_ATTACH_WS_PORT) }
+          : {}),
+      };
+      const existing = find(candidate);
+      if (
+        existing &&
+        processStartIdentity(existing.pid) === existing.processStart
+      )
+        assertCompatibleOwner(existing, candidate);
+      writeSessionMarkerState({
+        cwd: candidate.cwd,
+        localSessionId: candidate.sessionId,
+        sessionLabel: candidate.sessionLabel,
+        envFile: formatMarkerEnvPath(candidate.envPath, candidate.cwd),
+        gatewayClientUuid: candidate.clientUuid,
+      });
+      return candidate;
+    });
+    const record = await launchSessionOwner({ registry, spec });
+    if (detached) {
+      process.stdout.write(
+        "Session: " +
+          record.sessionLabel +
+          " (" +
+          record.sessionId +
+          ")\nHandle: " +
+          record.instance +
+          "\nAttach: tellymcp attach " +
+          record.instance +
+          "\n",
+      );
+      return;
+    }
+    const result = await attachTerminal(record);
+    if (result.detached)
+      process.stdout.write(
+        "Detached. Attach: tellymcp attach " + record.instance + "\n",
+      );
+    process.exitCode = result.exitCode;
+    return;
   }
   Object.assign(process.env, browserWsOverrides(args));
   if (parsed.TELLYMCP_SESSION_ID) {
@@ -1721,18 +1841,6 @@ async function runRuntime(args: string[]): Promise<void> {
         "Then rerun: tellymcp doctor --env <file>",
       ].join("\n"),
     );
-  }
-
-  if (isForegroundPtyClientMode(parsed)) {
-    const { runForegroundPtyRuntime } =
-      await import("./services/features/telegram-mcp/src/features/foreground-terminal/model/foregroundTerminalRuntime.js");
-    await runForegroundPtyRuntime({
-      envPath,
-      packageRoot,
-      printBanner,
-      ...(agentProvider ? { agentId: agentProvider.agentId } : {}),
-    });
-    return;
   }
 
   const runnerPath = path.join(
@@ -1795,12 +1903,106 @@ async function runRuntime(args: string[]): Promise<void> {
   });
 }
 
+async function localSessionCommand(
+  command: "sessions" | "attach" | "stop",
+  args: string[],
+): Promise<void> {
+  if (args.includes("--help") || args.includes("-h")) {
+    process.stdout.write(
+      "Usage: tellymcp " +
+        command +
+        (command === "sessions" ? " [--json]\n" : " [handle]\n"),
+    );
+    if (command === "attach")
+      process.stdout.write(
+        "Without a handle, choose a local session with arrows and Enter; Esc cancels.\n",
+      );
+    return;
+  }
+  if (
+    args.some(
+      (value) =>
+        value.startsWith("-") &&
+        !(command === "sessions" && value === "--json"),
+    ) ||
+    args.length > 1
+  )
+    throw new Error(
+      "Unsupported " +
+        command +
+        " arguments. Remote sessions are not available yet.",
+    );
+  const { LocalRegistry, processStartIdentity } =
+    await import("./services/features/telegram-mcp/src/features/detached-terminal/model/localRegistry.js");
+  const { listLocalSessions, resolveLocalOwner, stopLocalOwner } =
+    await import("./services/features/telegram-mcp/src/features/detached-terminal/model/localSessions.js");
+  const registry = new LocalRegistry();
+  if (command === "sessions") {
+    if (args.length && args[0] !== "--json")
+      throw new Error("Usage: tellymcp sessions [--json]");
+    const sessions = await listLocalSessions(registry);
+    if (args[0] === "--json")
+      process.stdout.write(JSON.stringify(sessions, null, 2) + "\n");
+    else if (!sessions.length) process.stdout.write("No local sessions.\n");
+    else
+      process.stdout.write(
+        formatSessionsTable(sessions, {
+          ...(process.stdout.isTTY && process.stdout.columns
+            ? { columns: process.stdout.columns }
+            : {}),
+        }),
+      );
+    return;
+  }
+  let handle = args[0];
+  if (command === "attach" && !handle) {
+    const { pickLocalSession } = await import("./cliSessionPicker.js");
+    handle = await pickLocalSession(registry);
+    if (!handle) return;
+  }
+  const record = resolveLocalOwner(registry, handle);
+  if (command === "stop") {
+    await stopLocalOwner(registry, record);
+    process.stdout.write("Stopped: " + record.instance + "\n");
+    return;
+  }
+  if (processStartIdentity(record.pid) !== record.processStart)
+    throw new Error(
+      "Session owner has exited; its live process cannot be restored.",
+    );
+  const { attachTerminal } =
+    await import("./services/features/telegram-mcp/src/features/detached-terminal/model/terminalAttachment.js");
+  const result = await attachTerminal(record);
+  if (result.detached)
+    process.stdout.write(
+      "Detached. Attach: tellymcp attach " + record.instance + "\n",
+    );
+  process.exitCode = result.exitCode;
+}
+
 async function main(argv: string[]): Promise<void> {
   const [rawCommand, firstArg, secondArg] = argv;
   if (rawCommand === "__session-owner") {
-    if (!firstArg || argv.length !== 2) throw new Error("Invalid internal owner invocation");
-    const { runOwnerEntrypoint } = await import("./services/features/telegram-mcp/src/features/detached-terminal/model/ownerRuntime.js");
+    if (!firstArg || argv.length !== 2)
+      throw new Error("Invalid internal owner invocation");
+    const { runOwnerEntrypoint } =
+      await import("./services/features/telegram-mcp/src/features/detached-terminal/model/ownerRuntime.js");
     await runOwnerEntrypoint(path.resolve(firstArg));
+    return;
+  }
+  if (
+    rawCommand === "sessions" ||
+    rawCommand === "attach" ||
+    rawCommand === "stop"
+  ) {
+    await localSessionCommand(rawCommand, argv.slice(1));
+    return;
+  }
+  if (
+    rawCommand === "run" &&
+    (argv.includes("--help") || argv.includes("-h"))
+  ) {
+    printHelp();
     return;
   }
   const command: CliCommand =
@@ -1888,4 +2090,9 @@ async function main(argv: string[]): Promise<void> {
   await runRuntime(argv.slice(1));
 }
 
-void main(process.argv.slice(2));
+void main(process.argv.slice(2)).catch((error: unknown) => {
+  process.stderr.write(
+    (error instanceof Error ? error.message : String(error)) + "\n",
+  );
+  process.exitCode = 1;
+});

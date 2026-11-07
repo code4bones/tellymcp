@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync } from "../../../shared/lib/sqlite";
 import { z } from "zod";
 
 import { LOCAL_PROTOCOL_VERSION } from "./localProtocol";
@@ -18,6 +18,10 @@ export const ownerSpecSchema = z
     sessionLabel: z.string().min(1).max(200),
     agentId: z.enum(["codex", "claude"]).optional(),
     browserWsPort: z.number().int().min(1).max(65535).optional(),
+    startupHash: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/u)
+      .optional(),
   })
   .strict();
 export type OwnerSpec = z.infer<typeof ownerSpecSchema>;
@@ -37,6 +41,12 @@ export const ownerRecordSchema = z
     socketPath: absolute,
     createdAt: z.string(),
     state: z.enum(["starting", "ready"]),
+    agentId: z.enum(["codex", "claude"]).optional(),
+    browserWsPort: z.number().int().min(1).max(65535).optional(),
+    startupHash: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/u)
+      .optional(),
   })
   .strict();
 export type OwnerRecord = z.infer<typeof ownerRecordSchema>;
@@ -125,6 +135,13 @@ export class LocalRegistry {
     }
   }
 
+  /** Serialize only the launcher's synchronous marker read/modify/write. */
+  updateWorkspaceIdentity<T>(
+    operation: (find: (spec: OwnerSpec) => OwnerRecord | null) => T,
+  ): T {
+    return this.locked(() => operation((spec) => this.findUnlocked(spec)));
+  }
+
   private claimPaths(
     record: Pick<OwnerRecord, "cwd" | "sessionId" | "clientUuid">,
   ): string[] {
@@ -165,26 +182,28 @@ export class LocalRegistry {
   }
 
   find(spec: OwnerSpec): OwnerRecord | null {
+    return this.locked(() => this.findUnlocked(spec));
+  }
+
+  private findUnlocked(spec: OwnerSpec): OwnerRecord | null {
     const canonical = { ...spec, cwd: fs.realpathSync(spec.cwd) };
-    return this.locked(() => {
-      const records = this.claimPaths(canonical)
-        .map((file) => this.read(file))
-        .filter((v): v is OwnerRecord => !!v);
-      if (new Set(records.map((v) => v.instance)).size > 1)
-        throw new Error("Ambiguous local owner claims");
-      const record = records[0];
-      if (!record) return null;
-      if (
-        (record.cwd !== canonical.cwd ||
-          record.clientUuid !== spec.clientUuid ||
-          record.sessionId !== spec.sessionId) &&
-        processStartIdentity(record.pid) === record.processStart
-      )
-        throw new Error(
-          "Console identity is already claimed by another workspace or owner",
-        );
-      return record;
-    });
+    const records = this.claimPaths(canonical)
+      .map((file) => this.read(file))
+      .filter((v): v is OwnerRecord => !!v);
+    if (new Set(records.map((v) => v.instance)).size > 1)
+      throw new Error("Ambiguous local owner claims");
+    const record = records[0];
+    if (!record) return null;
+    if (
+      (record.cwd !== canonical.cwd ||
+        record.clientUuid !== spec.clientUuid ||
+        record.sessionId !== spec.sessionId) &&
+      processStartIdentity(record.pid) === record.processStart
+    )
+      throw new Error(
+        "Console identity is already claimed by another workspace or owner",
+      );
+    return record;
   }
 
   createRecord(spec: OwnerSpec, packageVersion: string): OwnerRecord {
@@ -205,6 +224,11 @@ export class LocalRegistry {
       socketPath: path.join(this.root, `s-${instance}`),
       state: "starting",
       createdAt: new Date().toISOString(),
+      ...(spec.agentId ? { agentId: spec.agentId } : {}),
+      ...(spec.browserWsPort !== undefined
+        ? { browserWsPort: spec.browserWsPort }
+        : {}),
+      ...(spec.startupHash ? { startupHash: spec.startupHash } : {}),
     });
   }
 

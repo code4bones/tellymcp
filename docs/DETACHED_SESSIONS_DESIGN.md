@@ -1,10 +1,11 @@
 # Detached sessions in TellyMCP
 
-Status: stage-1 prototype accepted; stage-2 owner implementation under review,
+Status: stage-1 accepted; Linux local owner and public CLI implemented under review,
 updated 2026-11-07.
 Branch: `feature/detached-sessions`, merged with `main` at `13a14e0` in
 `b34bb74`. Current package baseline: `0.0.43`; the original `0.0.38` baseline
-is historical. The public commands below still describe proposed behavior.
+is historical. Local commands are implemented on this branch; remote commands
+and release acceptance remain proposed.
 
 TellyMCP should keep a running local console alive when its terminal disconnects,
 an SSH connection drops, or the user deliberately sends the session into the
@@ -91,18 +92,18 @@ failure; do not silently start another shell. See the
 for the underlying detached process and descriptor requirements; verify them
 against the project's supported Node 24 runtime during implementation.
 
-## Proposed command behavior
+## Local command behavior (development branch)
 
-| Command or action                     | Behavior                                                                                                                            |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `tellymcp run`                        | Start the workspace session owner and attach. If that exact session is already running, attach to it.                               |
-| `tellymcp run --detach`               | Start the owner, wait for readiness, print session identity, and return. An interactive TTY is not required.                        |
-| `tellymcp run --agent codex --detach` | Start the managed agent once within the new owner. Reuse existing provider launch semantics.                                        |
-| `tellymcp sessions`                   | List this OS user's local owners, with an opaque local handle, console identity, label, cwd, lifecycle state, and attachment state. |
-| `tellymcp attach <handle>`            | Attach to the exact existing owner; never create or resume a different process. Without a handle, use the current workspace marker. |
-| `tellymcp stop <handle>`              | Explicitly stop the owner, its agent backends, shell, PTY, and embedded services. Without a handle, use the workspace marker.       |
-| `Ctrl+]` followed by `d`              | Detach locally and restore the outer terminal. The owner continues. `Ctrl+]` twice forwards a literal prefix.                       |
-| `Ctrl+C` / `Ctrl+D` typed normally    | Forward to the PTY so the foreground program and shell retain their normal behavior.                                                |
+| Command or action                     | Behavior                                                                                                                                                                                 |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tellymcp run`                        | Start the workspace session owner and attach. If that exact session is already running, attach to it.                                                                                    |
+| `tellymcp run --detach`               | Start the owner, wait for readiness, print session identity, and return. An interactive TTY is not required.                                                                             |
+| `tellymcp run --agent codex --detach` | Start the managed agent once within the new owner. Reuse existing provider launch semantics.                                                                                             |
+| `tellymcp sessions`                   | List this OS user's local owners, with an opaque local handle, console identity, label, cwd, lifecycle state, and attachment state.                                                      |
+| `tellymcp attach [handle]`            | Attach to the exact existing owner; never create or resume a different process. Without a handle, show an interactive picker, initially selecting the available current workspace owner. |
+| `tellymcp stop <handle>`              | Explicitly stop the owner, its agent backends, shell, PTY, and embedded services. Without a handle, use the workspace marker.                                                            |
+| `Ctrl+]` followed by `d`              | Detach locally and restore the outer terminal. The owner continues. `Ctrl+]` twice forwards a literal prefix.                                                                            |
+| `Ctrl+C` / `Ctrl+D` typed normally    | Forward to the PTY so the foreground program and shell retain their normal behavior.                                                                                                     |
 
 The detach prefix parser must handle split reads and forward unmatched bytes in
 order. Paste data is forwarded intact; a pasted prefix must not accidentally
@@ -319,14 +320,13 @@ shipping a detach flag that cannot restore a working agent interface.
 
 ## Stage 1 prototype: T-TELLYMCP-040
 
-The isolated implementation is in
+The original stage-1 implementation is in
 `src/services/features/telegram-mcp/src/features/detached-terminal/model/`:
 `terminalRestorationPrototype.ts`, `terminalSnapshot.ts`, and `vtOutput.ts`.
-It takes an existing `node-pty` handle, owns its own experimental headless
-screen, and creates no processes or services. **It is not imported by the
-ordinary runtime or CLI.** Do not layer it onto an existing `ptyRegistry`
-screen as a second permanent parser: stage 2 must integrate one authoritative
-screen into that registry, keeping the existing capture and subscription APIs.
+It takes an existing `node-pty` handle and creates no processes or services.
+The standalone harness uses its own headless screen. Stage 2 promoted the same
+stream into `ptyRegistry` using the registry's existing screen; stage 3 now reaches
+it through the public client CLI. There is one authoritative parser per owned PTY.
 
 `@xterm/addon-serialize` is pinned to **0.13.0**, the compatible addon listed
 in the upstream [xterm 5.5 release](https://github.com/xtermjs/xterm.js/releases/tag/5.5.0).
@@ -444,9 +444,8 @@ tool PTY evidence, not visual verification in two physical terminal emulators.
 Stage 1 is committed as `9e2d636`; the user confirmed its manual detach/attach/exit
 test. Stage 2 adds `sessionOwner.ts`, `localProtocol.ts`, `localConnection.ts`,
 `localRegistry.ts`, `ownerLauncher.ts` and `ownerRuntime.ts` in the same model
-directory. These are internal APIs. Public `run --detach`, `sessions`, `attach`
-and `stop`, plus the foreground attachment loop, remain T-TELLYMCP-042.
-Ordinary `run` still uses its existing foreground path.
+directory. These are internal APIs. At the stage-2 checkpoint, public commands
+and the attachment loop were still pending; stage 3 below now provides them.
 
 ### Process and screen ownership
 
@@ -554,6 +553,116 @@ unverified and is still required before closing T041 acceptance. Provider TUI an
 two-physical-emulator checks, public CLI cleanup, remote auth/relay and release
 remain T042–045. No release, global install, gateway deployment or default launch
 change is included.
+
+## Stage 3 implementation: T-TELLYMCP-042
+
+Stage 2 is committed as `9f67959`. This branch now exposes the local commands
+through `src/cli.ts`; implementation changes for stage 3 are not committed yet.
+The installed client and production gateway have not been updated or released.
+
+### Public commands and identity
+
+- Client-mode `run` starts an owner or reuses the exact existing one, then attaches.
+  It checks for an interactive TTY before starting an interactive session.
+- `run --detach` waits for verified readiness, prints the local handle and returns
+  without requiring a TTY. `--agent`, `--env`, `--ws` and session flags are retained.
+- `sessions [--json]` lists this OS user's owners with handles, canonical identity,
+  label, cwd, owner/shell PIDs and current local-controller status. A probe never
+  acquires control. JSON output omits profile contents and startup fingerprints.
+- `attach [handle]` reaches an existing owner only; it never starts a broker,
+  provider, shell, bridge or replacement session. Handles are full instance UUIDs,
+  not guessed labels. Without a handle, `@clack/prompts` presents an interactive
+  picker, even for one owner. The available current workspace owner is initially
+  selected; selection works outside a workspace too. Busy/unavailable/exited
+  owners are disabled, and no available owner produces a clear error. Arrows/Enter
+  select; Esc/Ctrl+C cancel without acquiring control. Non-TTY selection fails
+  immediately. Raw mode and exact termios are restored before attachment or on
+  cancellation; SIGINT/SIGTERM/SIGHUP abort the prompt and retain exit status.
+- `stop [handle]` waits for that owner's cleanup; it does not signal guessed PIDs.
+  An already dead owner can have stale metadata removed only after safe recovery.
+
+Attach/list/stop need neither the env file nor the gateway connection. Startup
+still uses existing gateway registration. Gateway/both mode keeps its former
+runner and rejects `--detach`. Remote flags are explicitly unsupported here.
+
+Marker UUID allocation and synchronous read/modify/write now share the registry
+mutex, so two first launches in a fresh workspace cannot allocate different client
+UUIDs and start duplicate runtimes. Existing tools hashes and canonical identity
+remain in the marker. The owner record optionally retains provider, explicit bridge
+override and a SHA256 fingerprint of the profile plus selected inherited startup
+settings. Profile contents/credentials are never copied to discovery or argv.
+
+Repeated run checks the existing profile, fingerprint and explicitly requested
+provider/bridge choices. A conflict leaves the running owner and marker intact;
+use attach to keep its state, or stop before a new configuration. Omitting a
+provider/bridge flag on reattach does not restart or erase the previous choice.
+The profile fingerprint is conservative: even a profile comment edit requires
+attach or an explicit restart. A run nested inside its own Telly console is
+rejected; a pre-feature foreground PTY cannot be transferred into a new owner.
+
+### Native frontend
+
+`terminalAttachment.ts` owns only the socket and outer terminal. Snapshot size,
+instance, dimensions, generation and sequence are validated; output chunks are
+reassembled by sequence/byte offset before rendering, without per-read UTF8
+decoding. The write queue is bounded and can pause the socket; a slow terminal
+cannot grow an unbounded promise chain or block owner PTY parsing.
+
+Raw input preserves controls, function keys, Unicode and bytes. Ctrl+] then d
+detaches, ends the frontend and returns to the original shell. Double Ctrl+]
+passes one literal prefix; unmatched combinations pass unchanged. Split reads
+are handled. Bracketed paste markers and payloads pass intact, with no detach
+recognition inside the paste. Unbracketed paste cannot be distinguished from
+typed keystrokes; escape a literal prefix with the doubled form in that case.
+
+Linux `stty -g` saves exact outer termios before raw input. The frontend disables
+output post-processing while rendering VT, avoiding duplicated carriage returns
+from ONLCR, and restores the saved termios on exit. A short bounded mode/DECRQSS
+probe records supported outer VT modes, SGR, scroll region and cursor style.
+Its split/late replies are consumed locally rather than entering PTY stdin;
+unmatched early input is retained until the snapshot has been rendered and ACKed.
+An isolated Escape has a 50 ms ambiguity timeout and does not wait for another key.
+
+Cleanup restores known terminal modes (with defaults for unsupported queries),
+ends mouse/focus/paste/application-key modes, removes listeners and restores raw
+input state. It is not a saved copy of the outer screen/history, and terminal
+extensions outside the stage-1 contract remain unsupported. The probe never
+consumes status-shaped text inside bracketed paste.
+
+EOF, stdout/stdin failure, socket loss and frontend signals end only the
+attachment. Catchable signals restore the outer terminal; SIGKILL cannot run
+frontend cleanup but still leaves owner/PTy/services alive. Actual shell exit
+propagates its code after final output. The owner now drains final output even
+when the shell exits before the initial snapshot ACK, without enabling input.
+
+### Validation and remaining checks
+
+Build/lint pass; full suite **431 passed, 2 skipped**, including the SQLite-warning
+and interactive-picker follow-ups. Picker PTY tests cover another owner selection,
+disabled busy entries/all-busy rejection, selection outside a workspace,
+non-TTY rejection, exact termios after Esc/Ctrl+C, and SIGTERM cancellation.
+New stream tests cover byte
+splits, prefix escaping, paste, control keys, late query replies and sequence
+validation. Source-runtime public CLI tests start the actual embedded runtime
+against an isolated registration HTTP fixture and verify concurrent idempotent
+launch, conflicts without extra registration or marker changes, busy controllers,
+resize, profile-free reattach, exit7/final output, exact `stty -g` restoration in
+an outer Bash, active-controller stop, SIGTERM/SIGKILL survival and Ctrl+C/Z/D.
+The real browser bridge TCP listener remains open while detached and closes on
+owner exit. No Playwright browser or external extension is needed for that check.
+
+Manual compiled CLI evidence: `run --detach` and its repeat returned the same
+handle; sessions showed owner `1555986` and shell `1556062`. Native attach reached
+that shell, split Ctrl+] then d exited the frontend with code0, and reattach
+reported shell `1556062`, delivered `CLI_FINAL` and propagated exit7.
+
+These are tool-PTY checks on temporary profiles. Real SSH/login/cgroup survival,
+two physical emulators, managed Codex/Claude TUIs, authenticated Telegram/MCP/Live
+continuity and real WSS reconnect remain acceptance work. The HTTP fixture rejects
+WebSocket upgrades. Shared controller authorization across local/remote/writable
+Live paths remains T043; current busy enforcement covers local native attachments.
+No npm publication, package version bump, global install or deployment is
+part of this stage.
 
 ## Acceptance scenarios
 

@@ -19,6 +19,31 @@ export async function probeOwner(record: OwnerRecord): Promise<void> {
   socket.end();
 }
 
+export function assertCompatibleOwner(
+  record: OwnerRecord,
+  spec: OwnerSpec,
+): void {
+  if (fs.realpathSync(record.envPath) !== fs.realpathSync(spec.envPath))
+    throw new Error(
+      "Running session uses another env profile; attach to it or stop it before changing configuration.",
+    );
+  if (spec.agentId && record.agentId !== spec.agentId)
+    throw new Error(
+      "Running session uses another provider (or a plain shell); attach to it or stop it before changing --agent.",
+    );
+  if (
+    spec.browserWsPort !== undefined &&
+    record.browserWsPort !== spec.browserWsPort
+  )
+    throw new Error(
+      "Running session uses another browser bridge launch setting; attach or stop it before changing --ws.",
+    );
+  if (spec.startupHash && record.startupHash !== spec.startupHash)
+    throw new Error(
+      "Running session has different startup configuration; use attach or stop it before restarting.",
+    );
+}
+
 export async function launchSessionOwner(input: {
   spec: OwnerSpec;
   registry?: LocalRegistry;
@@ -41,6 +66,7 @@ export async function launchSessionOwner(input: {
     processStartIdentity(existing.pid) === existing.processStart
   ) {
     if (existing.state === "ready") {
+      assertCompatibleOwner(existing, spec);
       await probeOwner(existing);
       return existing;
     }
@@ -89,6 +115,7 @@ export async function launchSessionOwner(input: {
       if (spawnError) throw spawnError;
       const record = registry.find(spec);
       if (record?.state === "ready") {
+        assertCompatibleOwner(record, spec);
         await probeOwner(record);
         return record;
       }

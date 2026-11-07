@@ -33,7 +33,13 @@ export function ownerSocketReachable(record: OwnerRecord): Promise<boolean> {
 export function connectOwner(
   record: OwnerRecord,
   timeoutMs = 1000,
-): Promise<{ socket: Socket; writer: LocalWriter; decoder: FrameDecoder }> {
+): Promise<{
+  socket: Socket;
+  writer: LocalWriter;
+  decoder: FrameDecoder;
+  attached: boolean | null;
+  ptyPid: number;
+}> {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(record.socketPath);
     const writer = new LocalWriter(socket);
@@ -74,7 +80,7 @@ export function connectOwner(
         ) as Record<string, unknown>;
         if (response.type !== "ready")
           throw new Error(String(response.code || "Owner not ready"));
-        const { type: _type, ptyPid: _pid, ...fields } = response;
+        const { type: _type, ptyPid, attached, ...fields } = response;
         const verified = ownerRecordSchema.parse(fields);
         if (
           verified.instance !== record.instance ||
@@ -90,7 +96,19 @@ export function connectOwner(
         // Retain a harmless socket error listener; consumers can add their own.
         socket.off("error", onError);
         socket.on("error", () => {});
-        resolve({ socket, writer, decoder });
+        if (
+          !Number.isSafeInteger(ptyPid) ||
+          (ptyPid as number) <= 0 ||
+          (attached !== undefined && typeof attached !== "boolean")
+        )
+          throw new Error("Invalid owner status");
+        resolve({
+          socket,
+          writer,
+          decoder,
+          attached: attached === undefined ? null : (attached as boolean),
+          ptyPid: ptyPid as number,
+        });
       } catch (error) {
         fail(
           error instanceof Error ? error : new Error("Invalid owner handshake"),

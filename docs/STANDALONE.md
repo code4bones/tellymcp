@@ -173,6 +173,19 @@ After `.mcpsession.json` is created in the workspace, later runs can usually use
 tellymcp run
 ```
 
+### Linux local sessions (unreleased)
+
+Use `tellymcp run --detach`, `tellymcp sessions [--json]`,
+`tellymcp attach [handle]` and `tellymcp stop [handle]`. Without a handle,
+attach opens a session picker (arrows/Enter, Esc or Ctrl+C to cancel), initially
+selecting the available current workspace session. Busy/unavailable sessions are
+disabled. Stop uses the current workspace marker. Ctrl+] then d returns to the outer
+shell; doubled Ctrl+] forwards the literal prefix. Interactive attach needs
+Linux `stty`. Old foreground sessions require a fresh launch from the outer shell.
+For local build testing, use `node /absolute/path/to/tellymcp/dist/cli.js` after
+`yarn build`; no release/global install is implied. See
+[the implementation contract](DETACHED_SESSIONS_DESIGN.md).
+
 ## 7. Webhook
 
 Gateway supports polling and webhook.

@@ -20,7 +20,7 @@ export class BrowserDomTool implements ToolModule {
       {
         title: "Browser DOM",
         description:
-          "Inspect a DOM element in the current session browser target and return text, HTML, attributes, and visibility. If the session has a selected attached Firefox tab, inspect that tab; otherwise use the isolated Playwright page.",
+          "Inspect DOM in the session's browser target. By default return the first matching element; all=true returns up to limit matches (max50) with a shared max_chars budget, total and truncated flags. Use a Picker group's exact attribute selector to read marked elements live. Optional instance_id/tab_id require that exact attached target and reject a changed binding. Inspect the selected attached tab when present; otherwise use the isolated Playwright page.",
         inputSchema: browserDomInputSchema,
         outputSchema: browserDomOutputSchema,
       },

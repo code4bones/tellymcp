@@ -7,6 +7,8 @@ import {
   type Rect,
   type SelectionContext,
 } from "./context";
+import { pickerIcon, type PickerAction } from "./icons";
+import { MarkingSession } from "./marks";
 
 type Message = Record<string, unknown>;
 type Runtime = {
@@ -55,16 +57,21 @@ class Picker {
   private frame = 0;
   private target?: Element;
   private children: Element[] = [];
+  private ancestorNavigation = false;
   private drag?: { x: number; y: number };
   private context?: SelectionContext;
   private image?: { png_base64: string; width: number; height: number };
-  private mode: "element" | "region" = "element";
+  private mode: "element" | "region" | "marks" = "element";
+  private marks?: MarkingSession;
+  private marksLayer?: HTMLElement;
   private picking = false;
   private pageKey = "";
   private generation = 0;
   private suppressUntil = 0;
   private requestId = "";
   private submitted = false;
+  private submitting = false;
+  private lastSubmission = "";
   private receiver = "Local preview — connect a session to send";
 
   public stop(notify = true): void {
@@ -74,6 +81,9 @@ class Picker {
     this.abort?.abort();
     if (this.expiry) clearTimeout(this.expiry);
     cancelAnimationFrame(this.frame);
+    this.marks?.clear();
+    this.marks = undefined;
+    this.marksLayer = undefined;
     this.host?.remove();
     this.host = undefined;
     this.target = undefined;
@@ -83,17 +93,21 @@ class Picker {
     this.drag = undefined;
     this.suppressUntil = 0;
     this.children = [];
+    this.ancestorNavigation = false;
   }
 
   public start(
-    mode: "element" | "region",
+    mode: "element" | "region" | "marks",
     receiver: string,
     requestId?: string,
   ): void {
     this.stop(false);
     this.mode = mode;
+    this.marks = mode === "marks" ? new MarkingSession() : undefined;
     this.requestId = requestId || crypto.randomUUID();
     this.submitted = false;
+    this.submitting = false;
+    this.lastSubmission = "";
     this.receiver = receiver;
     this.pageKey = this.currentPageKey();
     this.host = document.createElement("div");
@@ -103,6 +117,10 @@ class Picker {
     this.shadow = this.host.attachShadow({ mode: "closed" });
     const style = document.createElement("style");
     style.textContent = `:host{color-scheme:dark}*{box-sizing:border-box}button,input,textarea{font:inherit}button{cursor:pointer;padding:7px 10px;border:1px solid #64748b;border-radius:6px;background:#24334c;color:white}button:hover{background:#334966}textarea{width:100%;min-height:60px;background:#101827;color:#fff;border:1px solid #64748b;padding:8px}pre{white-space:pre-wrap;overflow:auto;max-height:150px;font-size:11px}img{max-width:100%;max-height:180px;object-fit:contain}p{margin:8px 0}.panel{position:fixed;right:16px;top:16px;width:340px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);overflow:auto;background:#142036;color:#eef3ff;border:1px solid #4c6a9b;border-radius:10px;box-shadow:0 10px 30px #0008;padding:14px;font:13px/1.45 system-ui;pointer-events:auto}.row{display:flex;gap:7px;flex-wrap:wrap;margin:8px 0}.outline{position:fixed;border:2px solid #62b6ff;background:#62b6ff18;pointer-events:none}.shield{position:fixed;inset:0;pointer-events:auto;cursor:crosshair}.muted{font-size:12px;color:#b7c7e4}`;
+    style.textContent += `.panel.compact{width:44px;height:44px;padding:0;border-radius:50%;overflow:hidden}.panel.compact button{width:100%;height:100%;padding:0;border:0;border-radius:50%;font-size:26px;line-height:1}.panel button:focus-visible{outline:2px solid #62b6ff;outline-offset:-3px}`;
+    style.textContent += `.panel .reselect{position:fixed;right:16px;top:16px;width:44px;height:44px;padding:0;border-radius:50%;font-size:26px;line-height:1}.preview-title{margin:0 44px 12px 0;min-height:30px}`;
+    style.textContent += `button{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;padding:8px;flex-shrink:0}button svg{display:block;width:18px;height:18px;pointer-events:none}.compact button svg,.reselect svg{width:22px;height:22px}`;
+    style.textContent += `.mark{position:fixed;border:2px solid #71d08d;background:#71d08d18;pointer-events:none}.mark span{position:absolute;top:0;left:0;background:#17482a;color:white;padding:1px 5px;font:12px system-ui}.badge{position:absolute;right:0;bottom:0;min-width:16px;border-radius:8px;background:#17482a;color:white;font:11px/16px system-ui}.mark-list{padding-left:24px;max-height:180px;overflow:auto}.mark-list li{margin:4px 0}.mark-list button{width:28px;height:28px;margin-left:8px}`;
     this.shadow.append(style);
     this.shield = document.createElement("div");
     this.shield.className = "shield";
@@ -111,7 +129,8 @@ class Picker {
     this.panel = document.createElement("section");
     this.panel.className = "panel";
     this.panel.setAttribute("aria-label", "TellyMCP AI Picker");
-    this.shadow.append(this.shield, this.outline, this.panel);
+    this.marksLayer = document.createElement("div");
+    this.shadow.append(this.shield, this.marksLayer, this.outline, this.panel);
     document.documentElement.append(this.host);
     this.abort = new AbortController();
     const opts = { capture: true, signal: this.abort.signal };
@@ -138,6 +157,7 @@ class Picker {
   }
 
   private currentPageKey(): string {
+    if (this.mode === "marks") return location.href;
     return `${location.href}|${scrollX}|${scrollY}|${innerWidth}|${innerHeight}|${devicePixelRatio}`;
   }
   private own(event: Event): boolean {
@@ -163,11 +183,15 @@ class Picker {
     return node;
   }
   private button(
-    label: string,
+    label: PickerAction,
     action: () => void | Promise<void>,
+    parent?: HTMLElement,
   ): HTMLButtonElement {
     const button = document.createElement("button");
-    button.textContent = label;
+    button.type = "button";
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.append(pickerIcon(label));
     button.addEventListener("click", () => {
       void Promise.resolve()
         .then(action)
@@ -177,17 +201,44 @@ class Picker {
               "Could not complete request. Check the connection and retry.";
         });
     });
-    this.panel!.append(button);
+    (parent ?? this.panel!).append(button);
     return button;
   }
-  private renderPicker(requestId?: string): void {
+  private toolbar(): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.setAttribute("role", "group");
+    row.setAttribute("aria-label", "Picker actions");
+    this.panel!.append(row);
+    return row;
+  }
+  private renderPicker(requestId?: string, expanded = false): void {
     this.panel!.replaceChildren();
+    this.panel!.classList.toggle("compact", !expanded);
+    this.status = undefined;
+    if (!expanded) {
+      const toggle = this.button("Show picker controls", () =>
+        this.renderPicker(requestId, true),
+      );
+      toggle.title = `${this.mode === "region" ? "Drag to select a region" : "Point and click to select an element"} · Esc close · Click for controls`;
+      if (this.marks) {
+        const badge = document.createElement("span");
+        badge.className = "badge";
+        badge.textContent = String(this.marks.items.length);
+        badge.setAttribute("aria-hidden", "true");
+        toggle.append(badge);
+        toggle.title = `${this.marks.items.length} marked · Click elements to toggle · Enter review · Esc close`;
+      }
+      return;
+    }
     this.text(
-      `TellyMCP · ${this.mode === "region" ? "Region" : "Element"} Picker`,
+      `TellyMCP · ${this.mode === "marks" ? "Marks" : this.mode === "region" ? "Region" : "Element"} Picker`,
     );
     this.text(`Receiver: ${this.receiver}`, "muted");
     this.text(
-      "Click to select · Alt+↑ parent · Alt+↓ child · Enter confirm · Esc close",
+      this.marks
+        ? "Click to toggle · Click inside a mark to remove it · Enter review · Esc close"
+        : "Click to select · Alt+↑ parent · Alt+↓ child · Enter confirm · Esc close",
       "muted",
     );
     if (requestId)
@@ -196,11 +247,28 @@ class Picker {
         "muted",
       );
     this.status = this.text(
-      this.mode === "region"
-        ? "Drag a rectangle over the visible page."
-        : "Point at an element.",
+      this.marks
+        ? `${this.marks.items.length} elements marked.`
+        : this.mode === "region"
+          ? "Drag a rectangle over the visible page."
+          : "Point at an element.",
     );
-    this.button("Cancel", () => this.stop());
+    const controls = this.toolbar();
+    if (this.marks) {
+      this.markList();
+      this.button("Review marked elements", () => this.reviewMarks(), controls);
+      this.button(
+        "Clear marks",
+        () => {
+          this.marks!.clear();
+          this.drawMarks();
+          this.renderPicker(requestId, true);
+        },
+        controls,
+      );
+    }
+    this.button("Collapse", () => this.renderPicker(requestId), controls);
+    this.button("Cancel", () => this.stop(), controls);
   }
   private hit(x: number, y: number): Element | undefined {
     this.host!.style.visibility = "hidden";
@@ -233,13 +301,91 @@ class Picker {
           .join(" ‹ ");
     }
   }
+  private drawMarks(): void {
+    this.marksLayer?.replaceChildren();
+    for (const mark of this.marks?.items ?? []) {
+      if (!mark.element.isConnected) continue;
+      const rect = mark.element.getBoundingClientRect();
+      const box = document.createElement("div");
+      box.className = "mark";
+      box.style.cssText = `left:${rect.x}px;top:${rect.y}px;width:${rect.width}px;height:${rect.height}px`;
+      const label = document.createElement("span");
+      label.textContent = String(mark.id);
+      box.append(label);
+      this.marksLayer!.append(box);
+    }
+  }
+  private markList(): void {
+    const list = document.createElement("ol");
+    list.className = "mark-list";
+    for (const mark of this.marks!.items) {
+      const row = document.createElement("li");
+      const label = document.createElement("span");
+      label.textContent = `${mark.id} · ${mark.element.tagName.toLowerCase()}`;
+      row.append(label);
+      const remove = this.button(
+        "Remove mark",
+        () => {
+          this.marks!.remove(mark.element);
+          this.drawMarks();
+          this.renderPicker(undefined, true);
+        },
+        row,
+      );
+      remove.setAttribute("aria-label", `Remove marked element ${mark.id}`);
+      list.append(row);
+    }
+    this.panel!.append(list);
+  }
+  private toggleMark(): void {
+    if (!this.target || !this.marks) return;
+    try {
+      this.marks.toggle(this.target);
+    } catch (error) {
+      this.renderPicker(undefined, true);
+      this.status!.textContent =
+        error instanceof Error ? error.message : "Could not mark element.";
+      return;
+    }
+    this.drawMarks();
+    this.renderPicker();
+  }
+  private reviewMarks(): void {
+    if (!this.marks?.valid) {
+      this.renderPicker(undefined, true);
+      this.status!.textContent =
+        "Mark at least one element. Remove or reselect marks that changed.";
+      return;
+    }
+    this.choose({ x: 0, y: 0, width: innerWidth, height: innerHeight });
+  }
+  private resumeMarks(): void {
+    if (this.context)
+      void send({
+        type: "picker_forget",
+        selection_id: this.context.selectionId,
+      }).catch(() => {});
+    this.generation++;
+    this.submitting = false;
+    this.context = undefined;
+    this.requestId = crypto.randomUUID();
+    this.submitted = false;
+    this.lastSubmission = "";
+    this.picking = true;
+    this.shield!.style.display = "block";
+    this.outline!.style.display = "none";
+    this.renderPicker();
+  }
   private move = (event: PointerEvent): void => {
     if (!this.picking || this.own(event)) return;
+    this.ancestorNavigation = false;
     cancelAnimationFrame(this.frame);
     this.frame = requestAnimationFrame(() => {
       if (!this.picking) return;
-      if (this.mode === "element") {
+      if (this.mode !== "region") {
         this.target = this.hit(event.clientX, event.clientY);
+        if (this.target && this.marks)
+          this.target = this.marks.containing(this.target) ?? this.target;
         this.children = [];
         this.drawTarget();
       } else if (this.drag) this.draw(this.dragRect(event));
@@ -255,6 +401,23 @@ class Picker {
     };
   }
   private pointer = (event: MouseEvent): void => {
+    if (this.marks && !this.picking && !this.own(event)) {
+      this.suppress(event);
+      if (
+        event.type === "click" &&
+        event.button === 0 &&
+        performance.now() >= this.suppressUntil
+      ) {
+        const element = this.hit(event.clientX, event.clientY);
+        const marked = element && this.marks.containing(element);
+        if (marked) {
+          this.resumeMarks();
+          this.target = marked;
+          this.toggleMark();
+        }
+      }
+      return;
+    }
     if (!this.own(event) && performance.now() < this.suppressUntil) {
       this.suppress(event);
       return;
@@ -271,8 +434,10 @@ class Picker {
         if (rect.width >= 3 && rect.height >= 3) this.choose(rect);
       }
     } else if (event.type === "click") {
-      this.target ??= this.hit(event.clientX, event.clientY);
-      if (this.target) this.choose(this.target.getBoundingClientRect());
+      if (!this.ancestorNavigation)
+        this.target = this.hit(event.clientX, event.clientY);
+      if (this.marks) this.toggleMark();
+      else if (this.target) this.choose(this.target.getBoundingClientRect());
     }
   };
   private key = (event: KeyboardEvent): void => {
@@ -281,23 +446,31 @@ class Picker {
       this.stop();
       return;
     }
-    if (!this.picking || this.own(event)) return;
+    if (!this.picking || this.own(event)) {
+      if (this.marks && !this.own(event)) this.suppress(event);
+      return;
+    }
     // Do not let typing activate a page action while selection owns interaction.
     this.suppress(event);
     if (event.type !== "keydown") return;
     if (event.altKey && event.key === "ArrowUp" && this.target?.parentElement) {
       this.children.push(this.target);
       this.target = this.target.parentElement;
+      this.ancestorNavigation = true;
       this.drawTarget();
     }
     if (event.altKey && event.key === "ArrowDown" && this.children.length) {
       this.target = this.children.pop();
+      this.ancestorNavigation = true;
       this.drawTarget();
     }
-    if (event.key === "Enter" && this.target)
-      this.choose(this.target.getBoundingClientRect());
+    if (event.key === "Enter") {
+      if (this.marks) this.reviewMarks();
+      else if (this.target) this.choose(this.target.getBoundingClientRect());
+    }
   };
   private changed = (): void => {
+    this.drawMarks();
     if (this.picking) {
       cancelAnimationFrame(this.frame);
       this.frame = requestAnimationFrame(() => this.drawTarget());
@@ -318,17 +491,29 @@ class Picker {
       this.mode === "element" ? this.target : undefined,
     );
     this.context.requestId = this.requestId;
+    if (this.marks) {
+      this.context.selection.marks = {
+        groupId: this.marks.id,
+        selector: this.marks.selector,
+        itemIds: this.marks.items.map((mark) => mark.id),
+      };
+      this.context.redaction.warnings = [
+        "Selector-only request: no selected DOM, text or screenshot is included. Read marked elements live via browser_dom.",
+      ];
+    }
     this.suppressUntil = performance.now() + 500;
     this.pageKey = this.currentPageKey();
     this.picking = false;
-    this.shield!.style.display = "none";
-    this.draw(rect);
+    this.shield!.style.display = this.marks ? "block" : "none";
+    if (this.marks) this.outline!.style.display = "none";
+    else this.draw(rect);
     this.renderPreview();
   }
   private valid(): boolean {
     return Boolean(
       this.context &&
       this.currentPageKey() === this.pageKey &&
+      (this.mode !== "marks" || this.marks?.valid) &&
       (this.mode !== "element" ||
         (this.target?.isConnected &&
           JSON.stringify(extractElement(this.target)) ===
@@ -336,50 +521,67 @@ class Picker {
     );
   }
   private renderPreview(): void {
+    this.panel!.classList.remove("compact");
     this.panel!.replaceChildren();
-    this.text("Review selection before sending");
+    this.text("Review selection before sending", "preview-title");
+    const reselect = this.button("Select again", () =>
+      this.marks ? this.resumeMarks() : this.start(this.mode, this.receiver),
+    );
+    reselect.className = "reselect";
     this.text(`Receiver: ${this.receiver}`, "muted");
     const preview = document.createElement("pre");
     preview.textContent = JSON.stringify(this.context, null, 2);
     this.panel!.append(preview);
-    this.text(
-      "Page text is untrusted. Check for private information. Form values and common secrets are excluded. Images are optional.",
-      "muted",
-    );
     const question = document.createElement("textarea");
     question.placeholder = "Ask about this selection…";
     question.maxLength = 2000;
     this.panel!.append(question);
-    this.status = this.text(
-      "Kept locally until you send. The bound agent must read inspector_get_selection.",
-    );
-    this.button("Capture preview", () => this.capture());
-    this.button("Text only", () => {
-      this.image = undefined;
-      this.context!.screenshot = undefined;
-      this.panel!.querySelector("img")?.remove();
-      this.status!.textContent = "Image removed.";
-    });
-    this.button("Explain", () =>
-      this.submit(
-        question.value || "Explain this selection using only observed content.",
-      ),
-    );
-    this.button("Ask", () => this.submit(question.value));
-    this.button("Copy context", async () => {
-      await navigator.clipboard.writeText(
-        JSON.stringify(this.context, null, 2),
+    this.status = this.text("Ready to send to the bound agent.");
+    const actions = this.toolbar();
+    if (!this.marks)
+      this.button("Capture preview", () => this.capture(), actions);
+    if (!this.marks)
+      this.button(
+        "Text only",
+        () => {
+          this.image = undefined;
+          this.context!.screenshot = undefined;
+          this.panel!.querySelector("img")?.remove();
+          this.status!.textContent = "Image removed.";
+        },
+        actions,
       );
-      this.status!.textContent = "Context copied.";
-    });
-    this.button("Select again", () => this.start(this.mode, this.receiver));
-    this.button("Forget / close", async () => {
-      await send({
-        type: "picker_forget",
-        selection_id: this.context!.selectionId,
-      });
-      this.stop();
-    });
+    this.button(
+      "Explain",
+      () =>
+        this.submit(
+          question.value ||
+            "Explain this selection using only observed content.",
+        ),
+      actions,
+    );
+    this.button("Ask", () => this.submit(question.value), actions);
+    this.button(
+      "Copy context",
+      async () => {
+        await navigator.clipboard.writeText(
+          JSON.stringify(this.context, null, 2),
+        );
+        this.status!.textContent = "Context copied.";
+      },
+      actions,
+    );
+    this.button(
+      "Forget / close",
+      async () => {
+        await send({
+          type: "picker_forget",
+          selection_id: this.context!.selectionId,
+        });
+        this.stop();
+      },
+      actions,
+    );
   }
   private async capture(): Promise<void> {
     if (!this.valid()) throw new Error("Stale selection");
@@ -468,6 +670,7 @@ class Picker {
     }
   }
   private async submit(question: string): Promise<void> {
+    if (this.submitting) return;
     if (!this.valid()) {
       this.status!.textContent = "Selection is stale. Select again.";
       return;
@@ -482,25 +685,48 @@ class Picker {
       this.status!.textContent = "Element changed since preview. Select again.";
       return;
     }
-    if (this.submitted) this.context!.requestId = crypto.randomUUID();
-    this.context!.question = cleanText(question, 2000);
-    const result = await send({
-      type: "picker_submit",
-      context: this.context,
-      image: this.image,
-    });
-    if (generation !== this.generation) return;
-    this.submitted = result.ok === true;
-    this.status!.textContent = result.ok
-      ? "Queued for the bound agent. It must read inspector_get_selection; keep this tab open for its response."
-      : String(
-          result.error || "Not sent. Connect this tab to a session and retry.",
-        );
+    const cleanedQuestion = cleanText(question, 2000);
+    const submission = JSON.stringify([
+      cleanedQuestion,
+      this.image?.png_base64,
+    ]);
+    if (
+      this.submitted ||
+      (this.lastSubmission && this.lastSubmission !== submission)
+    )
+      this.context!.requestId = crypto.randomUUID();
+    this.lastSubmission = submission;
+    this.context!.question = cleanedQuestion;
+    this.submitting = true;
+    this.status!.textContent = "Sending to the bound agent…";
+    try {
+      const result = await send({
+        type: "picker_submit",
+        context: this.context,
+        image: this.image,
+      });
+      if (generation !== this.generation) return;
+      this.submitted = result.ok === true;
+      this.status!.textContent = result.ok
+        ? result.notified === true
+          ? "Saved and sent to the bound agent. Keep this tab open for its response."
+          : "Queued for the bound agent. Keep this tab open for its response."
+        : String(
+            result.error ||
+              "Not sent. Connect this tab to a session and retry.",
+          );
+    } finally {
+      if (generation === this.generation) this.submitting = false;
+    }
   }
   public command(message: Message): Message {
     if (message.action === "start") {
       this.start(
-        message.mode === "region" ? "region" : "element",
+        message.mode === "marks"
+          ? "marks"
+          : message.mode === "region"
+            ? "region"
+            : "element",
         String(message.receiver || "Local preview"),
         String(message.request_id || ""),
       );
@@ -518,7 +744,8 @@ class Picker {
     )
       return { ok: false, error: "Selection is stale or missing" };
     if (message.action === "highlight") {
-      this.draw(this.context.selection.rect);
+      if (this.marks) this.drawMarks();
+      else this.draw(this.context.selection.rect);
       return { ok: true };
     }
     if (message.action === "response") {

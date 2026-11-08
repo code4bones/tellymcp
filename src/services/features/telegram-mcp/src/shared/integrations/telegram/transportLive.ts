@@ -65,15 +65,12 @@ export function buildLiveViewLaunchKeyboard(input: {
     { mode: "default", label: input.labels.default },
   ];
 
-  for (const [index, { mode, label }] of modes.entries()) {
+  for (const { mode, label } of modes) {
     const url = input.getUrl(mode);
     if (!url) {
       continue;
     }
     keyboard.webApp(label, url);
-    if (index === 1) {
-      keyboard.row();
-    }
   }
 
   return keyboard;

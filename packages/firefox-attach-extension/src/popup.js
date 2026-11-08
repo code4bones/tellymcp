@@ -66,6 +66,7 @@ void render();
 for (const [id, mode] of [
   ["pick-element", "element"],
   ["pick-region", "region"],
+  ["pick-marks", "marks"],
 ]) {
   document.getElementById(id).addEventListener("click", async () => {
     try {

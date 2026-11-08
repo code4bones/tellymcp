@@ -4,6 +4,23 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.46
+
+- Picker Ask/Explain saves the question, selection and optional image as a local
+  artifact, then notifies the bound agent through existing terminal input. The
+  agent answers in its conversation and returns the same answer to the browser.
+- New Mark elements mode in Chrome0.0.11 / Firefox0.0.10: click toggles whole
+  containers under a shared UUID. Only selectors and question are sent; the agent
+  reads marked DOM live with bounded all-match `browser_dom` requests.
+- Picker collapses to a small circle while selecting and uses icon controls in
+  its panel and popup. Select again sits at the same upper-right position.
+- Telegram Live menu is now Fullscreen | Expand | Default, then Link | Attach,
+  then Back. Link sends a private copyable address instead of opening a browser.
+
+Update the gateway and source console for automatic delivery and Marks, restart
+the source owner, then reload the extensions. Existing owners keep running their
+previous code until restarted. Registry/browser-store publication is separate.
+
 ## 0.0.45
 
 ### Added

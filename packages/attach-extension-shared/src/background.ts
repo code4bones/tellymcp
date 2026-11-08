@@ -18,6 +18,7 @@ type Adapter = {
   message(id: number, message: Message): Promise<Message>;
   capture(windowId: number): Promise<string>;
   selected(): number | null;
+  submit?(tabId: number, context: SelectionContext): Promise<Message>;
 };
 type Entry = {
   context: SelectionContext;
@@ -82,7 +83,8 @@ export class InspectorBridge {
     const result = await this.adapter.message(tabId, {
       type: "picker_control",
       action: "start",
-      mode: mode === "region" ? "region" : "element",
+      mode:
+        mode === "marks" ? "marks" : mode === "region" ? "region" : "element",
       receiver: this.sessionId
         ? `${this.label || this.sessionId} (${this.sessionId})`
         : "Local preview — no connected session",
@@ -231,7 +233,7 @@ export class InspectorBridge {
       context.schemaVersion !== 1 ||
       !context.selectionId ||
       !context.requestId ||
-      !["element", "region"].includes(context.selection?.mode) ||
+      !["element", "region", "marks"].includes(context.selection?.mode) ||
       context.page?.url !== cleanUrl(tab.url || "")
     )
       throw new Error("Stale or invalid selection");
@@ -281,6 +283,17 @@ export class InspectorBridge {
     });
     this.entries.set(tabId, entries.slice(-5));
     setTimeout(() => this.prune(tabId), TTL_MS);
+    if (this.adapter.submit) {
+      try {
+        return await this.adapter.submit(tabId, context);
+      } catch {
+        return {
+          ok: false,
+          error:
+            "Console delivery was not confirmed. Check the console and retry.",
+        };
+      }
+    }
     return {
       ok: true,
       status: "queued",
@@ -356,8 +369,110 @@ export class InspectorBridge {
   }
 }
 
+export class PickerDeliveryClient {
+  private supported = false;
+  private marksSupported = false;
+  private readonly pending = new Map<
+    string,
+    {
+      promise: Promise<Message>;
+      resolve: (message: Message) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
+
+  public constructor(private readonly send: (message: Message) => boolean) {}
+  public bind(supported: boolean, marksSupported = false): void {
+    this.supported = supported;
+    this.marksSupported = marksSupported;
+  }
+  public disconnect(): void {
+    this.supported = false;
+    this.marksSupported = false;
+    for (const [requestId, pending] of this.pending) {
+      clearTimeout(pending.timer);
+      pending.resolve({
+        ok: false,
+        request_id: requestId,
+        error:
+          "Console disconnected before delivery confirmation. Check the console before retrying.",
+      });
+    }
+    this.pending.clear();
+  }
+  public receive(message: Message): void {
+    const pending = this.pending.get(String(message.request_id));
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pending.delete(String(message.request_id));
+    pending.resolve(message);
+  }
+  public submit(tabId: number, context: SelectionContext): Promise<Message> {
+    if (
+      !this.supported ||
+      (context.selection.mode === "marks" && !this.marksSupported)
+    )
+      return Promise.resolve({
+        ok: false,
+        error:
+          "Automatic delivery needs an updated console. Update TellyMCP and restart the source owner, then retry.",
+      });
+    const requestId = context.requestId;
+    const existing = this.pending.get(requestId);
+    if (existing) return existing.promise;
+    if (this.pending.size >= 8)
+      return Promise.resolve({
+        ok: false,
+        error: "Too many pending Picker requests.",
+      });
+    let resolve!: (message: Message) => void;
+    const promise = new Promise<Message>((done) => {
+      resolve = done;
+    });
+    const timer = setTimeout(
+      () =>
+        this.receive({
+          request_id: requestId,
+          ok: false,
+          error:
+            "Console delivery confirmation timed out. Check the console before retrying.",
+        }),
+      35_000,
+    );
+    this.pending.set(requestId, { promise, resolve, timer });
+    try {
+      if (
+        !this.send({
+          type: "picker_submit",
+          request_id: requestId,
+          selection_id: context.selectionId,
+          tab_id: tabId,
+        })
+      )
+        this.receive({
+          request_id: requestId,
+          ok: false,
+          error: "Console is disconnected.",
+        });
+    } catch {
+      this.receive({
+        request_id: requestId,
+        ok: false,
+        error: "Could not send to the console.",
+      });
+    }
+    return promise;
+  }
+}
+
 (
   globalThis as unknown as {
-    tellyInspector: { createBridge(adapter: Adapter): InspectorBridge };
+    tellyInspector: {
+      createBridge(adapter: Adapter): InspectorBridge;
+      createDelivery(send: (message: Message) => boolean): PickerDeliveryClient;
+    };
   }
-).tellyInspector = { createBridge: (adapter) => new InspectorBridge(adapter) };
+).tellyInspector = {
+  createBridge: (adapter) => new InspectorBridge(adapter),
+  createDelivery: (send) => new PickerDeliveryClient(send),
+};

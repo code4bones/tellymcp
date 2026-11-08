@@ -418,7 +418,15 @@ export const enMenu = {
       expand: "Expand",
       default: "Default",
       open_in_browser: "🌐 Open in browser",
-      attach: "🔗 Attach",
+      link: "Link",
+      attach: "Attach",
+      back: "Back",
+    },
+    link: {
+      instructions: "Copy this link and open it in your preferred browser. It grants access to this session's Live view for a limited time:",
+      sent: "Link sent to your private chat.",
+      denied: "Open Live for your session and press Link again.",
+      failed: "Could not send the link. Open a private chat with the bot and try again.",
     },
     attach: {
       instructions: "This one-use code connects your terminal to this session and expires in 5 minutes. Run the command on another machine. If its gateway is not configured, use the command with --gateway:",

@@ -137,6 +137,12 @@ export const firefoxAttachInboundMessageSchema = z.discriminatedUnion("type", [
     error: boundedString.optional(),
   }),
   z.strictObject({
+    type: z.literal("picker_submit"),
+    request_id: requestId,
+    selection_id: identifier,
+    tab_id: tabId,
+  }),
+  z.strictObject({
     type: z.literal("recording_control_result"),
     request_id: requestId,
     ok: z.boolean(),
@@ -347,4 +353,14 @@ export type FirefoxAttachOutboundMessage =
   | FirefoxAttachRecordingStartRequest
   | FirefoxAttachRecordingStopRequest
   | FirefoxAttachManualRecordingResult
-  | FirefoxAttachRecordingStateEvent;
+  | FirefoxAttachRecordingStateEvent
+  | {
+      type: "picker_submit_result";
+      request_id: string;
+      ok: boolean;
+      saved?: boolean;
+      notified?: boolean;
+      artifact_id?: string;
+      artifact_path?: string;
+      error?: string;
+    };

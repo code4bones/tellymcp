@@ -105,15 +105,13 @@ export class TransportLiveActions {
     const url = new URL(`${baseUrl}/live/${encodeURIComponent(resolvedLiveSessionId)}`);
     url.searchParams.set("launchMode", this.host.config.webapp.launchMode);
 
-    const directBrowserToken = this.host.webAppSessions.create(
-      resolvedLiveSessionId,
-      input.principal.telegramUserId,
-      this.host.config.webapp.sessionTtlSeconds,
-    ).token;
-    const directBrowserUrl = new URL(
-      `${baseUrl}/live/${encodeURIComponent(resolvedLiveSessionId)}`,
-    );
-    directBrowserUrl.searchParams.set("token", directBrowserToken);
+    const linkKey = createMenuPayloadKey();
+    const now = Date.now();
+    await this.host.menuPayloadStore.createMenuPayload({
+      key: linkKey, kind: "live-link", sessionId: input.sessionId,
+      targetSessionId: resolvedLiveSessionId, telegramUserId: input.principal.telegramUserId,
+      createdAt: new Date(now).toISOString(), expiresAt: new Date(now + 86400000).toISOString(),
+    }, 86400);
 
     const keyboard = this.buildKeyboard((mode) => {
       const modeUrl = new URL(url.toString());
@@ -122,9 +120,9 @@ export class TransportLiveActions {
     }, input.locale);
     keyboard
       .row()
-      .url(
-        this.host.t(input.locale, "menu:live.buttons.open_in_browser"),
-        directBrowserUrl.toString(),
+      .text(
+        this.host.t(input.locale, "menu:live.buttons.link"),
+        "live-link:" + linkKey,
       );
     if (this.host.config.distributed.mode !== "client" && this.host.issueTerminalAttachCode) {
       const key = createMenuPayloadKey();
@@ -136,6 +134,7 @@ export class TransportLiveActions {
       }, 86400);
       keyboard.text(this.host.t(input.locale, "menu:live.buttons.attach"), "terminal-attach:" + key);
     }
+    keyboard.row().text(this.host.t(input.locale, "menu:live.buttons.back"), "live-back");
 
     const sent = await this.host.sendChatMessage(
       input.principal.telegramChatId,
@@ -166,6 +165,40 @@ export class TransportLiveActions {
     );
 
     return sent;
+  }
+
+  public async handleLinkCallback(ctx: TelegramMenuContext): Promise<void> {
+    const locale = await this.host.resolveLocaleForContext(ctx);
+    const key = ctx.callbackQuery?.data?.slice("live-link:".length);
+    const payload = key ? await this.host.menuPayloadStore.getMenuPayload(key) : null;
+    const launch = ctx.from ? this.host.webAppLaunchRegistry.getByUserId(ctx.from.id) : null;
+    if (!payload || payload.kind !== "live-link" || !payload.sessionId || !payload.targetSessionId ||
+        payload.telegramUserId !== ctx.from?.id || Date.parse(payload.expiresAt) <= Date.now() ||
+        !launch || launch.sessionId !== payload.sessionId) {
+      await ctx.answerCallbackQuery({ text: this.host.t(locale, "menu:live.link.denied"), show_alert: true });
+      return;
+    }
+    const useGatewayRelay = this.host.config.distributed.mode === "client" && this.host.config.distributed.gatewayPublicUrl;
+    const baseUrl = useGatewayRelay
+      ? resolveGatewayWebAppBaseUrl(this.host.config.distributed.gatewayPublicUrl!, this.host.config.webapp.basePath)
+      : resolveWebAppPublicBaseUrl(this.host.config);
+    if (!baseUrl) {
+      await ctx.answerCallbackQuery({ text: this.host.t(locale, "menu:live.errors.public_url_missing"), show_alert: true });
+      return;
+    }
+    const url = new URL(`${baseUrl}/live/${encodeURIComponent(payload.targetSessionId)}`);
+    url.username = ""; url.password = ""; url.search = ""; url.hash = "";
+    const token = this.host.webAppSessions.create(payload.targetSessionId, ctx.from!.id, this.host.config.webapp.sessionTtlSeconds).token;
+    url.searchParams.set("token", token);
+    try {
+      await this.host.sendChatMessage(ctx.from!.id,
+        escapeHtml(this.host.t(locale, "menu:live.link.instructions")) + "\n\n<code>" + escapeHtml(url.toString()) + "</code>",
+        { parse_mode: "HTML", link_preview_options: { is_disabled: true } },
+        { kind: "notification", sessionId: payload.sessionId });
+      await ctx.answerCallbackQuery({ text: this.host.t(locale, "menu:live.link.sent") });
+    } catch {
+      await ctx.answerCallbackQuery({ text: this.host.t(locale, "menu:live.link.failed"), show_alert: true });
+    }
   }
 
   public async handleAttachCallback(ctx: TelegramMenuContext): Promise<void> {

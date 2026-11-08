@@ -996,6 +996,8 @@ export function buildTransportConstructorWiring(
 
   const menuShell = new TransportMenuShell({
     handleTerminalAttachCallback: ctx => liveActions.handleAttachCallback(ctx),
+    handleLiveLinkCallback: ctx => liveActions.handleLinkCallback(ctx),
+    showMainMenu: ctx => menuState.showMainMenu(ctx),
     logger: host.logger,
     tForContext: (ctx, key) => context.tForContext(ctx, key),
     showProjectsMenu: (ctx) => menuFlow.showProjectsMenu(ctx),

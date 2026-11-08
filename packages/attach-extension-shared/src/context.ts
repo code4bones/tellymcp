@@ -12,8 +12,9 @@ export type SelectionContext = {
     viewport: { width: number; height: number; deviceScaleFactor: number };
   };
   selection: {
-    mode: "element" | "region";
+    mode: "element" | "region" | "marks";
     rect: Rect;
+    marks?: { groupId: string; selector: string; itemIds: number[] };
     element?: {
       tagName: string;
       role?: string;
@@ -297,7 +298,7 @@ export function extractElement(
 }
 
 export function selectionContext(
-  mode: "element" | "region",
+  mode: "element" | "region" | "marks",
   rect: Rect,
   element?: Element,
 ): SelectionContext {

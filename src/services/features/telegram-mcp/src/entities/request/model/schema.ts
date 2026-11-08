@@ -633,6 +633,11 @@ export const browserDomInputSchema = z.object({
   selector: z.string().trim().min(1).optional(),
   include_html: z.boolean().optional(),
   include_text: z.boolean().optional(),
+  all: z.boolean().optional(),
+  limit: z.number().int().min(1).max(50).optional(),
+  max_chars: z.number().int().min(256).max(65536).optional(),
+  instance_id: z.string().min(1).max(256).optional(),
+  tab_id: z.number().int().nonnegative().optional(),
 });
 
 export const browserDomOutputSchema = z.object({
@@ -645,6 +650,13 @@ export const browserDomOutputSchema = z.object({
   text_content: z.string().optional(),
   visible: z.boolean().optional(),
   attributes: z.record(z.string(), z.string()).optional(),
+  total: z.number().int().nonnegative().optional(),
+  truncated: z.boolean().optional(),
+  elements: z.array(z.object({
+    index: z.number().int().nonnegative(),
+    text_content: z.string().optional(), outer_html: z.string().optional(),
+    attributes: z.record(z.string(), z.string()), visible: z.boolean(),
+  })).max(50).optional(),
 });
 
 export const browserComputedStyleInputSchema = z.object({

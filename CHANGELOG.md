@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## 0.0.46 — 2026-11-08
+
+- Arrange Telegram Live as Fullscreen | Expand | Default, Link | Attach, Back.
+  Link sends a private copyable URL on demand instead of opening the browser;
+  the standalone Back callback returns to the selected session menu.
+
+- Add Marks Picker mode: toggle whole DOM containers with a shared UUID, a
+  numbered list and cleanup/restoration of marker attributes. Ask sends only
+  group selectors/item IDs and question; the agent reads live DOM on demand.
+  Extend `browser_dom` with bounded all-match reads and optional original-tab
+  binding checks. Complete Marks workflows require the updated gateway schema.
+
+- Deliver browser Picker Ask/Explain to the bound console: save question, context,
+  optional PNG and exact reply IDs under `.mcp-xchange/{date}/picker/{id}`, create
+  a structured local handoff and submit an artifact notification through existing
+  terminal input. Confirm save/notification in the extension and deduplicate
+  retries; retain saved artifacts if the live selection expires.
+- Collapse the Picker panel into a small circle during selection, place Select
+  again at the same upper-right position, and use accessible Ant Design SVG icon
+  buttons in the panel and extension popup.
+
 ## 0.0.45 — 2026-11-08
 
 - Allow simultaneous writable native local/remote attachments with independent

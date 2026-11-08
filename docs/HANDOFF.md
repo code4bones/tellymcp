@@ -1,6 +1,117 @@
 # HANDOFF
 
-## Next session: Picker acceptance deferred by the user
+## Authorized0.0.46 release in progress (2026-11-08)
+
+User explicitly authorized the update after requesting the Live menu follow-up.
+**T-TELLYMCP-051**: first row Fullscreen | Expand | Default, second Link | Attach,
+third Back. Link is a callback, not a URL button: it creates a browser session
+token only on demand, sends a private HTML code-block address with previews
+disabled, validates original user/button/active launch grant, and never logs the
+address. Back routes to the selected console's main menu; approval chooser also
+gets Back. Existing owners and profiles must remain intact during installation.
+
+Release versions: runtime **0.0.46**, Chrome **0.0.11**, Firefox **0.0.10**.
+Includes T049 artifact/terminal notification and T050 toggle Marks/new MCP DOM
+schema, plus this session's accepted icon/compact UI. Local menu regression7
+tests pass; gateway0.0.45 baseline is healthy, polling on, env0600/admin principal
+and PostgreSQL/Redis/RabbitMQ IDs/volumes recorded in private fingerprint-only
+`artifacts/release046/preflight.json`. Local marker/profile fingerprints recorded.
+No local or gateway consoles were online during preflight; none were stopped.
+Build/lint and full suite477 passed,2 skipped. Local0.0.46 package is built under
+`artifacts/release046/`; tagged GitLab rollout is the next step.
+Create `v0.0.46` for the existing GitLab CI deployment flow, preserve production configuration
+and data, then verify live MCP schemas and health. Do not publish to npm/stores.
+
+## Current continuation: toggle DOM marking groups (2026-11-08)
+
+**T-TELLYMCP-050** adds popup **Mark elements** mode on top of T049 delivery.
+User clarified: clicking anywhere inside an already marked container removes the
+entire container mark; never select a nested child or activate the site button.
+The mode supports up to50 non-nested elements with a shared UUID in
+`data-ai-picker` and individual `data-ai-picker-item` IDs. Selecting a parent
+coalesces selected descendants. The compact circle shows count; its expanded
+list supports removal/clear, Enter/review opens question preview, Select again
+edits the group. Marked areas remain protected from site clicks during preview.
+Esc/close/TTL/navigation/disconnect remove marks and restore pre-existing values.
+
+Marks requests/artifacts contain only selector/group/item metadata and question,
+never selected text/HTML/image. `selection.json.read.arguments` tells the agent to
+call `browser_dom(all=true)` with pinned original session/instance/tab; a changed
+tab binding is rejected. DOM data is read live at analysis time, bounded by50
+matches/shared max_chars budget with total/truncated flags. Agent must check
+item IDs and report missing/changed marks. Top-frame light DOM only; no automatic
+marker recreation after rerender; Canvas content still requires Region/image.
+
+**Unlike T049 alone, full Marks agent use requires an updated gateway/catalog**:
+`browser_dom` schema now includes all/limit/max_chars/instance_id/tab_id and batch
+output; `inspector_start.mode` also accepts marks. Old owner consoles without
+`picker_marks` capability get an update/restart message on Ask. No gateway rollout
+or owner restart has been performed for this source work. Preserve the running
+user session. Original production stays tagged0.0.45; current source is local and
+uncommitted at the same package/extension version numbers.
+
+Validation: **474 passed,2 skipped**, build/typechecked extension builds/lint pass.
+Chromium fixtures exercise both Chrome/Firefox API styles, ancestor/child toggle,
+parent coalescing, list removal, metadata-only Ask, live batch read/limits and
+answer, restored site clicks, prior attributes, disconnect and five-minute TTL
+cleanup. Node tests cover no-DOM artifact/read instructions and pinned MCP reads.
+Actual installed Marks acceptance remains pending. Latest candidate package is
+under `artifacts/picker-marks-candidate/`; the earlier T049 candidate below and
+the original released root tarball remain separate and preserved.
+Marks candidate tgz SHA256:
+`f0b4e34870b0578ded7ecda025258b00573782348ccf0178c653c2abed69c4e4`.
+Both extension ZIPs rebuilt at their usual paths; packed batch helper/schema and
+Marks bundles verified. Final focused4 suites15 passed, including a click inside
+a marked container during preview; both built popup API styles route all four
+icons correctly. No installed owner/client/gateway changes accompanied packaging.
+
+## Current continuation: Picker artifact delivery (2026-11-08)
+
+The user resumed work, accepted installed Chrome and Firefox selection/UI, and
+accepted a real Chrome DOM selection -> agent -> plain-text overlay answer.
+These supersede the old deferral below. UI follow-ups are in the current working
+tree: 44px compact circle during picking, Select again at the same upper-right
+position, Ant Design SVG-only controls in preview and popup, removed privacy hint.
+
+**T-TELLYMCP-049** implements the user's next requested behavior: explicit
+Ask/Explain -> existing local WS -> owner validates/pulls context -> saves
+`.mcp-xchange/{date}/picker/{artifact_id}/selection.json`, optional `selection.png`
+and `README.txt` -> structured `local_handoff` / kind `browser_picker` -> existing
+`TerminalInputService` sends an ID/path notification to the same agent console.
+The agent must answer in its conversation and via `inspector_response`, then mark
+the xchange record read. `selection.json.response.arguments` preserves exact
+request/selection IDs and the canonical gateway session ID for client consoles.
+Artifact IDs deduplicate a session/instance/tab/request tuple; changed content
+requires a new request ID. No page/question contents are pasted into the terminal.
+ACK distinguishes saved/notified from failed/uncertain delivery. A persisted
+unfinished notification is not automatically replayed after an owner crash.
+
+Validation: full suite **472 passed,2 skipped**; build/lint and real WS + real PTY
+artifact-before-notification checks pass. Browser fixtures exercise both extension
+API styles and acknowledged submission. See `docs/AI_PICKER_EXTENSION.md` and
+`docs/AGENTS.md` for delivery and agent instructions. Installed automatic delivery
+still needs acceptance after loading this new owner code and extension builds;
+T049 remains separate from the earlier manual pull/response acceptance.
+
+This is local unreleased source at package0.0.45 / Chrome0.0.10 / Firefox0.0.9.
+Candidate packaging is under `artifacts/picker-candidate/`; preserve the original
+released root0.0.45 tarball and its earlier recorded SHA. Gateway remains the
+already deployed0.0.45; the new submission protocol is local console/extension
+only and does not require a gateway rollout. Old owners lack `picker_delivery`
+capability: extensions show an update/restart message for automatic delivery.
+Installing a package does not reload live owners. Do not stop the running user's
+session to force this update. No registry/store publication or production deploy.
+T048 remains review for remaining installed region/image/privacy/Firefox roundtrip
+acceptance; T046 real ChatGPT OAuth retry remains separate and unconfirmed.
+
+Candidate tarball SHA256:
+`cac5a8c9b76739ee758ca977311c2ef94d0a185e5ef781c6d0b34723ce5f8628`.
+It contains the compiled delivery module and both updated extension bridges;
+compiled CLI/module load passed using existing workspace dependencies (not a
+fresh dependency install). Both extension ZIPs are rebuilt at their usual paths.
+Post-final-routing focused tests:4 suites19 passed; lint and diff checks passed.
+
+## Historical deferral: Picker acceptance left for the next session
 
 The user ended today's work and explicitly left Picker testing for tomorrow/the
 next session. **Do not continue feature work or create reminders now.** Resume

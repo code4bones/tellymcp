@@ -20,6 +20,8 @@ import {
   type FirefoxAttachInstanceRecord,
 } from "./browserAttachRegistry";
 import { firefoxAttachInboundMessageSchema } from "./types";
+import { BrowserPickerDelivery } from "./browserPickerDelivery";
+import { TerminalInputService } from "../../terminal-input/model/terminalInputService";
 import type {
   FirefoxAttachGetActiveTabRequest,
   FirefoxAttachInboundMessage,
@@ -134,14 +136,19 @@ export class BrowserAttachServer {
   private readonly lastRecordingPersistAt = new Map<string, number>();
 
   private heartbeatReaper: NodeJS.Timeout | null = null;
+  private readonly pickerDelivery: BrowserPickerDelivery;
+  private readonly pickerSubmissions = new Map<string, Promise<void>>();
 
   public constructor(
     private readonly config: AppConfig,
     private readonly logger: Logger,
     private readonly sessionStore: SessionStore,
     private readonly maintenanceStore: MaintenanceStore,
+    terminalInput?: Pick<TerminalInputService, "submitHumanMessage">,
   ) {
     this.recordingWriter = new BrowserRecordingBundleWriter(config, logger);
+    this.pickerDelivery = new BrowserPickerDelivery(config, sessionStore,
+      terminalInput ?? new TerminalInputService(config, sessionStore, logger));
   }
 
   public async start(): Promise<void> {
@@ -566,6 +573,9 @@ export class BrowserAttachServer {
           this.resolvePendingTabAction(connectedInstanceId, message);
         }
         return;
+      case "picker_submit":
+        await this.handlePickerSubmit(state, message);
+        return;
       case "recording_control_result":
         if (connectedInstanceId) {
           this.resolvePendingRecordingControl(connectedInstanceId, message);
@@ -597,6 +607,55 @@ export class BrowserAttachServer {
     }
   }
 
+  private async handlePickerSubmit(
+    state: ConnectedSocketState,
+    message: Extract<FirefoxAttachInboundMessage, { type: "picker_submit" }>,
+  ): Promise<void> {
+    const key = JSON.stringify([state.instanceId, message.request_id]);
+    const pending = this.pickerSubmissions.get(key);
+    if (pending) return pending;
+    if (this.pickerSubmissions.size >= 8) {
+      this.sendJson(state.socket, { type: "picker_submit_result", request_id: message.request_id,
+        ok: false, error: "Too many pending Picker requests. Retry after they finish." });
+      return;
+    }
+    const operation = (async () => {
+      try {
+        const instanceId = state.instanceId!;
+        const sessionId = this.config.project.sessionId?.trim();
+        if (!sessionId) throw new Error("Missing owner session");
+        const assertBound = async () => {
+          const attachment = await this.maintenanceStore.getBrowserAttachment(sessionId);
+          if (this.socketsByInstanceId.get(instanceId) !== state ||
+              state.socket.readyState !== WS_OPEN ||
+              attachment?.instanceId !== instanceId || attachment.tabId !== message.tab_id)
+            throw new Error("Picker source is not the selected tab of this console");
+        };
+        await assertBound();
+        const result = await this.invokeTabAction({ instanceId, tabId: message.tab_id,
+          action: "inspector_get_selection", payload: { session_id: sessionId,
+            request_id: message.request_id, selection_id: message.selection_id, include_image: true } });
+        const context = result?.context as Record<string, unknown> | undefined;
+        if (context?.requestId !== message.request_id || context.selectionId !== message.selection_id)
+          throw new Error("Picker selection does not match the submitted request");
+        const clientUuid = this.config.distributed?.mode === "client"
+          ? await this.maintenanceStore.getGatewayClientUuid() : null;
+        if (this.config.distributed?.mode === "client" && !clientUuid)
+          throw new Error("Console gateway identity is unavailable");
+        const receipt = await this.pickerDelivery.deliver({ sessionId, instanceId,
+          ...(clientUuid ? { toolSessionId: `${clientUuid}:${sessionId}` } : {}),
+          tabId: message.tab_id, result, assertBound });
+        this.sendJson(state.socket, { type: "picker_submit_result", request_id: message.request_id, ...receipt });
+      } catch {
+        this.logger.warn("Browser Picker delivery failed", { instanceId: state.instanceId, requestId: message.request_id });
+        this.sendJson(state.socket, { type: "picker_submit_result", request_id: message.request_id,
+          ok: false, error: "Could not deliver selection. Check the attached tab and console, then retry." });
+      }
+    })();
+    this.pickerSubmissions.set(key, operation);
+    try { await operation; } finally { this.pickerSubmissions.delete(key); }
+  }
+
   private async handleHello(
     state: ConnectedSocketState,
     message: FirefoxAttachInstanceHello,
@@ -615,7 +674,7 @@ export class BrowserAttachServer {
       browser: message.browser,
       extensionVersion: message.extension_version,
       ...(message.profile_name ? { profileName: message.profile_name } : {}),
-      capabilities: ["tabs", "active_tab", "recording"],
+      capabilities: ["tabs", "active_tab", "recording", "picker_delivery", "picker_marks"],
     });
 
     this.sendJson(state.socket, {

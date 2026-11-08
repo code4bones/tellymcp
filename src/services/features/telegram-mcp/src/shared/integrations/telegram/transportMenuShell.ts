@@ -5,6 +5,8 @@ import type { TelegramMenuContext } from "./transportTypes";
 
 type TransportMenuShellHost = {
   handleTerminalAttachCallback: (ctx: TelegramMenuContext) => Promise<void>;
+  handleLiveLinkCallback: (ctx: TelegramMenuContext) => Promise<void>;
+  showMainMenu: (ctx: TelegramMenuContext) => Promise<void>;
   logger: Logger;
   tForContext: (
     ctx: TelegramMenuContext,
@@ -43,6 +45,13 @@ export class TransportMenuShell {
   public constructor(private readonly host: TransportMenuShellHost) {}
 
   public register(bot: Bot<TelegramMenuContext>): void {
+    bot.callbackQuery(/^live-link:(.+)$/u, async ctx => {
+      await this.host.handleLiveLinkCallback(ctx);
+    });
+    bot.callbackQuery("live-back", async ctx => {
+      await ctx.answerCallbackQuery();
+      await this.host.showMainMenu(ctx);
+    });
     bot.callbackQuery(/^terminal-attach:(.+)$/u, async ctx => {
       await this.host.handleTerminalAttachCallback(ctx);
     });

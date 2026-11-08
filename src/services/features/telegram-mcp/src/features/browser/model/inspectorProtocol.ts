@@ -49,9 +49,13 @@ export const inspectorContextSchema = z.strictObject({
     }),
   }),
   selection: z.strictObject({
-    mode: z.enum(["element", "region"]),
+    mode: z.enum(["element", "region", "marks"]),
     rect,
     element: element.optional(),
+    marks: z.strictObject({
+      groupId: z.uuid(), selector: z.string().max(128),
+      itemIds: z.array(z.number().int().positive()).min(1).max(50),
+    }).optional(),
   }),
   screenshot: z
     .strictObject({
@@ -76,7 +80,7 @@ export const inspectorInputSchema = z.object({
     "response",
     "stop",
   ]),
-  mode: z.enum(["element", "region"]).optional(),
+  mode: z.enum(["element", "region", "marks"]).optional(),
   request_id: id.optional(),
   selection_id: id.optional(),
   include_image: z.boolean().optional(),
@@ -115,6 +119,12 @@ export function validateInspectorResult(
   const output = inspectorResultSchema.parse(value);
   if (output.context) {
     const c = output.context;
+    if (c.selection.mode === "marks") {
+      const marks = c.selection.marks;
+      if (!marks || marks.selector !== `[data-ai-picker="${marks.groupId}"]` ||
+          new Set(marks.itemIds).size !== marks.itemIds.length || c.selection.element || c.screenshot || output.image)
+        throw new Error("Marked selections contain only group selectors, never DOM or images");
+    } else if (c.selection.marks) throw new Error("Group metadata requires marks mode");
     if (
       Buffer.byteLength(JSON.stringify(c), "utf8") > 65536 ||
       c.source.sessionId !== binding.sessionId ||

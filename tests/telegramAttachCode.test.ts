@@ -13,6 +13,7 @@ import type {
   TelegramSendMessageOptions,
 } from "../src/services/features/telegram-mcp/src/shared/integrations/telegram/transportTypes";
 import { translate as t } from "../src/services/features/telegram-mcp/src/shared/i18n";
+import { TransportMenuShell } from "../src/services/features/telegram-mcp/src/shared/integrations/telegram/transportMenuShell";
 
 function setup() {
   const payloads = new Map<string, TelegramMenuPayloadRecord>();
@@ -70,7 +71,9 @@ function setup() {
       sessionName: "Test",
       locale: "en",
     });
-    return [...payloads.values()][0]!;
+    return [...payloads.values()].find(
+      (payload) => payload.kind === "terminal-attach",
+    )!;
   };
   const callback = (key: string, user = 42) =>
     ({
@@ -82,19 +85,18 @@ function setup() {
   return { live, launcher, payloads, sent, issue, callback, host };
 }
 
-it("places Attach beside Open in browser, while launcher data contains no attach code", async () => {
+it("renders three launch modes, Link/Attach and Back without browser tokens or URL buttons", async () => {
   const ctx = setup();
   const payload = await ctx.launcher();
   const keyboard = ctx.sent[0]!.options.reply_markup as {
-    inline_keyboard: Array<Array<{ text: string; callback_data?: string }>>;
+    inline_keyboard: Array<
+      Array<{ text: string; callback_data?: string; url?: string }>
+    >;
   };
   const row = keyboard.inline_keyboard.find((items) =>
-    items.some((item) => item.text.includes("Open in browser")),
+    items.some((item) => item.text === "Link"),
   );
-  expect(row?.map((item) => item.text)).toEqual([
-    "🌐 Open in browser",
-    "🔗 Attach",
-  ]);
+  expect(row?.map((item) => item.text)).toEqual(["Link", "Attach"]);
   expect(row?.[1]!.callback_data).toBe("terminal-attach:" + payload.key);
   expect(payload).toMatchObject({
     telegramUserId: 42,
@@ -102,6 +104,90 @@ it("places Attach beside Open in browser, while launcher data contains no attach
     kind: "terminal-attach",
   });
   expect(ctx.issue).not.toHaveBeenCalled();
+  expect(
+    keyboard.inline_keyboard.map((row) => row.map((button) => button.text)),
+  ).toEqual([
+    ["Fullscreen", "Expand", "Default"],
+    ["Link", "Attach"],
+    ["Back"],
+  ]);
+  expect(keyboard.inline_keyboard.flat().some((button) => button.url)).toBe(
+    false,
+  );
+  expect(row?.[0]!.callback_data).toMatch(/^live-link:/);
+  expect(keyboard.inline_keyboard[2]![0]!.callback_data).toBe("live-back");
+  expect(JSON.stringify(keyboard)).not.toContain("token=");
+});
+
+it("creates a Live browser token only when Link is pressed and sends a copyable URL privately", async () => {
+  const ctx = setup();
+  const create = vi.spyOn(ctx.host.webAppSessions, "create");
+  await ctx.launcher();
+  expect(create).not.toHaveBeenCalled();
+  const payload = [...ctx.payloads.values()].find(
+    (payload) => payload.kind === "live-link",
+  )!;
+  const callback = ctx.callback(payload.key);
+  callback.callbackQuery!.data = "live-link:" + payload.key;
+  await ctx.live.handleLinkCallback(callback);
+  const sent = ctx.sent.at(-1)!;
+  expect(sent.chat).toBe(42);
+  expect(sent.options).toMatchObject({
+    parse_mode: "HTML",
+    link_preview_options: { is_disabled: true },
+  });
+  const url = new URL(
+    sent.text.match(/<code>(.+)<\/code>/)![1]!.replaceAll("&amp;", "&"),
+  );
+  expect(url.pathname).toBe("/api/webapp/live/client%3Asession");
+  expect(
+    ctx.host.webAppSessions.get(url.searchParams.get("token")!),
+  ).toMatchObject({ sessionId: "client:session", telegramUserId: 42 });
+  expect(sent.options.reply_markup).toBeUndefined();
+});
+
+it("denies Link to another user, an expired button or an expired launch grant", async () => {
+  const ctx = setup();
+  const create = vi.spyOn(ctx.host.webAppSessions, "create");
+  await ctx.launcher();
+  const payload = [...ctx.payloads.values()].find(
+    (payload) => payload.kind === "live-link",
+  )!;
+  const callback = (user = 42) => {
+    const c = ctx.callback(payload.key, user);
+    c.callbackQuery!.data = "live-link:" + payload.key;
+    return c;
+  };
+  await ctx.live.handleLinkCallback(callback(43));
+  payload.expiresAt = new Date(Date.now() - 1000).toISOString();
+  await ctx.live.handleLinkCallback(callback());
+  payload.expiresAt = new Date(Date.now() + 10000).toISOString();
+  ctx.host.webAppLaunchRegistry.deleteByUserId(42);
+  await ctx.live.handleLinkCallback(callback());
+  expect(create).not.toHaveBeenCalled();
+  expect(ctx.sent).toHaveLength(1);
+});
+
+it("routes the standalone Live Back button to the selected session menu", async () => {
+  const handlers = new Map<
+    string,
+    (ctx: TelegramMenuContext) => Promise<void>
+  >();
+  const showMainMenu = vi.fn(async () => {});
+  new TransportMenuShell({ showMainMenu } as never).register({
+    callbackQuery: (
+      pattern: string | RegExp,
+      handler: (ctx: TelegramMenuContext) => Promise<void>,
+    ) => handlers.set(String(pattern), handler),
+    catch: vi.fn(),
+    on: vi.fn(),
+  } as never);
+  const ctx = {
+    answerCallbackQuery: vi.fn(async () => {}),
+  } as unknown as TelegramMenuContext;
+  await handlers.get("live-back")!(ctx);
+  expect(ctx.answerCallbackQuery).toHaveBeenCalled();
+  expect(showMainMenu).toHaveBeenCalledWith(ctx);
 });
 
 it("only the original Telegram user can request a code and it is delivered privately", async () => {

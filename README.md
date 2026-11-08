@@ -339,14 +339,17 @@ does not replace code in an already running owner.
 
 ### AI Picker in the attached browser
 
-Chrome0.0.10 and Firefox0.0.9 add **Element / Region** to the popup and an
+Chrome0.0.11 and Firefox0.0.10 provide **Element / Region / Mark elements** and an
 **Alt+Shift+P** command. Attach a tab to a console in the existing Control Panel,
 select and review content, optionally capture a cropped preview, then choose
-**Explain / Ask**. The bound agent reads `inspector_get_selection` and returns
-`inspector_response`; `inspector_start`, `inspector_highlight` and `inspector_stop`
-support the agent-driven flow. New MCP tools need0.0.45 gateway/console builds.
-Nothing invokes an AI provider automatically. Context expires after five minutes;
-use Esc or Forget to clear it. See [scope and implementation](docs/AI_PICKER_EXTENSION.md#13-карта-реализации-mvp-2026-11-08).
+**Explain / Ask**. The owning console saves an artifact and notifies its agent;
+the agent answers in its conversation and through `inspector_response`.
+Mark elements toggles whole DOM containers and sends only group selectors and
+the question; the agent reads their live contents with `browser_dom(all=true)`.
+Automatic delivery and Marks require0.0.46 gateway/owner builds, an owner restart
+and reloaded extensions. No separate AI provider or agent is started. Live
+selection state expires after five minutes; saved artifacts remain available.
+Use Esc or Forget to clear the live state. See [scope and implementation](docs/AI_PICKER_EXTENSION.md#13-карта-реализации-mvp-2026-11-08).
 
 ### Start and continue a coding agent
 

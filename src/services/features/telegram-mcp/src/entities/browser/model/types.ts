@@ -369,6 +369,11 @@ export type BrowserDomInput = {
   selector?: string | undefined;
   include_html?: boolean | undefined;
   include_text?: boolean | undefined;
+  all?: boolean | undefined;
+  limit?: number | undefined;
+  max_chars?: number | undefined;
+  instance_id?: string | undefined;
+  tab_id?: number | undefined;
 };
 
 export type BrowserDomOutput = {
@@ -381,6 +386,12 @@ export type BrowserDomOutput = {
   text_content?: string | undefined;
   visible?: boolean | undefined;
   attributes?: Record<string, string> | undefined;
+  total?: number | undefined;
+  truncated?: boolean | undefined;
+  elements?: Array<{
+    index: number; text_content?: string; outer_html?: string;
+    attributes: Record<string, string>; visible: boolean;
+  }> | undefined;
 };
 
 export type BrowserComputedStyleInput = {

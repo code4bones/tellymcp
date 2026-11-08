@@ -191,7 +191,9 @@ For local build testing, use `node /absolute/path/to/tellymcp/dist/cli.js` after
 
 ### Native terminal through the gateway
 
-In Telegram Live, press **Attach** beside **Open in browser**. The owner receives
+In Telegram Live, press **Attach** beside **Link**. Link sends a private copyable
+Live address; the first row contains Fullscreen / Expand / Default and Back
+returns to the session menu. The owner receives
 a private single-use eight-digit code, valid for five minutes:
 `tellymcp attach --code <code> [--gateway <url>] [--env <file>]`.
 The same owner/shell/screen is restored; the viewing machine creates no console

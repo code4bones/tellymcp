@@ -3,6 +3,7 @@ import { chromium } from "playwright";
 import { describe, expect, it } from "vitest";
 import { inspectorBundle } from "../packages/attach-extension-shared/build.mjs";
 import { validateInspectorResult } from "../src/services/features/telegram-mcp/src/features/browser/model/inspectorProtocol";
+import { readDomBatch } from "../src/services/features/telegram-mcp/src/shared/lib/browserDomBatch";
 
 const fixture = `<!doctype html><html><head><title>Inspector fixture</title><style>body{margin:0;min-height:1800px}#card{position:absolute;left:40px;top:60px;width:280px;height:150px;background:#eee}#trade{margin:20px;width:120px;height:40px}canvas{position:absolute;left:40px;top:300px}iframe{position:absolute;left:40px;top:450px;width:200px;height:80px}</style></head><body><section id="card"><button id="trade">Liquidity 42</button><input type="password" value="super-private-value"><span hidden>hidden-value</span></section><canvas width="200" height="100"></canvas><iframe src="https://frame.test/"></iframe><script>globalThis.trades=0;document.querySelector('#trade').onclick=()=>trades++;const ctx=document.querySelector('canvas').getContext('2d');ctx.fillStyle='#ff0000';ctx.fillRect(0,0,200,100);</script></body></html>`;
 
@@ -47,11 +48,13 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
           await page.addScriptTag({
             content: `
         globalThis.fixtureMessages=[];
+        globalThis.fixtureDeliveries=[];
         const listeners=[];
         globalThis.fixtureBridge=tellyInspector.createBridge({
           tab:async id=>({id,windowId:1,url:location.href,active:true}),
           active:async()=>({id:7,windowId:1,url:location.href,active:true}),
           selected:()=>7,inject:async()=>{},capture:()=>fixtureCapture(),
+          submit:async(id,context)=>{fixtureDeliveries.push(structuredClone(context));return {ok:true,saved:true,notified:true,artifact_id:'fixture-artifact'}},
           message:async(id,message)=>new Promise(resolve=>listeners[0](message,{id:'fixture-extension'},resolve))
         });
         fixtureBridge.bind('session','connection','Fixture console');
@@ -71,7 +74,7 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
           const panel = page.locator("#telly-inspector-overlay");
           const clickButton = async (label: string) => {
             const box = await page.evaluate(
-              `(()=>{const button=[...fixtureShadow.querySelectorAll('button')].find(b=>b.textContent===${JSON.stringify(label)});if(!button)throw new Error('Missing picker button');button.scrollIntoView({block:'nearest'});const r=button.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`,
+              `(()=>{const button=[...fixtureShadow.querySelectorAll('button')].find(b=>b.textContent===${JSON.stringify(label)}||b.getAttribute('aria-label')===${JSON.stringify(label)});if(!button)throw new Error('Missing picker button');button.scrollIntoView({block:'nearest'});const r=button.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`,
             );
             await page.mouse.click(box.x, box.y);
           };
@@ -79,22 +82,45 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
             mode: "element",
             request_id: "agent-request",
           });
+          const panelSize = () =>
+            page.evaluate(
+              "(()=>{const r=fixtureShadow.querySelector('.panel').getBoundingClientRect();return {width:r.width,height:r.height}})()",
+            );
+          expect(await panelSize()).toEqual({ width: 44, height: 44 });
+          const pickerCorner = await page.evaluate(
+            "fixtureShadow.querySelector('.panel').getBoundingClientRect().toJSON()",
+          );
+          await clickButton("Show picker controls");
+          expect((await panelSize()).width).toBe(340);
+          expect(await page.evaluate("fixtureShadow.textContent")).toContain(
+            "Receiver: Fixture console",
+          );
+          await clickButton("Collapse");
+          expect(await panelSize()).toEqual({ width: 44, height: 44 });
           await page.mouse.move(100, 100);
           await page.waitForTimeout(40);
           await page.keyboard.press("Alt+ArrowUp");
           await page.keyboard.press("Alt+ArrowDown");
           await page.mouse.click(100, 100);
+          expect((await panelSize()).width).toBe(340);
           expect(await page.evaluate("trades")).toBe(0);
           expect(
             await page.evaluate(
               "fixtureMessages.filter(m=>m.type==='picker_submit').length",
             ),
           ).toBe(0);
+          expect(await page.evaluate("fixtureDeliveries.length")).toBe(0);
           await clickButton("Explain");
           await expect
             .poll(async () => (await command("get_selection"))?.result?.status)
             .toBe("selected");
           let selected = (await command("get_selection")).result.context;
+          expect(await page.evaluate("fixtureDeliveries[0].question")).toBe(
+            "Explain this selection using only observed content.",
+          );
+          expect(await page.evaluate("fixtureShadow.textContent")).toContain(
+            "Saved and sent to the bound agent",
+          );
           validateInspectorResult(
             { status: "selected", context: selected },
             { sessionId: "session", instanceId: "connection", tabId: 7 },
@@ -114,6 +140,28 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
             "<script>trades=999</script> Observed liquidity: 42",
           );
           expect(await page.evaluate("trades")).toBe(0);
+          // The old expanded panel covered this corner; selection must now reach the page.
+          await page.evaluate(
+            "(()=>{const corner=document.createElement('button');corner.textContent='Previously covered';corner.style.cssText='position:fixed;right:100px;top:70px;width:160px;height:50px';corner.onclick=()=>trades++;document.body.append(corner)})()",
+          );
+          await command("start", { mode: "element" });
+          await page.mouse.move(700, 90);
+          await page.waitForTimeout(40);
+          await page.mouse.click(700, 90);
+          expect(
+            await page.evaluate(
+              "fixtureShadow.querySelector('pre').textContent",
+            ),
+          ).toContain("Previously covered");
+          expect((await panelSize()).width).toBe(340);
+          expect(await page.evaluate("trades")).toBe(0);
+          expect(
+            await page.evaluate(
+              "fixtureShadow.querySelector('[aria-label=\"Select again\"]').getBoundingClientRect().toJSON()",
+            ),
+          ).toEqual(pickerCorner);
+          await clickButton("Select again");
+          expect(await panelSize()).toEqual({ width: 44, height: 44 });
           await command("start", {
             mode: "element",
             request_id: "parent-request",
@@ -154,16 +202,32 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
           ).rejects.toThrow();
           await page.keyboard.press("Escape");
           expect(await panel.count()).toBe(0);
+          await page.evaluate(
+            "for(let i=0;i<60;i++){const e=document.createElement('div');e.setAttribute('data-batch-test','yes');e.textContent='Batch item '+i;document.body.append(e)}",
+          );
+          const boundedBatch = await page.evaluate(readDomBatch, {
+            selector: "[data-batch-test]",
+          });
+          expect(boundedBatch.total).toBe(60);
+          expect(boundedBatch.elements).toHaveLength(50);
+          expect(boundedBatch.truncated).toBe(true);
+          expect(
+            await page.evaluate(readDomBatch, {
+              selector: "[data-no-such-mark]",
+            }),
+          ).toMatchObject({ found: false, total: 0, elements: [] });
           await page.waitForTimeout(20);
           expect((await command("get_selection")).result.status).toBe(
             "pending",
           );
 
           await command("start", { mode: "region" });
+          expect(await panelSize()).toEqual({ width: 44, height: 44 });
           await page.mouse.move(40, 300);
           await page.mouse.down();
           await page.mouse.move(240, 400);
           await page.mouse.up();
+          expect((await panelSize()).width).toBe(340);
           await clickButton("Capture preview");
           await expect
             .poll(
@@ -219,6 +283,154 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
           await page.evaluate("window.scrollTo(0,0)");
           await page.locator("#trade").click();
           expect(await page.evaluate("afterEscape")).toBe(1);
+
+          // Marks toggle whole containers, never trigger their child buttons, and send selectors only.
+          await page.evaluate(
+            "globalThis.trades=0;document.querySelector('#trade').onclick=()=>trades++;document.querySelector('canvas').setAttribute('data-ai-picker','site-owned');document.querySelector('canvas').setAttribute('data-ai-picker-item','legacy')",
+          );
+          await command("start", { mode: "marks" });
+          await page.mouse.click(290, 180);
+          const groupId = await page
+            .locator("#card")
+            .getAttribute("data-ai-picker");
+          expect(groupId).toMatch(/^[a-f0-9-]{36}$/);
+          await page.mouse.click(100, 100);
+          expect(
+            await page.locator("#card").getAttribute("data-ai-picker"),
+          ).toBeNull();
+          expect(
+            await page.locator("#trade").getAttribute("data-ai-picker"),
+          ).toBeNull();
+          expect(await page.evaluate("trades")).toBe(0);
+          await page.mouse.click(100, 100);
+          await page.mouse.click(100, 350);
+          expect(
+            await page.locator("#trade").getAttribute("data-ai-picker"),
+          ).toBe(groupId);
+          expect(
+            await page.locator("canvas").getAttribute("data-ai-picker"),
+          ).toBe(groupId);
+          await page.mouse.click(290, 180);
+          expect(
+            await page.locator("#trade").getAttribute("data-ai-picker"),
+          ).toBeNull();
+          expect(
+            await page.locator("#card").getAttribute("data-ai-picker"),
+          ).toBe(groupId);
+          expect(
+            await page.locator(`[data-ai-picker="${groupId}"]`).count(),
+          ).toBe(2);
+          await clickButton("Show picker controls");
+          const item = await page
+            .locator("#card")
+            .getAttribute("data-ai-picker-item");
+          await clickButton(`Remove marked element ${item}`);
+          expect(
+            await page.locator("#card").getAttribute("data-ai-picker"),
+          ).toBeNull();
+          await clickButton("Collapse");
+          await page.mouse.click(290, 180);
+          await page.keyboard.press("Enter");
+          expect(
+            await page.evaluate(
+              "[...fixtureShadow.querySelectorAll('button')].some(b=>b.getAttribute('aria-label')==='Capture preview')",
+            ),
+          ).toBe(false);
+          await page.evaluate(
+            "fixtureShadow.querySelector('textarea').value='Compare the marked blocks'",
+          );
+          await clickButton("Ask");
+          await expect
+            .poll(
+              async () =>
+                (await command("get_selection")).result?.context?.selection
+                  ?.mode,
+            )
+            .toBe("marks");
+          const marked = (await command("get_selection")).result;
+          validateInspectorResult(marked, {
+            sessionId: "session",
+            instanceId: "connection",
+            tabId: 7,
+          });
+          expect(marked.context.question).toBe("Compare the marked blocks");
+          expect(marked.context.selection.marks).toMatchObject({
+            groupId,
+            selector: `[data-ai-picker="${groupId}"]`,
+          });
+          expect(marked.context.selection.marks.itemIds).toHaveLength(2);
+          expect(marked.context.selection.element).toBeUndefined();
+          expect(marked.context.screenshot).toBeUndefined();
+          expect(marked.image).toBeUndefined();
+          expect(JSON.stringify(marked)).not.toContain("super-private-value");
+          expect(JSON.stringify(marked)).not.toContain("Replaced");
+          const batch = await page.evaluate(readDomBatch, {
+            selector: marked.context.selection.marks.selector,
+          });
+          expect(batch.total).toBe(2);
+          expect(batch.elements).toHaveLength(2);
+          expect(
+            batch.elements.some((e) => e.text_content?.includes("Replaced")),
+          ).toBe(true);
+          const limited = await page.evaluate(readDomBatch, {
+            selector: marked.context.selection.marks.selector,
+            limit: 1,
+            max_chars: 256,
+          });
+          expect(limited.total).toBe(2);
+          expect(limited.elements).toHaveLength(1);
+          expect(limited.truncated).toBe(true);
+          await command("response", {
+            request_id: marked.context.requestId,
+            selection_id: marked.context.selectionId,
+            explanation: "Both marked blocks were read live.",
+          });
+          expect(await page.evaluate("fixtureShadow.textContent")).toContain(
+            "Both marked blocks were read live.",
+          );
+          await page.waitForTimeout(510);
+          await page.mouse.click(100, 100);
+          expect(
+            await page.locator("#card").getAttribute("data-ai-picker"),
+          ).toBeNull();
+          expect(
+            await page.locator("canvas").getAttribute("data-ai-picker"),
+          ).toBe(groupId);
+          expect(await page.evaluate("trades")).toBe(0);
+          expect(await panelSize()).toEqual({ width: 44, height: 44 });
+          await page.keyboard.press("Escape");
+          expect(
+            await page.locator(`[data-ai-picker="${groupId}"]`).count(),
+          ).toBe(0);
+          expect(
+            await page.locator("canvas").getAttribute("data-ai-picker"),
+          ).toBe("site-owned");
+          expect(
+            await page.locator("canvas").getAttribute("data-ai-picker-item"),
+          ).toBe("legacy");
+          await page.locator("#trade").click();
+          expect(await page.evaluate("trades")).toBe(1);
+          await command("start", { mode: "marks" });
+          await page.mouse.click(290, 180);
+          await page.evaluate("fixtureBridge.disconnect()");
+          expect(
+            await page.locator("#card").getAttribute("data-ai-picker"),
+          ).toBeNull();
+          expect(await panel.count()).toBe(0);
+          await page.evaluate(
+            "fixtureBridge.bind('session','connection','Fixture console')",
+          );
+          await page.clock.install();
+          await command("start", { mode: "marks" });
+          await page.mouse.click(290, 180);
+          expect(
+            await page.locator("#card").getAttribute("data-ai-picker"),
+          ).not.toBeNull();
+          await page.clock.fastForward(300001);
+          expect(
+            await page.locator("#card").getAttribute("data-ai-picker"),
+          ).toBeNull();
+          expect(await panel.count()).toBe(0);
         } finally {
           await browser.close();
         }

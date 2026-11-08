@@ -77,6 +77,7 @@ import type {
   TelegramXchangeFileMetaStore,
 } from "../../../shared/api/storage/contract";
 import type { Logger } from "../../../shared/lib/logger/logger";
+import { readDomBatch } from "../../../shared/lib/browserDomBatch";
 import { ProjectIdentityResolver } from "../../../shared/lib/project-identity/projectIdentity";
 import {
   formatLocalDateSegment,
@@ -1541,6 +1542,18 @@ export class BrowserService {
     }
     this.ensureEnabled();
     const attached = await this.getAttachedBrowserAttachment(normalizedSessionId);
+    if ((input.instance_id !== undefined && input.instance_id !== attached?.instanceId) ||
+        (input.tab_id !== undefined && input.tab_id !== attached?.tabId))
+      throw new Error("The original marked browser tab is no longer attached to this session.");
+    if (input.all === true) {
+      const selector = input.selector?.trim() || "body";
+      const payload = { selector, all: true, include_html: input.include_html !== false,
+        include_text: input.include_text !== false, limit: input.limit ?? 50, max_chars: input.max_chars ?? 32768 };
+      const batch = attached
+        ? await this.runAttachedTabAction(normalizedSessionId, attached, { action: "dom", payload }) as ReturnType<typeof readDomBatch>
+        : await (await this.requireSessionState(input)).state.page.evaluate(readDomBatch, payload);
+      return { session_id: normalizedSessionId, selector, ...batch };
+    }
     if (attached) {
       const selector = input.selector?.trim() || "body";
       const result = await this.runAttachedTabAction(normalizedSessionId, attached, {

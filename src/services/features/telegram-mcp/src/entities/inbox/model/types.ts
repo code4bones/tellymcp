@@ -42,6 +42,7 @@ export type TelegramMenuPayloadRecord = {
     | "live-approval"
     | "terminal-prompt-action"
     | "terminal-attach"
+    | "live-link"
     | "project-file-target"
     | "partner-file-target"
     | "inbox-route-entry"

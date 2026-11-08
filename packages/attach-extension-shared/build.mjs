@@ -15,7 +15,11 @@ const options = {
   noEmit: true,
 };
 export function inspectorBundle(entry) {
-  const included = ["context", entry];
+  const included = [
+    "context",
+    ...(entry === "controller" ? ["icons", "marks"] : []),
+    entry,
+  ];
   const bodies = included
     .map(
       (name) =>
@@ -25,7 +29,7 @@ export function inspectorBundle(entry) {
   return `(()=>{"use strict";const modules={${bodies}};const cache={};function require(id){if(!cache[id]){const module={exports:{}};cache[id]=module;modules[id](module,module.exports,require);}return cache[id].exports;}require(${JSON.stringify("./" + entry)});})();\n`;
 }
 export function buildInspector(dist) {
-  const modules = ["context", "controller", "background"];
+  const modules = ["context", "controller", "background", "marks"];
   const files = modules.map((name) => path.join(root, "src", name + ".ts"));
   const diagnostics = ts.getPreEmitDiagnostics(
     ts.createProgram(files, options),
@@ -43,8 +47,20 @@ export function buildInspector(dist) {
     inspectorBundle("controller"),
   );
   const background = path.join(dist, "background.js");
+  const domSource = readFileSync(
+    path.resolve(
+      root,
+      "../../src/services/features/telegram-mcp/src/shared/lib/browserDomBatch.ts",
+    ),
+    "utf8",
+  );
+  const domScript = ts.transpileModule(domSource, {
+    compilerOptions: options,
+  }).outputText;
   writeFileSync(
     background,
-    inspectorBundle("background") + readFileSync(background, "utf8"),
+    `(()=>{const exports={};${domScript}\nglobalThis.tellyReadDomBatch=exports.readDomBatch;})();\n` +
+      inspectorBundle("background") +
+      readFileSync(background, "utf8"),
   );
 }

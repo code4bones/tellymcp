@@ -48,6 +48,13 @@ Browser tools:
 
 Browser runtime rule:
 
+- Browser Picker Ask/Explain creates a local `browser_picker` handoff and submits
+  its artifact ID/path to the bound agent. Read it, answer in this conversation
+  and through `inspector_response`, then mark the record read. For mode `marks`,
+  no selected contents are embedded: use the artifact's pinned `read.arguments`
+  with `browser_dom(all=true)`, check item IDs/count/truncation and report stale
+  marks instead of guessing. Do not forward Picker answers to Telegram.
+
 - Browser tools now have two backends:
   - attached browser tab backend for a real user Firefox or Chrome session
   - isolated Playwright Chromium backend

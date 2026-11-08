@@ -29,7 +29,13 @@ const consoleMessagesByTabId = new Map();
 const pageErrorsByTabId = new Map();
 const networkFailuresByTabId = new Map();
 
+const inspectorDelivery = globalThis.tellyInspector.createDelivery((message) => {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+  sendJson(message);
+  return true;
+});
 const inspectorBridge = globalThis.tellyInspector.createBridge({
+  submit: (tabId, context) => inspectorDelivery.submit(tabId, context),
   tab: (tabId) => browser.tabs.get(tabId),
   active: async () =>
     (await browser.tabs.query({ active: true, currentWindow: true }))[0],
@@ -528,6 +534,12 @@ function buildTabActionCode(action, payload) {
 }
 
 async function runTabAction(tabId, action, payload) {
+  if (action === "dom" && payload?.all === true) {
+    const execution = await browser.tabs.executeScript(tabId, {
+      code: "(" + globalThis.tellyReadDomBatch.toString() + ")(" + JSON.stringify(payload) + ")",
+    });
+    return { ok: true, result: execution[0] };
+  }
   if (action.startsWith("inspector_")) return inspectorBridge.action(tabId, action, payload || {});
   const activeTab = await ensureTabIsActive(tabId);
 
@@ -1011,6 +1023,7 @@ async function handleMessage(rawData) {
 
   switch (message.type) {
     case "hello_ack":
+      inspectorDelivery.bind(message.capabilities?.includes("picker_delivery") === true, message.capabilities?.includes("picker_marks") === true);
       inspectorBridge.bind(message.session_id || "", message.instance_id, message.session_label || "");
       await setConnectionStatus({
         state: "connected",
@@ -1074,6 +1087,9 @@ async function handleMessage(rawData) {
       });
       return;
     }
+    case "picker_submit_result":
+      inspectorDelivery.receive(message);
+      return;
     case "recording_manual_result": {
       const pending = pendingManualRecordingRequests.get(message.request_id);
       if (!pending) {
@@ -1138,6 +1154,7 @@ async function connect() {
   });
 
   socket.addEventListener("close", () => {
+    inspectorDelivery.disconnect();
     inspectorBridge.disconnect();
     socket = null;
     if (manualDisconnect) {

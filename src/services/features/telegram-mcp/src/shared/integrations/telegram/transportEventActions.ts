@@ -436,7 +436,7 @@ export class TransportEventActions {
               launchMode: mode,
             }),
           locale,
-        ),
+        ).row().text(this.host.t(locale, "menu:live.buttons.back"), "live-back"),
       },
       {
         kind: "notification",

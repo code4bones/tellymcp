@@ -76,6 +76,10 @@ body {
   min-width: 12px;
 }
 
+body.browser-live .toolbar {
+  display: none;
+}
+
 .btn {
   appearance: none;
   border: 1px solid var(--border);
@@ -1276,6 +1280,7 @@ async function applyLaunchMode() {
 
 async function main() {
   try {
+    document.body.classList.toggle("browser-live", Boolean(getRequestedDirectToken()));
     await initializeTelegram();
     await applyLaunchMode();
     loadWrapPreference();

@@ -1,5 +1,16 @@
 # HANDOFF
 
+## Local follow-up: browser Live toolbar hidden (2026-11-08)
+
+User requested `div.toolbar { display:none }` only for browser Live. Current
+source adds body.browser-live before startup when a direct token exists in query
+or hash, and scopes the hiding rule to that class. Telegram retains its toolbar;
+both keep the statusbar. Build and21 focused WebApp checks pass; a real Chromium
+layout probe confirms zero toolbar height and terminal/statusbar adjacency for
+both token forms, and visible toolbar for Mini App mode. Focused lint passes.
+This is source-only for the next release: production/global CLI and existing
+package artifacts remain0.0.47; no deployment or owner restart for this CSS change.
+
 ## Production0.0.47 deployed: browser Live and Picker auto-attachment (2026-11-08)
 
 **Installed acceptance update:** user confirmed Live ultimately opened in both

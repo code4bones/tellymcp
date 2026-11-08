@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Hide the Live toolbar for browser links authenticated by token (query or hash),
+  keeping the statusbar and the toolbar in Telegram Mini App launches.
+
 ## 0.0.47 — 2026-11-08
 
 - Skip Telegram SDK loading for direct-token browser Live links, avoiding a

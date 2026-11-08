@@ -24,10 +24,32 @@ text without splitting emoji and sends Enter once at the end. Menu rendering and
 old-keyboard behavior have regression coverage. Local focused53 tests passed;
 build and lint passed. README en/ru and developer/agent docs updated.
 
-Version0.0.54; extensions unchanged (Chrome/Firefox0.0.15). Local archive is under
-artifacts/release054. Release CI/deployment/production verification pending at this
-checkpoint; current production is0.0.52 and local installed CLI is0.0.52. Marrow
-T059 tracks this change. Do not restart the active owner for a gateway-menu update.
+Released/deployed0.0.54 via tag v0.0.54 at3409c3f (runtime feature commit f4d5ca9).
+Pipeline7569 succeeded: build13607, deploy13608,517 tests passed/15 skipped (13
+browser checks without Chromium,2 opt-in Codex smoke tests). Final local focused
+run including i18n:56 tests passed; full lint and build passed before release.
+https://gitlab.undoo.ru/c4b/mcp/telegram_mcp/-/pipelines/7569
+
+Production image: tellymcp-gateway:0.0.54-3409c3fab993. Actual package version0.0.54
+verified in the running container; all5 services healthy. Only gateway recreated;
+Nginx/PostgreSQL/Redis/RabbitMQ IDs and .env contents excluding image are unchanged.
+Config snapshot: /opt/tellymcp/releases/20261108T220727Z-13608.
+Authorized MCP, external healthz, Live/SDK/public-root probes passed. Rendering
+createMainMenu from the deployed package confirms exactly8 buttons: Live, Content,
+Browser, Collab, Storage, Settings, Inbox, Back. No Agent button/menu module.
+No synthetic Telegram messages or real user browser actions were sent.
+INFO polling/hello logs are unavailable at existing LOG_LEVEL=warn; no polling
+crash or queue retry/dispatch errors were logged. Existing0.0.52 queue schema/index
+remain present.
+
+Evidence: artifacts/release054/deploy-preflight.json, deploy-state.json and
+deploy-verification.jsonl. Local archive0.0.54 (627335 bytes), SHA256
+f4cdd6cc3ebdf792102ec76ff62a944a0e48520a0c80427d92bc268c8f31467c;
+inventory in artifacts/release054/artifacts.json. Extensions unchanged
+(Chrome/Firefox0.0.15); no re-sign required. Local installed CLI remains0.0.52;
+no owner restart was needed/performed for this gateway-menu change. Marrow T059
+done, project.lastVersion=0.0.54. Open /menu afresh to replace old visible
+keyboards; old Agent callbacks return to the session menu.
 
 First release attempt v0.0.53/f4d5ca9 was not deployed: pipeline7567 build13605
 failed only on an obsolete i18n test for removed agents.screen.chat_ready_hint.

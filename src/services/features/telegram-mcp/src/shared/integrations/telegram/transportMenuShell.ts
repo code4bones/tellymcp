@@ -45,6 +45,11 @@ export class TransportMenuShell {
   public constructor(private readonly host: TransportMenuShellHost) {}
 
   public register(bot: Bot<TelegramMenuContext>): void {
+    // Old Agent keyboards must not restore a delivery mode or start a turn.
+    bot.callbackQuery(/^telegram-agent-menu\//u, async (ctx) => {
+      await ctx.answerCallbackQuery();
+      await this.host.showMainMenu(ctx);
+    });
     bot.callbackQuery(/^live-link:(.+)$/u, async ctx => {
       await this.host.handleLiveLinkCallback(ctx);
     });

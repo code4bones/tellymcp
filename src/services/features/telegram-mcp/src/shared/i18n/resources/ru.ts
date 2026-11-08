@@ -30,7 +30,6 @@ export const ruMenu = {
       live: "🖥 Live",
       content: "📄 Content",
       browser: "🌐 Browser",
-      agents: "🤖 Агент",
       local: "🏠 Local",
       collab: "👥 Collab",
       storage: "📦 Storage",
@@ -41,7 +40,6 @@ export const ruMenu = {
     actions: {
       open_content: "Открываю меню content.",
       open_browser: "Открываю browser.",
-      open_agents: "Открываю меню агентов.",
       open_inbox: "Открываю inbox.",
       open_external_inbox: "Открываю входящие.",
       open_storage: "Открываю storage.",
@@ -58,50 +56,6 @@ export const ruMenu = {
       link_hint:
         "🔗 Свяжи напарника, чтобы координироваться через общие заметки и файлы.",
       terminal_mode_direct: "🖧 Режим терминала: direct",
-    },
-  },
-  agents: {
-    actions: {
-      attached: "Подключено к {{agentName}}.",
-      terminal_selected: "Сообщения из Telegram будут отправляться в терминал.",
-      stop_requested: "Остановка запрошена.",
-      back_to_session: "Назад в меню сессии.",
-    },
-    buttons: {
-      terminal: "🖥 Терминал · PTY",
-      stop: "⏹ Остановить активный turn",
-    },
-    states: {
-      running: "под управлением Telly",
-      ready: "установлен, но не управляется Telly",
-      missing: "CLI не найден",
-    },
-    screen: {
-      title: "🤖 Coding agent",
-      active_session: "📌 Активная сессия: {{sessionName}}",
-      route_agent: "💬 Маршрут сообщений: {{agentName}}",
-      route_pty: "🖥 Маршрут сообщений: терминал (PTY)",
-      provider: "• {{agentName}} · {{providerName}} — {{state}}",
-      codex_policy:
-        "🔒 Codex: {{sandbox}}, approvals {{approvalPolicy}}, сеть {{network}}",
-      codex_version: "🧩 Codex CLI: {{version}}",
-      claude_policy:
-        "🔒 Claude Agent SDK: подключён, permissions {{permissionMode}}",
-      last_usage:
-        "📊 Последний turn: {{inputTokens}} входных / {{outputTokens}} выходных токенов",
-      choose_hint:
-        "Выбери агента, уже запущенного через Telly в этой консоли. Telegram никогда не запускает агента.",
-      running_hint:
-        "Агент запущен через Telly. Выбери его, чтобы подключить Telegram к текущему диалогу.",
-      chat_ready_hint:
-        "💬 Отправь следующее сообщение обычным текстом прямо в этот чат. Оно продолжит текущий диалог, а ответ агента придёт сюда.",
-      turn_running_hint:
-        "Агент выполняет turn. Его можно остановить, не закрывая сессию агента.",
-      unavailable: "Agent runtime недоступен: {{message}}",
-      attached: "Подключено к {{agentName}} в выбранной консоли.",
-      terminal_selected:
-        "Сообщения из Telegram теперь идут в терминал выбранной консоли.",
-      stop_requested: "Для активного turn агента запрошена остановка.",
     },
   },
   sessions: {

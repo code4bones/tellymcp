@@ -384,23 +384,17 @@ TellyMCP для Codex. Для Claude Code используется встрое�
 существующий helper `tellymcp mcp --format claude`; сам vendor CLI нужно
 установить отдельно.
 
-После выбора консоли в Telegram открой `🤖 Агент`: меню покажет доступные на
-этой client-машине providers и позволит запустить Codex или Claude Code. Для
-Codex TellyMCP поднимает локальный `codex app-server` на приватном Unix socket и
-подключает консольный TUI через `codex --remote`; Claude Code пока использует
-прямой PTY adapter. Следующие сообщения из Telegram попадут в тот же
-терминальный диалог, а на gateway по-прежнему не нужен ни один vendor CLI.
-TellyMCP не позволит случайно запустить второго агента, пока первый ещё работает,
-и остановит managed app-server после выхода из Codex TUI.
+Агента запускай локально через `tellymcp run --agent codex|claude`, затем выбери
+его работающую консоль в Telegram. Обычный текст, подписи к файлам и загрузки
+файлов отправляются в терминальный ввод именно этой консоли. Отдельного меню
+«Агент» и переключателя режима доставки в Telegram больше нет. Служебные команды
+и ответы на явные запросы подтверждения обрабатываются своими обработчиками.
 
-Оставь MCP endpoint TellyMCP подключённым к выбранному агенту: тогда его workflow
-сможет возвращать файлы в Telegram существующими notify-tools. Текстовые
-Telegram-сообщения для Codex отправляются напрямую через app-server `turn/start`,
-а финальный ответ агента возвращается через Telegram route выбранной консоли.
-Keyboard relay остаётся fallback для Claude Code и других неструктурированных
-providers. Пока один Telegram turn выполняется, второй будет отклонён;
-app-server approvals сейчас безопасно отклоняются до подключения Telegram UI к
-этому provider adapter.
+Для Codex TellyMCP поднимает локальный `codex app-server` и подключает консольный
+TUI; Claude Code использует PTY adapter. Ввод из Telegram идёт в тот же TUI, что и
+локальная клавиатура. Оставь MCP endpoint TellyMCP подключённым к агенту, чтобы его
+workflow мог возвращать ответы и файлы в Telegram через существующие notify-tools.
+На gateway vendor CLI не требуется.
 
 ## Webhook
 

@@ -178,17 +178,21 @@ The runtime uses a built-in PTY-backed terminal layer.
 
 ### Managed coding agents
 
-- provider adapters are built into TellyMCP; Codex and Claude Code are the first allowlisted agents
-- availability is resolved from `PATH` on the client that owns the selected console
-- `tellymcp run --agent codex|claude` and the Telegram `Agent` menu call the same client-side `telegramMcp.agentRuntime` service
-- the gateway only relays provider status/start actions and never starts an app-server or requires a vendor CLI
-- Codex uses a client-owned `codex app-server` on a private Unix socket and a console TUI attached with `codex --remote`; Claude Code uses the direct PTY adapter
-- TellyMCP initializes its own app-server JSON-RPC connection, creates the thread before launching the TUI, and attaches the TUI with `resume <thread-id>`
-- Telegram inbox text uses app-server `turn/start` for an active Codex provider; final `agentMessage` text is delivered through the existing gateway-bound notify route
-- only one direct Telegram turn is accepted at a time; common app-server approval requests are denied until the Telegram approval callback is implemented
-- the runtime wraps the allowlisted TUI launch command with a unique exit sentinel, tracks the TUI and app-server lifecycle, and rejects a second launch while an agent is running
-- arbitrary command names or arguments must not be accepted from Telegram callbacks
-- Telegram approval handling and richer progress streaming belong behind this same contract; an equivalent Claude adapter must remain optional
+- Codex and Claude Code are allowlisted client-side providers, resolved from PATH.
+- Start a provider locally with `tellymcp run --agent codex|claude`. Telegram has
+  no Agent submenu or provider/delivery-mode selector.
+- Ordinary Telegram text and uploaded-file context go through the selected
+  console's live relay as terminal text followed by Enter. Legacy Redis delivery
+  preferences are no longer read; no data migration is required.
+- Codex's client-owned app-server and attached console TUI retain their existing
+  lifecycle. Claude Code retains its PTY adapter. Terminal input reaches the same
+  running TUI as local keyboard input.
+- Programmatic agentRuntime status/attach/submit/stop APIs remain available;
+  removing the Telegram menu does not remove provider execution or approval APIs.
+- Bot commands, pending menu forms and explicit request/approval replies keep their
+  dedicated handlers. They are not blindly forwarded as terminal input.
+- Main-menu fingerprints invalidate keyboards from the old layout; callbacks from
+  removed Agent keyboards return to the session menu without invoking a provider.
 
 Prompt scan model:
 

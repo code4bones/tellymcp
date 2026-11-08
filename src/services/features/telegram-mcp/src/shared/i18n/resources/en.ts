@@ -29,7 +29,6 @@ export const enMenu = {
       live: "🖥 Live",
       content: "📄 Content",
       browser: "🌐 Browser",
-      agents: "🤖 Agent",
       local: "🏠 Local",
       collab: "👥 Collab",
       storage: "📦 Storage",
@@ -40,7 +39,6 @@ export const enMenu = {
     actions: {
       open_content: "Opening content menu.",
       open_browser: "Opening browser menu.",
-      open_agents: "Opening agent menu.",
       open_inbox: "Opening inbox.",
       open_external_inbox: "Opening inbox.",
       open_storage: "Opening storage.",
@@ -57,50 +55,6 @@ export const enMenu = {
       link_hint:
         "🔗 Link a partner session to coordinate through shared notes and files.",
       terminal_mode_direct: "🖧 Terminal mode: direct",
-    },
-  },
-  agents: {
-    actions: {
-      attached: "Attached to {{agentName}}.",
-      terminal_selected: "Telegram messages will be sent to the terminal.",
-      stop_requested: "Stop requested.",
-      back_to_session: "Back to session menu.",
-    },
-    buttons: {
-      terminal: "🖥 Terminal · PTY",
-      stop: "⏹ Stop active turn",
-    },
-    states: {
-      running: "managed by Telly",
-      ready: "installed, not managed",
-      missing: "CLI missing",
-    },
-    screen: {
-      title: "🤖 Coding agent",
-      active_session: "📌 Active session: {{sessionName}}",
-      route_agent: "💬 Message route: {{agentName}}",
-      route_pty: "🖥 Message route: terminal (PTY)",
-      provider: "• {{agentName}} · {{providerName}} — {{state}}",
-      codex_policy:
-        "🔒 Codex: {{sandbox}}, approvals {{approvalPolicy}}, network {{network}}",
-      codex_version: "🧩 Codex CLI: {{version}}",
-      claude_policy:
-        "🔒 Claude Agent SDK: attached, permissions {{permissionMode}}",
-      last_usage:
-        "📊 Last turn: {{inputTokens}} input / {{outputTokens}} output tokens",
-      choose_hint:
-        "Choose an agent already started by Telly in this console. Telegram never launches an agent.",
-      running_hint:
-        "A Telly-managed agent is active. Choose it to attach Telegram to its current conversation.",
-      chat_ready_hint:
-        "💬 Send your next message as plain text in this chat. It will continue the current conversation, and the agent response will appear here.",
-      turn_running_hint:
-        "An agent turn is running. You can stop it without closing the agent session.",
-      unavailable: "Agent runtime is unavailable: {{message}}",
-      attached: "Attached to {{agentName}} in the selected console.",
-      terminal_selected:
-        "Telegram messages now go to the selected console's terminal.",
-      stop_requested: "Stop was requested for the active agent turn.",
     },
   },
   sessions: {

@@ -1412,12 +1412,22 @@ export class GatewayHttpService {
           return true;
         }
 
-        await this.requestLiveRelayAction({
-          clientUuid: targetClientUuid,
-          localSessionId: targetLocalSessionId,
-          action: "text",
-          text: submittedText,
-        });
+        // Telegram allows longer messages than one live text frame. Submit one
+        // terminal line, preserving surrogate pairs and normalizing newlines
+        // before chunking so a CRLF cannot straddle two frames.
+        const terminalText = submittedText.replace(/\r?\n/g, " ");
+        for (let start = 0; start < terminalText.length;) {
+          let end = Math.min(start + 4000, terminalText.length);
+          const last = terminalText.charCodeAt(end - 1);
+          if (end < terminalText.length && last >= 0xd800 && last <= 0xdbff) end--;
+          await this.requestLiveRelayAction({
+            clientUuid: targetClientUuid,
+            localSessionId: targetLocalSessionId,
+            action: "text",
+            text: terminalText.slice(start, end),
+          });
+          start = end;
+        }
         await this.requestLiveRelayAction({
           clientUuid: targetClientUuid,
           localSessionId: targetLocalSessionId,

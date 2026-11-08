@@ -81,8 +81,7 @@ export interface TransportInboxMenusHost {
     sessionId: string,
   ): Promise<void>;
   showMainMenu(ctx: TelegramMenuContext): Promise<void>;
-  // Backed by a ref object set after createInboxMenu() runs -- mirrors the
-  // agentMenuRef pattern wiring uses for the same self-reference problem
+  // Backed by a ref object set after createInboxMenu() runs
   // (this class builds the Menu AND is the one that later renders it).
   getInboxMenu(): unknown;
   renderMenuHtmlScreen(

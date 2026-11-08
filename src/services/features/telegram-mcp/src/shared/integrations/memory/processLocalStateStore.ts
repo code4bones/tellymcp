@@ -23,7 +23,6 @@ import type {
   PendingRequestStore,
   ProjectMenuViewState,
   SessionBindingStore,
-  TelegramConsoleDeliveryRoute,
   TelegramAdminAuthStore,
   TelegramGatewayAuthStore,
   TelegramMenuPayloadStore,
@@ -52,22 +51,11 @@ function xchangeKey(sessionId: string, filePath: string): string {
   return `${sessionId}\u0000${filePath}`;
 }
 
-function consoleDeliveryRouteKey(
-  principal: TelegramPrincipal,
-  sessionId: string,
-): string {
-  return `${principalKey(principal)}\u0000${sessionId}`;
-}
-
 export class ProcessLocalStateStore implements RuntimeStateStore {
   private readonly pairCodes = new Map<string, Expiring<PairCodeRecord>>();
   private readonly bindings = new Map<string, SessionBinding>();
   private readonly principalSessions = new Map<string, Set<string>>();
   private readonly principalActiveSessions = new Map<string, string>();
-  private readonly consoleDeliveryRoutes = new Map<
-    string,
-    TelegramConsoleDeliveryRoute
-  >();
   private readonly locales = new Map<number, string>();
   private adminPrincipal: TelegramPrincipal | null = null;
   private readonly gatewayAuthorizedPrincipals = new Map<
@@ -181,30 +169,6 @@ export class ProcessLocalStateStore implements RuntimeStateStore {
       });
     }
     return Array.from(principals.values());
-  }
-
-  public async getConsoleDeliveryRoute(
-    principal: TelegramPrincipal,
-    sessionId: string,
-  ): Promise<TelegramConsoleDeliveryRoute> {
-    return (
-      this.consoleDeliveryRoutes.get(
-        consoleDeliveryRouteKey(principal, sessionId),
-      ) ?? { mode: "pty" }
-    );
-  }
-
-  public async setConsoleDeliveryRoute(
-    principal: TelegramPrincipal,
-    sessionId: string,
-    route: TelegramConsoleDeliveryRoute,
-  ): Promise<void> {
-    const key = consoleDeliveryRouteKey(principal, sessionId);
-    if (route.mode === "pty") {
-      this.consoleDeliveryRoutes.delete(key);
-      return;
-    }
-    this.consoleDeliveryRoutes.set(key, route);
   }
 
   public async resetRuntimeState(): Promise<void> {
@@ -345,7 +309,6 @@ export class ProcessLocalStateStore implements RuntimeStateStore {
     this.pairCodes.clear(); this.bindings.clear(); this.principalSessions.clear();
     this.principalActiveSessions.clear(); this.locales.clear(); this.adminPrincipal = null;
     this.gatewayAuthorizedPrincipals.clear();
-    this.consoleDeliveryRoutes.clear();
     this.requests.clear(); this.requestQueue.length = 0; this.activeRequestId = null;
     this.menuPayloads.clear(); this.xchangeFileMetas.clear(); this.browserAttachments.clear();
     this.browserRecordings.clear(); this.projectMenuViews.clear(); this.outgoingNotices.clear();
@@ -411,9 +374,6 @@ export class ProcessLocalStateStore implements RuntimeStateStore {
       if (next) this.principalActiveSessions.set(key, next);
       else this.principalActiveSessions.delete(key);
     }
-    this.consoleDeliveryRoutes.delete(
-      consoleDeliveryRouteKey(principal, sessionId),
-    );
   }
 
   private countEntries(): number {
@@ -421,7 +381,6 @@ export class ProcessLocalStateStore implements RuntimeStateStore {
       (this.adminPrincipal ? 1 : 0) + this.gatewayAuthorizedPrincipals.size +
       this.requests.size + this.menuPayloads.size +
       this.xchangeFileMetas.size + this.browserAttachments.size + this.browserRecordings.size +
-      this.projectMenuViews.size + this.outgoingNotices.size +
-      this.consoleDeliveryRoutes.size + (this.gatewayClientUuid ? 1 : 0);
+      this.projectMenuViews.size + this.outgoingNotices.size + (this.gatewayClientUuid ? 1 : 0);
   }
 }

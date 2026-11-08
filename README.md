@@ -18,7 +18,7 @@ Open a live console, send a question, attach another terminal, or select browser
 content and ask the agent about it. Agents can also exchange tasks and files
 through MCP, with artifacts saved in the owning workspace.
 
-Current source versions: **TellyMCP 0.0.52**, **Chrome extension 0.0.15**,
+Current source versions: **TellyMCP 0.0.53**, **Chrome extension 0.0.15**,
 **Firefox extension 0.0.15**. The npm badge shows the published package version;
 to use the current checkout, see [Build from source](#build-from-source).
 
@@ -184,14 +184,17 @@ tellymcp provider install codex
 tellymcp run --env .env-client --agent codex
 ```
 
-The Telegram **Agent** menu can also start an available provider in the selected
-console. TellyMCP prevents a second managed agent from starting in a console
+Start the provider locally, then select its running console in Telegram.
+Ordinary messages, file captions and file uploads go to that console's terminal
+input. There is no separate Agent menu or Telegram delivery-mode selector.
+Service commands and replies to explicit confirmation requests keep their own
+handlers. TellyMCP prevents a second managed agent from starting in a console
 while the first is running.
 
-Keep the TellyMCP MCP connection configured in the agent. Codex uses its local
-app-server integration for structured Telegram turns; Claude Code uses the PTY
-adapter. The bundled workflow plugin helps agents follow the reply and artifact
-delivery paths:
+Keep the TellyMCP MCP connection configured in the agent. Telegram input reaches
+the same console TUI used locally, including managed Codex and Claude sessions.
+The bundled workflow plugin helps agents follow the reply and artifact delivery
+paths:
 
 ```bash
 tellymcp codex-plugin install
@@ -404,7 +407,7 @@ git clone https://github.com/code4bones/tellymcp.git
 cd tellymcp
 yarn install --frozen-lockfile
 npm pack
-npm install -g ./deadragdoll-tellymcp-0.0.52.tgz
+npm install -g ./deadragdoll-tellymcp-0.0.53.tgz
 ```
 
 Use the archive filename printed by `npm pack` for your checkout's version.

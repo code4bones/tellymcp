@@ -4,6 +4,13 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.53
+
+- Send ordinary Telegram messages to the selected console's terminal input.
+- Remove the Agent submenu and its delivery-mode selector; start Codex/Claude
+  locally and select their running console in Telegram.
+- Existing command, confirmation and provider runtime APIs remain available.
+
 ## 0.0.52
 
 - Make queued project delivery atomic, retryable and duplicate-aware. Gateway

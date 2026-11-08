@@ -34,6 +34,11 @@ Do not:
 - read local sqlite files directly if structured xchange tools work
 - substitute a partner reply path when the user asked the current console directly
 
+Ordinary Telegram messages go to the selected console's terminal input. There is
+no Agent submenu or delivery-mode preference; providers are started locally.
+Service commands, pending menu forms and explicit request/approval replies retain
+their dedicated handlers.
+
 ## Partner Note Work
 
 If the current console received a `partner_note`:

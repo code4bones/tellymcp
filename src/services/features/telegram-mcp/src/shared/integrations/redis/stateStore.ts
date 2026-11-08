@@ -29,7 +29,6 @@ import type {
   PendingRequestStore,
   SessionBindingStore,
   SessionStore,
-  TelegramConsoleDeliveryRoute,
   TelegramAdminAuthStore,
   TelegramGatewayAuthStore,
   TelegramUserLocaleStore,
@@ -449,36 +448,6 @@ export class RedisStateStore
     } while (cursor !== "0");
 
     return Array.from(principals.values());
-  }
-
-  public async getConsoleDeliveryRoute(
-    principal: TelegramPrincipal,
-    sessionId: string,
-  ): Promise<TelegramConsoleDeliveryRoute> {
-    const raw = await this.redis.get(
-      consoleDeliveryRouteKey(principal, sessionId),
-    );
-    const route = parseJson<TelegramConsoleDeliveryRoute>(raw);
-    if (
-      route?.mode === "agent" &&
-      (route.agentId === "codex" || route.agentId === "claude")
-    ) {
-      return route;
-    }
-    return { mode: "pty" };
-  }
-
-  public async setConsoleDeliveryRoute(
-    principal: TelegramPrincipal,
-    sessionId: string,
-    route: TelegramConsoleDeliveryRoute,
-  ): Promise<void> {
-    const key = consoleDeliveryRouteKey(principal, sessionId);
-    if (route.mode === "pty") {
-      await this.redis.del(key);
-      return;
-    }
-    await this.redis.set(key, JSON.stringify(route));
   }
 
   public async resetRuntimeState(): Promise<void> {

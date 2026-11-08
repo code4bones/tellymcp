@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.0.53 — 2026-11-09
+
+- Remove the session Agent menu (Codex, Claude, Terminal and Stop active turn).
+  Ordinary Telegram messages always use the selected console's terminal input,
+  ignoring old delivery preferences; preserve command and confirmation handlers.
+- Split long console input into live frames without splitting emoji; send Enter
+  once after all text frames.
+- Remove the menu wiring, translations and unused route storage API. Invalidate
+  old session keyboards and return retired Agent callbacks to the session menu.
+- Verify text, captions, file-only uploads, selection changes and unavailable
+  targets through the real gateway/owner handlers into isolated PTYs.
+
 ## 0.0.52 — 2026-11-09
 
 - Enqueue project messages, attachments and delivery rows in one transaction.

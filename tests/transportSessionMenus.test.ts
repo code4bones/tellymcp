@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Menu } from "@grammyjs/menu";
+import { Menu } from "@grammyjs/menu";
 
 import type { AppConfig } from "../src/services/features/telegram-mcp/src/app/config/env";
 import { buildLiveRelaySessionId } from "../src/services/features/telegram-mcp/src/app/webapp/relay";
 import { ProcessLocalSessionStore } from "../src/services/features/telegram-mcp/src/shared/integrations/memory/processLocalSessionStore";
+import { TransportMenuShell } from "../src/services/features/telegram-mcp/src/shared/integrations/telegram/transportMenuShell";
 import { TransportConsoleRegistry } from "../src/services/features/telegram-mcp/src/shared/integrations/telegram/transportConsoleRegistry";
 import {
   TransportMenuFactories,
@@ -204,5 +205,63 @@ describe("Telegram account → sessions navigation", () => {
       ownerUserUuid: "user-petr",
       label: `Vita · ${ownerLabel}`,
     });
+  });
+});
+
+describe("session menu without provider controls", () => {
+  it("renders only console tools and invalidates old Agent keyboard positions", async () => {
+    const { factories } = createHarness(sessions("user-petr"));
+    const buttons = await render(factories.createMainMenu());
+    expect(buttons.map((b) => b.text)).toEqual([
+      "menu:main.buttons.live",
+      "menu:main.buttons.content",
+      "menu:main.buttons.browser",
+      "menu:main.buttons.collab",
+      "menu:main.buttons.storage",
+      "menu:main.buttons.settings",
+      "menu:main.buttons.externalInbox",
+      "menu:main.buttons.back",
+    ]);
+    const old = new Menu<TelegramMenuContext>("telegram-main-menu", {
+      fingerprint: () => "main",
+    })
+      .text("menu:main.buttons.live", () => {})
+      .row()
+      .text("menu:main.buttons.agents", () => {});
+    expect(buttons[0]!.callback_data).not.toBe(
+      (await render(old))[0]!.callback_data,
+    );
+  });
+
+  it("returns old Agent callbacks to the session menu without invoking provider controls", async () => {
+    const handlers: Array<{
+      pattern: string | RegExp;
+      handler: (ctx: TelegramMenuContext) => Promise<void>;
+    }> = [];
+    const bot = {
+      callbackQuery: (
+        pattern: string | RegExp,
+        handler: (ctx: TelegramMenuContext) => Promise<void>,
+      ) => {
+        handlers.push({ pattern, handler });
+      },
+      catch: vi.fn(),
+      on: vi.fn(),
+    };
+    const showMainMenu = vi.fn(async () => {});
+    new TransportMenuShell({ showMainMenu } as unknown as ConstructorParameters<
+      typeof TransportMenuShell
+    >[0]).register(bot as never);
+    const callback = handlers.find(
+      (h) =>
+        h.pattern instanceof RegExp &&
+        h.pattern.test("telegram-agent-menu/0/0//habcd"),
+    )!;
+    const ctx = {
+      answerCallbackQuery: vi.fn(async () => {}),
+    } as unknown as TelegramMenuContext;
+    await callback.handler(ctx);
+    expect(ctx.answerCallbackQuery).toHaveBeenCalledTimes(1);
+    expect(showMainMenu).toHaveBeenCalledExactlyOnceWith(ctx);
   });
 });

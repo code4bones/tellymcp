@@ -1,5 +1,34 @@
 # HANDOFF
 
+## Remove Agent submenu and unify Telegram console input (2026-11-09)
+
+User requested checking delivery to the selected console and removing the whole
+Agent menu; explicitly reconfirmed that the Agent button itself must be absent.
+Found: default delivery already used PTY, but Agent-menu selection persisted a
+principal/session route to agentRuntime.submitRemote. Ordinary Telegram input now
+always uses the selected console's terminal relay, ignoring legacy preferences.
+Commands, pending menu forms, explicit human requests and approval callbacks retain
+their dedicated handlers. Agent runtime/provider APIs remain available.
+
+Removed the Agent button, submenu, action class/wiring, translations and unused
+route-storage API/map. Existing Redis preference keys are not read; existing
+unbind cleanup still removes them. Main-menu fingerprint is versioned to stop old
+button coordinates invoking a different handler. Old Agent keyboard callbacks
+return to the session menu; no provider action is invoked.
+
+Added real flow→gateway HTTP→owner live handler→isolated PTY checks: both selected
+consoles, stale agent preference, text, captions/file-only uploads, missing target
+without fallback and no selection. Also fixed a discovered limit mismatch:
+Telegram input can exceed the4000-character live frame; gateway chunks normalized
+text without splitting emoji and sends Enter once at the end. Menu rendering and
+old-keyboard behavior have regression coverage. Local focused53 tests passed;
+build and lint passed. README en/ru and developer/agent docs updated.
+
+Version0.0.53; extensions unchanged (Chrome/Firefox0.0.15). Local archive is under
+artifacts/release053. Release CI/deployment/production verification pending at this
+checkpoint; current production is0.0.52 and local installed CLI is0.0.52. Marrow
+T059 tracks this change. Do not restart the active owner for a gateway-menu update.
+
 ## Gateway0.0.52 deployed (2026-11-09)
 
 User explicitly authorized production deployment after the debt-closing step.

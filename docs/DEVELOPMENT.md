@@ -6,9 +6,10 @@ The local background-session architecture is described in
 [Detached sessions in TellyMCP](DETACHED_SESSIONS_DESIGN.md). It covers detach,
 terminal fidelity and process ownership. Current source implements Linux local
 owner/CLI attachment and Telegram-code authorization for native gateway attach.
-Native local/remote attachments share exclusivity; Live View remains mirrored and
-writable by explicit user decision. These changes are unreleased; a local client build can be installed from
-the `npm pack` archive. See HANDOFF for the current local installation.
+Native local/remote attachments share the owner's terminal stream. Multiple
+attachments can mirror the session; Live View remains writable by explicit user
+decision. A local client build can be installed from the `npm pack` archive.
+See [HANDOFF](HANDOFF.md) for package and production versions.
 
 ## Current Product Model
 

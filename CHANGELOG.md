@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.0.52 — 2026-11-08 (local candidate)
+
+- Enqueue project messages, attachments and delivery rows in one transaction.
+  Optional request_id provides source-scoped retry deduplication and rejects
+  changed payloads; direct routes reject the queued-only key.
+- Claim queued deliveries with PostgreSQL row locks/SKIP LOCKED and a 60-second
+  lease. Immediate pushes and periodic retries share the claim path. Missing
+  recipient sessions fail retryably instead of ACKing discarded work.
+- Persist notification completion and coalesce simultaneous materialization RPCs;
+  retries preserve read records. An uncertain notification is reported explicitly.
+- Cache SQLite xchange connections with WAL/busy timeout and shutdown cleanup.
+  Constrain exchange writes/deletes, refuse symbolic links and allocate new files
+  exclusively. Mark delivery completion without resetting concurrent read status.
+- Fix repeated Firefox Inject and keep custom namespaces independent. Firefox
+  extension0.0.15; Chrome remains0.0.15. Region stays screenshot-only.
+- Add real PostgreSQL concurrency, rollback, retry and migration tests, enabled
+  in package-build CI with an isolated temporary database. Align CLI/Russian MCP
+  setup text and Nginx documentation with current behavior.
+
 ## 0.0.51 — 2026-11-08 (local build)
 
 - Select Elements and toggle Marks with Ctrl+click. Ordinary clicks and typing

@@ -12,12 +12,15 @@ vi.mock(
   "../src/services/features/telegram-mcp/src/shared/integrations/xchange/sqliteRecordStore",
   () => ({
     upsertXchangeRecord: vi.fn(),
+    getXchangeRecord: vi.fn(async()=>null),
+    updateXchangeRecordTags: vi.fn(async()=>true),
   }),
 );
 
 import GatewayDeliveryService from "../src/services/features/telegram-mcp/gateway-delivery.service";
 import { writeXchangeRelativeFile } from "../src/services/features/telegram-mcp/src/shared/integrations/terminal/client";
-import { upsertXchangeRecord } from "../src/services/features/telegram-mcp/src/shared/integrations/xchange/sqliteRecordStore";
+import type { XchangeRecord } from "../src/services/features/telegram-mcp/src/entities/xchange/model/types";
+import { getXchangeRecord, updateXchangeRecordTags, upsertXchangeRecord } from "../src/services/features/telegram-mcp/src/shared/integrations/xchange/sqliteRecordStore";
 
 type GatewayDelivery = {
   delivery_uuid: string;
@@ -181,6 +184,51 @@ describe("gatewayDelivery service", () => {
   beforeEach(() => {
     mockedWriteXchangeRelativeFile.mockReset();
     mockedUpsertXchangeRecord.mockReset();
+    vi.mocked(getXchangeRecord).mockReset().mockResolvedValue(null);
+    vi.mocked(updateXchangeRecordTags).mockReset().mockResolvedValue(true);
+  });
+
+  it("does not notify or overwrite an already completed/read delivery after restart",async()=>{
+    let saved:XchangeRecord|null=null;
+    vi.mocked(getXchangeRecord).mockImplementation(async()=>saved);
+    mockedUpsertXchangeRecord.mockImplementation(async(_config,_cwd,_dir,record)=>{saved=structuredClone(record);});
+    mockedWriteXchangeRelativeFile.mockResolvedValue("/workspace/.mcp-xchange/shares/share-1.md");
+    const prepare=()=>{const h=createRuntimeHarness();h.getRuntimeOrThrow().sessionStore.getSession.mockResolvedValue({sessionId:"backend-local",label:"backend"});return h;};
+    vi.mocked(updateXchangeRecordTags).mockImplementation(async(_config,_cwd,_dir,_session,_id,change)=>{
+      saved!.tags=[...saved!.tags.filter(tag=>!change.remove.includes(tag)),...change.add];return true;
+    });
+    const first=prepare();
+    // An agent may consume the note before terminal nudge returns.
+    first.getRuntimeOrThrow().telegramTransport.nudgeSessionPartnerNote.mockImplementation(async()=>{saved!.status="read";});
+    await methods.materializeIncomingDelivery.call(first,createDelivery());
+    expect(first.getRuntimeOrThrow().telegramTransport.nudgeSessionPartnerNote).toHaveBeenCalledTimes(1);
+    const second=prepare();await methods.materializeIncomingDelivery.call(second,createDelivery());
+    expect(second.getRuntimeOrThrow().telegramTransport.nudgeSessionPartnerNote).not.toHaveBeenCalled();
+    expect(mockedWriteXchangeRelativeFile).toHaveBeenCalledTimes(1);
+    expect(saved!.tags).toContain("gateway-delivery-complete:delivery-1");
+    saved!.status="read";
+    await methods.materializeIncomingDelivery.call(second,createDelivery());
+    expect(saved!.status).toBe("read");
+  });
+  it("retains an explicit uncertain notification marker after nudge failure",async()=>{
+    let saved:XchangeRecord|null=null;
+    vi.mocked(getXchangeRecord).mockImplementation(async()=>saved);
+    mockedUpsertXchangeRecord.mockImplementation(async(_config,_cwd,_dir,record)=>{saved=structuredClone(record);});
+    mockedWriteXchangeRelativeFile.mockResolvedValue("/workspace/.mcp-xchange/shares/share-1.md");
+    const harness=createRuntimeHarness();harness.getRuntimeOrThrow().sessionStore.getSession.mockResolvedValue({sessionId:"backend-local"});
+    harness.getRuntimeOrThrow().telegramTransport.nudgeSessionPartnerNote.mockRejectedValue(new Error("input failed"));
+    await expect(methods.materializeIncomingDelivery.call(harness,createDelivery())).rejects.toThrow("input failed");
+    expect(saved!.tags).toContain("gateway-delivery-notifying:delivery-1");
+    await expect(methods.materializeIncomingDelivery.call(harness,createDelivery())).rejects.toThrow("outcome is uncertain");
+    expect(harness.getRuntimeOrThrow().telegramTransport.nudgeSessionPartnerNote).toHaveBeenCalledTimes(1);
+  });
+  it("coalesces concurrent materialization RPCs for the same delivery",async()=>{
+    const method=vi.fn();let release!:()=>void;method.mockImplementation(()=>new Promise<void>(resolve=>{release=resolve;}));
+    const carrier={materializeIncomingDelivery:method};const handler=(GatewayDeliveryService.actions!.materializeIncomingDelivery as {handler(this: unknown, ctx: unknown): Promise<unknown>}).handler;
+    const ctx={params:{delivery:createDelivery()}};
+    const a=handler.call(carrier,ctx);const b=handler.call(carrier,ctx);
+    expect(method).toHaveBeenCalledTimes(1);release();
+    await expect(Promise.all([a,b])).resolves.toEqual([{ok:true},{ok:true}]);
   });
 
   it("materializes incoming delivery into note, xchange record, and telegram notification", async () => {
@@ -258,11 +306,11 @@ describe("gatewayDelivery service", () => {
     );
   });
 
-  it("skips materialization when target local session is unavailable", async () => {
+  it("rejects materialization as retryable when target local session is unavailable", async () => {
     const harness = createRuntimeHarness();
     harness.getRuntimeOrThrow().sessionStore.getSession.mockResolvedValue(null);
 
-    await methods.materializeIncomingDelivery.call(harness, createDelivery());
+    await expect(methods.materializeIncomingDelivery.call(harness, createDelivery())).rejects.toMatchObject({retryable:true});
 
     expect(mockedUpsertXchangeRecord).not.toHaveBeenCalled();
     expect(harness.getRuntimeOrThrow().logger.warn).toHaveBeenCalledWith(

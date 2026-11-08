@@ -343,6 +343,7 @@ type GatewaySocketDeliveryFail = {
   type: "delivery_fail";
   delivery_ids: string[];
   error_text?: string;
+  retryable?: boolean;
 };
 
 type GatewaySocketMessage =
@@ -405,6 +406,8 @@ type GatewaySocketCarrier = Service & {
   wsReconnectTimer?: NodeJS.Timeout | null;
   wsIdentityRefreshTimer?: NodeJS.Timeout | null;
   wsToolsSyncTimer?: NodeJS.Timeout | null;
+  wsDeliveryRetryTimer?: NodeJS.Timeout | null;
+  wsDeliveryRetryRunning?: boolean;
   wsHeartbeatTimer?: NodeJS.Timeout | null;
   wsAwaitingPong?: boolean;
   wsConnectionId?: string | null;
@@ -565,6 +568,11 @@ type GatewaySocketCarrier = Service & {
     clientUuid: string;
     delivery: GatewaySocketDelivery;
   }) => Promise<boolean>;
+  dispatchClaimedDelivery?: (params: {
+    clientUuid: string;
+    delivery: GatewaySocketDelivery;
+  }) => Promise<boolean>;
+  drainQueuedDeliveries?: () => Promise<void>;
   notifyDeliveryStatus?: (params: {
     clientUuid: string;
     status: GatewaySocketDeliveryStatus;
@@ -1050,6 +1058,8 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
     this.wsReconnectTimer = null;
     this.wsIdentityRefreshTimer = null;
     this.wsToolsSyncTimer = null;
+    this.wsDeliveryRetryTimer = null;
+    this.wsDeliveryRetryRunning = false;
     this.wsHeartbeatTimer = null;
     this.wsAwaitingPong = false;
     this.wsConnectionId = null;
@@ -1653,6 +1663,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             client_uuid: params.clientUuid,
             delivery_ids: [params.delivery.delivery_uuid],
             error_text: error instanceof Error ? error.message : String(error),
+            ...((error as {retryable?:boolean})?.retryable === true ? {retryable:true} : {}),
           },
           { meta: { internal_call: true } },
         ) as {
@@ -2395,6 +2406,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
             "telegramMcp.gateway.pollDeliveries",
             {
               client_uuid: hello.client_uuid,
+              local_session_ids: (hello.session_tools ?? []).map(session => session.local_session_id),
               limit: 50,
             },
             { meta: { internal_call: true } },
@@ -2621,6 +2633,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           {
             client_uuid: clientUuid,
             delivery_ids: deliveryIds,
+            ...(parsed.type === "delivery_fail" && parsed.retryable === true ? {retryable:true} : {}),
             ...(parsed.type === "delivery_fail" &&
             typeof parsed.error_text === "string" &&
             parsed.error_text.trim()
@@ -2950,6 +2963,7 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
           this.wsClient?.send(
             JSON.stringify({
               type: "delivery_fail",
+              ...((error as {retryable?:boolean})?.retryable === true ? {retryable:true} : {}),
               delivery_ids: [delivery.delivery_uuid],
               error_text:
                 error instanceof Error ? error.message : String(error),
@@ -3348,12 +3362,94 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
     async notifyDeliveryQueued(
       this: GatewaySocketCarrier,
+      params: { clientUuid: string; delivery: GatewaySocketDelivery },
+    ): Promise<boolean> {
+      // Direct deliveries have no PostgreSQL queue row; retain their live route.
+      if (params.delivery.route_mode === "direct")
+        return (await this.dispatchClaimedDelivery?.(params)) ?? false;
+      const result = (await this.broker.call(
+        "telegramMcp.gateway.pollDeliveries",
+        {
+          client_uuid: params.clientUuid,
+          delivery_ids: [params.delivery.delivery_uuid],
+          local_session_ids: [params.delivery.target_local_session_id],
+          limit: 1,
+        },
+        { meta: { internal_call: true } },
+      )) as { deliveries?: GatewaySocketDelivery[] };
+      const claimed = result.deliveries?.[0];
+      if (!claimed) return false;
+      return (
+        (await this.dispatchClaimedDelivery?.({
+          ...params,
+          delivery: claimed,
+        })) ?? false
+      );
+    },
+
+    async drainQueuedDeliveries(this: GatewaySocketCarrier): Promise<void> {
+      if (this.stopRequested || this.wsDeliveryRetryRunning) return;
+      this.wsDeliveryRetryRunning = true;
+      try {
+        const routes = new Map<string, Set<string>>();
+        for (const [socket, hello] of this.connectedClients?.entries() ?? []) {
+          if (socket.readyState !== 1 || !hello.client_uuid) continue;
+          const ids = routes.get(hello.client_uuid) ?? new Set<string>();
+          for (const session of hello.session_tools ?? [])
+            ids.add(session.local_session_id);
+          routes.set(hello.client_uuid, ids);
+        }
+        const runtime = this.getRuntimeOrThrow!();
+        const localClient =
+          await runtime.maintenanceStore.getGatewayClientUuid();
+        if (localClient) {
+          const localSessions = (
+            await runtime.sessionStore.listSessions()
+          ).filter(hasLocalTargetSession);
+          if (localSessions.length) {
+            const ids = routes.get(localClient) ?? new Set<string>();
+            for (const session of localSessions) ids.add(session.sessionId);
+            routes.set(localClient, ids);
+          }
+        }
+        for (const [clientUuid, ids] of routes) {
+          if (!ids.size) continue;
+          const result = (await this.broker.call(
+            "telegramMcp.gateway.pollDeliveries",
+            {
+              client_uuid: clientUuid,
+              local_session_ids: [...ids],
+              limit: 50,
+            },
+            { meta: { internal_call: true } },
+          )) as { deliveries?: GatewaySocketDelivery[] };
+          for (const delivery of result.deliveries ?? []) {
+            try {
+              await this.dispatchClaimedDelivery?.({ clientUuid, delivery });
+            } catch (error) {
+              runtime.logger.warn("Queued gateway delivery attempt failed", {
+                deliveryUuid: delivery.delivery_uuid,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+        }
+      } finally {
+        this.wsDeliveryRetryRunning = false;
+      }
+    },
+
+    async dispatchClaimedDelivery(
+      this: GatewaySocketCarrier,
       params: {
         clientUuid: string;
         delivery: GatewaySocketDelivery;
       },
     ): Promise<boolean> {
-      if (await this.handleLocalIncomingDelivery?.(params)) {
+      if (
+        (await this.isLocalGatewayClientUuid?.(params.clientUuid)) &&
+        (await this.handleLocalIncomingDelivery?.(params))
+      ) {
         return true;
       }
 
@@ -3926,6 +4022,14 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
     if (gatewayEnabled) {
       await this.startGatewayWsServer?.();
+      this.wsDeliveryRetryTimer = setInterval(() => {
+        void this.drainQueuedDeliveries?.().catch((error: unknown) => {
+          runtime.logger.warn("Gateway delivery retry failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }, 5000);
+      this.wsDeliveryRetryTimer.unref();
     }
 
     if (clientEnabled) {
@@ -3935,6 +4039,8 @@ const TelegramMcpGatewaySocketService: ServiceSchema = {
 
   async stopped(this: GatewaySocketCarrier) {
     this.stopRequested = true;
+    if (this.wsDeliveryRetryTimer) clearInterval(this.wsDeliveryRetryTimer);
+    this.wsDeliveryRetryTimer = null;
     await this.closeGatewayWsResources?.();
   },
 };

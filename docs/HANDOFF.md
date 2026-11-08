@@ -1,5 +1,56 @@
 # HANDOFF
 
+## Technical debt fixes:0.0.52 candidate (2026-11-08)
+
+User authorized finishing confirmed debts T001–004 and repeated Firefox Inject
+(T058), milestone "Закрыть технический долг TellyMCP". Region remains screenshot-only.
+No running owner, production gateway or credentials were changed.
+
+Implemented:
+- SQLite connections reused per canonical workspace path, WAL/busy timeout,
+  one schema setup per cached handle; existing runtime shutdown closes the cache.
+- Xchange root must remain within the workspace. Writes/deletes reject symlink
+  roots/parents/leaves, including dangling links. Writers verify the open regular
+  file before truncating; unique allocation uses exclusive creation. These are
+  application-level checks, not a native OS sandbox for concurrent directory swaps.
+- Project enqueue is one transaction for message/artifacts/delivery. Optional
+  source-scoped request_id uses an advisory lock, fingerprint and unique index;
+  repeated keys replay the original receipt, changed payloads fail, calls without
+  a key remain independent. The key is supported only on queued project routes;
+  direct/local routes reject it. Additive schema migration handles existing tables.
+- Queue polling uses FOR UPDATE OF d/SKIP LOCKED and a60s lease in available_at.
+  Push and periodic5s retry drain use the same claim path, scoped to advertised
+  owner sessions. Local and remote owners sharing a client UUID are merged.
+  Missing targets fail retryably without ACK; late errors cannot overwrite an ACK.
+- Recipient coalesces concurrent delivery RPCs, persists notifying/complete tags,
+  preserves already-read records and never blindly repeats an uncertain terminal
+  notification after a crash. Such an outcome is reported as failed for inspection;
+  this is not a transactionally exactly-once PTY-input guarantee. Completion updates
+  only tags so an agent reading during notification stays read.
+- Firefox Inject helpers are block-scoped, repeated exports refresh and a custom
+  namespace no longer overwrites the default namespace. Firefox0.0.15; Chrome
+  remains0.0.15. No Picker behavior changes.
+
+Validation: build + lint passed. Full suite529 passed/2 skipped, including7 real
+PostgreSQL tests; subsequent queue/socket regressions38 passed after guarding late
+failure and merging owner routes. Integration tests use a random isolated schema,
+real ensuredb migration and a temporary PostgreSQL17 container, never production.
+Package-build CI now creates its own isolated PostgreSQL/network and cleans both
+by container/network ID. docs/tellymcp.gw.conf is a generic HTTP/TLS-termination
+example with the same limiter policy as nginx/tellymcp.gw.conf; nginx -t passed.
+CLI/Russian MCP routing docs and D-029 write/delete guarantees updated.
+
+Release preparation pending at this checkpoint: main CI, final package0.0.52,
+Mozilla unlisted signing of Firefox0.0.15, local CLI installation, final checksum
+inventory and Marrow reconciliation. Existing global CLI remains0.0.51 and production
+is gateway0.0.48. Both gateway and recipient owners need0.0.52 for queue fixes.
+No release tag or production deploy is authorized in this debt-closing step.
+
+Temporary isolated PostgreSQL container `tellymcp-debt-postgres-test` is still
+running for final checks; stop it before ending. Source owner must not be restarted
+while this conversation is active. Preflight hashes (session marker, env, Chrome
+key) are in ignored artifacts/release052/local-preflight.json.
+
 ## Public README refreshed for Git (2026-11-08)
 
 README.md now presents current0.0.51 features, gateway/client quick start, Live

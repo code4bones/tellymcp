@@ -203,6 +203,7 @@ export class LocalCollaborationBackend implements CollaborationBackend {
     input: SendPartnerNoteInput,
     resolved: ResolvedSessionDefaults,
   ): Promise<SendPartnerNoteOutput> {
+    if (input.request_id) throw new Error("request_id requires queued gateway project delivery");
     const sourceSession = await this.sessionStore.getSession(resolved.sessionId);
 
     if (!sourceSession) {

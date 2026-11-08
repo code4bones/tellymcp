@@ -10,7 +10,7 @@ Rules:
 - track open work and implementation status in Marrow project `tellymcp`
 - when a decision changes, update this file instead of layering contradictory docs on top
 
-Last updated: `2026-08-21`
+Last updated: `2026-11-08`
 
 ## Core Architecture
 
@@ -291,7 +291,9 @@ Status: accepted
 - arbitrary project paths are intentionally not enumerated by `get_file_list`; callers must already know the exact path
 - sensitive filenames, extensions, and directories are rejected on the client before file reads and uploads; path confinement is still verified after realpath resolution
 - `selector = "latest_screenshot"` resolves the newest screenshot from existing per-session file metadata when the human does not know its generated path
-- file access for `get_file`/`get_file_list` reads must stay within the selected session workspace after symlink resolution and remain subject to body-size limits; this realpath-based guarantee covers these read paths only — xchange write and delete paths (browser-recording writes, partner-artifact writes, `deleteXchangeFile`) are a separate, still lexical-only (`path.resolve`/`path.relative`) check, tracked as open finding H-06 in `docs/CODE_REVIEW_2026-07-13.md`
+- file access for `get_file`/`get_file_list` reads must stay within the selected session workspace after symlink resolution and remain subject to body-size limits
+- xchange writes/deletes resolve their exchange root within the workspace and reject symbolic links in the root, parent directories and file leaf; writers verify the opened regular file before truncation and use exclusive creation for unique filenames (H-06 fixed in0.0.52)
+- these application-level filesystem checks do not provide a native OS sandbox against concurrent directory replacement by another process
 - temporary gateway files expire after 10 minutes and download links allow a small bounded number of GET requests
 - client-provided temporary filenames are untrusted and sanitized to a safe basename before storage and `Content-Disposition`; control and filesystem-reserved characters are replaced
 

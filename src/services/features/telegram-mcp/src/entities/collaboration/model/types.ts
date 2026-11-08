@@ -16,6 +16,7 @@ export type PartnerArtifactRef = {
 };
 
 export type SendPartnerNoteInput = {
+  request_id?: string | undefined;
   session_id?: string | undefined;
   target_session_id?: string | undefined;
   target_client_uuid?: string | undefined;
@@ -32,6 +33,7 @@ export type SendPartnerNoteInput = {
 };
 
 export type SendPartnerFileInput = {
+  request_id?: string | undefined;
   session_id?: string | undefined;
   target_session_id?: string | undefined;
   target_client_uuid?: string | undefined;

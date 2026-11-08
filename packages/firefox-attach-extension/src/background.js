@@ -511,10 +511,10 @@ function buildTabActionCode(action, payload) {
       if (!source) {
         return { ok: false, error: "Script source is required." };
       }
-      const wrapped = "const __tellyNamespace=" + JSON.stringify(namespace)
-        + ";window[__tellyNamespace]=window[__tellyNamespace]||{};var TELLY=window[__tellyNamespace];const __tellyBeforeKeys=new Set(Object.getOwnPropertyNames(window));\\n"
+      const wrapped = "{const __tellyNamespace=" + JSON.stringify(namespace)
+        + ";window[__tellyNamespace]=window[__tellyNamespace]||{};const TELLY=window[__tellyNamespace];const __tellyBeforeKeys=new Set(Object.getOwnPropertyNames(window));\\n"
         + source
-        + "\\nfor(const __tellyKey of Object.getOwnPropertyNames(window)){if(__tellyBeforeKeys.has(__tellyKey)){continue;}if(__tellyKey===__tellyNamespace){continue;}try{window[__tellyNamespace][__tellyKey]=window[__tellyKey];}catch{}}";
+        + "\\nfor(const __tellyKey of Object.getOwnPropertyNames(window)){if(__tellyBeforeKeys.has(__tellyKey)&&!Object.prototype.hasOwnProperty.call(window[__tellyNamespace],__tellyKey)){continue;}if(__tellyKey===__tellyNamespace){continue;}try{window[__tellyNamespace][__tellyKey]=window[__tellyKey];}catch{}}}";
       const script = document.createElement("script");
       script.textContent = wrapped;
       (document.documentElement || document.head || document.body).appendChild(script);

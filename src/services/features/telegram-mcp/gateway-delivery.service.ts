@@ -14,7 +14,8 @@ import {
   buildIncomingTelegramMessageTools,
 } from "./src/shared/lib/xchangeRecordHints";
 import { writeXchangeRelativeFile } from "./src/shared/integrations/terminal/client";
-import { upsertXchangeRecord } from "./src/shared/integrations/xchange/sqliteRecordStore";
+import type { XchangeRecord } from "./src/entities/xchange/model/types";
+import { getXchangeRecord, updateXchangeRecordTags, upsertXchangeRecord } from "./src/shared/integrations/xchange/sqliteRecordStore";
 import type { OutgoingDeliveryNotice } from "./src/shared/api/storage/contract";
 import {
   assertBodySize,
@@ -70,6 +71,7 @@ type GatewayDeliveryStatus = {
 };
 
 type RuntimeCarrier = Service & {
+  pendingIncoming?: Map<string, Promise<void>>;
   runtimeService?: TelegramMcpRuntimeServiceInstance | null;
   getRuntimeOrThrow?: () => ReturnType<TelegramMcpRuntimeServiceInstance["getRuntime"]>;
   materializeIncomingDelivery?: (delivery: GatewayDelivery) => Promise<void>;
@@ -477,7 +479,10 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
             targetLocalSessionId: delivery.target_local_session_id,
           },
         );
-        return;
+        throw Object.assign(
+          new Error("Target local session is temporarily unavailable"),
+          { retryable: true },
+        );
       }
 
       const targetBinding = await runtime.bindingStore.getBinding(
@@ -493,7 +498,24 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
         );
       }
 
-      const workspaceDir = runtime.objectStore.resolveWorkspaceDir(targetSession);
+      const workspaceDir =
+        runtime.objectStore.resolveWorkspaceDir(targetSession);
+      const completeTag = "gateway-delivery-complete:" + delivery.delivery_uuid;
+      const notifyingTag =
+        "gateway-delivery-notifying:" + delivery.delivery_uuid;
+      const existing = await getXchangeRecord(
+        runtime.config.terminal,
+        workspaceDir,
+        runtime.config.exchange.dir,
+        targetSession.sessionId,
+        delivery.share_id,
+      );
+      if (existing?.status === "read" || existing?.tags.includes(completeTag))
+        return;
+      if (existing?.tags.includes(notifyingTag))
+        throw new Error(
+          "Delivery artifact is saved but notification outcome is uncertain; inspect the target console before retrying",
+        );
       const copiedArtifacts: string[] = [];
       for (const artifact of delivery.artifacts) {
         const relativePath =
@@ -553,7 +575,8 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
         mimeType: "text/markdown",
         sizeBytes: Buffer.byteLength(noteContent, "utf8"),
       });
-      const isTelegramHumanSource = delivery.source_client_uuid === "gateway-telegram";
+      const isTelegramHumanSource =
+        delivery.source_client_uuid === "gateway-telegram";
       const prefersFileDelivery = looksLikeFileDeliveryRequest({
         kind: delivery.kind,
         summary: delivery.summary,
@@ -572,7 +595,9 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
       });
       const actionDesc = isTelegramHumanSource
         ? buildIncomingTelegramMessageActionDesc(
-            delivery.kind as Parameters<typeof buildIncomingTelegramMessageActionDesc>[0],
+            delivery.kind as Parameters<
+              typeof buildIncomingTelegramMessageActionDesc
+            >[0],
             detectIncomingTelegramBrowserScreenshotRequest({
               kind: delivery.kind as Parameters<
                 typeof buildIncomingTelegramMessageActionDesc
@@ -584,95 +609,106 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
             }),
           )
         : buildIncomingPartnerActionDesc(
-            delivery.kind as Parameters<typeof buildIncomingPartnerActionDesc>[0],
+            delivery.kind as Parameters<
+              typeof buildIncomingPartnerActionDesc
+            >[0],
             delivery.requires_reply,
             prefersFileDelivery,
             prefersBrowserScreenshot,
           );
+      const incomingRecord: XchangeRecord = {
+        record_id: delivery.share_id,
+        session_id: targetSession.sessionId,
+        category: isTelegramHumanSource ? "telegram_message" : "partner_note",
+        direction: "incoming",
+        status: "new",
+        kind: delivery.kind,
+        summary: delivery.summary,
+        body_text: noteContent,
+        action_desc: actionDesc,
+        tools: isTelegramHumanSource
+          ? buildIncomingTelegramMessageTools(
+              delivery.kind as Parameters<
+                typeof buildIncomingTelegramMessageTools
+              >[0],
+              detectIncomingTelegramBrowserScreenshotRequest({
+                kind: delivery.kind as Parameters<
+                  typeof buildIncomingTelegramMessageTools
+                >[0],
+                text: delivery.message,
+                ...(delivery.summary.trim()
+                  ? { summary: delivery.summary.trim() }
+                  : {}),
+              }),
+            )
+          : buildIncomingPartnerTools(
+              delivery.kind as Parameters<typeof buildIncomingPartnerTools>[0],
+              delivery.requires_reply,
+              prefersFileDelivery,
+              prefersBrowserScreenshot,
+            ),
+        note_path: notePath,
+        note_relative_path: delivery.note_relative_path,
+        source_session_id: delivery.source_session_uuid,
+        source_label: delivery.source_session_label,
+        ...(delivery.source_client_uuid
+          ? { source_client_uuid: delivery.source_client_uuid }
+          : {}),
+        source_local_session_id: delivery.source_local_session_id,
+        target_session_id: delivery.target_session_uuid,
+        target_label: delivery.target_session_label,
+        ...(delivery.target_client_uuid
+          ? { target_client_uuid: delivery.target_client_uuid }
+          : {}),
+        target_local_session_id: delivery.target_local_session_id,
+        ...(delivery.project_uuid
+          ? { project_uuid: delivery.project_uuid }
+          : {}),
+        ...(delivery.project_name
+          ? { project_name: delivery.project_name }
+          : {}),
+        requires_reply: delivery.requires_reply,
+        ...(delivery.expected_reply
+          ? { expected_reply: delivery.expected_reply }
+          : {}),
+        ...(delivery.in_reply_to ? { in_reply_to: delivery.in_reply_to } : {}),
+        attachments: [
+          {
+            file_path: notePath,
+            relative_path: delivery.note_relative_path,
+            original_name: path.basename(delivery.note_relative_path),
+            mime_type: "text/markdown",
+            size_bytes: Buffer.byteLength(noteContent, "utf8"),
+          },
+          ...delivery.artifacts.map((artifact, index) => ({
+            file_path: copiedArtifacts[index] ?? artifact.original_name,
+            ...(artifact.relative_path
+              ? { relative_path: artifact.relative_path }
+              : {}),
+            original_name: artifact.original_name,
+            ...(artifact.mime_type ? { mime_type: artifact.mime_type } : {}),
+            ...(typeof artifact.size_bytes === "number"
+              ? { size_bytes: artifact.size_bytes }
+              : {}),
+            ...(artifact.storage_ref
+              ? { storage_ref: artifact.storage_ref }
+              : {}),
+          })),
+        ],
+        tags: [
+          "partner",
+          delivery.kind,
+          ...(delivery.project_uuid ? ["project"] : ["direct"]),
+          ...(delivery.requires_reply ? ["requires-reply"] : []),
+        ],
+        created_at: delivery.created_at,
+        updated_at: delivery.created_at,
+      };
       await upsertXchangeRecord(
         runtime.config.terminal,
         workspaceDir,
         runtime.config.exchange.dir,
-        {
-          record_id: delivery.share_id,
-          session_id: targetSession.sessionId,
-          category: isTelegramHumanSource ? "telegram_message" : "partner_note",
-          direction: "incoming",
-          status: "new",
-          kind: delivery.kind,
-          summary: delivery.summary,
-          body_text: noteContent,
-          action_desc: actionDesc,
-          tools: isTelegramHumanSource
-            ? buildIncomingTelegramMessageTools(
-                delivery.kind as Parameters<typeof buildIncomingTelegramMessageTools>[0],
-                detectIncomingTelegramBrowserScreenshotRequest({
-                  kind: delivery.kind as Parameters<
-                    typeof buildIncomingTelegramMessageTools
-                  >[0],
-                  text: delivery.message,
-                  ...(delivery.summary.trim()
-                    ? { summary: delivery.summary.trim() }
-                    : {}),
-                }),
-              )
-            : buildIncomingPartnerTools(
-                delivery.kind as Parameters<typeof buildIncomingPartnerTools>[0],
-                delivery.requires_reply,
-                prefersFileDelivery,
-                prefersBrowserScreenshot,
-              ),
-          note_path: notePath,
-          note_relative_path: delivery.note_relative_path,
-          source_session_id: delivery.source_session_uuid,
-          source_label: delivery.source_session_label,
-          ...(delivery.source_client_uuid
-            ? { source_client_uuid: delivery.source_client_uuid }
-            : {}),
-          source_local_session_id: delivery.source_local_session_id,
-          target_session_id: delivery.target_session_uuid,
-          target_label: delivery.target_session_label,
-          ...(delivery.target_client_uuid
-            ? { target_client_uuid: delivery.target_client_uuid }
-            : {}),
-          target_local_session_id: delivery.target_local_session_id,
-          ...(delivery.project_uuid ? { project_uuid: delivery.project_uuid } : {}),
-          ...(delivery.project_name ? { project_name: delivery.project_name } : {}),
-          requires_reply: delivery.requires_reply,
-          ...(delivery.expected_reply
-            ? { expected_reply: delivery.expected_reply }
-            : {}),
-          ...(delivery.in_reply_to ? { in_reply_to: delivery.in_reply_to } : {}),
-          attachments: [
-            {
-              file_path: notePath,
-              relative_path: delivery.note_relative_path,
-              original_name: path.basename(delivery.note_relative_path),
-              mime_type: "text/markdown",
-              size_bytes: Buffer.byteLength(noteContent, "utf8"),
-            },
-            ...delivery.artifacts.map((artifact, index) => ({
-              file_path: copiedArtifacts[index] ?? artifact.original_name,
-              ...(artifact.relative_path
-                ? { relative_path: artifact.relative_path }
-                : {}),
-              original_name: artifact.original_name,
-              ...(artifact.mime_type ? { mime_type: artifact.mime_type } : {}),
-              ...(typeof artifact.size_bytes === "number"
-                ? { size_bytes: artifact.size_bytes }
-                : {}),
-              ...(artifact.storage_ref ? { storage_ref: artifact.storage_ref } : {}),
-            })),
-          ],
-          tags: [
-            "partner",
-            delivery.kind,
-            ...(delivery.project_uuid ? ["project"] : ["direct"]),
-            ...(delivery.requires_reply ? ["requires-reply"] : []),
-          ],
-          created_at: delivery.created_at,
-          updated_at: delivery.created_at,
-        },
+        { ...incomingRecord, tags: [...incomingRecord.tags, notifyingTag] },
       );
 
       if (targetBinding && !isTelegramHumanSource) {
@@ -697,7 +733,9 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
               deliveryUuid: delivery.delivery_uuid,
               sessionId: targetSession.sessionId,
               error:
-                error instanceof Error ? (error.stack ?? error.message) : String(error),
+                error instanceof Error
+                  ? (error.stack ?? error.message)
+                  : String(error),
             },
           );
         }
@@ -715,9 +753,23 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
           deliveryUuid: delivery.delivery_uuid,
           sessionId: targetSession.sessionId,
           error:
-            error instanceof Error ? (error.stack ?? error.message) : String(error),
+            error instanceof Error
+              ? (error.stack ?? error.message)
+              : String(error),
         });
+        throw error;
       }
+      if (
+        !(await updateXchangeRecordTags(
+          runtime.config.terminal,
+          workspaceDir,
+          runtime.config.exchange.dir,
+          targetSession.sessionId,
+          delivery.share_id,
+          { add: [completeTag], remove: [notifyingTag] },
+        ))
+      )
+        throw new Error("Saved delivery record disappeared before completion");
 
       runtime.logger.info("Gateway delivery materialized locally", {
         deliveryUuid: delivery.delivery_uuid,
@@ -786,7 +838,15 @@ const TelegramMcpGatewayDeliveryService: ServiceSchema = {
         this: RuntimeCarrier,
         ctx: { params: { delivery: GatewayDelivery } },
       ) {
-        await this.materializeIncomingDelivery?.(ctx.params.delivery);
+        const pending=this.pendingIncoming ??= new Map();
+        const delivery=ctx.params.delivery;
+        const key=delivery.delivery_uuid+":"+delivery.target_local_session_id;
+        let operation=pending.get(key);
+        if(!operation) {
+          operation=this.materializeIncomingDelivery!(delivery);
+          pending.set(key,operation);
+        }
+        try {await operation;} finally {if(pending.get(key)===operation) pending.delete(key);}
         return { ok: true };
       },
     },

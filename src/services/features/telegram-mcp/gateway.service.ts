@@ -1,7 +1,8 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 
 import type { Service, ServiceSchema } from "moleculer";
+import type { Knex } from "knex";
 
 import { DBMixin } from "@src/lib/mixins/db";
 import type {
@@ -26,6 +27,28 @@ const GATEWAY_ENABLED =
 const INBOX_SYSTEM_PROJECT_UUID = "00000000-0000-0000-0000-00000000c001";
 const INBOX_SYSTEM_CLIENT_UUID = "00000000-0000-0000-0000-00000000c002";
 const INBOX_SYSTEM_SESSION_UUID = "00000000-0000-0000-0000-00000000c003";
+
+type GatewayQueueRow = {
+  delivery_uuid: string;
+  message_uuid: string;
+  project_uuid?: string;
+  project_name?: string;
+  source_actor_label?: string;
+  kind: string;
+  summary: string;
+  body: string;
+  expected_reply?: string;
+  requires_reply: boolean;
+  in_reply_to?: string;
+  meta: unknown;
+  created_at: string | Date;
+  source_session_uuid: string;
+  source_local_session_id: string;
+  source_session_label?: string;
+  target_session_uuid: string;
+  target_local_session_id: string;
+  target_session_label?: string;
+};
 
 type GatewayServiceCarrier = Service & {
   normalizeOptionalText?: (value: unknown) => string | null;
@@ -1030,7 +1053,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
       const inviteToken = randomUUID();
       const now = new Date().toISOString();
 
-      await this.db.transaction(async (trx) => {
+      await this.db.transaction(async (trx: Knex.Transaction) => {
         await trx.withSchema(MCP_SCHEMA).table("gateway_projects").insert({
           project_uuid: projectUuid,
           name,
@@ -1889,7 +1912,9 @@ const TelegramMcpGatewayService: ServiceSchema = {
         input.target_session_id,
         "target_session_id",
       );
-      const requestedProjectUuid = this.normalizeOptionalText?.(input.project_uuid);
+      const requestedProjectUuid = this.normalizeOptionalText?.(
+        input.project_uuid,
+      );
       const kind = this.requireText?.(input.kind, "kind");
       const summary = this.requireText?.(input.summary, "summary");
       const message = this.requireText?.(input.message, "message");
@@ -1903,7 +1928,11 @@ const TelegramMcpGatewayService: ServiceSchema = {
       const targetSession = await this.db
         .withSchema(MCP_SCHEMA)
         .table("gateway_project_consoles as pc")
-        .join("gateway_sessions as s", "s.session_uuid", "pc.gateway_session_uuid")
+        .join(
+          "gateway_sessions as s",
+          "s.session_uuid",
+          "pc.gateway_session_uuid",
+        )
         .leftJoin("gateway_clients as c", "c.client_uuid", "pc.client_uuid")
         .leftJoin("gateway_projects as p", "p.project_uuid", "pc.project_uuid")
         .where("pc.gateway_session_uuid", targetSessionId)
@@ -1924,14 +1953,18 @@ const TelegramMcpGatewayService: ServiceSchema = {
         .first();
 
       if (!targetSession) {
-        throw new Error(`Target project session ${targetSessionId} was not found.`);
+        throw new Error(
+          `Target project session ${targetSessionId} was not found.`,
+        );
       }
 
       if (
         requestedProjectUuid &&
         requestedProjectUuid !== String(targetSession.project_uuid)
       ) {
-        throw new Error("Target session does not belong to the requested project.");
+        throw new Error(
+          "Target session does not belong to the requested project.",
+        );
       }
 
       const sourceProjectConsole = await this.db
@@ -1954,7 +1987,9 @@ const TelegramMcpGatewayService: ServiceSchema = {
       const sourceSession = await this.db
         .withSchema(MCP_SCHEMA)
         .table("gateway_sessions")
-        .where({ session_uuid: String(sourceProjectConsole.gateway_session_uuid) })
+        .where({
+          session_uuid: String(sourceProjectConsole.gateway_session_uuid),
+        })
         .first();
 
       if (!sourceSession) {
@@ -1967,184 +2002,291 @@ const TelegramMcpGatewayService: ServiceSchema = {
       const messageUuid = randomUUID();
       const deliveryUuid = randomUUID();
       const now = new Date().toISOString();
-      const resolvedInReplyTo = await resolveGatewayInReplyTo(inReplyTo ?? undefined, {
-        findMessageUuidByMessageUuid: async (messageUuid) => {
-          const directReplyTarget = await this.db
-            .withSchema(MCP_SCHEMA)
-            .table("gateway_messages")
-            .where({ message_uuid: messageUuid })
-            .select("message_uuid")
-            .first();
+      const resolvedInReplyTo = await resolveGatewayInReplyTo(
+        inReplyTo ?? undefined,
+        {
+          findMessageUuidByMessageUuid: async (messageUuid) => {
+            const directReplyTarget = await this.db
+              .withSchema(MCP_SCHEMA)
+              .table("gateway_messages")
+              .where({ message_uuid: messageUuid })
+              .select("message_uuid")
+              .first();
 
-          return directReplyTarget?.message_uuid
-            ? String(directReplyTarget.message_uuid)
-            : undefined;
+            return directReplyTarget?.message_uuid
+              ? String(directReplyTarget.message_uuid)
+              : undefined;
+          },
+          findMessageUuidByShareId: async (shareId) => {
+            const shareReplyTarget = await this.db
+              .withSchema(MCP_SCHEMA)
+              .table("gateway_messages")
+              .whereRaw("meta->>'share_id' = ?", [shareId])
+              .select("message_uuid")
+              .orderBy("created_at", "desc")
+              .first();
+
+            return shareReplyTarget?.message_uuid
+              ? String(shareReplyTarget.message_uuid)
+              : undefined;
+          },
         },
-        findMessageUuidByShareId: async (shareId) => {
-          const shareReplyTarget = await this.db
-            .withSchema(MCP_SCHEMA)
-            .table("gateway_messages")
-            .whereRaw("meta->>'share_id' = ?", [shareId])
-            .select("message_uuid")
-            .orderBy("created_at", "desc")
-            .first();
+      );
 
-          return shareReplyTarget?.message_uuid
-            ? String(shareReplyTarget.message_uuid)
-            : undefined;
-        },
-      });
-
-      await this.db.withSchema(MCP_SCHEMA).table("gateway_messages").insert({
-        message_uuid: messageUuid,
-        project_uuid: String(targetSession.project_uuid),
-        from_session_uuid: sourceSession.session_uuid,
-        to_session_uuid: targetSession.session_uuid,
-        kind,
-        summary,
-        body: message,
-        ...(expectedReply ? { expected_reply: expectedReply } : {}),
-        ...(resolvedInReplyTo ? { in_reply_to: resolvedInReplyTo } : {}),
-        requires_reply: requiresReply,
-        meta: this.db.raw(`?::jsonb`, [JSON.stringify({ share_id: shareId })]),
-        created_at: now,
-      });
-
-      const artifactRefs = Array.isArray(input.artifact_refs)
-        ? (input.artifact_refs as PartnerArtifactRef[])
-        : [];
-      const usedArtifactNames = new Set<string>();
-      const queuedArtifacts: Array<{
-        artifact_uuid: string;
-        original_name: string;
-        mime_type?: string;
-        size_bytes?: number;
-        storage_ref?: string;
-        relative_path: string;
-        content_base64?: string;
-      }> = [];
-
-      for (const artifact of artifactRefs) {
-        const originalName =
-          trimOptionalText(artifact.original_name) ||
-          trimOptionalText(artifact.relative_path) ||
-          trimOptionalText(artifact.file_path) ||
-          "file";
-        const relativePath = allocateArtifactRelativePath(
-          shareId,
-          path.basename(originalName),
-          usedArtifactNames,
-        );
-        const mimeType = trimOptionalText(artifact.mime_type) ?? undefined;
-        const storageRef = trimOptionalText(artifact.storage_ref) ?? undefined;
-        const contentBase64 =
-          trimOptionalText(artifact.content_base64) ?? undefined;
-        const queuedArtifact = {
-          artifact_uuid: randomUUID(),
-          original_name: path.basename(originalName),
-          ...(mimeType ? { mime_type: mimeType } : {}),
-          ...(typeof artifact.size_bytes === "number"
-            ? { size_bytes: artifact.size_bytes }
-            : {}),
-          ...(storageRef ? { storage_ref: storageRef } : {}),
-          relative_path: relativePath,
-          ...(contentBase64 ? { content_base64: contentBase64 } : {}),
-        };
-        queuedArtifacts.push(queuedArtifact);
-
-        await this.db.withSchema(MCP_SCHEMA).table("gateway_message_artifacts").insert({
-          artifact_uuid: queuedArtifact.artifact_uuid,
-          message_uuid: messageUuid,
-          original_name: queuedArtifact.original_name,
-          ...(queuedArtifact.mime_type
-            ? { mime_type: queuedArtifact.mime_type }
-            : {}),
-          ...(typeof queuedArtifact.size_bytes === "number"
-            ? { size_bytes: queuedArtifact.size_bytes }
-            : {}),
-          ...(queuedArtifact.storage_ref
-            ? { storage_ref: queuedArtifact.storage_ref }
-            : {}),
-          relative_path: relativePath,
-          meta: this.db.raw(`?::jsonb`, [
-            JSON.stringify({
-              file_path: trimOptionalText(artifact.file_path),
-              relative_path: trimOptionalText(artifact.relative_path),
-              content_base64: trimOptionalText(artifact.content_base64),
-            }),
+      const requestKey = this.normalizeOptionalText?.(input.request_id);
+      if (requestKey && requestKey.length > 128)
+        throw new Error("request_id exceeds 128 characters");
+      const fingerprint = createHash("sha256")
+        .update(
+          JSON.stringify([
+            targetSession.session_uuid,
+            targetSession.project_uuid,
+            kind,
+            summary,
+            message,
+            expectedReply ?? null,
+            requiresReply,
+            resolvedInReplyTo ?? null,
+            (Array.isArray(input.artifact_refs) ? input.artifact_refs : []).map(
+              (ref: PartnerArtifactRef) => [
+                ref.file_path,
+                ref.relative_path,
+                ref.original_name,
+                ref.mime_type,
+                ref.size_bytes,
+                ref.storage_ref,
+                ref.content_base64,
+              ],
+            ),
           ]),
-          created_at: now,
-        });
-      }
+        )
+        .digest("hex");
+      return this.db.transaction(async (trx: Knex.Transaction) => {
+        if (requestKey) {
+          await trx.raw(
+            "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))",
+            [String(sourceSession.session_uuid) + ":" + requestKey],
+          );
+          const previous = await trx
+            .withSchema(MCP_SCHEMA)
+            .table("gateway_messages")
+            .where({
+              from_session_uuid: sourceSession.session_uuid,
+              request_key: requestKey,
+            })
+            .first();
+          if (previous) {
+            const meta = previous.meta;
+            if (
+              meta?.request_fingerprint !== fingerprint ||
+              !meta.enqueue_receipt
+            )
+              throw new Error(
+                "request_id was reused with different partner-note content",
+              );
+            const replay = structuredClone(
+              meta.enqueue_receipt,
+            ) as typeof receipt;
+            const storedArtifacts = await trx
+              .withSchema(MCP_SCHEMA)
+              .table("gateway_message_artifacts")
+              .where("message_uuid", previous.message_uuid)
+              .select("artifact_uuid", "meta");
+            for (const artifact of replay.delivery.artifacts) {
+              const stored = storedArtifacts.find(
+                (entry) => entry.artifact_uuid === artifact.artifact_uuid,
+              );
+              if (typeof stored?.meta?.content_base64 === "string")
+                artifact.content_base64 = stored.meta.content_base64;
+            }
+            return replay;
+          }
+        }
+        await trx
+          .withSchema(MCP_SCHEMA)
+          .table("gateway_messages")
+          .insert({
+            message_uuid: messageUuid,
+            ...(requestKey ? { request_key: requestKey } : {}),
+            project_uuid: String(targetSession.project_uuid),
+            from_session_uuid: sourceSession.session_uuid,
+            to_session_uuid: targetSession.session_uuid,
+            kind,
+            summary,
+            body: message,
+            ...(expectedReply ? { expected_reply: expectedReply } : {}),
+            ...(resolvedInReplyTo ? { in_reply_to: resolvedInReplyTo } : {}),
+            requires_reply: requiresReply,
+            meta: trx.raw(`?::jsonb`, [JSON.stringify({ share_id: shareId })]),
+            created_at: now,
+          });
 
-      await this.db.withSchema(MCP_SCHEMA).table("gateway_deliveries").insert({
-        delivery_uuid: deliveryUuid,
-        message_uuid: messageUuid,
-        target_client_uuid: targetSession.client_uuid,
-        target_session_uuid: targetSession.session_uuid,
-        status: "queued",
-        attempt_count: 0,
-        available_at: now,
-        created_at: now,
-      });
+        const artifactRefs = Array.isArray(input.artifact_refs)
+          ? (input.artifact_refs as PartnerArtifactRef[])
+          : [];
+        const usedArtifactNames = new Set<string>();
+        const queuedArtifacts: Array<{
+          artifact_uuid: string;
+          original_name: string;
+          mime_type?: string;
+          size_bytes?: number;
+          storage_ref?: string;
+          relative_path: string;
+          content_base64?: string;
+        }> = [];
 
-      return {
-        session_id: localSessionId,
-        partner_session_id: targetSession.session_uuid,
-        ...(targetSession.project_name
-          ? { project_name: targetSession.project_name }
-          : {}),
-        project_uuid: String(targetSession.project_uuid),
-        ...(targetSession.target_actor_label
-          ? { target_actor_label: targetSession.target_actor_label }
-          : {}),
-        ...(targetSession.label
-          ? { target_session_label: targetSession.label }
-          : {}),
-        kind: kind as SendPartnerNoteOutput["kind"],
-        share_id: shareId,
-        delivery_status: "queued",
-        note_path: `gateway://shares/${shareId}.md`,
-        xchange_record_id: shareId,
-        copied_artifacts: artifactRefs.map((artifact) =>
-          trimOptionalText(artifact.original_name) ||
-          trimOptionalText(artifact.relative_path) ||
-          trimOptionalText(artifact.file_path) ||
-          "file",
-        ),
-        inbox_message_id: deliveryUuid,
-        requires_reply: requiresReply,
-        delivery_uuid: deliveryUuid,
-        target_client_uuid: targetSession.client_uuid,
-        delivery: {
+        for (const artifact of artifactRefs) {
+          const originalName =
+            trimOptionalText(artifact.original_name) ||
+            trimOptionalText(artifact.relative_path) ||
+            trimOptionalText(artifact.file_path) ||
+            "file";
+          const relativePath = allocateArtifactRelativePath(
+            shareId,
+            path.basename(originalName),
+            usedArtifactNames,
+          );
+          const mimeType = trimOptionalText(artifact.mime_type) ?? undefined;
+          const storageRef =
+            trimOptionalText(artifact.storage_ref) ?? undefined;
+          const contentBase64 =
+            trimOptionalText(artifact.content_base64) ?? undefined;
+          const queuedArtifact = {
+            artifact_uuid: randomUUID(),
+            original_name: path.basename(originalName),
+            ...(mimeType ? { mime_type: mimeType } : {}),
+            ...(typeof artifact.size_bytes === "number"
+              ? { size_bytes: artifact.size_bytes }
+              : {}),
+            ...(storageRef ? { storage_ref: storageRef } : {}),
+            relative_path: relativePath,
+            ...(contentBase64 ? { content_base64: contentBase64 } : {}),
+          };
+          queuedArtifacts.push(queuedArtifact);
+
+          await trx
+            .withSchema(MCP_SCHEMA)
+            .table("gateway_message_artifacts")
+            .insert({
+              artifact_uuid: queuedArtifact.artifact_uuid,
+              message_uuid: messageUuid,
+              original_name: queuedArtifact.original_name,
+              ...(queuedArtifact.mime_type
+                ? { mime_type: queuedArtifact.mime_type }
+                : {}),
+              ...(typeof queuedArtifact.size_bytes === "number"
+                ? { size_bytes: queuedArtifact.size_bytes }
+                : {}),
+              ...(queuedArtifact.storage_ref
+                ? { storage_ref: queuedArtifact.storage_ref }
+                : {}),
+              relative_path: relativePath,
+              meta: trx.raw(`?::jsonb`, [
+                JSON.stringify({
+                  file_path: trimOptionalText(artifact.file_path),
+                  relative_path: trimOptionalText(artifact.relative_path),
+                  content_base64: trimOptionalText(artifact.content_base64),
+                }),
+              ]),
+              created_at: now,
+            });
+        }
+
+        await trx.withSchema(MCP_SCHEMA).table("gateway_deliveries").insert({
           delivery_uuid: deliveryUuid,
           message_uuid: messageUuid,
-          share_id: shareId,
+          target_client_uuid: targetSession.client_uuid,
+          target_session_uuid: targetSession.session_uuid,
+          status: "queued",
+          attempt_count: 0,
+          available_at: now,
+          created_at: now,
+        });
+
+        const receipt = {
+          session_id: localSessionId,
+          partner_session_id: targetSession.session_uuid,
           ...(targetSession.project_name
             ? { project_name: targetSession.project_name }
             : {}),
           project_uuid: String(targetSession.project_uuid),
-          source_actor_label:
-            sourceSession.label ?? sourceSession.local_session_id,
-          kind,
-          summary,
-          message,
-          ...(expectedReply ? { expected_reply: expectedReply } : {}),
+          ...(targetSession.target_actor_label
+            ? { target_actor_label: targetSession.target_actor_label }
+            : {}),
+          ...(targetSession.label
+            ? { target_session_label: targetSession.label }
+            : {}),
+          kind: kind as SendPartnerNoteOutput["kind"],
+          share_id: shareId,
+          delivery_status: "queued",
+          note_path: `gateway://shares/${shareId}.md`,
+          xchange_record_id: shareId,
+          copied_artifacts: artifactRefs.map(
+            (artifact) =>
+              trimOptionalText(artifact.original_name) ||
+              trimOptionalText(artifact.relative_path) ||
+              trimOptionalText(artifact.file_path) ||
+              "file",
+          ),
+          inbox_message_id: deliveryUuid,
           requires_reply: requiresReply,
-          ...(resolvedInReplyTo ? { in_reply_to: resolvedInReplyTo } : {}),
-          source_session_uuid: sourceSession.session_uuid,
-          source_session_label:
-            sourceSession.label ?? sourceSession.local_session_id,
-          source_local_session_id: sourceSession.local_session_id,
-          target_session_uuid: targetSession.session_uuid,
-          target_local_session_id: targetSession.local_session_id,
-          target_session_label:
-            targetSession.label ?? targetSession.local_session_id,
-          created_at: now,
-          note_relative_path: `shares/${shareId}.md`,
-          artifacts: queuedArtifacts,
-        },
-      };
+          delivery_uuid: deliveryUuid,
+          target_client_uuid: targetSession.client_uuid,
+          delivery: {
+            delivery_uuid: deliveryUuid,
+            message_uuid: messageUuid,
+            share_id: shareId,
+            ...(targetSession.project_name
+              ? { project_name: targetSession.project_name }
+              : {}),
+            project_uuid: String(targetSession.project_uuid),
+            source_actor_label:
+              sourceSession.label ?? sourceSession.local_session_id,
+            kind,
+            summary,
+            message,
+            ...(expectedReply ? { expected_reply: expectedReply } : {}),
+            requires_reply: requiresReply,
+            ...(resolvedInReplyTo ? { in_reply_to: resolvedInReplyTo } : {}),
+            source_session_uuid: sourceSession.session_uuid,
+            source_session_label:
+              sourceSession.label ?? sourceSession.local_session_id,
+            source_local_session_id: sourceSession.local_session_id,
+            target_session_uuid: targetSession.session_uuid,
+            target_local_session_id: targetSession.local_session_id,
+            target_session_label:
+              targetSession.label ?? targetSession.local_session_id,
+            created_at: now,
+            note_relative_path: `shares/${shareId}.md`,
+            artifacts: queuedArtifacts,
+          },
+        };
+        if (requestKey) {
+          const cachedReceipt = {
+            ...receipt,
+            delivery: {
+              ...receipt.delivery,
+              artifacts: receipt.delivery.artifacts.map(
+                ({ content_base64: _content, ...ref }) => ref,
+              ),
+            },
+          };
+          await trx
+            .withSchema(MCP_SCHEMA)
+            .table("gateway_messages")
+            .where("message_uuid", messageUuid)
+            .update({
+              meta: trx.raw("?::jsonb", [
+                JSON.stringify({
+                  share_id: shareId,
+                  request_fingerprint: fingerprint,
+                  enqueue_receipt: cachedReceipt,
+                }),
+              ]),
+            });
+        }
+        return receipt;
+      });
     },
 
     async ensureInboxSystemActorRecord(this: GatewayServiceCarrier): Promise<{
@@ -2262,7 +2404,7 @@ const TelegramMcpGatewayService: ServiceSchema = {
       let deliveryUuid = messageUuid;
       const now = new Date().toISOString();
 
-      await this.db.transaction(async (trx) => {
+      await this.db.transaction(async (trx: Knex.Transaction) => {
         await trx
           .withSchema(MCP_SCHEMA)
           .table("gateway_messages")
@@ -2331,130 +2473,189 @@ const TelegramMcpGatewayService: ServiceSchema = {
           ? Math.max(1, Math.min(50, Math.trunc(input.limit)))
           : 20;
 
-      const rows = await this.db
-        .withSchema(MCP_SCHEMA)
-        .table("gateway_deliveries as d")
-        .join("gateway_messages as m", "m.message_uuid", "d.message_uuid")
-        .join("gateway_projects as p", "p.project_uuid", "m.project_uuid")
-        .join("gateway_sessions as s_from", "s_from.session_uuid", "m.from_session_uuid")
-        .join("gateway_sessions as s_to", "s_to.session_uuid", "m.to_session_uuid")
-        .leftJoin("gateway_clients as c_from", "c_from.client_uuid", "s_from.client_uuid")
-        .where("d.target_client_uuid", clientUuid)
-        .where("d.status", "queued")
-        .where("d.available_at", "<=", this.db.fn.now())
-        .select(
-          "d.delivery_uuid",
-          "d.message_uuid",
-          "p.project_uuid",
-          "m.kind",
-          "m.summary",
-          "m.body",
-          "m.expected_reply",
-          "m.requires_reply",
-          "m.in_reply_to",
-          "m.meta",
-          "m.created_at",
-          "p.name as project_name",
-          this.db.raw(
-            "coalesce(nullif(c_from.meta->>'telegram_display_name', ''), nullif(c_from.meta->>'telegram_username', ''), c_from.client_label, c_from.bot_username) as source_actor_label",
-          ),
-          "s_from.session_uuid as source_session_uuid",
-          "s_from.local_session_id as source_local_session_id",
-          "s_from.label as source_session_label",
-          "s_to.session_uuid as target_session_uuid",
-          "s_to.local_session_id as target_local_session_id",
-          "s_to.label as target_session_label",
-        )
-        .orderBy("m.created_at", "asc")
-        .limit(limit);
-
-      const messageIds = rows.map((row) => row.message_uuid);
-      const artifactRows = messageIds.length
-        ? await this.db
+      return this.db.transaction(async (trx: Knex.Transaction) => {
+        const rows: GatewayQueueRow[] = await trx
+          .table(`${MCP_SCHEMA}.gateway_deliveries as d`)
+          .join(
+            `${MCP_SCHEMA}.gateway_messages as m`,
+            "m.message_uuid",
+            "d.message_uuid",
+          )
+          .join(
+            `${MCP_SCHEMA}.gateway_projects as p`,
+            "p.project_uuid",
+            "m.project_uuid",
+          )
+          .join(
+            `${MCP_SCHEMA}.gateway_sessions as s_from`,
+            "s_from.session_uuid",
+            "m.from_session_uuid",
+          )
+          .join(
+            `${MCP_SCHEMA}.gateway_sessions as s_to`,
+            "s_to.session_uuid",
+            "m.to_session_uuid",
+          )
+          .leftJoin(
+            `${MCP_SCHEMA}.gateway_clients as c_from`,
+            "c_from.client_uuid",
+            "s_from.client_uuid",
+          )
+          .where("d.target_client_uuid", clientUuid)
+          .where("d.status", "queued")
+          .modify((query) => {
+            if (Array.isArray(input.delivery_ids))
+              query.whereIn("d.delivery_uuid", input.delivery_ids as string[]);
+            if (Array.isArray(input.local_session_ids))
+              query.whereIn(
+                "s_to.local_session_id",
+                input.local_session_ids as string[],
+              );
+          })
+          .where("d.available_at", "<=", trx.fn.now())
+          .select(
+            "d.delivery_uuid",
+            "d.message_uuid",
+            "p.project_uuid",
+            "m.kind",
+            "m.summary",
+            "m.body",
+            "m.expected_reply",
+            "m.requires_reply",
+            "m.in_reply_to",
+            "m.meta",
+            "m.created_at",
+            "p.name as project_name",
+            trx.raw(
+              "coalesce(nullif(c_from.meta->>'telegram_display_name', ''), nullif(c_from.meta->>'telegram_username', ''), c_from.client_label, c_from.bot_username) as source_actor_label",
+            ),
+            "s_from.session_uuid as source_session_uuid",
+            "s_from.local_session_id as source_local_session_id",
+            "s_from.label as source_session_label",
+            "s_to.session_uuid as target_session_uuid",
+            "s_to.local_session_id as target_local_session_id",
+            "s_to.label as target_session_label",
+          )
+          .orderBy("m.created_at", "asc")
+          .limit(limit)
+          .forUpdate("d")
+          .skipLocked();
+        if (rows.length) {
+          await trx
             .withSchema(MCP_SCHEMA)
-            .table("gateway_message_artifacts")
-            .whereIn("message_uuid", messageIds)
-            .select(
-              "artifact_uuid",
-              "message_uuid",
-              "original_name",
-              "mime_type",
-              "size_bytes",
-              "storage_ref",
-              "relative_path",
-              "meta",
+            .table("gateway_deliveries")
+            .whereIn(
+              "delivery_uuid",
+              rows.map((row) => row.delivery_uuid),
             )
-            .orderBy("created_at", "asc")
-        : [];
+            .update({
+              available_at: trx.raw("now() + interval '60 seconds'"),
+              attempt_count: trx.raw("attempt_count + 1"),
+            });
+        }
 
-      const artifactsByMessage = new Map<string, Array<{
-        artifact_uuid: string;
-        original_name: string;
-        mime_type?: string;
-        size_bytes?: number;
-        storage_ref?: string;
-        relative_path?: string;
-        content_base64?: string;
-      }>>();
+        const messageIds = rows.map((row) => row.message_uuid);
+        const artifactRows = messageIds.length
+          ? await trx
+              .withSchema(MCP_SCHEMA)
+              .table("gateway_message_artifacts")
+              .whereIn("message_uuid", messageIds)
+              .select(
+                "artifact_uuid",
+                "message_uuid",
+                "original_name",
+                "mime_type",
+                "size_bytes",
+                "storage_ref",
+                "relative_path",
+                "meta",
+              )
+              .orderBy("created_at", "asc")
+          : [];
 
-      for (const artifact of artifactRows) {
-        const meta =
-          artifact.meta && typeof artifact.meta === "object" ? artifact.meta : {};
-        const list = artifactsByMessage.get(artifact.message_uuid) ?? [];
-        list.push({
-          artifact_uuid: artifact.artifact_uuid,
-          original_name: artifact.original_name,
-          ...(artifact.mime_type ? { mime_type: artifact.mime_type } : {}),
-          ...(typeof artifact.size_bytes === "number"
-            ? { size_bytes: Number(artifact.size_bytes) }
-            : {}),
-          ...(artifact.storage_ref ? { storage_ref: artifact.storage_ref } : {}),
-          ...(artifact.relative_path ? { relative_path: artifact.relative_path } : {}),
-          ...(typeof (meta as { content_base64?: unknown }).content_base64 === "string"
-            ? {
-                content_base64: (meta as { content_base64: string }).content_base64,
-              }
-            : {}),
-        });
-        artifactsByMessage.set(artifact.message_uuid, list);
-      }
+        const artifactsByMessage = new Map<
+          string,
+          Array<{
+            artifact_uuid: string;
+            original_name: string;
+            mime_type?: string;
+            size_bytes?: number;
+            storage_ref?: string;
+            relative_path?: string;
+            content_base64?: string;
+          }>
+        >();
 
-      return {
-        deliveries: rows.map((row) => {
-          const meta = row.meta && typeof row.meta === "object" ? row.meta : {};
-          const shareId =
-            typeof (meta as { share_id?: unknown }).share_id === "string"
-              ? (meta as { share_id: string }).share_id
-              : row.message_uuid;
-          return {
-            delivery_uuid: row.delivery_uuid,
-            message_uuid: row.message_uuid,
-            share_id: shareId,
-            ...(row.project_uuid ? { project_uuid: row.project_uuid } : {}),
-            ...(row.project_name ? { project_name: row.project_name } : {}),
-            ...(row.source_actor_label
-              ? { source_actor_label: row.source_actor_label }
+        for (const artifact of artifactRows) {
+          const meta =
+            artifact.meta && typeof artifact.meta === "object"
+              ? artifact.meta
+              : {};
+          const list = artifactsByMessage.get(artifact.message_uuid) ?? [];
+          list.push({
+            artifact_uuid: artifact.artifact_uuid,
+            original_name: artifact.original_name,
+            ...(artifact.mime_type ? { mime_type: artifact.mime_type } : {}),
+            ...(typeof artifact.size_bytes === "number"
+              ? { size_bytes: Number(artifact.size_bytes) }
               : {}),
-            kind: row.kind,
-            summary: row.summary,
-            message: row.body,
-            ...(row.expected_reply ? { expected_reply: row.expected_reply } : {}),
-            requires_reply: Boolean(row.requires_reply),
-            ...(row.in_reply_to ? { in_reply_to: row.in_reply_to } : {}),
-            source_session_uuid: row.source_session_uuid,
-            source_session_label:
-              row.source_session_label ?? row.source_local_session_id,
-            source_local_session_id: row.source_local_session_id,
-            target_session_uuid: row.target_session_uuid,
-            target_local_session_id: row.target_local_session_id,
-            target_session_label:
-              row.target_session_label ?? row.target_local_session_id,
-            created_at: String(row.created_at),
-            note_relative_path: `shares/${shareId}.md`,
-            artifacts: artifactsByMessage.get(row.message_uuid) ?? [],
-          };
-        }),
-      };
+            ...(artifact.storage_ref
+              ? { storage_ref: artifact.storage_ref }
+              : {}),
+            ...(artifact.relative_path
+              ? { relative_path: artifact.relative_path }
+              : {}),
+            ...(typeof (meta as { content_base64?: unknown }).content_base64 ===
+            "string"
+              ? {
+                  content_base64: (meta as { content_base64: string })
+                    .content_base64,
+                }
+              : {}),
+          });
+          artifactsByMessage.set(artifact.message_uuid, list);
+        }
+
+        return {
+          deliveries: rows.map((row) => {
+            const meta =
+              row.meta && typeof row.meta === "object" ? row.meta : {};
+            const shareId =
+              typeof (meta as { share_id?: unknown }).share_id === "string"
+                ? (meta as { share_id: string }).share_id
+                : row.message_uuid;
+            return {
+              delivery_uuid: row.delivery_uuid,
+              message_uuid: row.message_uuid,
+              share_id: shareId,
+              ...(row.project_uuid ? { project_uuid: row.project_uuid } : {}),
+              ...(row.project_name ? { project_name: row.project_name } : {}),
+              ...(row.source_actor_label
+                ? { source_actor_label: row.source_actor_label }
+                : {}),
+              kind: row.kind,
+              summary: row.summary,
+              message: row.body,
+              ...(row.expected_reply
+                ? { expected_reply: row.expected_reply }
+                : {}),
+              requires_reply: Boolean(row.requires_reply),
+              ...(row.in_reply_to ? { in_reply_to: row.in_reply_to } : {}),
+              source_session_uuid: row.source_session_uuid,
+              source_session_label:
+                row.source_session_label ?? row.source_local_session_id,
+              source_local_session_id: row.source_local_session_id,
+              target_session_uuid: row.target_session_uuid,
+              target_local_session_id: row.target_local_session_id,
+              target_session_label:
+                row.target_session_label ?? row.target_local_session_id,
+              created_at: String(row.created_at),
+              note_relative_path: `shares/${shareId}.md`,
+              artifacts: artifactsByMessage.get(row.message_uuid) ?? [],
+            };
+          }),
+        };
+      });
     },
 
     async ackDeliveriesRecord(
@@ -2526,40 +2727,66 @@ const TelegramMcpGatewayService: ServiceSchema = {
         throw new Error("delivery_ids must contain at least one id");
       }
 
-      const rows = await this.db
-        .withSchema(MCP_SCHEMA)
-        .table("gateway_deliveries as d")
-        .join("gateway_messages as m", "m.message_uuid", "d.message_uuid")
-        .join("gateway_sessions as s_from", "s_from.session_uuid", "m.from_session_uuid")
-        .where("d.target_client_uuid", clientUuid)
-        .whereIn("d.delivery_uuid", deliveryIds)
-        .select(
-          "d.delivery_uuid",
-          "d.delivered_at",
-          "d.acked_at",
-          "s_from.client_uuid as source_client_uuid",
-          this.db.raw(`coalesce(m.meta->>'share_id', '') as share_id`),
-        );
+      if (input.retryable === true) {
+        const retrying = await this.db
+          .withSchema(MCP_SCHEMA)
+          .table("gateway_deliveries")
+          .where("target_client_uuid", clientUuid)
+          .whereIn("delivery_uuid", deliveryIds)
+          .where("status", "queued")
+          .update({
+            available_at: this.db.raw("now() + interval '5 seconds'"),
+            last_error: errorText ?? "Target temporarily unavailable",
+          });
+        return { failed: 0, retrying, deliveries: [] };
+      }
 
-      const updated = await this.db
+      // A late failed attempt must never overwrite a successful ACK.
+      const changed = await this.db
         .withSchema(MCP_SCHEMA)
         .table("gateway_deliveries")
         .where("target_client_uuid", clientUuid)
         .whereIn("delivery_uuid", deliveryIds)
+        .where("status", "queued")
         .update({
           status: "failed",
           ...(errorText ? { last_error: errorText } : {}),
           acked_at: new Date().toISOString(),
-        });
+        })
+        .returning("delivery_uuid");
+      const rows = changed.length
+        ? await this.db
+            .withSchema(MCP_SCHEMA)
+            .table("gateway_deliveries as d")
+            .join("gateway_messages as m", "m.message_uuid", "d.message_uuid")
+            .join(
+              "gateway_sessions as s_from",
+              "s_from.session_uuid",
+              "m.from_session_uuid",
+            )
+            .whereIn(
+              "d.delivery_uuid",
+              changed.map((row) => row.delivery_uuid),
+            )
+            .select(
+              "d.delivery_uuid",
+              "d.delivered_at",
+              "d.acked_at",
+              "s_from.client_uuid as source_client_uuid",
+              this.db.raw(`coalesce(m.meta->>'share_id', '') as share_id`),
+            )
+        : [];
 
       return {
-        failed: updated,
+        failed: changed.length,
         deliveries: rows.map((row) => ({
           delivery_uuid: row.delivery_uuid,
           share_id: String(row.share_id || ""),
           status: "failed",
           source_client_uuid: row.source_client_uuid,
-          ...(row.delivered_at ? { delivered_at: String(row.delivered_at) } : {}),
+          ...(row.delivered_at
+            ? { delivered_at: String(row.delivered_at) }
+            : {}),
           acked_at: new Date().toISOString(),
         })),
       };

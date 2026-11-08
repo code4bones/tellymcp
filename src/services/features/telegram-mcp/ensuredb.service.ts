@@ -437,6 +437,7 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
           table.uuid("project_uuid").notNullable();
           table.uuid("from_session_uuid").notNullable();
           table.uuid("to_session_uuid").notNullable();
+          table.text("request_key");
           table.text("kind").notNullable();
           table.text("summary").notNullable();
           table.text("body").notNullable();
@@ -471,6 +472,15 @@ const TelegramMcpEnsureDbService: ServiceSchema = {
           table.index(["to_session_uuid", "created_at"], "gateway_messages_target_idx");
         });
       }
+
+      if (!(await this.db.schema.withSchema(MCP_SCHEMA).hasColumn("gateway_messages", "request_key"))) {
+        await this.db.schema.withSchema(MCP_SCHEMA).alterTable("gateway_messages", (table) => {
+          table.text("request_key");
+        });
+      }
+
+      await this.db.raw("CREATE UNIQUE INDEX IF NOT EXISTS ?? ON ??.?? (??, ??)",
+        ["gateway_messages_request_key_unique", MCP_SCHEMA, "gateway_messages", "from_session_uuid", "request_key"]);
 
       if (!(await this.db.schema.withSchema(MCP_SCHEMA).hasTable("gateway_message_artifacts"))) {
         await this.db.schema

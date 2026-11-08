@@ -39,6 +39,7 @@ type GatewayServiceMethods = {
 
 type GatewayServiceHarness = {
   db: {
+    transaction: <T>(callback: (db: GatewayServiceHarness["db"]) => Promise<T>) => Promise<T>;
     fn: { now: () => string };
     raw: (sql: string, values: unknown[]) => { sql: string; values: unknown[] };
     withSchema: (schema: string) => {
@@ -100,8 +101,9 @@ function createHarness(rowsByTable: Record<string, QueryRow[]>): GatewayServiceH
     tableName: "",
   };
 
-  return {
+  const harness: GatewayServiceHarness = {
     db: {
+      transaction: async callback => callback(harness.db),
       fn: {
         now: () => "now()",
       },
@@ -115,6 +117,7 @@ function createHarness(rowsByTable: Record<string, QueryRow[]>): GatewayServiceH
     sendPartnerNoteRecord: methods.sendPartnerNoteRecord,
     __state: state,
   };
+  return harness;
 }
 
 describe("gateway service sendPartnerNoteRecord", () => {

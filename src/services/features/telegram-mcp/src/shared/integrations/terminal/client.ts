@@ -1,14 +1,14 @@
 import {
-  access,
-  appendFile,
+  lstat,
   mkdir,
+  open,
   realpath,
   readdir,
   readFile,
   rm,
   stat,
-  writeFile,
 } from "node:fs/promises";
+import { constants } from "node:fs";
 import path from "node:path";
 import { assertBodySize, MAX_BODY_SIZE_BYTES } from "../../lib/bodyLimits";
 
@@ -112,6 +112,98 @@ function resolvePathInsideRoot(rootDir: string, relativePath: string): string {
   return resolvedPath;
 }
 
+function isMissing(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException)?.code === "ENOENT";
+}
+
+function assertContained(root: string, candidate: string): void {
+  const relative = path.relative(root, candidate);
+  if (
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  )
+    throw new Error("File path is outside the exchange directory.");
+}
+
+async function ensureContainedDirectory(
+  root: string,
+  relative: string,
+): Promise<string> {
+  let current = root;
+  for (const segment of relative
+    .split(path.sep)
+    .filter((part) => part && part !== ".")) {
+    const candidate = path.resolve(current, segment);
+    assertContained(root, candidate);
+    try {
+      await mkdir(candidate);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") throw error;
+    }
+    const info = await lstat(candidate);
+    if (info.isSymbolicLink() || !info.isDirectory())
+      throw new Error(
+        "Exchange directories must be real directories, not symbolic links.",
+      );
+    current = await realpath(candidate);
+    assertContained(root, current);
+  }
+  return current;
+}
+
+export async function resolveXchangePathForWrite(
+  config: TerminalRuntimeConfig,
+  workspaceDir: string,
+  exchangeDirName: string,
+  relativePath: string,
+): Promise<string> {
+  const root = await ensureXchangeDir(config, workspaceDir, exchangeDirName);
+  const candidate = resolvePathInsideRoot(root, relativePath);
+  const parent = await ensureContainedDirectory(
+    root,
+    path.relative(root, path.dirname(candidate)),
+  );
+  const output = path.join(parent, path.basename(candidate));
+  try {
+    if ((await lstat(output)).isSymbolicLink())
+      throw new Error("Exchange files must not be symbolic links.");
+  } catch (error) {
+    if (!isMissing(error)) throw error;
+  }
+  return output;
+}
+
+async function writeContainedFile(
+  root: string,
+  output: string,
+  content: Uint8Array,
+  append = false,
+  exclusive = false,
+): Promise<void> {
+  const flags =
+    constants.O_WRONLY |
+    constants.O_CREAT |
+    constants.O_NOFOLLOW |
+    (append ? constants.O_APPEND : 0) |
+    (exclusive ? constants.O_EXCL : 0);
+  const file = await open(output, flags, 0o600);
+  try {
+    const info = await file.stat();
+    if (!info.isFile())
+      throw new Error("Exchange path must be a regular file.");
+    const canonical = await realpath(output);
+    assertContained(root, canonical);
+    const current = await stat(canonical);
+    if (current.dev !== info.dev || current.ino !== info.ino)
+      throw new Error("Exchange file changed while opening it.");
+    if (!append) await file.truncate(0);
+    await file.writeFile(content);
+  } finally {
+    await file.close();
+  }
+}
+
 function resolvePathInsideWorkspace(
   workspaceDir: string,
   filePath: string,
@@ -147,8 +239,9 @@ async function allocateAvailableFilePath(
     const candidatePath = path.join(dir, candidateName);
 
     try {
-      await access(candidatePath);
-    } catch {
+      await lstat(candidatePath);
+    } catch (error) {
+      if (!isMissing(error)) throw error;
       return candidatePath;
     }
   }
@@ -169,9 +262,14 @@ export async function ensureXchangeDir(
   workspaceDir: string,
   exchangeDirName: string,
 ): Promise<string> {
-  const resolvedDir = path.resolve(workspaceDir, exchangeDirName);
-  await mkdir(resolvedDir, { recursive: true });
-  return resolvedDir;
+  const workspace = path.resolve(workspaceDir);
+  const resolvedDir = path.resolve(workspace, exchangeDirName);
+  assertContained(workspace, resolvedDir);
+  await mkdir(workspace, { recursive: true });
+  return ensureContainedDirectory(
+    await realpath(workspace),
+    path.relative(workspace, resolvedDir),
+  );
 }
 
 export async function writeXchangeFile(
@@ -182,9 +280,16 @@ export async function writeXchangeFile(
   content: Uint8Array,
 ): Promise<string> {
   const dir = await ensureXchangeDir(config, workspaceDir, exchangeDirName);
-  const outputPath = await allocateAvailableFilePath(dir, fileName);
-  await writeFile(outputPath, content);
-  return outputPath;
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    const outputPath = await allocateAvailableFilePath(dir, fileName);
+    try {
+      await writeContainedFile(dir, outputPath, content, false, true);
+      return outputPath;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") throw error;
+    }
+  }
+  throw new Error("Could not allocate a unique exchange file.");
 }
 
 export async function writeXchangeRelativeFile(
@@ -198,14 +303,13 @@ export async function writeXchangeRelativeFile(
   },
 ): Promise<string> {
   const dir = await ensureXchangeDir(config, workspaceDir, exchangeDirName);
-  const outputPath = resolvePathInsideRoot(dir, relativePath);
-  await mkdir(path.dirname(outputPath), { recursive: true });
-
-  if (options?.append) {
-    await appendFile(outputPath, content);
-  } else {
-    await writeFile(outputPath, content);
-  }
+  const outputPath = await resolveXchangePathForWrite(
+    config,
+    workspaceDir,
+    exchangeDirName,
+    relativePath,
+  );
+  await writeContainedFile(dir, outputPath, content, options?.append);
 
   return outputPath;
 }
@@ -262,6 +366,18 @@ export async function deleteXchangeFile(
     throw new Error("File path is outside the exchange directory.");
   }
 
+  let current = dir;
+  for (const segment of relative.split(path.sep)) {
+    current = path.join(current, segment);
+    try {
+      if ((await lstat(current)).isSymbolicLink())
+        throw new Error("Cannot delete through an exchange symbolic link.");
+      assertContained(dir, await realpath(current));
+    } catch (error) {
+      if (isMissing(error)) return true;
+      throw error;
+    }
+  }
   await rm(resolvedFilePath, { force: true });
   return true;
 }

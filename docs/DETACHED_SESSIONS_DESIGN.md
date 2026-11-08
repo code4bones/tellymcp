@@ -1,9 +1,10 @@
 # Detached sessions in TellyMCP
 
 Status: stage-1 accepted; Linux local owner and public CLI implemented under review,
-updated 2026-11-07.
+updated 2026-11-07. This document preserves the original design; current package,
+attachment behavior and deployment status are recorded in [HANDOFF](HANDOFF.md).
 Branch: `feature/detached-sessions`, merged with `main` at `13a14e0` in
-`b34bb74`. Current package baseline: `0.0.43`; the original `0.0.38` baseline
+`b34bb74`. Design implementation baseline: `0.0.43`; the original `0.0.38` baseline
 is historical. Local commands and Telegram-code remote attach are implemented
 in source; real deployment/release acceptance remains pending.
 

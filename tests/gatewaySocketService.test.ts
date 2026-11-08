@@ -72,6 +72,8 @@ type GatewaySocketMethods = {
     clientUuid: string;
     delivery: GatewaySocketDelivery;
   }) => Promise<boolean>;
+  dispatchClaimedDelivery: GatewaySocketMethods["notifyDeliveryQueued"];
+  drainQueuedDeliveries: (this: unknown) => Promise<void>;
   notifyDeliveryStatus: (params: {
     clientUuid: string;
     status: GatewaySocketDeliveryStatus;
@@ -132,6 +134,7 @@ type GatewaySocketHarness = {
   notifyLiveApprovalRequest: GatewaySocketMethods["notifyLiveApprovalRequest"];
   notifyLiveApprovalResolved: GatewaySocketMethods["notifyLiveApprovalResolved"];
   notifyDeliveryQueued: GatewaySocketMethods["notifyDeliveryQueued"];
+  dispatchClaimedDelivery: GatewaySocketMethods["notifyDeliveryQueued"];
   notifyDeliveryStatus: GatewaySocketMethods["notifyDeliveryStatus"];
 };
 
@@ -216,11 +219,72 @@ function createHarness(): GatewaySocketHarness {
     notifyLiveApprovalRequest: methods.notifyLiveApprovalRequest,
     notifyLiveApprovalResolved: methods.notifyLiveApprovalResolved,
     notifyDeliveryQueued: methods.notifyDeliveryQueued,
+    dispatchClaimedDelivery: methods.dispatchClaimedDelivery,
     notifyDeliveryStatus: methods.notifyDeliveryStatus,
   };
 }
 
 describe("gatewaySocket service", () => {
+  it("claims queued push once and skips a duplicate already leased elsewhere", async () => {
+    const harness=createHarness();const delivery=createDelivery();
+    const socket={readyState:1,send:vi.fn()};
+    harness.connectedClients.set(socket,{client_uuid:"target-client",session_tools:[{local_session_id:delivery.target_local_session_id}]});
+    harness.broker.call.mockResolvedValueOnce({deliveries:[delivery]}).mockResolvedValueOnce({deliveries:[]});
+    expect(await harness.notifyDeliveryQueued({clientUuid:"target-client",delivery})).toBe(true);
+    expect(await harness.notifyDeliveryQueued({clientUuid:"target-client",delivery})).toBe(false);
+    expect(socket.send).toHaveBeenCalledTimes(1);
+    expect(harness.broker.call).toHaveBeenCalledWith("telegramMcp.gateway.pollDeliveries",expect.objectContaining({client_uuid:"target-client",delivery_ids:[delivery.delivery_uuid],local_session_ids:[delivery.target_local_session_id]}),{meta:{internal_call:true}});
+  });
+  it("does not ACK missing sessions and forwards retryability", async () => {
+    const harness=createHarness();harness.broker.call.mockRejectedValueOnce(Object.assign(new Error("target unavailable"),{retryable:true}));
+    await expect(harness.handleGatewayWsClientMessage(JSON.stringify({type:"delivery_event",payload:createDelivery()}))).rejects.toThrow("target unavailable");
+    const messages=harness.wsClient!.send.mock.calls.map(([value])=>JSON.parse(String(value)));
+    expect(messages.some(message=>message.type==="delivery_ack")).toBe(false);
+    expect(messages).toContainEqual(expect.objectContaining({type:"delivery_fail",retryable:true}));
+  });
+  it("periodically drains only advertised owners and coalesces overlapping drain runs",async()=>{
+    const harness=createHarness();const delivery=createDelivery();const socket={readyState:1,send:vi.fn()};
+    harness.connectedClients.set(socket,{client_uuid:"target-client",session_tools:[{local_session_id:delivery.target_local_session_id}]});
+    const runtime={...harness.getRuntimeOrThrow(),maintenanceStore:{getGatewayClientUuid:async()=>null}};
+    const carrier={...harness,getRuntimeOrThrow:()=>runtime};
+    harness.broker.call.mockResolvedValue({deliveries:[delivery]});
+    const drain=methods.drainQueuedDeliveries;
+    await Promise.all([drain.call(carrier),drain.call(carrier)]);
+    expect(socket.send).toHaveBeenCalledTimes(1);
+    expect(harness.broker.call).toHaveBeenCalledTimes(1);
+  });
+  it("merges local and socket owners sharing one client identity", async () => {
+    const harness = createHarness();
+    const socket = { readyState: 1, send: vi.fn() };
+    harness.connectedClients.set(socket, {
+      client_uuid: "shared-client",
+      session_tools: [{ local_session_id: "remote-owner" }],
+    });
+    const runtime = {
+      ...harness.getRuntimeOrThrow(),
+      maintenanceStore: { getGatewayClientUuid: async () => "shared-client" },
+      sessionStore: { listSessions: async () => [{ sessionId: "local-owner", terminalTarget: "pty:local-owner" }] },
+    };
+    harness.broker.call.mockResolvedValue({ deliveries: [] });
+    await methods.drainQueuedDeliveries.call({ ...harness, getRuntimeOrThrow: () => runtime });
+    expect(harness.broker.call).toHaveBeenCalledWith(
+      "telegramMcp.gateway.pollDeliveries",
+      { client_uuid: "shared-client", local_session_ids: ["remote-owner", "local-owner"], limit: 50 },
+      { meta: { internal_call: true } },
+    );
+  });
+  it("starts and clears the gateway retry timer",async()=>{
+    vi.useFakeTimers();
+    try {
+      const drain=vi.fn(async()=>{});const runtime={config:{distributed:{mode:"gateway"}},logger:{warn:vi.fn()}};
+      const carrier={broker:{waitForServices:vi.fn(async()=>{}),getLocalService:()=>({waitUntilReady:async()=>runtime})},startGatewayWsServer:vi.fn(async()=>{}),drainQueuedDeliveries:drain,closeGatewayWsResources:vi.fn(async()=>{})};
+      await (GatewaySocketService.started as (this: unknown) => Promise<void>).call(carrier);
+      await vi.advanceTimersByTimeAsync(5000);expect(drain).toHaveBeenCalledTimes(1);
+      await (GatewaySocketService.stopped as (this: unknown) => Promise<void>).call(carrier);
+      await vi.advanceTimersByTimeAsync(10000);expect(drain).toHaveBeenCalledTimes(1);
+    }finally {vi.useRealTimers();}
+  });
+
   it("delivers a client agent notification through the gateway Telegram route", async () => {
     const harness = createHarness();
     const socket = { readyState: 1, send: vi.fn() };
@@ -783,8 +847,9 @@ describe("gatewaySocket service", () => {
       send: remoteSend,
     });
     harness.handleLocalIncomingDelivery.mockResolvedValue(true);
+    harness.isLocalGatewayClientUuid.mockResolvedValue(true);
 
-    const published = await harness.notifyDeliveryQueued({
+    const published = await harness.dispatchClaimedDelivery({
       clientUuid: "remote-client",
       delivery,
     });
@@ -811,7 +876,7 @@ describe("gatewaySocket service", () => {
     });
     harness.connectedClientsByUuid.set("remote-client", socket);
 
-    const published = await harness.notifyDeliveryQueued({
+    const published = await harness.dispatchClaimedDelivery({
       clientUuid: "remote-client",
       delivery,
     });
@@ -829,7 +894,7 @@ describe("gatewaySocket service", () => {
   it("returns false for queued delivery when no local or remote target is available", async () => {
     const harness = createHarness();
 
-    const published = await harness.notifyDeliveryQueued({
+    const published = await harness.dispatchClaimedDelivery({
       clientUuid: "offline-client",
       delivery: createDelivery(),
     });

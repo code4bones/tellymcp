@@ -4,6 +4,15 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.52 (local candidate)
+
+- Make queued project delivery atomic, retryable and duplicate-aware. Gateway
+  and recipient owners must be updated to load both sides of these fixes.
+- Reuse SQLite connections and confine exchange writes/deletes to real paths
+  within the workspace.
+- Firefox0.0.15 allows repeated Inject and independent custom namespaces.
+  Chrome remains0.0.15; Picker behavior is unchanged.
+
 ## 0.0.51 (local build)
 
 - Chrome0.0.15 / Firefox0.0.14 use **Ctrl+click** to select Elements or toggle

@@ -566,6 +566,8 @@ Purpose:
 
 Input:
 
+- `request_id?` — retry key for queued project delivery only; reuse with identical
+  content. Direct live routes reject this field.
 - `session_id?`
 - `target_session_id?`
 - `target_client_uuid?`

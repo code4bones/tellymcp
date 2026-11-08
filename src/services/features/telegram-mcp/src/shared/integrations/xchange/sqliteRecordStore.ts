@@ -1,4 +1,3 @@
-import path from "node:path";
 import { DatabaseSync } from "../../lib/sqlite";
 
 import type {
@@ -7,7 +6,7 @@ import type {
   XchangeRecordDirection,
   XchangeRecordStatus,
 } from "../../../entities/xchange/model/types";
-import { ensureXchangeDir } from "../terminal/client";
+import { resolveXchangePathForWrite } from "../terminal/client";
 import type { TerminalRuntimeConfig } from "../terminal/client";
 
 type JsonAttachment = XchangeRecord["attachments"];
@@ -54,6 +53,23 @@ type RowRecord = {
 };
 
 const DB_FILE_NAME = "xchange.sqlite3";
+const connections = new Map<string, DatabaseSync>();
+
+/** Runtime shutdown owns connection cleanup; callbacks below are synchronous. */
+export function closeAllXchangeConnections(): void {
+  const databases = [...connections.values()];
+  connections.clear();
+  const errors: unknown[] = [];
+  for (const db of databases) {
+    try {
+      db.close();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length)
+    throw new AggregateError(errors, "Failed to close xchange connections");
+}
 
 function parseJson<T>(raw: string | null, fallback: T): T {
   if (!raw?.trim()) {
@@ -80,16 +96,26 @@ function toRecord(row: RowRecord): XchangeRecord {
     action_desc: row.action_desc,
     tools: parseJson<JsonStringArray>(row.tools_json, []),
     ...(row.note_path ? { note_path: row.note_path } : {}),
-    ...(row.note_relative_path ? { note_relative_path: row.note_relative_path } : {}),
-    ...(row.source_session_id ? { source_session_id: row.source_session_id } : {}),
+    ...(row.note_relative_path
+      ? { note_relative_path: row.note_relative_path }
+      : {}),
+    ...(row.source_session_id
+      ? { source_session_id: row.source_session_id }
+      : {}),
     ...(row.source_label ? { source_label: row.source_label } : {}),
-    ...(row.source_client_uuid ? { source_client_uuid: row.source_client_uuid } : {}),
+    ...(row.source_client_uuid
+      ? { source_client_uuid: row.source_client_uuid }
+      : {}),
     ...(row.source_local_session_id
       ? { source_local_session_id: row.source_local_session_id }
       : {}),
-    ...(row.target_session_id ? { target_session_id: row.target_session_id } : {}),
+    ...(row.target_session_id
+      ? { target_session_id: row.target_session_id }
+      : {}),
     ...(row.target_label ? { target_label: row.target_label } : {}),
-    ...(row.target_client_uuid ? { target_client_uuid: row.target_client_uuid } : {}),
+    ...(row.target_client_uuid
+      ? { target_client_uuid: row.target_client_uuid }
+      : {}),
     ...(row.target_local_session_id
       ? { target_local_session_id: row.target_local_session_id }
       : {}),
@@ -113,8 +139,12 @@ async function resolveDbPath(
   workspaceDir: string,
   exchangeDirName: string,
 ): Promise<string> {
-  const dir = await ensureXchangeDir(config, workspaceDir, exchangeDirName);
-  return path.join(dir, DB_FILE_NAME);
+  return resolveXchangePathForWrite(
+    config,
+    workspaceDir,
+    exchangeDirName,
+    DB_FILE_NAME,
+  );
 }
 
 function applySchema(db: DatabaseSync): void {
@@ -168,14 +198,19 @@ async function withDatabase<T>(
   callback: (db: DatabaseSync) => T,
 ): Promise<T> {
   const dbPath = await resolveDbPath(config, workspaceDir, exchangeDirName);
-  const db = new DatabaseSync(dbPath);
-
-  try {
-    applySchema(db);
-    return callback(db);
-  } finally {
-    db.close();
+  let db = connections.get(dbPath);
+  if (!db) {
+    db = new DatabaseSync(dbPath);
+    try {
+      db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL;");
+      applySchema(db);
+      connections.set(dbPath, db);
+    } catch (error) {
+      db.close();
+      throw error;
+    }
   }
+  return callback(db);
 }
 
 export async function upsertXchangeRecord(
@@ -185,7 +220,8 @@ export async function upsertXchangeRecord(
   record: XchangeRecord,
 ): Promise<void> {
   await withDatabase(config, workspaceDir, exchangeDirName, (db) => {
-    db.prepare(`
+    db.prepare(
+      `
       INSERT OR REPLACE INTO xchange_records (
         record_id, session_id, category, direction, status, kind, summary, body_text, action_desc,
         tools_json, note_path, note_relative_path, source_session_id, source_label,
@@ -199,7 +235,8 @@ export async function upsertXchangeRecord(
         @target_client_uuid, @target_local_session_id, @project_uuid, @project_name, @requires_reply,
         @expected_reply, @in_reply_to, @attachments_json, @tags_json, @created_at, @updated_at, @read_at
       )
-    `).run({
+    `,
+    ).run({
       record_id: record.record_id,
       session_id: record.session_id,
       category: record.category,
@@ -284,13 +321,50 @@ export async function getXchangeRecord(
   recordId: string,
 ): Promise<XchangeRecord | null> {
   return withDatabase(config, workspaceDir, exchangeDirName, (db) => {
-    const row = db.prepare(`
+    const row = db
+      .prepare(
+        `
       SELECT * FROM xchange_records
       WHERE session_id = ? AND record_id = ?
       LIMIT 1
-    `).get(sessionId, recordId) as RowRecord | undefined;
+    `,
+      )
+      .get(sessionId, recordId) as RowRecord | undefined;
 
     return row ? toRecord(row) : null;
+  });
+}
+
+/** Update delivery bookkeeping without resetting a concurrently read record. */
+export async function updateXchangeRecordTags(
+  config: TerminalRuntimeConfig,
+  workspaceDir: string,
+  exchangeDirName: string,
+  sessionId: string,
+  recordId: string,
+  change: { add: string[]; remove: string[] },
+): Promise<boolean> {
+  return withDatabase(config, workspaceDir, exchangeDirName, (db) => {
+    const row = db
+      .prepare(
+        "SELECT tags_json FROM xchange_records WHERE record_id = ? AND session_id = ?",
+      )
+      .get(recordId, sessionId) as { tags_json: string } | undefined;
+    if (!row) return false;
+    const tags = [
+      ...new Set([
+        ...parseJson<string[]>(row.tags_json, []).filter(
+          (tag) => !change.remove.includes(tag),
+        ),
+        ...change.add,
+      ]),
+    ];
+    const result = db
+      .prepare(
+        "UPDATE xchange_records SET tags_json = ?, updated_at = ? WHERE record_id = ? AND session_id = ?",
+      )
+      .run(JSON.stringify(tags), new Date().toISOString(), recordId, sessionId);
+    return (result.changes ?? 0) > 0;
   });
 }
 
@@ -303,11 +377,15 @@ export async function markXchangeRecordRead(
   readAt: string = new Date().toISOString(),
 ): Promise<boolean> {
   return withDatabase(config, workspaceDir, exchangeDirName, (db) => {
-    const result = db.prepare(`
+    const result = db
+      .prepare(
+        `
       UPDATE xchange_records
       SET status = 'read', updated_at = ?, read_at = COALESCE(read_at, ?)
       WHERE session_id = ? AND record_id = ?
-    `).run(readAt, readAt, sessionId, recordId);
+    `,
+      )
+      .run(readAt, readAt, sessionId, recordId);
 
     return (result.changes ?? 0) > 0;
   });

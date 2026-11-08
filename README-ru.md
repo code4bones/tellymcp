@@ -210,7 +210,7 @@ gateway HTTP/WebSocket и опционального RabbitMQ.
 Запуск:
 
 ```bash
-tellymcp run --env .env
+tellymcp run --env .env-gateway
 ```
 
 ### 2. Agent
@@ -312,8 +312,7 @@ SSH/cgroup, настоящие TUI агентов и remote attach требую�
 
 ### Attach терминалом через шлюз
 
-В Telegram открой Live нужной сессии и нажми **Attach** рядом с **Открыть в
-браузере**. Владельцу придёт личное сообщение с одноразовым восьмизначным кодом
+В Telegram открой Live нужной сессии и нажми **Attach** рядом с **Link**. Владельцу придёт личное сообщение с одноразовым восьмизначным кодом
 на пять минут и готовой командой для другой машины:
 
 ```bash
@@ -339,11 +338,12 @@ Ctrl+], затем d отключает только этот терминал, 
 
 ### AI Picker в подключённом браузере
 
-В Chrome0.0.15 и Firefox0.0.14 есть **Element / Region / Mark elements** и команда
+В Chrome0.0.15 и Firefox0.0.15 есть **Element / Region / Mark elements** и команда
 **Alt+Shift+P**. Подключи расширение к консоли в Control Panel. **Ctrl+клик**
 выбирает элемент или переключает метку; обычный клик работает на странице,
 позволяя сначала открыть popup. В Region область выделяется обычным
-перетаскиванием. Локальный кадр сохраняется при выборе без маскирования;
+перетаскиванием и служит только для скриншота, без сбора DOM. Для отправки
+содержимого Region включи Snapshot. Локальный кадр сохраняется при выборе без маскирования;
 **Snapshot** включает его превью и отправку (изначально выключен). **Send**
 запрашивает ответ в консоли, **Ctrl+Send** — также в браузере через
 `inspector_response`; при Ctrl кнопка Send зелёная на hover. Исходная консоль
@@ -429,19 +429,20 @@ TELEGRAM_WEBHOOK_SECRET=change_me_webhook_secret
 
 ### Local HTTP
 
-В client mode локальный MCP endpoint обычно:
+Для обычного gateway-first запуска используй MCP endpoint шлюза:
 
 ```text
-http://127.0.0.1:8787/mcp
+https://example.com/api/mcp
 ```
 
 Helper:
 
 ```bash
-tellymcp mcp --url http://127.0.0.1:8787/mcp
+tellymcp mcp --url https://example.com/api/mcp
 ```
 
-Для Codex и похожих агентов используй MCP HTTP endpoint, который поднимает `tellymcp run`.
+Интерактивный `tellymcp run` не открывает локальный MCP HTTP listener. Локальный
+порт8787 относится к отдельно настроенному standalone/dev runtime.
 
 ## Codex Plugin
 

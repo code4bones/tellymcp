@@ -604,6 +604,9 @@ export class GatewayHttpService {
           typeof input.target_session_id === "string" &&
           input.target_session_id.trim().length > 0;
 
+        if (input.request_id && !useQueuedGatewayDelivery)
+          throw new Error("request_id idempotency is supported for queued project delivery only");
+
         const output = useDirectGatewayDelivery
           ? await this.callBroker(
               "telegramMcp.gatewaySocket.sendDirectPartnerNote",

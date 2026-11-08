@@ -27,6 +27,7 @@ import {
   ensureTerminalTargetForSession,
 } from "../../shared/integrations/terminal/client";
 import { stopAllPtyTargets } from "../../shared/integrations/terminal/ptyRegistry";
+import { closeAllXchangeConnections } from "../../shared/integrations/xchange/sqliteRecordStore";
 import type {
   MaintenanceStore,
   SessionStore,
@@ -352,6 +353,7 @@ export async function createAppRuntime(input: {
       await browserAttachServer.stop();
       await telegramTransport.stop();
       stopAllPtyTargets();
+      closeAllXchangeConnections();
       redis?.disconnect();
       await closeTellyProxyAgents();
       logger.info("Shutdown completed");

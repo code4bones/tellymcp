@@ -712,6 +712,7 @@ export const browserCloseOutputSchema = z.object({
 });
 
 export const sendPartnerNoteInputSchema = z.object({
+  request_id: z.string().trim().min(1).max(128).describe("Idempotency key for queued project delivery; reuse on retries. Direct routes reject this field.").optional(),
   session_id: z.string().trim().min(1).optional(),
   target_session_id: z.string().trim().min(1).optional(),
   target_client_uuid: z.string().trim().min(1).optional(),
@@ -740,6 +741,7 @@ export const sendPartnerNoteInputSchema = z.object({
 });
 
 export const sendPartnerFileInputSchema = z.object({
+  request_id: z.string().trim().min(1).max(128).describe("Idempotency key for queued project delivery; reuse on retries. Direct routes reject this field.").optional(),
   session_id: z.string().trim().min(1).optional(),
   target_session_id: z.string().trim().min(1).optional(),
   target_client_uuid: z.string().trim().min(1).optional(),

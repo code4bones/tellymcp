@@ -351,9 +351,9 @@ function printMcpHelp(): void {
   printSection("What you need", [
     "  1. Terminal live view and nudges use the built-in PTY runtime.",
     "  2. Your MCP endpoint depends on mode:",
-    "     - client/local: http://127.0.0.1:8787/mcp",
-    "     - gateway/both behind nginx: https://your-host.example/api/mcp",
-    "  3. For local and remote agents, use the MCP HTTP endpoint exposed by tellymcp run.",
+    "     - normal gateway-first setup: https://your-host.example/api/mcp",
+    "     - standalone/development listener, when configured: http://127.0.0.1:8787/mcp",
+    "  3. Interactive tellymcp run does not open a local MCP HTTP listener.",
   ]);
   printSection("Claude / modern streamable-http example", [
     "{",

@@ -270,3 +270,10 @@ Use `--no-open` on a headless machine and open the printed URL through an
 appropriate local tunnel. The configurator does not bind to a public interface.
 Browser downloads do not guarantee Unix permissions, so set mode `0600` on the
 downloaded dotenv before starting TellyMCP.
+
+## Exchange file confinement (0.0.52)
+
+`MCP_XCHANGE_DIR` must resolve inside the console workspace. File writes and
+removals reject symbolic links in the exchange root, intermediate directories
+or final file. A workspace itself may be reached through an alias; it is
+canonicalized before resolving exchange files. Existing read confinement remains.

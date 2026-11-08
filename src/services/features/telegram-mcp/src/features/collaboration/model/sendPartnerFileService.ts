@@ -121,6 +121,7 @@ export class SendPartnerFileService {
     const mimeType = lookupMimeType(originalName) || "application/octet-stream";
 
     const note: SendPartnerNoteInput = {
+      ...(input.request_id ? {request_id: input.request_id} : {}),
       session_id: sessionId,
       ...(input.target_session_id?.trim()
         ? { target_session_id: input.target_session_id.trim() }

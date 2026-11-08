@@ -18,8 +18,8 @@ Open a live console, send a question, attach another terminal, or select browser
 content and ask the agent about it. Agents can also exchange tasks and files
 through MCP, with artifacts saved in the owning workspace.
 
-Current source versions: **TellyMCP 0.0.51**, **Chrome extension 0.0.15**,
-**Firefox extension 0.0.14**. The npm badge shows the published package version;
+Current source versions: **TellyMCP 0.0.52**, **Chrome extension 0.0.15**,
+**Firefox extension 0.0.15**. The npm badge shows the published package version;
 to use the current checkout, see [Build from source](#build-from-source).
 
 ## What you can do
@@ -371,6 +371,13 @@ the record read after the required reply succeeds. Picker artifacts specify
 whether a browser reply is requested; console-only requests finish after the
 answer is written in the agent conversation.
 
+Queued project deliveries in0.0.52 use atomic enqueue, leased claims and
+persistent recipient bookkeeping. For a retryable project request, reuse the
+same optional `request_id` with `send_partner_note` or `send_partner_file`;
+changed content with the same key is rejected. This key applies to the queued
+project route; direct live routes reject it. Upgrade both gateway and owners to
+load the delivery fixes.
+
 ## Webhook mode
 
 The gateway supports polling and webhooks. To use a webhook behind a reverse
@@ -397,7 +404,7 @@ git clone https://github.com/code4bones/tellymcp.git
 cd tellymcp
 yarn install --frozen-lockfile
 npm pack
-npm install -g ./deadragdoll-tellymcp-0.0.51.tgz
+npm install -g ./deadragdoll-tellymcp-0.0.52.tgz
 ```
 
 Use the archive filename printed by `npm pack` for your checkout's version.

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.0.52 — 2026-11-08 (local candidate)
+## 0.0.52 — 2026-11-09
 
 - Enqueue project messages, attachments and delivery rows in one transaction.
   Optional request_id provides source-scoped retry deduplication and rejects

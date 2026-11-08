@@ -4,7 +4,7 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
-## 0.0.52 (local candidate)
+## 0.0.52
 
 - Make queued project delivery atomic, retryable and duplicate-aware. Gateway
   and recipient owners must be updated to load both sides of these fixes.

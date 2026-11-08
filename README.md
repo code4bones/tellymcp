@@ -339,14 +339,16 @@ does not replace code in an already running owner.
 
 ### AI Picker in the attached browser
 
-Chrome0.0.11 and Firefox0.0.10 provide **Element / Region / Mark elements** and an
-**Alt+Shift+P** command. Attach a tab to a console in the existing Control Panel,
+Chrome0.0.12 and Firefox0.0.11 provide **Element / Region / Mark elements** and an
+**Alt+Shift+P** command. Connect the extension to a console in the Control Panel,
 select and review content, optionally capture a cropped preview, then choose
 **Explain / Ask**. The owning console saves an artifact and notifies its agent;
-the agent answers in its conversation and through `inspector_response`.
+the agent answers in its conversation and through `inspector_response`. The
+source tab is automatically attached on Ask/Explain, with confirmation from the
+console before delivery; no manual tab attachment is needed.
 Mark elements toggles whole DOM containers and sends only group selectors and
 the question; the agent reads their live contents with `browser_dom(all=true)`.
-Automatic delivery and Marks require0.0.46 gateway/owner builds, an owner restart
+Automatic tab attachment requires0.0.47 owner builds, an owner restart
 and reloaded extensions. No separate AI provider or agent is started. Live
 selection state expires after five minutes; saved artifacts remain available.
 Use Esc or Forget to clear the live state. See [scope and implementation](docs/AI_PICKER_EXTENSION.md#13-карта-реализации-mvp-2026-11-08).

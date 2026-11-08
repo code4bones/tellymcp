@@ -36,6 +36,24 @@ const inspectorDelivery = globalThis.tellyInspector.createDelivery((message) => 
 });
 const inspectorBridge = globalThis.tellyInspector.createBridge({
   submit: (tabId, context) => inspectorDelivery.submit(tabId, context),
+  attach: async (tabId) => {
+    const currentSocket = socket;
+    const tab = await browser.tabs.get(tabId);
+    const record = {
+      tab_id: tabId,
+      window_id: tab.windowId,
+      active: tab.active === true,
+      title: tab.title || "",
+      url: tab.url || "",
+      status: tab.status || "",
+    };
+    const result = await inspectorDelivery.attach(record);
+    if (!result.ok) return result;
+    if (socket !== currentSocket || socket?.readyState !== WebSocket.OPEN)
+      return { ok: false, error: "Console connection changed. Retry the selection." };
+    await setAttachedTab(record);
+    return result;
+  },
   tab: (tabId) => browser.tabs.get(tabId),
   active: async () =>
     (await browser.tabs.query({ active: true, currentWindow: true }))[0],
@@ -1023,7 +1041,7 @@ async function handleMessage(rawData) {
 
   switch (message.type) {
     case "hello_ack":
-      inspectorDelivery.bind(message.capabilities?.includes("picker_delivery") === true, message.capabilities?.includes("picker_marks") === true);
+      inspectorDelivery.bind(message.capabilities?.includes("picker_delivery") === true, message.capabilities?.includes("picker_marks") === true, message.capabilities?.includes("picker_auto_attach") === true);
       inspectorBridge.bind(message.session_id || "", message.instance_id, message.session_label || "");
       await setConnectionStatus({
         state: "connected",
@@ -1087,6 +1105,7 @@ async function handleMessage(rawData) {
       });
       return;
     }
+    case "attach_tab_selected_result":
     case "picker_submit_result":
       inspectorDelivery.receive(message);
       return;

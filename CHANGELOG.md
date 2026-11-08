@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.0.47 — 2026-11-08
+
+- Skip Telegram SDK loading for direct-token browser Live links, avoiding a
+  parser-blocking dependency on telegram.org. Load the SDK asynchronously for
+  Mini App authentication with a ten-second limit and actionable failure text.
+- Automatically attach the source Picker tab on Ask/Explain for Element, Region
+  and Marks. Await the owner's persisted attachment ACK before submitting the
+  selection; gate the protocol on picker_auto_attach capability and reject
+  changed/disconnected sources. Manual Control Panel attachment remains available.
+
 ## 0.0.46 — 2026-11-08
 
 - Arrange Telegram Live as Fullscreen | Expand | Default, Link | Attach, Back.

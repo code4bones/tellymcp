@@ -124,6 +124,7 @@ export const firefoxAttachInboundMessageSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("attach_tab_selected"),
     tab: firefoxAttachTabRecordSchema,
+    request_id: requestId.optional(),
   }),
   z.strictObject({
     type: z.literal("tab_removed"),
@@ -346,6 +347,7 @@ export type FirefoxAttachInboundMessage = z.infer<
 >;
 
 export type FirefoxAttachOutboundMessage =
+  | { type: "attach_tab_selected_result"; request_id: string; ok: boolean; error?: string }
   | FirefoxAttachHelloAck
   | FirefoxAttachListTabsRequest
   | FirefoxAttachGetActiveTabRequest

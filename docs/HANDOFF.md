@@ -1,5 +1,32 @@
 # HANDOFF
 
+## Follow-up0.0.47: browser Live and Picker auto-attachment (2026-11-08)
+
+**T-TELLYMCP-052** follows the user's Chrome/Firefox diagnosis and request to
+remove manual tab attachment. Source/runtime0.0.47, Chrome0.0.12, Firefox0.0.11.
+Direct Live tokens in query or hash skip Telegram SDK initialization entirely;
+Mini App startup loads the SDK asynchronously before authorization/launch mode,
+with an explicit ten-second failure instead of an indefinite parser stall.
+The old page had a synchronous head script on telegram.org: public gateway health
+was200 directly, Telegram SDK timed out directly and returned200 via the configured
+proxy. This explains Firefox-with-proxy vs Chrome-without-proxy behavior.
+
+Picker Ask/Explain in all three modes validates sender/context, requests automatic
+attachment using the existing attach_tab_selected event with a unique request ID,
+and waits for attach_tab_selected_result after owner persistence. Only then does
+it set local attachment, cache context and submit for artifact delivery. New
+picker_auto_attach capability prevents optimistic use against old owners. Failed
+attachment, changed source or disconnect cannot continue delivery. Agent artifacts
+retain exact browser instance/tab IDs. Auto-attachment selects that browser target
+for the console and may invalidate another tab's previous live Picker.
+
+Validation: local full suite492 passed,2 skipped (78 files); build/typecheck/lint
+pass. Real Chromium fixtures prove browser bootstrap/WS without telegram.org and
+all three Mini App launch modes. Real owner socket checks ACK-after-persistence;
+tests cover all Picker modes, attachment failure/disconnect and old-owner gating.
+Packaging/rollout are in progress; production remains0.0.46 until verified below.
+Preserve the active Test Attach owner; installing the package does not reload it.
+
 ## Production0.0.46 deployed (2026-11-08)
 
 Authoritative current state; earlier implementation/candidate notes below describe

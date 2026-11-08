@@ -85,14 +85,24 @@ function createElement() {
   };
 }
 
-function createWebAppHarness() {
+function createWebAppHarness(
+  href = "https://example.test/telegram-mcp/webapp",
+) {
   const elements = new Map<string, ReturnType<typeof createElement>>();
+  const script = {
+    src: "",
+    async: false,
+    onload: null,
+    onerror: null,
+    remove: vi.fn(),
+  };
+  const appendChild = vi.fn();
   const windowObject = {
     __TELEGRAM_MCP_WEBAPP__: {
       basePath: "/telegram-mcp/webapp",
       liveWsPath: "/telegram-mcp/webapp/api/live/ws",
     },
-    location: { href: "https://example.test/telegram-mcp/webapp" },
+    location: { href },
     addEventListener: vi.fn(),
     setTimeout,
     localStorage: { getItem: vi.fn(), setItem: vi.fn() },
@@ -101,6 +111,8 @@ function createWebAppHarness() {
     /\nmain\(\);\n$/u,
     `\nglobalThis.__webAppTestHooks = {
       state,
+      initializeTelegram,
+      bootstrap,
       fitTerminal,
       renderTerminalPayload,
       connectLiveSocket,
@@ -109,10 +121,13 @@ function createWebAppHarness() {
   );
   const context = vm.createContext({
     URL,
+    URLSearchParams,
     WebSocket: FakeWebSocket,
     clearTimeout,
     console,
     document: {
+      createElement: () => script,
+      head: { appendChild },
       querySelector(selector: string) {
         const existing = elements.get(selector);
         if (existing) {
@@ -129,10 +144,12 @@ function createWebAppHarness() {
   });
   vm.runInContext(source, context);
 
-  return (
+  const hooks = (
     context as unknown as {
       __webAppTestHooks: {
         state: WebAppTestState;
+        initializeTelegram: () => Promise<void>;
+        bootstrap: () => Promise<unknown>;
         fitTerminal: (notifyServer?: boolean) => void;
         renderTerminalPayload: (
           payload: Record<string, unknown>,
@@ -142,6 +159,7 @@ function createWebAppHarness() {
       };
     }
   ).__webAppTestHooks;
+  return { ...hooks, script, appendChild, context };
 }
 
 afterEach(() => {
@@ -150,6 +168,64 @@ afterEach(() => {
 });
 
 describe("Telegram WebApp live console assets", () => {
+  it.each(["?token=browser-token", "#token=browser-token"])(
+    "bootstraps a browser link without requesting the Telegram SDK (%s)",
+    async (suffix) => {
+      const hooks = createWebAppHarness(
+        "https://example.test/telegram-mcp/webapp" + suffix,
+      );
+      const fetch = vi
+        .fn()
+        .mockResolvedValue({
+          ok: true,
+          json: async () => ({ token: "session-token" }),
+        });
+      hooks.context.fetch = fetch;
+      await hooks.initializeTelegram();
+      await hooks.bootstrap();
+      expect(hooks.appendChild).not.toHaveBeenCalled();
+      expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+        directToken: "browser-token",
+      });
+    },
+  );
+
+  it("loads the SDK before Mini App authentication", async () => {
+    const hooks = createWebAppHarness();
+    const loading = hooks.initializeTelegram();
+    expect(hooks.appendChild).toHaveBeenCalledWith(hooks.script);
+    const initData = "auth_date=123&hash=fixture";
+    hooks.context.window.Telegram = {
+      WebApp: { initData, initDataUnsafe: { user: { id: 42 } } },
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ token: "session-token" }),
+      });
+    hooks.context.fetch = fetch;
+    (hooks.script.onload as unknown as () => void)();
+    await loading;
+    await hooks.bootstrap();
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+      initDataRaw: initData,
+      initDataUnsafe: { user: { id: 42 } },
+    });
+  });
+
+  it("reports a bounded SDK timeout instead of waiting indefinitely", async () => {
+    vi.useFakeTimers();
+    const hooks = createWebAppHarness();
+    const result = expect(hooks.initializeTelegram()).rejects.toThrow(
+      "Telegram SDK timed out",
+    );
+    await vi.advanceTimersByTimeAsync(10000);
+    await result;
+    expect(hooks.script.remove).toHaveBeenCalledOnce();
+    expect(hooks.context.fetch).not.toHaveBeenCalled();
+  });
+
   it("embeds the official fit addon before the application script", () => {
     const html = renderWebAppHtml({
       basePath: "/telegram-mcp/webapp",

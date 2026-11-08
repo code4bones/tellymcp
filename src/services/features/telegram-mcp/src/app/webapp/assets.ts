@@ -269,7 +269,7 @@ body {
 `;
 
 export const WEBAPP_APP_JS = `
-const tg = window.Telegram?.WebApp;
+let tg = null;
 const config = window.__TELEGRAM_MCP_WEBAPP__;
 
 const state = {
@@ -838,6 +838,44 @@ function getRequestedDirectToken() {
   return fromHash || null;
 }
 
+async function initializeTelegram() {
+  // Browser links authenticate with their token and must work without telegram.org.
+  if (getRequestedDirectToken()) {
+    return;
+  }
+
+  tg = window.Telegram?.WebApp;
+  if (tg) {
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://telegram.org/js/telegram-web-app.js";
+    script.async = true;
+    const finish = (error) => {
+      clearTimeout(timeout);
+      script.onload = null;
+      script.onerror = null;
+      if (error) {
+        script.remove();
+        reject(error);
+      } else {
+        resolve();
+      }
+    };
+    const timeout = setTimeout(() => {
+      finish(new Error("Telegram SDK timed out. Check connectivity or open a browser Link from the bot."));
+    }, 10000);
+    script.onload = () => {
+      tg = window.Telegram?.WebApp;
+      finish(tg ? null : new Error("Telegram SDK is unavailable."));
+    };
+    script.onerror = () => finish(new Error("Telegram SDK could not load. Check connectivity or open a browser Link from the bot."));
+    document.head.appendChild(script);
+  });
+}
+
 function getInitData() {
   return tg?.initData || "";
 }
@@ -1238,6 +1276,7 @@ async function applyLaunchMode() {
 
 async function main() {
   try {
+    await initializeTelegram();
     await applyLaunchMode();
     loadWrapPreference();
     bindUi();
@@ -1270,7 +1309,6 @@ export function renderWebAppHtml(input: RenderWebAppHtmlInput): string {
       content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
     />
     <title>Telegram MCP Live View</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>${WEBAPP_STYLES_CSS}
 ${XTERM_WEBAPP_CSS}</style>
   </head>

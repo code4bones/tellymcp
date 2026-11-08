@@ -1,6 +1,6 @@
 {
   "name": "@deadragdoll/tellymcp-chrome-attach-extension",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "private": true,
   "description": "Chrome extension for attaching TellyMCP to an existing user browser session",
   "license": "MIT",

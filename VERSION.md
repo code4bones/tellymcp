@@ -4,6 +4,18 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.47
+
+- Browser Live links authenticate with their existing token and start without
+  requesting the Telegram SDK. Mini App launches load the SDK separately with a
+  bounded wait and preserve Fullscreen/Expand/Default behavior.
+- Chrome0.0.12 / Firefox0.0.11 automatically attach the Picker's source tab on
+  Ask/Explain. The console confirms the stored attachment before delivery;
+  Element, Region and Marks no longer require manually attaching the tab.
+
+Connect the extension to the intended console, reload the new extension and use
+an updated0.0.47 owner. Existing owners keep running until restarted.
+
 ## 0.0.46
 
 - Picker Ask/Explain saves the question, selection and optional image as a local

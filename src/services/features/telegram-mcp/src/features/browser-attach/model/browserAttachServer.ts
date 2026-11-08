@@ -560,12 +560,21 @@ export class BrowserAttachServer {
         }
         return;
       case "attach_tab_selected":
-        if (state.instanceId) {
+        try {
+          if (!state.instanceId || this.socketsByInstanceId.get(state.instanceId) !== state)
+            throw new Error("Browser connection changed");
           this.registry.updateTab(state.instanceId, {
             ...message.tab,
-            active: true,
           });
           await this.persistSelectedTab(state.instanceId, message.tab);
+          if (this.socketsByInstanceId.get(state.instanceId) !== state || state.socket.readyState !== WS_OPEN)
+            throw new Error("Browser disconnected during attachment");
+          if (message.request_id)
+            this.sendJson(state.socket, { type: "attach_tab_selected_result", request_id: message.request_id, ok: true });
+        } catch (error) {
+          if (!message.request_id) throw error;
+          this.sendJson(state.socket, { type: "attach_tab_selected_result", request_id: message.request_id,
+            ok: false, error: "Could not attach the Picker tab to this console. Retry after reconnecting." });
         }
         return;
       case "tab_action_result":
@@ -674,7 +683,7 @@ export class BrowserAttachServer {
       browser: message.browser,
       extensionVersion: message.extension_version,
       ...(message.profile_name ? { profileName: message.profile_name } : {}),
-      capabilities: ["tabs", "active_tab", "recording", "picker_delivery", "picker_marks"],
+      capabilities: ["tabs", "active_tab", "recording", "picker_delivery", "picker_marks", "picker_auto_attach"],
     });
 
     this.sendJson(state.socket, {

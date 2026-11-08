@@ -18,7 +18,10 @@ import {
   upsertXchangeRecord,
 } from "../src/services/features/telegram-mcp/src/shared/integrations/xchange/sqliteRecordStore";
 import type { Logger } from "../src/services/features/telegram-mcp/src/shared/lib/logger/logger";
-import { PickerDeliveryClient } from "../packages/attach-extension-shared/src/background";
+import {
+  InspectorBridge,
+  PickerDeliveryClient,
+} from "../packages/attach-extension-shared/src/background";
 import type { SelectionContext } from "../packages/attach-extension-shared/src/context";
 import { TerminalInputService } from "../src/services/features/telegram-mcp/src/features/terminal-input/model/terminalInputService";
 import { stopPtyTarget } from "../src/services/features/telegram-mcp/src/shared/integrations/terminal/ptyRegistry";
@@ -326,9 +329,17 @@ describe("Picker artifact delivery", () => {
         path: "/browser-attach/ws",
       },
     } as AppConfig["browser"];
-    let attached = { instanceId: "chrome-test", tabId: 7 };
+    let attached = { instanceId: "another-instance", tabId: 9 };
+    let confirmAttachment!: () => void;
+    const attachmentPending = new Promise<void>((resolve) => {
+      confirmAttachment = resolve;
+    });
     const maintenance = {
       getBrowserAttachment: vi.fn(async () => attached),
+      setBrowserAttachment: vi.fn(async (value: typeof attached) => {
+        await attachmentPending;
+        attached = value;
+      }),
       getBrowserRecording: vi.fn(async () => null),
       getGatewayClientUuid: vi.fn(async () => "client-uuid"),
     } as unknown as MaintenanceStore;
@@ -401,8 +412,35 @@ describe("Picker artifact delivery", () => {
     await expect
       .poll(() => messages.find((m) => m.type === "hello_ack"))
       .toMatchObject({
-        capabilities: expect.arrayContaining(["picker_delivery"]),
+        capabilities: expect.arrayContaining([
+          "picker_delivery",
+          "picker_auto_attach",
+        ]),
       });
+    socket.send(
+      JSON.stringify({
+        type: "attach_tab_selected",
+        request_id: "picker-attach-7",
+        tab: {
+          tab_id: 7,
+          title: "Fixture",
+          url: "https://example.test/",
+          active: true,
+        },
+      }),
+    );
+    await expect
+      .poll(() => vi.mocked(maintenance.setBrowserAttachment).mock.calls.length)
+      .toBe(1);
+    expect(messages.some((m) => m.type === "attach_tab_selected_result")).toBe(
+      false,
+    );
+    expect(notify).not.toHaveBeenCalled();
+    confirmAttachment();
+    await expect
+      .poll(() => messages.find((m) => m.type === "attach_tab_selected_result"))
+      .toMatchObject({ ok: true, request_id: "picker-attach-7" });
+    expect(attached).toMatchObject({ instanceId: "chrome-test", tabId: 7 });
     const submit = async (requestId = "request", tabId = 7) => {
       messages.length = 0;
       socket.send(
@@ -462,6 +500,31 @@ describe("Picker artifact delivery", () => {
 });
 
 describe("Picker delivery acknowledgement client", () => {
+  it("requires auto-attach support and waits for the correlated attachment ACK", async () => {
+    const send = vi.fn(() => true);
+    const client = new PickerDeliveryClient(send);
+    client.bind(true, true);
+    const tab = { tab_id: 7, title: "Fixture", url: "https://example.test/" };
+    expect(await client.attach(tab)).toMatchObject({ ok: false });
+    expect(send).not.toHaveBeenCalled();
+    client.bind(true, true, true);
+    const attached = client.attach(tab);
+    expect(client.attach(tab)).toBe(attached);
+    expect(send).toHaveBeenCalledWith({
+      type: "attach_tab_selected",
+      request_id: expect.stringMatching(/^picker-attach-/),
+      tab,
+    });
+    const requestId = (
+      send.mock.calls[0] as unknown as [Record<string, unknown>]
+    )[0].request_id;
+    client.receive({ request_id: "unrelated-ack", ok: true });
+    client.receive({ request_id: requestId, ok: true });
+    expect(await attached).toMatchObject({ ok: true });
+    client.disconnect();
+    expect(await client.attach(tab)).toMatchObject({ ok: false });
+  });
+
   it("waits for ACK, coalesces clicks, handles timeout/disconnect and never sends to an older owner", async () => {
     vi.useFakeTimers();
     const send = vi.fn(() => true);
@@ -496,4 +559,95 @@ describe("Picker delivery acknowledgement client", () => {
     expect(await client.submit(7, context)).toMatchObject({ ok: false });
     expect(vi.getTimerCount()).toBe(0);
   });
+});
+
+describe("Picker automatic attachment", () => {
+  it.each(["failed", "disconnected"])(
+    "does not deliver after attachment is %s",
+    async (failure) => {
+      const submit = vi.fn();
+      const bridge = new InspectorBridge({
+        tab: async (id) => ({ id, windowId: 1, url: "https://example.test/" }),
+        active: async () => undefined,
+        selected: () => 7,
+        attach: async () => {
+          if (failure === "disconnected") bridge.disconnect();
+          return { ok: failure === "disconnected", error: "Attachment failed" };
+        },
+        inject: async () => {},
+        message: async () => ({ ok: true }),
+        capture: async () => "",
+        submit,
+      });
+      bridge.bind("console", "chrome-test", "Fixture");
+      await bridge.start(7, "region");
+      expect(
+        await bridge.runtime(
+          { type: "picker_submit", context: selection().context },
+          { tab: { id: 7 } },
+        ),
+      ).toMatchObject({ ok: false });
+      expect(submit).not.toHaveBeenCalled();
+      bridge.disconnect();
+    },
+  );
+
+  it.each(["element", "region", "marks"] as const)(
+    "waits for attachment before delivering a %s selection from the sender tab",
+    async (mode) => {
+      let selected: number | null = null;
+      let confirm!: (value: Record<string, unknown>) => void;
+      const attached = new Promise<Record<string, unknown>>((resolve) => {
+        confirm = resolve;
+      });
+      const attach = vi.fn(async (tabId: number) => {
+        const result = await attached;
+        if (result.ok) selected = tabId;
+        return result;
+      });
+      const submit = vi.fn(async () => ({
+        ok: true,
+        saved: true,
+        notified: true,
+      }));
+      const bridge = new InspectorBridge({
+        tab: async (id) => ({ id, windowId: 1, url: "https://example.test/" }),
+        active: async () => ({
+          id: 7,
+          windowId: 1,
+          url: "https://example.test/",
+        }),
+        selected: () => selected,
+        attach,
+        inject: async () => {},
+        message: async () => ({ ok: true }),
+        capture: async () => "",
+        submit,
+      });
+      bridge.bind("console", "chrome-test", "Fixture");
+      await bridge.start(7, mode);
+      const context = selection().context as SelectionContext;
+      context.selection.mode = mode;
+      const result = bridge.runtime(
+        { type: "picker_submit", context },
+        { tab: { id: 7 }, frameId: 0 },
+      );
+      await expect.poll(() => attach.mock.calls.length).toBe(1);
+      expect(attach).toHaveBeenCalledWith(7);
+      expect(submit).not.toHaveBeenCalled();
+      confirm({ ok: true });
+      expect(await result).toMatchObject({ ok: true, notified: true });
+      expect(submit).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({
+          source: {
+            sessionId: "console",
+            connectionId: "chrome-test",
+            tabId: "7",
+          },
+        }),
+      );
+      bridge.disconnect();
+    },
+  );
 });

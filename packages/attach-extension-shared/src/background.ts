@@ -18,6 +18,7 @@ type Adapter = {
   message(id: number, message: Message): Promise<Message>;
   capture(windowId: number): Promise<string>;
   selected(): number | null;
+  attach?(tabId: number): Promise<Message>;
   submit?(tabId: number, context: SelectionContext): Promise<Message>;
 };
 type Entry = {
@@ -215,12 +216,14 @@ export class InspectorBridge {
       return { ok: true, image: await this.capture(tabId, message) };
     if (message.type !== "picker_submit")
       throw new Error("Unsupported picker message");
-    if (!this.sessionId || this.adapter.selected() !== tabId)
+    if (!this.sessionId)
       return {
         ok: false,
         error:
-          "Not sent: attach this tab to the connected session in the Control Panel, then retry.",
+          "Not sent: connect the extension to an agent console in the Control Panel, then retry.",
       };
+    const sessionId = this.sessionId;
+    const connectionId = this.connectionId;
     if (
       !message.context ||
       new TextEncoder().encode(JSON.stringify(message.context)).byteLength >
@@ -273,6 +276,27 @@ export class InspectorBridge {
         attachmentId: context.selectionId,
       };
     } else delete context.screenshot;
+    if (this.adapter.attach) {
+      const attached = await this.adapter.attach(tabId);
+      if (!attached.ok) return attached;
+    }
+    if (
+      this.sessionId !== sessionId ||
+      this.connectionId !== connectionId ||
+      !this.active.has(tabId) ||
+      this.adapter.selected() !== tabId
+    )
+      return {
+        ok: false,
+        error:
+          "Picker connection or selected tab changed. Retry the selection.",
+      };
+    const refreshedTab = await this.adapter.tab(tabId);
+    if (cleanUrl(refreshedTab.url || "") !== context.page.url)
+      return {
+        ok: false,
+        error: "Page changed before delivery. Select again.",
+      };
     const entries = this.prune(tabId).filter(
       (e) => e.context.selectionId !== context.selectionId,
     );
@@ -372,6 +396,8 @@ export class InspectorBridge {
 export class PickerDeliveryClient {
   private supported = false;
   private marksSupported = false;
+  private autoAttachSupported = false;
+  private readonly attachments = new Map<number, Promise<Message>>();
   private readonly pending = new Map<
     string,
     {
@@ -382,13 +408,20 @@ export class PickerDeliveryClient {
   >();
 
   public constructor(private readonly send: (message: Message) => boolean) {}
-  public bind(supported: boolean, marksSupported = false): void {
+  public bind(
+    supported: boolean,
+    marksSupported = false,
+    autoAttachSupported = false,
+  ): void {
     this.supported = supported;
     this.marksSupported = marksSupported;
+    this.autoAttachSupported = autoAttachSupported;
   }
   public disconnect(): void {
     this.supported = false;
     this.marksSupported = false;
+    this.autoAttachSupported = false;
+    this.attachments.clear();
     for (const [requestId, pending] of this.pending) {
       clearTimeout(pending.timer);
       pending.resolve({
@@ -417,7 +450,37 @@ export class PickerDeliveryClient {
         error:
           "Automatic delivery needs an updated console. Update TellyMCP and restart the source owner, then retry.",
       });
-    const requestId = context.requestId;
+    return this.request({
+      type: "picker_submit",
+      request_id: context.requestId,
+      selection_id: context.selectionId,
+      tab_id: tabId,
+    });
+  }
+  public attach(tab: Message): Promise<Message> {
+    if (!this.autoAttachSupported)
+      return Promise.resolve({
+        ok: false,
+        error:
+          "Automatic tab attachment needs an updated console. Update TellyMCP and restart the source owner, then retry.",
+      });
+    const tabId = Number(tab.tab_id);
+    const existing = this.attachments.get(tabId);
+    if (existing) return existing;
+    const result = this.request({
+      type: "attach_tab_selected",
+      request_id: `picker-attach-${crypto.randomUUID()}`,
+      tab,
+    });
+    this.attachments.set(tabId, result);
+    void result.then(() => {
+      if (this.attachments.get(tabId) === result)
+        this.attachments.delete(tabId);
+    });
+    return result;
+  }
+  private request(message: Message): Promise<Message> {
+    const requestId = String(message.request_id);
     const existing = this.pending.get(requestId);
     if (existing) return existing.promise;
     if (this.pending.size >= 8)
@@ -441,14 +504,7 @@ export class PickerDeliveryClient {
     );
     this.pending.set(requestId, { promise, resolve, timer });
     try {
-      if (
-        !this.send({
-          type: "picker_submit",
-          request_id: requestId,
-          selection_id: context.selectionId,
-          tab_id: tabId,
-        })
-      )
+      if (!this.send(message))
         this.receive({
           request_id: requestId,
           ok: false,

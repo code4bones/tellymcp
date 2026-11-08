@@ -1,5 +1,40 @@
 # HANDOFF
 
+## Extension packages signed and checked (2026-11-08)
+
+User requested current package builds, including Firefox's existing sign flow.
+Versions preserved: Chrome0.0.15 / Firefox0.0.14 / runtime0.0.51. Run scripts
+separately: aggregate release:extensions synchronizes versions and was not used.
+Chrome pack reused packages/chrome-attach-extension/key.pem (existing CRX identity
+`oihpjdgijjpgnckbjpcabcgomceanokm`); ZIP/CRX3 payloads match dist and runtime tgz.
+
+Firefox sign used existing AMO environment with no credential output and channel
+unlisted. Upload passed validation (0 errors,1 warning). Mozilla approved version
+6681638 at2026-11-08T19:31:09Z, file.status=public, channel=unlisted (not a public
+listing). Signed XPI downloaded successfully; all code/assets match dist/tgz.
+Mozilla reformatted manifest.json, but parsed manifest objects are identical.
+META-INF signature files present; detached CMS signature verifies with the
+embedded certificate (this local check does not independently validate its chain).
+Firefox add-on GUID matches the previous signed0.0.8 package.
+
+Ready artifacts:
+- packages/chrome-attach-extension/webstore-artifacts/tellymcp-chrome-attach-0.0.15.zip
+  SHA2562af7b14b1d10017c1bea838f17be540679b8105f43481311f5ba8202b7419ea0
+- packages/chrome-attach-extension/crx-artifacts/tellymcp-chrome-attach-0.0.15.crx
+  SHA25630792d7827e06a68d9c6b778a63c0e34218edb358ba245b7d94ccb6c13c4c4c4
+- packages/firefox-attach-extension/web-ext-artifacts/6e2c53eb034d4975995e-0.0.14.xpi
+  SHA256da5d34c83a8232ed3fe39061c06294997b1ec465733ca198f2f4f7386f315c7b
+- artifacts/release051/deadragdoll-tellymcp-0.0.51.tgz unchanged; SHA below.
+
+Checksums/sizes saved in ignored artifacts/release051/extensions.json and
+SHA256SUMS. No source behavior changes; no broad test rerun needed after the
+previous503-pass suite. No deploy, owner restart, update-server/store publish.
+
+User explicitly clarified **Region is screenshot-only; do not add DOM collection**.
+The briefly proposed Region DOM change was cancelled before any code edit.
+User accepted current Picker behavior; actual signed Firefox installation remains
+for the user to perform. Keep T056 review until installed acceptance is clear.
+
 ## Local0.0.51: Ctrl selection, optional reply, frozen Snapshot toggle (2026-11-08)
 
 User changes bundled into this local update:

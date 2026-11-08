@@ -1,5 +1,14 @@
 # HANDOFF
 
+## Old local build artifacts cleaned (2026-11-08)
+
+At the user's request, removed25 ignored files (~4.99MiB): client0.0.41–43,
+Picker candidate builds, releases0.0.46/47/49/50 and Chrome CRX0.0.8. Historical
+artifact paths below may no longer exist. Retained current runtime0.0.51 and
+Chrome0.0.15/Firefox0.0.14 packages, plus deployed gateway0.0.48 for recovery.
+Current artifacts and Chrome signing key hashes unchanged. Session artifacts in
+.mcp-xchange were not touched. Cleanup inventory: artifacts/release051/cleanup.json.
+
 ## Extension packages signed and checked (2026-11-08)
 
 User requested current package builds, including Firefox's existing sign flow.

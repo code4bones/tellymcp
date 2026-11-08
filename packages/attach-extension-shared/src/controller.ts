@@ -133,6 +133,13 @@ class Picker {
     this.shadow.append(this.shield, this.marksLayer, this.outline, this.panel);
     document.documentElement.append(this.host);
     this.abort = new AbortController();
+    // Keep focus notifications inside the Picker. Page modal focus traps see
+    // the closed shadow host as an outside element and otherwise steal focus
+    // back from our question field. Preserve the browser's default focus action.
+    for (const name of ["focusin", "focusout"] as const)
+      this.shadow.addEventListener(name, (event) => event.stopPropagation(), {
+        signal: this.abort.signal,
+      });
     const opts = { capture: true, signal: this.abort.signal };
     for (const name of [
       "pointerdown",
@@ -529,9 +536,6 @@ class Picker {
     );
     reselect.className = "reselect";
     this.text(`Receiver: ${this.receiver}`, "muted");
-    const preview = document.createElement("pre");
-    preview.textContent = JSON.stringify(this.context, null, 2);
-    this.panel!.append(preview);
     const question = document.createElement("textarea");
     question.placeholder = "Ask about this selection…";
     question.maxLength = 2000;

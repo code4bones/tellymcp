@@ -1,5 +1,39 @@
 # HANDOFF
 
+## Local0.0.49 extension fix: Picker question vs Drawer focus trap (2026-11-08)
+
+**T-TELLYMCP-054:** user could hover/click Picker buttons but could not focus/type
+the question when Marrow's Ant Design Drawer was open. Inspection of the attached
+Chrome tab1974259195 showed the Picker above the drawer; local installed
+@rc-component/util/Dom/focus uses a window-bubble focusin listener to force focus
+back into the Drawer. This was focus capture, not a stacking-order problem.
+
+Permanent shared-controller fix stops focusin/focusout propagation inside the
+closed Shadow Root without preventDefault; listener cleanup uses Picker's existing
+AbortController. Real click/typing/Ask browser regression fails before fix (empty
+question) and passes after for Chrome/Firefox API fixtures; after Picker closes,
+the page focus trap still works. Existing browser regression4/4 passed.
+
+A temporary host-scoped window-capture guard was injected through Telly into the
+already open Marrow Picker (no reload or content reset). User confirmed typing
+now works. Guard removes itself when that host disappears or after five minutes.
+Persistent source must still be loaded by updating extensions/reloading target
+page once the user finishes this live selection.
+
+Local package0.0.49 built and global CLI installed; Chrome0.0.13 / Firefox0.0.12
+ZIPs match dist and bundled package byte-for-byte. Artifact:
+`artifacts/release049/deadragdoll-tellymcp-0.0.49.tgz`, SHA256
+`597dd599f5ed36038d37e692dececb4ac4eeb9909f25139965bbbaf1fa94dd36`.
+Full suite496 passed,2 skipped; after final JSON removal, browser regression4/4,
+build/typechecked extension builds/lint passed again. Local profile/marker hashes
+unchanged. Gateway remains production0.0.48; no gateway/owner restart or new release
+tag was created for this extension-only change. No npm/store publication. T054
+is in review for loading the permanent extension builds; temporary live fix was
+user-accepted. Preserve current selection, then reload extension and target page.
+User also requested removing the raw JSON block from every Picker preview;
+renderPreview no longer creates it. Keep question, status/actions, optional image,
+Copy context and later agent response blocks. Artifact/protocol contents unchanged.
+
 ## Production0.0.48 deployed: local Telegram SDK and starfield (2026-11-08)
 
 Current release commit **`eee972a07b4492804644ea4d158b934713bb4838`**, tag

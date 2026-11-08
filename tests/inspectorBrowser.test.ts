@@ -8,6 +8,85 @@ import { readDomBatch } from "../src/services/features/telegram-mcp/src/shared/l
 const fixture = `<!doctype html><html><head><title>Inspector fixture</title><style>body{margin:0;min-height:1800px}#card{position:absolute;left:40px;top:60px;width:280px;height:150px;background:#eee}#trade{margin:20px;width:120px;height:40px}canvas{position:absolute;left:40px;top:300px}iframe{position:absolute;left:40px;top:450px;width:200px;height:80px}</style></head><body><section id="card"><button id="trade">Liquidity 42</button><input type="password" value="super-private-value"><span hidden>hidden-value</span></section><canvas width="200" height="100"></canvas><iframe src="https://frame.test/"></iframe><script>globalThis.trades=0;document.querySelector('#trade').onclick=()=>trades++;const ctx=document.querySelector('canvas').getContext('2d');ctx.fillStyle='#ff0000';ctx.fillRect(0,0,200,100);</script></body></html>`;
 
 describe.skipIf(!existsSync(chromium.executablePath()))(
+  "Picker question focus inside a modal page",
+  () => {
+    it.each(["chrome", "firefox"])(
+      "accepts a typed question with an open Drawer (%s API)",
+      async (browserName) => {
+        const browser = await chromium.launch({ headless: true });
+        try {
+          const page = await browser.newPage({
+            viewport: { width: 1100, height: 800 },
+          });
+          await page.route("https://focus.test/**", (route) =>
+            route.fulfill({
+              contentType: "text/html",
+              body: `<button id="outside">Outside</button><aside role="dialog" aria-modal="true" style="position:fixed;inset:0 0 0 500px;z-index:1000;background:#ddd"><button id="drawer-focus">Drawer action</button><div id="marked" style="margin-top:100px;width:200px;height:90px;background:#aaa">Selected content</div></aside>`,
+            }),
+          );
+          await page.goto("https://focus.test/");
+          await page.addScriptTag({
+            content: `
+        globalThis.focusReturns=0;globalThis.deliveries=[];
+        const drawer=document.querySelector('[role=dialog]');
+        window.addEventListener('focusin',()=>{
+          if(!drawer.contains(document.activeElement)){
+            focusReturns++;document.querySelector('#drawer-focus').focus();
+          }
+        });
+        document.querySelector('#drawer-focus').focus();
+        const original=Element.prototype.attachShadow;
+        Element.prototype.attachShadow=function(init){const root=original.call(this,init);globalThis.fixtureShadow=root;return root;};
+        const runtime={id:'fixture-extension',onMessage:{addListener:fn=>globalThis.command=fn},sendMessage:(message,callback)=>{
+          if(message.type==='picker_submit')deliveries.push(message.context);
+          const result={ok:true,saved:true,notified:true};
+          if(callback){callback(result);return;}return Promise.resolve(result);
+        }};
+        globalThis.${browserName === "firefox" ? "browser" : "chrome"}={runtime};
+      `,
+          });
+          await page.addScriptTag({ content: inspectorBundle("controller") });
+          await page.evaluate(
+            `command({type:'picker_control',action:'start',mode:'marks'}, {id:'fixture-extension'}, ()=>{});`,
+          );
+          await page.mouse.click(600, 150);
+          await page.keyboard.press("Enter");
+          const box = await page.evaluate(
+            `(()=>{const r=fixtureShadow.querySelector('textarea').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`,
+          );
+          await page.mouse.click(box.x, box.y);
+          await page.keyboard.type("Compare these marked elements");
+          expect(
+            await page.evaluate(
+              "fixtureShadow.querySelector('textarea').value",
+            ),
+          ).toBe("Compare these marked elements");
+          expect(
+            await page.evaluate(
+              "fixtureShadow.activeElement===fixtureShadow.querySelector('textarea')",
+            ),
+          ).toBe(true);
+          const ask = await page.evaluate(
+            `(()=>{const r=fixtureShadow.querySelector('[aria-label=Ask]').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`,
+          );
+          await page.mouse.click(ask.x, ask.y);
+          await expect
+            .poll(() => page.evaluate("deliveries[0]?.question"))
+            .toBe("Compare these marked elements");
+          await page.keyboard.press("Escape");
+          await page.locator("#outside").focus();
+          expect(await page.evaluate("document.activeElement.id")).toBe(
+            "drawer-focus",
+          );
+        } finally {
+          await browser.close();
+        }
+      },
+    );
+  },
+);
+
+describe.skipIf(!existsSync(chromium.executablePath()))(
   "AI Picker browser interaction",
   () => {
     it.each(["chrome", "firefox"])(
@@ -148,11 +227,13 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
           await page.mouse.move(700, 90);
           await page.waitForTimeout(40);
           await page.mouse.click(700, 90);
-          expect(
-            await page.evaluate(
-              "fixtureShadow.querySelector('pre').textContent",
-            ),
-          ).toContain("Previously covered");
+          await page.evaluate(
+            `Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async value => { globalThis.fixtureCopiedContext = value; } } });`,
+          );
+          await clickButton("Copy context");
+          expect(await page.evaluate("fixtureCopiedContext")).toContain(
+            "Previously covered",
+          );
           expect((await panelSize()).width).toBe(340);
           expect(await page.evaluate("trades")).toBe(0);
           expect(

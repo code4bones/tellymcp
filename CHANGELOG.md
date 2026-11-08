@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.0.49 — 2026-11-08 (local extension build)
+
+- Keep Picker focusin/focusout events inside its Shadow DOM so an open page
+  Drawer cannot steal focus from the question field. Preserve default focus,
+  real typing and Ask delivery; the page's focus trap resumes outside Picker.
+  Chrome0.0.13 / Firefox0.0.12; compatible with existing0.0.48 owners/gateway.
+- Remove raw selection JSON from the Picker preview; retain the question,
+  controls, optional image and Copy context action.
+
 ## 0.0.48 — 2026-11-08
 
 - Bundle an unmodified, pinned Telegram Mini Apps SDK and serve it from a

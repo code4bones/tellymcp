@@ -4,6 +4,16 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.49 (local extension build)
+
+- Chrome0.0.13 / Firefox0.0.12 fix typing a Picker question while the page has an
+  open Drawer that traps focus. Buttons and normal Drawer focus behavior remain
+  available.
+- Picker preview no longer shows raw JSON; Copy context remains available.
+
+Reload the updated extension and target page after finishing any current Picker
+request. Existing0.0.48 gateway/owners support this change without a restart.
+
 ## 0.0.48
 
 - Mini Apps load their bundled Telegram SDK from the gateway, avoiding a runtime

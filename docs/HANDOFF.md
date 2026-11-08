@@ -1,5 +1,48 @@
 # HANDOFF
 
+## Gateway0.0.52 deployed (2026-11-09)
+
+User explicitly authorized production deployment after the debt-closing step.
+Release commit13a6e3a, annotated tag v0.0.52 pushed to GitLab and GitHub.
+Pipeline7564 passed build13603 and deploy13604:
+https://gitlab.undoo.ru/c4b/mcp/telegram_mcp/-/pipelines/7564
+CI:517 passed/15 skipped, including all7 real PostgreSQL tests. Skips are13 browser
+checks (Chromium absent in build image) and2 opt-in Codex smoke tests; browser
+coverage had passed in the earlier local full run.
+
+Production on savant now runs tellymcp-gateway:0.0.52-13a6e3a88970. Actual installed
+package version inside the running container is0.0.52. All5 services are healthy;
+PostgreSQL, Redis, RabbitMQ and Nginx retained their container IDs. Gateway was
+recreated; prior image/config remains available. Config snapshot:
+/opt/tellymcp/releases/20261108T210935Z-13604
+
+Post-deploy verification:
+- External /api/healthz is OK. Authorized MCP initialize/listTools succeeds;
+  send_partner_note/send_partner_file expose request_id, browser_dom batch/pinned
+  target fields and all5 inspector tools with Marks are present.
+- PostgreSQL16 has mcp.gateway_messages.request_key and the source/request unique
+  index. Queue/messages were empty before deployment and remain empty.
+- User env fingerprint is unchanged after excluding TELLYMCP_IMAGE. Database/cache
+  services and volumes were not recreated. No credentials or admin grants changed.
+- Telegram read-only API succeeds; getWebhookInfo confirms no webhook and0 pending
+  updates; /menu,/auth,/admin commands are registered. Deployment remains polling.
+  INFO startup/polling logs are unavailable at existing LOG_LEVEL=warn; no polling
+  crash or queue retry/dispatch errors were logged. No synthetic human update,
+  Telegram message or browser action was sent during verification.
+- A console reconnected after gateway restart (live registry connected_at). No
+  local or remote owner process was restarted by this deployment.
+- Copyable Live menu/link behavior, token-link HTML, locally hosted Telegram SDK
+  digest/cache headers, three-layer public root and browser toolbar scope passed
+  the deployed-package probe. Probe uses fixtures for Telegram menu rendering.
+
+Ignored evidence: artifacts/release052/deploy-preflight.json, deploy-state.json,
+deploy-mcp-verification.jsonl, deploy-telegram-verification.json, deploy-presence.json.
+The local CLI0.0.52, signed Firefox0.0.15 and Chrome0.0.15 from the previous step
+remain valid; release-only changes were CHANGELOG/VERSION metadata. Existing
+recipient owners must be restarted separately to load their0.0.52 materializer
+fixes. The active conversation owner was intentionally kept alive. No npm registry
+publication or extension-store publication was performed.
+
 ## Technical debt fixes:0.0.52 candidate (2026-11-08)
 
 User authorized finishing confirmed debts T001–004 and repeated Firefox Inject

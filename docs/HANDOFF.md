@@ -40,16 +40,40 @@ by container/network ID. docs/tellymcp.gw.conf is a generic HTTP/TLS-termination
 example with the same limiter policy as nginx/tellymcp.gw.conf; nginx -t passed.
 CLI/Russian MCP routing docs and D-029 write/delete guarantees updated.
 
-Release preparation pending at this checkpoint: main CI, final package0.0.52,
-Mozilla unlisted signing of Firefox0.0.15, local CLI installation, final checksum
-inventory and Marrow reconciliation. Existing global CLI remains0.0.51 and production
-is gateway0.0.48. Both gateway and recipient owners need0.0.52 for queue fixes.
-No release tag or production deploy is authorized in this debt-closing step.
+Implementation commit b86419f is pushed to GitLab and GitHub main. Pipeline7561
+(build:gateway/job13602) passed the complete Docker package/image-build flow:
+517 tests passed/15 skipped (13 browser tests: Chromium absent in build image;
+2 opt-in Codex smoke tests). All7 real PostgreSQL tests and all11 detached CLI
+scenarios passed. Local full run included the browser tests,529 passed/2 skipped;
+the subsequent38 queue/socket checks cover the last added owner-route regression.
+Pipeline: https://gitlab.undoo.ru/c4b/mcp/telegram_mcp/-/pipelines/7561
+No deploy job runs for main.
 
-Temporary isolated PostgreSQL container `tellymcp-debt-postgres-test` is still
-running for final checks; stop it before ending. Source owner must not be restarted
-while this conversation is active. Preflight hashes (session marker, env, Chrome
-key) are in ignored artifacts/release052/local-preflight.json.
+Prepared and installed local CLI0.0.52. All271 installed runtime/extension files
+match the npm archive. Firefox0.0.15 was signed by Mozilla in channel unlisted;
+code/assets match dist/npm and the ZIP, parsed manifest objects match, embedded
+CMS signature verifies (no independent certificate-chain validation). Chrome15
+ZIP/CRX were retained unchanged and their payloads checked against dist/npm.
+
+Artifacts (ignored, checksums and sizes in artifacts/release052/artifacts.json):
+- artifacts/release052/deadragdoll-tellymcp-0.0.52.tgz
+  SHA2562f138eee0e86514d1dd12e0b60fc62287737a2b05f3a6e3dc8b07b5cea57fefb
+- packages/firefox-attach-extension/web-ext-artifacts/6e2c53eb034d4975995e-0.0.15.xpi
+  SHA2569d03aeb6c33f623046d33801fee06b60fb28cdd632128e5fead21a821f4813d6
+- packages/firefox-attach-extension/web-ext-artifacts/tellymcp-firefox-attach-0.0.15.zip
+  SHA256aee1db6e0892d6dde680688aca0af52c242674957567336245fe4134a3b8bdfd
+Chrome15 hashes/identity remain as recorded in the previous signed-artifact section.
+Session marker, user .env and Chrome key hashes match local-preflight.json.
+Temporary PostgreSQL container tellymcp-debt-postgres-test was stopped/removed.
+No running owner was restarted; production gateway remains0.0.48. Both gateway
+and recipient owners need0.0.52 to activate the queue fixes. No release tag/deploy
+or npm publication was performed.
+
+Marrow reconciliation: T037 /admin is done (existing implementation and user
+confirmation); T030 is done and project.lastVersion=0.0.52, verified by project.get.
+T006 PTY and T036 Nginx moved from stale todo to review with precise remaining
+acceptance notes. T001–004 and T058 are done, with implementation/test notes and
+CI evidence. Other open roadmap/review tasks were not declared done.
 
 ## Public README refreshed for Git (2026-11-08)
 

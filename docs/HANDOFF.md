@@ -1,13 +1,30 @@
 # HANDOFF
 
-## Gateway0.0.45 update in progress (2026-11-08)
+## Production gateway0.0.45 deployed (2026-11-08)
 
-The user reports0.0.45 installed everywhere and requested the gateway update.
-Releasing the verified source through the existing `v0.0.45` GitLab tag pipeline
-on savant. Preserve polling, env/admin grants, data containers and volumes; do not
-restart user-owned session processes. Record final pipeline/image and health/tool
-verification here after deployment. Native viewers disconnect across a gateway
-restart and must reconnect with a fresh code; the source owner stays running.
+The user reported0.0.45 installed everywhere and requested the gateway update.
+Release commit **`9e9169812cc690674e4e97489f46e2f5ef11eda0`**, tag **`v0.0.45`**,
+image **`tellymcp-gateway:0.0.45-9e9169812cc6`** is running on savant.
+GitLab pipeline **[7537](https://gitlab.undoo.ru/c4b/mcp/telegram_mcp/-/pipelines/7537)**
+succeeded: build13592, deploy13593. CI:466 passed,4 skipped (Chromium fixtures are
+unavailable in the build container; local browser-inclusive suite468 passed,2
+skipped). Build/lint/package/native PTY checks passed. Previous configuration:
+`/opt/tellymcp/releases/20261108T000735Z-13593` (rollback app/config, not DB).
+
+Post-deploy: all five services healthy and public `/api/healthz` OK. Verified
+**all five `inspector_*` tools through the running HTTP MCP endpoint**, with the
+configured operator bearer kept inside the container. Only initialize/list/close
+were used, no tool execution or browser/user actions. The compiled full service
+also advertises OAuth security metadata for these tools. Telegram JWKS returns
+HTTP200/four keys through the configured proxy. Polling remains enabled; env hash
+excluding the intended image change,0600 permissions, Redis admin principal and
+PostgreSQL/Redis/RabbitMQ IDs/volumes all match the preflight baseline.
+
+Main/tag were pushed to GitLab and GitHub. User session owners were not stopped.
+A gateway restart disconnects remote viewers; reconnect with a fresh code. Load
+the new extensions and a0.0.45 source owner for real Picker acceptance. T047/T048
+stay in review pending real multi-terminal/installed-browser acceptance; T046
+still needs the user's real ChatGPT OAuth retry. No registry/store publication.
 
 ## Implementation and local verification record (2026-11-08)
 
@@ -59,7 +76,7 @@ restart and must reconnect with a fresh code; the source owner stays running.
   Source test notes: I065/I066; candidate/install smoke: **I067**. Final tgz SHA256:
   `550a3d8d9ebf50c316dde096ff3e79ab24691f4d458fb38770577cbb0383e2eb`.
 
-## Production gateway updated (2026-11-08)
+## Historical0.0.44 gateway update (2026-11-08)
 
 The user authorized the T046 gateway update. **0.0.44** is deployed on savant:
 release commit **`2a993c001ad213cd3ceef47693f466b815d477ac`**, tag `v0.0.44`,
@@ -96,7 +113,7 @@ is archived in Marrow. Retain the research; resume only on a new request.
 
 ### Repository and installed client
 
-- Repository package version is **0.0.44**. The user authorized a local package install
+- Repository package version is **0.0.45**. The user authorized a local package install
   on 2026-11-08; the global command now includes detach/attach and the stop-menu
   follow-up. Current `main` includes released Linux local detach/attach, merged
   as **`f377ea7`** from `feature/detached-sessions` at **`968698e`**. Source
@@ -171,10 +188,10 @@ is archived in Marrow. Retain the research; resume only on a new request.
   private Redis and stubbed gateway identity/database methods: one registration,
   same shell PID **1989565**, detach/fresh-code reattach, final output/exit7 and
   no viewer marker/runtime. Temporary owner and Redis were cleaned up.
-- Remote-attach source is committed and deployed in0.0.44 (`2a993c0`). Installed
-  global0.0.43 still contains the previously installed **local** attach/stop menus
-  only. Real Telegram/account/WSS and separate-host acceptance remain
-  pending; updating owner and viewer builds is necessary to use the button.
+- Remote-attach source was released in0.0.44 (`2a993c0`); the user accepted actual
+  Telegram/account/public-WSS/separate-host access in I064. Installed clients and
+  gateway are now0.0.45. Simultaneous native attach and installed-browser Picker
+  acceptance are tracked separately in T047/T048 and remain pending.
   Implementation/review records: **I-TELLYMCP-060** (authorization and policy),
   **I-TELLYMCP-061** (remote transport); T043/T044 are in review.
 
@@ -209,9 +226,9 @@ is archived in Marrow. Retain the research; resume only on a new request.
 
 ### Production deployment — keep distinct from the client version
 
-- Gateway is **0.0.44**, image `tellymcp-gateway:0.0.44-2a993c001ad2` on
+- Gateway is **0.0.45**, image `tellymcp-gateway:0.0.45-9e9169812cc6` on
   **savant**, not fr-vpn. All five Compose services are healthy after deployment.
-  Previous image0.0.40 remains available for rollback. Local client0.0.41–0.0.43
+  Previous image0.0.44 remains available for rollback. Local client0.0.41–0.0.43
   updates had no corresponding gateway releases.
 - `/opt/tellymcp`: `docker-compose.yml`, secret `.env-gateway` (`0600`),
   `nginx/default.conf`, `state/`, `backups/`, `releases/`. PostgreSQL 16, Redis 7
@@ -223,7 +240,7 @@ is archived in Marrow. Retain the research; resume only on a new request.
 - GitLab CI uses shell runner tag **`telly_savant`**. Main/MR builds produce
   npm `.tgz` artifacts and gateway images. A matching **`vX.Y.Z` tag** deploys
   production after main-ancestry/version checks. A main push alone does not
-  deploy. Latest production release: `v0.0.44`, pipeline **7534**.
+  deploy. Latest production release: `v0.0.45`, pipeline **7537**.
 - Telegram uses **polling**, `TELEGRAM_WEBHOOK_ENABLED=false`: inbound webhook
   traffic cannot reach this network. User confirmed messages, menu and Live work.
   Keep polling during future deploys and rollbacks; older snapshots have webhook

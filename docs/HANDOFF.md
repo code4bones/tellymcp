@@ -2,6 +2,15 @@
 
 ## Production0.0.47 deployed: browser Live and Picker auto-attachment (2026-11-08)
 
+**Installed acceptance update:** user confirmed Live ultimately opened in both
+Chrome and Firefox and Attach worked. Browser Live acceptance is now confirmed;
+do not repeat the earlier blocked-on-SDK diagnosis as a current failure. The
+report does not distinguish Live terminal Attach from Picker auto-attachment,
+and does not establish the complete Picker artifact → agent → overlay response
+roundtrip. Keep T052 in review for the remaining Picker acceptance; do not close
+T049/T050 based solely on this report. The Telegram menu stall below remains a
+separate recovered incident with unconfirmed root cause.
+
 **Postdeploy Telegram incident (14:04 UTC):** user reported startup/client-online
 notifications arriving but both /menu and callbacks unresponsive. Gateway HTTP,
 all services and proxied Bot API getMe were healthy; webhook disabled and
@@ -33,8 +42,9 @@ Global local CLI0.0.47 is installed; active owner preserved and **not restarted*
 Package: `artifacts/release047/deadragdoll-tellymcp-0.0.47.tgz`, SHA256
 `626b81f6c5c80132aec5667a08b9965062aabc1f08bc33087ec8d709048727ba`.
 Chrome0.0.12/Firefox0.0.11 ZIPs match rebuilt dist and packed extension contents.
-No npm/store publication. T052 is in review for installed Chrome Live and Picker
-acceptance: reload extensions, restart the owner when ready, get a fresh Live→Link
+No npm/store publication. T052 is in review for remaining installed Picker
+acceptance; Live in Chrome/Firefox and Attach were confirmed above. Reload
+extensions, restart the owner when ready, get a fresh Live→Link
 (gateway tokens/launch grants are in memory and old links expire across restart).
 
 **T-TELLYMCP-052** follows the user's Chrome/Firefox diagnosis and request to

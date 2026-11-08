@@ -4,6 +4,17 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.50 (local extension build)
+
+- Chrome0.0.14 / Firefox0.0.13 send the Element snapshot captured at selection time,
+  even if its original DOM later changes or disappears. The saved DOM is not
+  reread on Send. Marks remains the separate live-DOM mode.
+- One Send icon submits the question from the text field.
+
+Reload the updated extension and target page. Highlighting or capturing a new
+image requires the original element; navigation, viewport changes and expiration
+still require selecting again.
+
 ## 0.0.49 (local extension build)
 
 - Chrome0.0.13 / Firefox0.0.12 fix typing a Picker question while the page has an

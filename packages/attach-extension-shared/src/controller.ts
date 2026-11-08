@@ -1,6 +1,5 @@
 import {
   cleanText,
-  extractElement,
   selectionContext,
   sensitive,
   TTL_MS,
@@ -520,11 +519,7 @@ class Picker {
     return Boolean(
       this.context &&
       this.currentPageKey() === this.pageKey &&
-      (this.mode !== "marks" || this.marks?.valid) &&
-      (this.mode !== "element" ||
-        (this.target?.isConnected &&
-          JSON.stringify(extractElement(this.target)) ===
-            JSON.stringify(this.context.selection.element))),
+      (this.mode !== "marks" || this.marks?.valid),
     );
   }
   private renderPreview(): void {
@@ -555,16 +550,7 @@ class Picker {
         },
         actions,
       );
-    this.button(
-      "Explain",
-      () =>
-        this.submit(
-          question.value ||
-            "Explain this selection using only observed content.",
-        ),
-      actions,
-    );
-    this.button("Ask", () => this.submit(question.value), actions);
+    this.button("Send", () => this.submit(question.value), actions);
     this.button(
       "Copy context",
       async () => {
@@ -589,6 +575,11 @@ class Picker {
   }
   private async capture(): Promise<void> {
     if (!this.valid()) throw new Error("Stale selection");
+    if (this.mode === "element" && !this.target?.isConnected) {
+      this.status!.textContent =
+        "The original element is gone. Its text snapshot is saved; select again to capture an image.";
+      return;
+    }
     if (visualViewport && visualViewport.scale !== 1) {
       this.status!.textContent =
         "Pinch zoom is not supported for capture. Reset zoom or use text only.";
@@ -680,15 +671,6 @@ class Picker {
       return;
     }
     const generation = this.generation;
-    if (
-      this.target &&
-      this.mode === "element" &&
-      JSON.stringify(extractElement(this.target)) !==
-        JSON.stringify(this.context!.selection.element)
-    ) {
-      this.status!.textContent = "Element changed since preview. Select again.";
-      return;
-    }
     const cleanedQuestion = cleanText(question, 2000);
     const submission = JSON.stringify([
       cleanedQuestion,
@@ -748,6 +730,11 @@ class Picker {
     )
       return { ok: false, error: "Selection is stale or missing" };
     if (message.action === "highlight") {
+      if (this.mode === "element" && !this.target?.isConnected)
+        return {
+          ok: false,
+          error: "The original element is no longer on the page",
+        };
       if (this.marks) this.drawMarks();
       else this.draw(this.context.selection.rect);
       return { ok: true };

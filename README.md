@@ -339,12 +339,12 @@ does not replace code in an already running owner.
 
 ### AI Picker in the attached browser
 
-Chrome0.0.12 and Firefox0.0.11 provide **Element / Region / Mark elements** and an
+Chrome0.0.14 and Firefox0.0.13 provide **Element / Region / Mark elements** and an
 **Alt+Shift+P** command. Connect the extension to a console in the Control Panel,
 select and review content, optionally capture a cropped preview, then choose
-**Explain / Ask**. The owning console saves an artifact and notifies its agent;
+**Send**. The owning console saves an artifact and notifies its agent;
 the agent answers in its conversation and through `inspector_response`. The
-source tab is automatically attached on Ask/Explain, with confirmation from the
+source tab is automatically attached on Send, with confirmation from the
 console before delivery; no manual tab attachment is needed.
 Mark elements toggles whole DOM containers and sends only group selectors and
 the question; the agent reads their live contents with `browser_dom(all=true)`.

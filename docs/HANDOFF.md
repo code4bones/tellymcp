@@ -1,5 +1,34 @@
 # HANDOFF
 
+## Local0.0.50 built: frozen Element snapshot and single Send (2026-11-08)
+
+User explicitly requested that ordinary Element selection not fail with
+"Selection is stale. Select again." when its content updates but its role stays
+the same. User clarified the snapshot must be captured immediately on selection.
+Final behavior: choose captures sanitized DOM once; Send uses that saved snapshot
+without rereading/ comparing live contents. Content updates or original-node
+removal do not block sending or replies. Highlight/new image capture require the
+original connected node; navigation/page geometry, expiry and correlated IDs
+retain their guards. Marks stays separate and reads live DOM by selector.
+Explain/Ask buttons are replaced by one Ant Design Send icon that sends the text
+field's question; no default Explain action remains.
+
+Chrome/Firefox API regression failed before fix (selection stayed pending after
+text update), passes after fix, verifies original text delivered despite updates
+before Send, and responses accepted after further updates or node replacement.
+Highlight rejects a removed node while saved-text response still succeeds.21 focused
+browser/inspector/delivery tests passed on final source, build/typechecked extension
+builds/lint pass. Local package0.0.50 built and installed globally; Chrome0.0.14 /
+Firefox0.0.13 ZIPs match dist and tgz byte-for-byte. Package:
+`artifacts/release050/deadragdoll-tellymcp-0.0.50.tgz`, SHA256
+`93918320d4fcd76829d498e8c15750744271ffe2d9b29de69e9f718af9d4af56`.
+Shared local profile and workspace marker unchanged; owners were not stopped.
+Gateway remains0.0.48; no gateway deployment, release tag or registry/store
+publication. Load the new extension and reload the target page after finishing
+current work; T055 is in review for installed acceptance. Earlier uninstalled
+draft package was moved outside the repo and replaced with the final frozen-snapshot
+build; do not ship a reread-on-Send variant.
+
 ## Local0.0.49 extension fix: Picker question vs Drawer focus trap (2026-11-08)
 
 **T-TELLYMCP-054:** user could hover/click Picker buttons but could not focus/type

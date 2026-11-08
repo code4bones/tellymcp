@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.0.50 — 2026-11-08 (local extension build)
+
+- Keep Element's sanitized snapshot from the moment of selection. DOM updates or
+  removal no longer invalidate sending that snapshot or receiving the answer.
+  Highlighting/new image capture still require the original node; page-change,
+  viewport, expiry and request/selection identity checks remain.
+- Replace Explain/Ask with one Send icon that submits the typed question.
+  Chrome0.0.14 / Firefox0.0.13; existing0.0.48 gateway/owners remain compatible.
+
 ## 0.0.49 — 2026-11-08 (local extension build)
 
 - Keep Picker focusin/focusout events inside its Shadow DOM so an open page

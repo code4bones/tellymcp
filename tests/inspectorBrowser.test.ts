@@ -67,7 +67,7 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
             ),
           ).toBe(true);
           const ask = await page.evaluate(
-            `(()=>{const r=fixtureShadow.querySelector('[aria-label=Ask]').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`,
+            `(()=>{const r=fixtureShadow.querySelector('[aria-label=Send]').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`,
           );
           await page.mouse.click(ask.x, ask.y);
           await expect
@@ -157,6 +157,14 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
             );
             await page.mouse.click(box.x, box.y);
           };
+          const sendQuestion = async (value: string) => {
+            const box = await page.evaluate(
+              `(()=>{const field=fixtureShadow.querySelector('textarea');field.scrollIntoView({block:'nearest'});const r=field.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`,
+            );
+            await page.mouse.click(box.x, box.y);
+            await page.keyboard.type(value);
+            await clickButton("Send");
+          };
           await command("start", {
             mode: "element",
             request_id: "agent-request",
@@ -189,7 +197,12 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
             ),
           ).toBe(0);
           expect(await page.evaluate("fixtureDeliveries.length")).toBe(0);
-          await clickButton("Explain");
+          await page.evaluate(
+            "document.querySelector('#trade').textContent='Liquidity 84'",
+          );
+          await sendQuestion(
+            "Explain this selection using only observed content.",
+          );
           await expect
             .poll(async () => (await command("get_selection"))?.result?.status)
             .toBe("selected");
@@ -210,6 +223,9 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
           expect(JSON.stringify(selected)).not.toContain("super-private-value");
           expect(JSON.stringify(selected)).not.toContain("hidden-value");
           expect(selected.page.url).toBe("https://fixture.test/page");
+          await page.evaluate(
+            "document.querySelector('#trade').textContent='Liquidity 126'",
+          );
           await command("response", {
             selection_id: selected.selectionId,
             request_id: selected.requestId,
@@ -251,7 +267,9 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
           await page.waitForTimeout(40);
           await page.keyboard.press("Alt+ArrowUp");
           await page.keyboard.press("Enter");
-          await clickButton("Explain");
+          await sendQuestion(
+            "Explain this selection using only observed content.",
+          );
           await expect
             .poll(
               async () =>
@@ -280,7 +298,25 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
               selection_id: selected.selectionId,
               request_id: selected.requestId,
             }),
+          ).resolves.toMatchObject({ ok: true });
+          await page.evaluate(
+            "document.querySelector('#card').replaceWith(document.querySelector('#card').cloneNode(true))",
+          );
+          await expect(
+            command("highlight", {
+              selection_id: selected.selectionId,
+              request_id: selected.requestId,
+            }),
           ).rejects.toThrow();
+          await command("response", {
+            selection_id: selected.selectionId,
+            request_id: selected.requestId,
+            explanation:
+              "The captured text is still available after the original node was replaced.",
+          });
+          expect(await page.evaluate("fixtureShadow.textContent")).toContain(
+            "The captured text is still available after the original node was replaced.",
+          );
           await page.keyboard.press("Escape");
           expect(await panel.count()).toBe(0);
           await page.evaluate(
@@ -324,7 +360,9 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
               "fixtureMessages.filter(m=>m.type==='picker_submit').length",
             ),
           ).toBe(2);
-          await clickButton("Explain");
+          await sendQuestion(
+            "Explain this selection using only observed content.",
+          );
           await expect
             .poll(
               async () =>
@@ -417,10 +455,7 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
               "[...fixtureShadow.querySelectorAll('button')].some(b=>b.getAttribute('aria-label')==='Capture preview')",
             ),
           ).toBe(false);
-          await page.evaluate(
-            "fixtureShadow.querySelector('textarea').value='Compare the marked blocks'",
-          );
-          await clickButton("Ask");
+          await sendQuestion("Compare the marked blocks");
           await expect
             .poll(
               async () =>

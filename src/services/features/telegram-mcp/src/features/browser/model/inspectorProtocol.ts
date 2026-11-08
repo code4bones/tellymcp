@@ -66,6 +66,7 @@ export const inspectorContextSchema = z.strictObject({
     })
     .optional(),
   question: z.string().max(2000).optional(),
+  replyInBrowser: z.boolean().optional(),
   redaction: z.strictObject({
     applied: z.literal(true),
     warnings: z.array(z.string().max(512)).max(10),

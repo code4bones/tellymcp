@@ -1041,7 +1041,7 @@ async function handleMessage(rawData) {
 
   switch (message.type) {
     case "hello_ack":
-      inspectorDelivery.bind(message.capabilities?.includes("picker_delivery") === true, message.capabilities?.includes("picker_marks") === true, message.capabilities?.includes("picker_auto_attach") === true);
+      inspectorDelivery.bind(message.capabilities?.includes("picker_delivery") === true, message.capabilities?.includes("picker_marks") === true, message.capabilities?.includes("picker_auto_attach") === true, message.capabilities?.includes("picker_optional_reply") === true);
       inspectorBridge.bind(message.session_id || "", message.instance_id, message.session_label || "");
       await setConnectionStatus({
         state: "connected",

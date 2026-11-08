@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 0.0.51 — 2026-11-08 (local build)
+
+- Select Elements and toggle Marks with Ctrl+click. Ordinary clicks and typing
+  reach the page, so popups can be opened before selection; Region keeps normal
+  dragging. Suppress the complete selection gesture even if Ctrl is released early.
+- Send requests an answer in the console only; Ctrl+Send also requests a browser
+  reply and turns the hovered Send button green. Save this preference in the
+  artifact, notification and xchange reply requirements. Older extensions retain
+  their browser-reply workflow; explicit preferences require owner0.0.51.
+- Save a local cropped image immediately on Element/Region selection, without
+  a page scan or masking. Snapshot is an initially disabled-inclusion toggle:
+  attach/remove the cached image without recapturing, including after the original
+  popup disappears. Keep DOM sanitization and image-size/source checks.
+- Chrome0.0.15 / Firefox0.0.14 and local package0.0.51. Restart the source owner
+  and reload extensions/pages to use optional replies; no gateway deploy needed
+  for artifact delivery and browser responses.
+
 ## 0.0.50 — 2026-11-08 (local extension build)
 
 - Keep Element's sanitized snapshot from the moment of selection. DOM updates or

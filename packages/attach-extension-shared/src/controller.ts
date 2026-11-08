@@ -1,7 +1,6 @@
 import {
   cleanText,
   selectionContext,
-  sensitive,
   TTL_MS,
   type Rect,
   type SelectionContext,
@@ -60,6 +59,8 @@ class Picker {
   private drag?: { x: number; y: number };
   private context?: SelectionContext;
   private image?: { png_base64: string; width: number; height: number };
+  private frozenImage?: { png_base64: string; width: number; height: number };
+  private captureError = "";
   private mode: "element" | "region" | "marks" = "element";
   private marks?: MarkingSession;
   private marksLayer?: HTMLElement;
@@ -67,6 +68,7 @@ class Picker {
   private pageKey = "";
   private generation = 0;
   private suppressUntil = 0;
+  private selectingGesture = false;
   private requestId = "";
   private submitted = false;
   private submitting = false;
@@ -88,9 +90,12 @@ class Picker {
     this.target = undefined;
     this.context = undefined;
     this.image = undefined;
+    this.frozenImage = undefined;
+    this.captureError = "";
     this.picking = false;
     this.drag = undefined;
     this.suppressUntil = 0;
+    this.selectingGesture = false;
     this.children = [];
     this.ancestorNavigation = false;
   }
@@ -120,9 +125,11 @@ class Picker {
     style.textContent += `.panel .reselect{position:fixed;right:16px;top:16px;width:44px;height:44px;padding:0;border-radius:50%;font-size:26px;line-height:1}.preview-title{margin:0 44px 12px 0;min-height:30px}`;
     style.textContent += `button{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;padding:8px;flex-shrink:0}button svg{display:block;width:18px;height:18px;pointer-events:none}.compact button svg,.reselect svg{width:22px;height:22px}`;
     style.textContent += `.mark{position:fixed;border:2px solid #71d08d;background:#71d08d18;pointer-events:none}.mark span{position:absolute;top:0;left:0;background:#17482a;color:white;padding:1px 5px;font:12px system-ui}.badge{position:absolute;right:0;bottom:0;min-width:16px;border-radius:8px;background:#17482a;color:white;font:11px/16px system-ui}.mark-list{padding-left:24px;max-height:180px;overflow:auto}.mark-list li{margin:4px 0}.mark-list button{width:28px;height:28px;margin-left:8px}`;
+    style.textContent += `.send.reply-requested:hover{background:#176a3a;border-color:#71d08d}button[aria-pressed=true]{background:#176a3a;border-color:#71d08d}button:disabled{cursor:wait;opacity:.55}`;
     this.shadow.append(style);
     this.shield = document.createElement("div");
     this.shield.className = "shield";
+    this.shield.style.pointerEvents = mode === "region" ? "auto" : "none";
     this.outline = document.createElement("div");
     this.outline.className = "outline";
     this.panel = document.createElement("section");
@@ -143,6 +150,8 @@ class Picker {
     for (const name of [
       "pointerdown",
       "pointerup",
+      "mousedown",
+      "mouseup",
       "click",
       "dblclick",
       "contextmenu",
@@ -190,7 +199,7 @@ class Picker {
   }
   private button(
     label: PickerAction,
-    action: () => void | Promise<void>,
+    action: (event: MouseEvent) => void | Promise<void>,
     parent?: HTMLElement,
   ): HTMLButtonElement {
     const button = document.createElement("button");
@@ -198,9 +207,9 @@ class Picker {
     button.title = label;
     button.setAttribute("aria-label", label);
     button.append(pickerIcon(label));
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
       void Promise.resolve()
-        .then(action)
+        .then(() => action(event))
         .catch(() => {
           if (this.status)
             this.status.textContent =
@@ -226,14 +235,14 @@ class Picker {
       const toggle = this.button("Show picker controls", () =>
         this.renderPicker(requestId, true),
       );
-      toggle.title = `${this.mode === "region" ? "Drag to select a region" : "Point and click to select an element"} · Esc close · Click for controls`;
+      toggle.title = `${this.mode === "region" ? "Drag to select a region" : "Ctrl+click to select an element"} · Esc close · Click for controls`;
       if (this.marks) {
         const badge = document.createElement("span");
         badge.className = "badge";
         badge.textContent = String(this.marks.items.length);
         badge.setAttribute("aria-hidden", "true");
         toggle.append(badge);
-        toggle.title = `${this.marks.items.length} marked · Click elements to toggle · Enter review · Esc close`;
+        toggle.title = `${this.marks.items.length} marked · Ctrl+click elements to toggle · Enter review · Esc close`;
       }
       return;
     }
@@ -243,8 +252,10 @@ class Picker {
     this.text(`Receiver: ${this.receiver}`, "muted");
     this.text(
       this.marks
-        ? "Click to toggle · Click inside a mark to remove it · Enter review · Esc close"
-        : "Click to select · Alt+↑ parent · Alt+↓ child · Enter confirm · Esc close",
+        ? "Ctrl+click to toggle · Ctrl+click inside a mark to remove it · Enter review · Esc close"
+        : this.mode === "region"
+          ? "Drag to select a region · Esc close"
+          : "Ctrl+click to select · Alt+↑ parent · Alt+↓ child · Enter confirm · Esc close",
       "muted",
     );
     if (requestId)
@@ -383,6 +394,7 @@ class Picker {
     this.renderPicker();
   }
   private move = (event: PointerEvent): void => {
+    this.updateSendModifier(event.ctrlKey);
     if (!this.picking || this.own(event)) return;
     this.ancestorNavigation = false;
     cancelAnimationFrame(this.frame);
@@ -407,6 +419,16 @@ class Picker {
     };
   }
   private pointer = (event: MouseEvent): void => {
+    if (this.own(event)) return;
+    if (this.mode !== "region") {
+      if (event.type === "pointerdown")
+        this.selectingGesture = event.button === 0 && event.ctrlKey;
+      // Latch the modifier for the complete gesture, including compatibility
+      // mouse events and a click delivered after Ctrl has already been released.
+      const selecting = this.selectingGesture || event.ctrlKey;
+      if (event.type === "click") this.selectingGesture = false;
+      if (!selecting) return;
+    }
     if (this.marks && !this.picking && !this.own(event)) {
       this.suppress(event);
       if (
@@ -447,16 +469,28 @@ class Picker {
     }
   };
   private key = (event: KeyboardEvent): void => {
+    this.updateSendModifier(event.ctrlKey);
     if (event.key === "Escape") {
       this.suppress(event);
       this.stop();
       return;
     }
-    if (!this.picking || this.own(event)) {
-      if (this.marks && !this.own(event)) this.suppress(event);
+    if (!this.picking || this.own(event)) return;
+    // Ordinary typing belongs to the page, just like an unmodified click.
+    if (
+      !(
+        (event.altKey && ["ArrowUp", "ArrowDown"].includes(event.key)) ||
+        event.key === "Enter"
+      ) ||
+      event
+        .composedPath()
+        .some(
+          (node) =>
+            node instanceof HTMLElement &&
+            (node.matches("input,textarea,select") || node.isContentEditable),
+        )
+    )
       return;
-    }
-    // Do not let typing activate a page action while selection owns interaction.
     this.suppress(event);
     if (event.type !== "keydown") return;
     if (event.altKey && event.key === "ArrowUp" && this.target?.parentElement) {
@@ -514,6 +548,31 @@ class Picker {
     if (this.marks) this.outline!.style.display = "none";
     else this.draw(rect);
     this.renderPreview();
+    if (!this.marks) {
+      const generation = this.generation;
+      const button = this.panel!.querySelector<HTMLButtonElement>(
+        "[aria-label=Snapshot]",
+      )!;
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+      button.title = "Saving snapshot…";
+      void this.freezeImage()
+        .catch((error: unknown) => {
+          if (generation === this.generation)
+            this.captureError =
+              error instanceof Error
+                ? error.message
+                : "Snapshot unavailable. Select again to retry.";
+        })
+        .finally(() => {
+          if (generation !== this.generation) return;
+          button.disabled = false;
+          button.removeAttribute("aria-busy");
+          button.title = this.frozenImage
+            ? "Include snapshot"
+            : this.captureError;
+        });
+    }
   }
   private valid(): boolean {
     return Boolean(
@@ -537,20 +596,22 @@ class Picker {
     this.panel!.append(question);
     this.status = this.text("Ready to send to the bound agent.");
     const actions = this.toolbar();
-    if (!this.marks)
-      this.button("Capture preview", () => this.capture(), actions);
-    if (!this.marks)
-      this.button(
-        "Text only",
-        () => {
-          this.image = undefined;
-          this.context!.screenshot = undefined;
-          this.panel!.querySelector("img")?.remove();
-          this.status!.textContent = "Image removed.";
-        },
+    if (!this.marks) {
+      const snapshot = this.button(
+        "Snapshot",
+        () => this.toggleSnapshot(),
         actions,
       );
-    this.button("Send", () => this.submit(question.value), actions);
+      snapshot.setAttribute("aria-pressed", "false");
+      snapshot.title = "Include snapshot";
+    }
+    const sendButton = this.button(
+      "Send",
+      (event) => this.submit(question.value, event.ctrlKey),
+      actions,
+    );
+    sendButton.className = "send";
+    this.updateSendModifier(false);
     this.button(
       "Copy context",
       async () => {
@@ -573,98 +634,84 @@ class Picker {
       actions,
     );
   }
-  private async capture(): Promise<void> {
+  private async toggleSnapshot(): Promise<void> {
     if (!this.valid()) throw new Error("Stale selection");
-    if (this.mode === "element" && !this.target?.isConnected) {
-      this.status!.textContent =
-        "The original element is gone. Its text snapshot is saved; select again to capture an image.";
+    const button = this.panel!.querySelector<HTMLButtonElement>(
+      "[aria-label=Snapshot]",
+    )!;
+    if (this.image) {
+      this.image = undefined;
+      this.context!.screenshot = undefined;
+      this.panel!.querySelector("img")?.remove();
+      button.setAttribute("aria-pressed", "false");
+      button.title = "Include snapshot";
+      this.status!.textContent = "Snapshot excluded.";
       return;
     }
-    if (visualViewport && visualViewport.scale !== 1) {
+    if (!this.frozenImage) {
       this.status!.textContent =
-        "Pinch zoom is not supported for capture. Reset zoom or use text only.";
+        this.captureError ||
+        "Snapshot unavailable. Text is saved; select again to retry the image.";
       return;
     }
+    this.image = this.frozenImage;
+    const img = document.createElement("img");
+    img.alt = "Selection snapshot — included with Send";
+    img.src = "data:image/png;base64," + this.image.png_base64;
+    this.panel!.querySelector("img")?.remove();
+    this.panel!.append(img);
+    button.setAttribute("aria-pressed", "true");
+    button.title = "Exclude snapshot";
+    this.status!.textContent = "Snapshot included.";
+  }
+  private async freezeImage(): Promise<void> {
+    if (visualViewport && visualViewport.scale !== 1)
+      throw new Error("Reset pinch zoom to save a snapshot. Text is saved.");
     const generation = this.generation;
-    const masks: Rect[] = [];
-    const elements: Element[] = [];
-    const roots: Node[] = [document.body || document.documentElement];
-    while (roots.length && elements.length <= 10_000) {
-      const walker = document.createTreeWalker(
-        roots.pop()!,
-        NodeFilter.SHOW_ELEMENT,
-      );
-      for (
-        let node = walker.nextNode();
-        node && elements.length <= 10_000;
-        node = walker.nextNode()
-      ) {
-        const element = node as Element;
-        elements.push(element);
-        if (element.shadowRoot) roots.push(element.shadowRoot);
-      }
-    }
-    if (elements.length > 10_000) {
-      this.status!.textContent =
-        "Page too large for automatic image redaction. Use text only.";
-      return;
-    }
-    for (const element of elements) {
-      if (element === this.host) continue;
-      const text =
-        element.children.length === 0 ? element.textContent || "" : "";
-      if (
-        element.matches("iframe,frame") ||
-        (element.tagName.includes("-") && !element.shadowRoot) ||
-        sensitive(element) ||
-        (text &&
-          cleanText(text, new TextEncoder().encode(text).byteLength) !==
-            text.replace(/\s+/g, " ").trim())
-      ) {
-        const r = element.getBoundingClientRect();
-        if (r.width && r.height)
-          masks.push({ x: r.x, y: r.y, width: r.width, height: r.height });
-      }
-    }
-    if (masks.length > 500) {
-      this.status!.textContent = "Too many private regions. Use text only.";
-      return;
-    }
+    const target = this.mode === "element" ? this.target : undefined;
     this.host!.style.visibility = "hidden";
     try {
+      // Let the hidden overlay paint; no DOM scan or screenshot masking.
       await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        requestAnimationFrame(() => resolve()),
       );
       if (generation !== this.generation || !this.valid()) return;
+      if (target && !target.isConnected)
+        throw new Error(
+          "Popup closed before its image was captured. Text is saved; select again to retry the image.",
+        );
       const response = await send({
         type: "picker_capture",
         rect: this.context!.selection.rect,
         viewport: this.context!.page.viewport,
-        masks,
         page_url: location.href,
       });
       if (generation !== this.generation || !this.valid()) return;
-      if (!response.ok) {
-        this.status!.textContent = String(
-          response.error ||
-            "Capture unavailable. Select a smaller region or use text only.",
+      if (!response.ok || !response.image)
+        throw new Error(
+          String(
+            response.error ||
+              "Snapshot unavailable. Text is saved; select again to retry the image.",
+          ),
         );
-        return;
-      }
-      this.image = response.image as typeof this.image;
-      const img = document.createElement("img");
-      img.alt = "Selection screenshot preview — review before sending";
-      img.src = "data:image/png;base64," + this.image!.png_base64;
-      this.panel!.querySelector("img")?.remove();
-      this.panel!.append(img);
-      this.status!.textContent =
-        "Review the image. Use Text only to omit it. Select a smaller region to exclude private areas.";
+      this.frozenImage = response.image as typeof this.frozenImage;
     } finally {
       if (generation === this.generation && this.host)
         this.host.style.visibility = "visible";
     }
   }
-  private async submit(question: string): Promise<void> {
+  private updateSendModifier(replyInBrowser: boolean): void {
+    const button = this.panel?.querySelector<HTMLButtonElement>(".send");
+    if (!button) return;
+    button.classList.toggle("reply-requested", replyInBrowser);
+    button.title = replyInBrowser
+      ? "Send and reply in browser"
+      : "Send to console · Ctrl+click to also reply in browser";
+  }
+  private async submit(
+    question: string,
+    replyInBrowser: boolean,
+  ): Promise<void> {
     if (this.submitting) return;
     if (!this.valid()) {
       this.status!.textContent = "Selection is stale. Select again.";
@@ -675,6 +722,7 @@ class Picker {
     const submission = JSON.stringify([
       cleanedQuestion,
       this.image?.png_base64,
+      replyInBrowser,
     ]);
     if (
       this.submitted ||
@@ -683,6 +731,7 @@ class Picker {
       this.context!.requestId = crypto.randomUUID();
     this.lastSubmission = submission;
     this.context!.question = cleanedQuestion;
+    this.context!.replyInBrowser = replyInBrowser;
     this.submitting = true;
     this.status!.textContent = "Sending to the bound agent…";
     try {
@@ -695,8 +744,12 @@ class Picker {
       this.submitted = result.ok === true;
       this.status!.textContent = result.ok
         ? result.notified === true
-          ? "Saved and sent to the bound agent. Keep this tab open for its response."
-          : "Queued for the bound agent. Keep this tab open for its response."
+          ? replyInBrowser
+            ? "Saved and sent to the bound agent. Keep this tab open for its response."
+            : "Saved and sent. The agent will answer in its console."
+          : replyInBrowser
+            ? "Queued for the bound agent. Keep this tab open for its response."
+            : "Queued. The agent will answer in its console."
         : String(
             result.error ||
               "Not sent. Connect this tab to a session and retry.",

@@ -65,12 +65,15 @@ a `picker-*` record ID and a local artifact path. Its xchange category is
    Call `browser_dom` with `read.arguments` from the artifact to read all marked
    nodes live. Honor its original session/instance/tab binding, itemIds and
    total/truncated flags; report missing/changed marks rather than guessing.
-3. Write the answer in this agent conversation and send the same answer through
-   `inspector_response`, using the exact `response.arguments` from the artifact
-   plus `explanation`.
-4. Mark the record read only after the browser reply succeeds. If the selection
-   expired, report that in this conversation; do not redirect the answer to a
-   different tab or to Telegram. Saved artifacts remain available.
+3. Write the answer in this agent conversation. If `replyRequired=false` (or
+   `context.replyInBrowser=false`), answer only here; do not call
+   `inspector_response`. Otherwise send the same answer through
+   `inspector_response`, using the exact `response.arguments` plus `explanation`.
+   Older artifacts without the flag retain the browser-reply requirement.
+4. For console-only requests, mark the record read after writing the answer here.
+   For browser-reply requests, mark it read only after the browser reply succeeds.
+   If that selection expired, report it here; do not redirect to another tab or
+   Telegram. Saved artifacts remain available. Marks still need live marked DOM.
 
 Delivery acknowledgement means files were saved and terminal input was submitted;
 it does not mean the agent has already analyzed or answered the request.

@@ -683,7 +683,7 @@ export class BrowserAttachServer {
       browser: message.browser,
       extensionVersion: message.extension_version,
       ...(message.profile_name ? { profileName: message.profile_name } : {}),
-      capabilities: ["tabs", "active_tab", "recording", "picker_delivery", "picker_marks", "picker_auto_attach"],
+      capabilities: ["tabs", "active_tab", "recording", "picker_delivery", "picker_marks", "picker_auto_attach", "picker_optional_reply"],
     });
 
     this.sendJson(state.socket, {

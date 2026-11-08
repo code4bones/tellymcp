@@ -339,11 +339,16 @@ does not replace code in an already running owner.
 
 ### AI Picker in the attached browser
 
-Chrome0.0.14 and Firefox0.0.13 provide **Element / Region / Mark elements** and an
+Chrome0.0.15 and Firefox0.0.14 provide **Element / Region / Mark elements** and an
 **Alt+Shift+P** command. Connect the extension to a console in the Control Panel,
-select and review content, optionally capture a cropped preview, then choose
-**Send**. The owning console saves an artifact and notifies its agent;
-the agent answers in its conversation and through `inspector_response`. The
+use **Ctrl+click** to select an element or toggle a mark. Ordinary clicks work
+on the page, so you can open a popup before selecting it. Region uses normal
+dragging. A local image is captured at selection time without masking; toggle
+**Snapshot** to preview and include it (off by default). **Send** asks the agent
+to answer in its console; **Ctrl+Send** also requests `inspector_response` back
+to the browser, with a green Send hover. The owning console saves an artifact
+and notifies its agent. Optional browser replies require owner0.0.51 and a
+restart of that owner. The
 source tab is automatically attached on Send, with confirmation from the
 console before delivery; no manual tab attachment is needed.
 Mark elements toggles whole DOM containers and sends only group selectors and

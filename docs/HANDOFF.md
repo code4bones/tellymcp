@@ -1,5 +1,55 @@
 # HANDOFF
 
+## Local0.0.51: Ctrl selection, optional reply, frozen Snapshot toggle (2026-11-08)
+
+User changes bundled into this local update:
+- Element/Marks use Ctrl+click; normal clicks/typing reach the page so users can
+  open a popup before selecting it. Ctrl is latched for the complete gesture,
+  including compatibility mouse events/release-before-click. Region keeps normal
+  dragging. Ctrl+click inside a mark removes its entire marked container.
+- Send requests an answer only in the agent console. Ctrl+Send additionally asks
+  for a browser reply, with green hover while Ctrl is held. The flag is
+  `context.replyInBrowser`; new artifacts include `replyRequired`, and only
+  requested browser replies include `response.arguments`. Terminal prompt,
+  xchange tools/requires_reply/expected_reply and read-after-answer instructions
+  follow the flag. Console-only: answer in conversation, then mark read; browser
+  reply: answer here, respond successfully, then mark read. Old contexts without
+  a flag keep their old artifact shape/reply workflow to preserve retry identity.
+- Element/Region start a local cropped screenshot at selection time; one frame
+  hides the overlay before capture. Snapshot is an initially-off inclusion toggle:
+  preview/attach or remove the cached image without recapture. A removed original
+  node does not invalidate a completed cached image. Busy/failed capture does not
+  discard the saved DOM. Image data stays local unless Snapshot is enabled.
+- User explicitly requested speed over image masking: the new screenshot path
+  does not scan DOM or generate masks. DOM/question sanitization remains.
+  Legacy background callers can still supply their old masks; the new controller
+  sends none. Existing source-tab/URL/image-size/expiry guards remain.
+
+Final validation: full suite **503 passed,2 skipped** (78 passed files,1 skipped);
+28 focused tests passed before the final full run. Build/typechecked extension
+builds/lint pass. Browser regressions cover popup opening/page typing, modifier
+release, Ctrl hover/Send flags, Marks review, modal focus, image toggle after node
+replacement, zero recapture, no mask payload and original red canvas image despite
+later blue pixels. Chrome/Firefox API semantics are exercised in Chromium fixtures;
+actual installed Chrome/Firefox user acceptance is still pending (T056 review).
+
+Local0.0.51 installed globally; Chrome0.0.15 / Firefox0.0.14 ZIPs match final dist
+and bundled package bytes. Artifact:
+`artifacts/release051/deadragdoll-tellymcp-0.0.51.tgz`, SHA256
+`83b2667a84435cbfa03a9f5d7b398185884e231c22acffcc843db5acebe5b4ca`.
+An early Ctrl-only0.0.51 draft was installed during this turn before the user
+expanded scope; it was superseded by the final package and reinstalled. Draft
+archives were moved outside the repository; do not use those /tmp artifacts.
+Local profile/workspace marker fingerprints are preserved. No running owner was
+stopped or restarted. **Optional replies require restarting the source owner on
+0.0.51**, then reloading extensions and target pages when the current selection
+is finished. Capability `picker_optional_reply` prevents an older owner from
+misinterpreting the new explicit flag. Installing alone does not update running
+owners. Gateway stays deployed0.0.48; no gateway deploy/tag/registry/store publish.
+Artifact delivery and browser responses do not need a gateway deployment for this
+change. Direct get_selection against an old remote catalog may still reject the
+new optional context field; use the artifact instructions for the agent workflow.
+
 ## Local0.0.50 built: frozen Element snapshot and single Send (2026-11-08)
 
 User explicitly requested that ordinary Element selection not fail with

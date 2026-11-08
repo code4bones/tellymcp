@@ -161,6 +161,56 @@ describe("Picker artifact delivery", () => {
     ).rejects.toThrow();
     expect(notify).toHaveBeenCalledTimes(1);
   });
+  it.each([false, true])(
+    "persists browser reply preference %s and gives the agent the matching workflow",
+    async (replyInBrowser) => {
+      const { cwd, config, sessions } = await fixture();
+      const notify = vi.fn(async () => ({ ok: true }) as never);
+      const service = new BrowserPickerDelivery(config, sessions, {
+        submitHumanMessage: notify,
+      });
+      const source = selection();
+      const receipt = await service.deliver({
+        sessionId: "console",
+        instanceId: "chrome-test",
+        tabId: 7,
+        result: { ...source, context: { ...source.context, replyInBrowser } },
+        assertBound: async () => {},
+      });
+      const record = await getXchangeRecord(
+        config.terminal,
+        cwd,
+        config.exchange.dir,
+        "console",
+        receipt.artifact_id,
+      );
+      const artifact = JSON.parse(record!.body_text);
+      expect(artifact.context.replyInBrowser).toBe(replyInBrowser);
+      expect(artifact.replyRequired).toBe(replyInBrowser);
+      expect(record!.requires_reply).toBe(replyInBrowser);
+      expect(record!.tools.includes("inspector_response")).toBe(replyInBrowser);
+      expect(await readFile(record!.note_path!, "utf8")).toBe(
+        record!.body_text,
+      );
+      const instruction = notify.mock.calls[0]![0] as { text: string };
+      if (replyInBrowser) {
+        expect(artifact.response.arguments).toMatchObject({
+          session_id: "console",
+          request_id: "request",
+          selection_id: "selection",
+        });
+        expect(instruction.text).toContain(
+          "Only after the browser reply succeeds",
+        );
+      } else {
+        expect(artifact.response).toBeUndefined();
+        expect(instruction.text).toContain("do not call inspector_response");
+        expect(instruction.text).toContain(
+          "After writing your answer here, mark this xchange record read",
+        );
+      }
+    },
+  );
   it("writes question, image and reply metadata before one notification; retries survive a service restart", async () => {
     const { cwd, config, sessions } = await fixture();
     const notify = vi.fn(async () => {
@@ -500,6 +550,27 @@ describe("Picker artifact delivery", () => {
 });
 
 describe("Picker delivery acknowledgement client", () => {
+  it("gates explicit reply preferences on owner capability", async () => {
+    const send = vi.fn(() => true);
+    const client = new PickerDeliveryClient(send);
+    const context = {
+      ...selection().context,
+      replyInBrowser: false,
+    } as SelectionContext;
+    client.bind(true, true, true);
+    expect(await client.submit(7, context)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("0.0.51"),
+    });
+    expect(send).not.toHaveBeenCalled();
+    client.bind(true, true, true, true);
+    const pending = client.submit(7, context);
+    client.receive({ request_id: context.requestId, ok: true });
+    expect(await pending).toMatchObject({ ok: true });
+    client.disconnect();
+    client.bind(true, true, true);
+    expect(await client.submit(7, context)).toMatchObject({ ok: false });
+  });
   it("requires auto-attach support and waits for the correlated attachment ACK", async () => {
     const send = vi.fn(() => true);
     const client = new PickerDeliveryClient(send);

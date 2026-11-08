@@ -1,9 +1,18 @@
 import { existsSync } from "node:fs";
-import { chromium } from "playwright";
+import { chromium, type Page } from "playwright";
 import { describe, expect, it } from "vitest";
 import { inspectorBundle } from "../packages/attach-extension-shared/build.mjs";
 import { validateInspectorResult } from "../src/services/features/telegram-mcp/src/features/browser/model/inspectorProtocol";
 import { readDomBatch } from "../src/services/features/telegram-mcp/src/shared/lib/browserDomBatch";
+
+async function selectAt(page: Page, x: number, y: number): Promise<void> {
+  await page.keyboard.down("Control");
+  try {
+    await page.mouse.click(x, y);
+  } finally {
+    await page.keyboard.up("Control");
+  }
+}
 
 const fixture = `<!doctype html><html><head><title>Inspector fixture</title><style>body{margin:0;min-height:1800px}#card{position:absolute;left:40px;top:60px;width:280px;height:150px;background:#eee}#trade{margin:20px;width:120px;height:40px}canvas{position:absolute;left:40px;top:300px}iframe{position:absolute;left:40px;top:450px;width:200px;height:80px}</style></head><body><section id="card"><button id="trade">Liquidity 42</button><input type="password" value="super-private-value"><span hidden>hidden-value</span></section><canvas width="200" height="100"></canvas><iframe src="https://frame.test/"></iframe><script>globalThis.trades=0;document.querySelector('#trade').onclick=()=>trades++;const ctx=document.querySelector('canvas').getContext('2d');ctx.fillStyle='#ff0000';ctx.fillRect(0,0,200,100);</script></body></html>`;
 
@@ -49,7 +58,7 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
           await page.evaluate(
             `command({type:'picker_control',action:'start',mode:'marks'}, {id:'fixture-extension'}, ()=>{});`,
           );
-          await page.mouse.click(600, 150);
+          await selectAt(page, 600, 150);
           await page.keyboard.press("Enter");
           const box = await page.evaluate(
             `(()=>{const r=fixtureShadow.querySelector('textarea').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`,
@@ -73,6 +82,9 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
           await expect
             .poll(() => page.evaluate("deliveries[0]?.question"))
             .toBe("Compare these marked elements");
+          expect(await page.evaluate("deliveries[0].replyInBrowser")).toBe(
+            false,
+          );
           await page.keyboard.press("Escape");
           await page.locator("#outside").focus();
           expect(await page.evaluate("document.activeElement.id")).toBe(
@@ -89,6 +101,169 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
 describe.skipIf(!existsSync(chromium.executablePath()))(
   "AI Picker browser interaction",
   () => {
+    it.each([
+      ["chrome", "element"],
+      ["firefox", "element"],
+      ["chrome", "marks"],
+      ["firefox", "marks"],
+    ])(
+      "opens page popups and selects with Ctrl (%s API, %s)",
+      async (api, mode) => {
+        const browser = await chromium.launch({ headless: true });
+        try {
+          const page = await browser.newPage();
+          await page.route("https://popup.test/**", (route) =>
+            route.fulfill({
+              contentType: "text/html",
+              body: `<button id="open">Open popup</button>
+          <div id="popup" hidden style="position:absolute;left:80px;top:100px;width:300px;height:250px;background:#ddd">
+            <button id="content" style="margin:20px;width:180px;height:50px">Popup details</button>
+            <input id="page-question" aria-label="Page question">
+          </div>`,
+            }),
+          );
+          await page.goto("https://popup.test/");
+          await page.addScriptTag({
+            content: `
+          globalThis.pageActions=[];globalThis.deliveries=[];
+          document.querySelector('#open').onclick=()=>document.querySelector('#popup').hidden=false;
+          for(const name of ['pointerdown','mousedown','pointerup','mouseup','click'])
+            document.querySelector('#content').addEventListener(name,()=>pageActions.push(name));
+          const original=Element.prototype.attachShadow;
+          Element.prototype.attachShadow=function(init){const root=original.call(this,init);globalThis.fixtureShadow=root;return root;};
+          const runtime={id:'fixture-extension',onMessage:{addListener:fn=>globalThis.command=fn},sendMessage:(message,callback)=>{
+            if(message.type==='picker_submit')deliveries.push(structuredClone(message.context));
+            const result={ok:true,notified:true};if(callback){callback(result);return;}return Promise.resolve(result);
+          }};
+          globalThis.${api === "firefox" ? "browser" : "chrome"}={runtime};
+        `,
+          });
+          await page.addScriptTag({ content: inspectorBundle("controller") });
+          await page.evaluate(
+            `command({type:'picker_control',action:'start',mode:'${mode}'},{id:'fixture-extension'},()=>{})`,
+          );
+          await page.locator("#open").click();
+          await expect
+            .poll(() => page.locator("#popup").isVisible())
+            .toBe(true);
+          expect(
+            await page.evaluate(
+              "fixtureShadow.querySelector('.panel').classList.contains('compact')",
+            ),
+          ).toBe(true);
+          await page.locator("#page-question").click();
+          await page.keyboard.type("ordinary page typing");
+          expect(await page.locator("#page-question").inputValue()).toBe(
+            "ordinary page typing",
+          );
+          // A real page click reaches every handler. The following Ctrl gesture must reach none.
+          await page.locator("#content").click();
+          expect(await page.evaluate("pageActions")).toEqual([
+            "pointerdown",
+            "mousedown",
+            "pointerup",
+            "mouseup",
+            "click",
+          ]);
+          await page.evaluate("pageActions=[]");
+          await page.mouse.move(150, 145);
+          await page.keyboard.down("Control");
+          await page.mouse.down();
+          await page.keyboard.up("Control");
+          await page.mouse.up();
+          expect(await page.evaluate("pageActions")).toEqual([]);
+          if (mode === "marks") {
+            expect(
+              await page.locator("#content").getAttribute("data-ai-picker"),
+            ).not.toBeNull();
+            await page.keyboard.press("Enter");
+            expect(
+              await page.evaluate(
+                "fixtureShadow.querySelector('textarea') !== null",
+              ),
+            ).toBe(true);
+          }
+          // Plain Send asks for console output only; Ctrl+Send requests a browser reply.
+          await expect
+            .poll(() =>
+              page.evaluate(
+                "document.querySelector('#telly-inspector-overlay').style.visibility",
+              ),
+            )
+            .not.toBe("hidden");
+          const sendPosition = await page.evaluate(
+            `(()=>{const r=fixtureShadow.querySelector('[aria-label=Send]').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`,
+          );
+          await page.mouse.click(sendPosition.x, sendPosition.y);
+          await expect.poll(() => page.evaluate("deliveries.length")).toBe(1);
+          expect(await page.evaluate("deliveries[0].replyInBrowser")).toBe(
+            false,
+          );
+          expect(await page.evaluate("fixtureShadow.textContent")).toContain(
+            "The agent will answer in its console.",
+          );
+          const sendColor = () =>
+            page.evaluate(
+              "getComputedStyle(fixtureShadow.querySelector('[aria-label=Send]')).backgroundColor",
+            );
+          const normalColor = await sendColor();
+          await page.keyboard.down("Control");
+          expect(await sendColor()).toBe("rgb(23, 106, 58)");
+          expect(
+            await page.evaluate(
+              "fixtureShadow.querySelector('[aria-label=Send]').title",
+            ),
+          ).toBe("Send and reply in browser");
+          await page.mouse.click(sendPosition.x, sendPosition.y);
+          await page.keyboard.up("Control");
+          await expect.poll(() => page.evaluate("deliveries.length")).toBe(2);
+          expect(await sendColor()).toBe(normalColor);
+          expect(await page.evaluate("deliveries[1].replyInBrowser")).toBe(
+            true,
+          );
+          expect(
+            await page.evaluate(
+              "deliveries[1].requestId!==deliveries[0].requestId",
+            ),
+          ).toBe(true);
+          expect(await page.evaluate("fixtureShadow.textContent")).toContain(
+            "Keep this tab open for its response.",
+          );
+          if (mode === "marks") {
+            // Normal clicks also work during Marks review without removing a mark.
+            await page.locator("#content").click();
+            expect(
+              await page.locator("#content").getAttribute("data-ai-picker"),
+            ).not.toBeNull();
+            await page.waitForTimeout(510);
+            await selectAt(page, 150, 145);
+            expect(
+              await page.locator("#content").getAttribute("data-ai-picker"),
+            ).toBeNull();
+            expect(await page.evaluate("pageActions")).toEqual([
+              "pointerdown",
+              "mousedown",
+              "pointerup",
+              "mouseup",
+              "click",
+            ]);
+          } else {
+            expect(
+              await page.evaluate(
+                "fixtureShadow.querySelector('textarea') !== null",
+              ),
+            ).toBe(true);
+          }
+          await page.keyboard.press("Escape");
+          expect(await page.locator("#telly-inspector-overlay").count()).toBe(
+            0,
+          );
+        } finally {
+          await browser.close();
+        }
+      },
+    );
+
     it.each(["chrome", "firefox"])(
       "selects, reviews, crops and answers with %s API semantics",
       async (browserName) => {
@@ -152,18 +327,38 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
             );
           const panel = page.locator("#telly-inspector-overlay");
           const clickButton = async (label: string) => {
+            await expect
+              .poll(
+                () =>
+                  page.evaluate(
+                    "document.querySelector('#telly-inspector-overlay').style.visibility",
+                  ),
+                { timeout: 5000 },
+              )
+              .not.toBe("hidden");
             const box = await page.evaluate(
               `(()=>{const button=[...fixtureShadow.querySelectorAll('button')].find(b=>b.textContent===${JSON.stringify(label)}||b.getAttribute('aria-label')===${JSON.stringify(label)});if(!button)throw new Error('Missing picker button');button.scrollIntoView({block:'nearest'});const r=button.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`,
             );
             await page.mouse.click(box.x, box.y);
           };
           const sendQuestion = async (value: string) => {
+            await expect
+              .poll(
+                () =>
+                  page.evaluate(
+                    "document.querySelector('#telly-inspector-overlay').style.visibility",
+                  ),
+                { timeout: 5000 },
+              )
+              .not.toBe("hidden");
             const box = await page.evaluate(
               `(()=>{const field=fixtureShadow.querySelector('textarea');field.scrollIntoView({block:'nearest'});const r=field.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`,
             );
             await page.mouse.click(box.x, box.y);
             await page.keyboard.type(value);
+            await page.keyboard.down("Control");
             await clickButton("Send");
+            await page.keyboard.up("Control");
           };
           await command("start", {
             mode: "element",
@@ -188,7 +383,7 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
           await page.waitForTimeout(40);
           await page.keyboard.press("Alt+ArrowUp");
           await page.keyboard.press("Alt+ArrowDown");
-          await page.mouse.click(100, 100);
+          await selectAt(page, 100, 100);
           expect((await panelSize()).width).toBe(340);
           expect(await page.evaluate("trades")).toBe(0);
           expect(
@@ -242,7 +437,7 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
           await command("start", { mode: "element" });
           await page.mouse.move(700, 90);
           await page.waitForTimeout(40);
-          await page.mouse.click(700, 90);
+          await selectAt(page, 700, 90);
           await page.evaluate(
             `Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async value => { globalThis.fixtureCopiedContext = value; } } });`,
           );
@@ -317,6 +512,47 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
           expect(await page.evaluate("fixtureShadow.textContent")).toContain(
             "The captured text is still available after the original node was replaced.",
           );
+          const captures = await page.evaluate(
+            "fixtureMessages.filter(m=>m.type==='picker_capture').length",
+          );
+          await clickButton("Snapshot");
+          await expect
+            .poll(() =>
+              page.evaluate(
+                "fixtureShadow.querySelector('[aria-label=Snapshot]').getAttribute('aria-pressed')",
+              ),
+            )
+            .toBe("true");
+          const frozenImage = await page.evaluate(
+            "fixtureShadow.querySelector('img').src",
+          );
+          await clickButton("Snapshot");
+          await expect
+            .poll(() =>
+              page.evaluate("fixtureShadow.querySelectorAll('img').length"),
+            )
+            .toBe(0);
+          expect(
+            await page.evaluate(
+              "fixtureShadow.querySelector('[aria-label=Snapshot]').getAttribute('aria-pressed')",
+            ),
+          ).toBe("false");
+          await clickButton("Snapshot");
+          await expect
+            .poll(() =>
+              page.evaluate("fixtureShadow.querySelector('img')?.src"),
+            )
+            .toBe(frozenImage);
+          expect(
+            await page.evaluate(
+              "fixtureMessages.filter(m=>m.type==='picker_capture').length",
+            ),
+          ).toBe(captures);
+          expect(
+            await page.evaluate(
+              "fixtureMessages.filter(m=>m.type==='picker_capture').every(m=>!('masks' in m))",
+            ),
+          ).toBe(true);
           await page.keyboard.press("Escape");
           expect(await panel.count()).toBe(0);
           await page.evaluate(
@@ -345,7 +581,19 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
           await page.mouse.move(240, 400);
           await page.mouse.up();
           expect((await panelSize()).width).toBe(340);
-          await clickButton("Capture preview");
+          await expect
+            .poll(
+              () =>
+                page.evaluate(
+                  "fixtureShadow.querySelector('[aria-label=Snapshot]').disabled",
+                ),
+              { timeout: 5000 },
+            )
+            .toBe(false);
+          await page.evaluate(
+            "(()=>{const c=document.querySelector('canvas').getContext('2d');c.fillStyle='#0000ff';c.fillRect(0,0,200,100)})()",
+          );
+          await clickButton("Snapshot");
           await expect
             .poll(
               () =>
@@ -408,12 +656,12 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
             "globalThis.trades=0;document.querySelector('#trade').onclick=()=>trades++;document.querySelector('canvas').setAttribute('data-ai-picker','site-owned');document.querySelector('canvas').setAttribute('data-ai-picker-item','legacy')",
           );
           await command("start", { mode: "marks" });
-          await page.mouse.click(290, 180);
+          await selectAt(page, 290, 180);
           const groupId = await page
             .locator("#card")
             .getAttribute("data-ai-picker");
           expect(groupId).toMatch(/^[a-f0-9-]{36}$/);
-          await page.mouse.click(100, 100);
+          await selectAt(page, 100, 100);
           expect(
             await page.locator("#card").getAttribute("data-ai-picker"),
           ).toBeNull();
@@ -421,15 +669,15 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
             await page.locator("#trade").getAttribute("data-ai-picker"),
           ).toBeNull();
           expect(await page.evaluate("trades")).toBe(0);
-          await page.mouse.click(100, 100);
-          await page.mouse.click(100, 350);
+          await selectAt(page, 100, 100);
+          await selectAt(page, 100, 350);
           expect(
             await page.locator("#trade").getAttribute("data-ai-picker"),
           ).toBe(groupId);
           expect(
             await page.locator("canvas").getAttribute("data-ai-picker"),
           ).toBe(groupId);
-          await page.mouse.click(290, 180);
+          await selectAt(page, 290, 180);
           expect(
             await page.locator("#trade").getAttribute("data-ai-picker"),
           ).toBeNull();
@@ -448,11 +696,11 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
             await page.locator("#card").getAttribute("data-ai-picker"),
           ).toBeNull();
           await clickButton("Collapse");
-          await page.mouse.click(290, 180);
+          await selectAt(page, 290, 180);
           await page.keyboard.press("Enter");
           expect(
             await page.evaluate(
-              "[...fixtureShadow.querySelectorAll('button')].some(b=>b.getAttribute('aria-label')==='Capture preview')",
+              "[...fixtureShadow.querySelectorAll('button')].some(b=>b.getAttribute('aria-label')==='Snapshot')",
             ),
           ).toBe(false);
           await sendQuestion("Compare the marked blocks");
@@ -505,7 +753,7 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
             "Both marked blocks were read live.",
           );
           await page.waitForTimeout(510);
-          await page.mouse.click(100, 100);
+          await selectAt(page, 100, 100);
           expect(
             await page.locator("#card").getAttribute("data-ai-picker"),
           ).toBeNull();
@@ -527,7 +775,7 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
           await page.locator("#trade").click();
           expect(await page.evaluate("trades")).toBe(1);
           await command("start", { mode: "marks" });
-          await page.mouse.click(290, 180);
+          await selectAt(page, 290, 180);
           await page.evaluate("fixtureBridge.disconnect()");
           expect(
             await page.locator("#card").getAttribute("data-ai-picker"),
@@ -538,7 +786,7 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
           );
           await page.clock.install();
           await command("start", { mode: "marks" });
-          await page.mouse.click(290, 180);
+          await selectAt(page, 290, 180);
           expect(
             await page.locator("#card").getAttribute("data-ai-picker"),
           ).not.toBeNull();

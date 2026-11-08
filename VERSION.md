@@ -4,6 +4,19 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.51 (local build)
+
+- Chrome0.0.15 / Firefox0.0.14 use **Ctrl+click** to select Elements or toggle
+  Marks. Ordinary clicks open page popups; Region keeps normal dragging.
+- **Send** asks for an answer in the console. **Ctrl+Send** also asks for a browser
+  reply; Send glows green on hover while Ctrl is held.
+- **Snapshot** toggles sending the local image saved at selection time. Initially
+  off; enabling it shows the image preview. No page scan or screenshot masking.
+
+Update/restart the source console owner to0.0.51 and reload the extension/target
+page after finishing the current request. Gateway deployment is not required for
+artifact delivery and browser responses.
+
 ## 0.0.50 (local extension build)
 
 - Chrome0.0.14 / Firefox0.0.13 send the Element snapshot captured at selection time,

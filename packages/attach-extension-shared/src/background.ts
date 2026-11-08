@@ -329,8 +329,10 @@ export class InspectorBridge {
     tabId: number,
     message: Message,
   ): Promise<NonNullable<Entry["image"]>> {
-    const tab = await this.adapter.tab(tabId);
-    const active = await this.adapter.active();
+    const [tab, active] = await Promise.all([
+      this.adapter.tab(tabId),
+      this.adapter.active(),
+    ]);
     if (!tab.active || active?.id !== tabId || tab.url !== message.page_url)
       throw new Error("Keep the selected tab active while capturing");
     const viewport = message.viewport as { width: number; height: number };
@@ -340,8 +342,10 @@ export class InspectorBridge {
       viewport?.height,
     );
     const dataUrl = await this.adapter.capture(tab.windowId);
-    const after = await this.adapter.active();
-    const refreshed = await this.adapter.tab(tabId);
+    const [after, refreshed] = await Promise.all([
+      this.adapter.active(),
+      this.adapter.tab(tabId),
+    ]);
     if (after?.id !== tabId || refreshed.url !== message.page_url)
       throw new Error("Tab changed during capture");
     const blob = await (await fetch(dataUrl)).blob();
@@ -364,10 +368,11 @@ export class InspectorBridge {
         width,
         height,
       );
-      if (!Array.isArray(message.masks) || message.masks.length > 500)
+      const masks = message.masks ?? [];
+      if (!Array.isArray(masks) || masks.length > 500)
         throw new Error("Invalid redaction masks");
       ctx.fillStyle = "#101827";
-      for (const mask of message.masks as Rect[]) {
+      for (const mask of masks as Rect[]) {
         if (![mask.x, mask.y, mask.width, mask.height].every(Number.isFinite))
           throw new Error("Invalid redaction mask");
         ctx.fillRect(
@@ -397,6 +402,7 @@ export class PickerDeliveryClient {
   private supported = false;
   private marksSupported = false;
   private autoAttachSupported = false;
+  private optionalReplySupported = false;
   private readonly attachments = new Map<number, Promise<Message>>();
   private readonly pending = new Map<
     string,
@@ -412,15 +418,18 @@ export class PickerDeliveryClient {
     supported: boolean,
     marksSupported = false,
     autoAttachSupported = false,
+    optionalReplySupported = false,
   ): void {
     this.supported = supported;
     this.marksSupported = marksSupported;
     this.autoAttachSupported = autoAttachSupported;
+    this.optionalReplySupported = optionalReplySupported;
   }
   public disconnect(): void {
     this.supported = false;
     this.marksSupported = false;
     this.autoAttachSupported = false;
+    this.optionalReplySupported = false;
     this.attachments.clear();
     for (const [requestId, pending] of this.pending) {
       clearTimeout(pending.timer);
@@ -441,6 +450,12 @@ export class PickerDeliveryClient {
     pending.resolve(message);
   }
   public submit(tabId: number, context: SelectionContext): Promise<Message> {
+    if (context.replyInBrowser !== undefined && !this.optionalReplySupported)
+      return Promise.resolve({
+        ok: false,
+        error:
+          "Send/Ctrl+Send needs TellyMCP 0.0.51 or newer. Update and restart the source console owner, then retry.",
+      });
     if (
       !this.supported ||
       (context.selection.mode === "marks" && !this.marksSupported)

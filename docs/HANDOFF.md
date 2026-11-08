@@ -22,8 +22,11 @@ PostgreSQL/Redis/RabbitMQ IDs/volumes all match the preflight baseline.
 
 Main/tag were pushed to GitLab and GitHub. User session owners were not stopped.
 A gateway restart disconnects remote viewers; reconnect with a fresh code. Load
-the new extensions and a0.0.45 source owner for real Picker acceptance. T047/T048
-stay in review pending real multi-terminal/installed-browser acceptance; T046
+the new extensions and a0.0.45 source owner for real Picker acceptance. **T047 is
+done:** the user accepted all native terminals and Live working simultaneously
+with correct shared sizes, recorded in **I-TELLYMCP-069**. All266 compiled files in
+the deployed image match the installed candidate, so no package reinstall is needed.
+T048 stays in review pending installed-browser Picker acceptance; T046
 still needs the user's real ChatGPT OAuth retry. No registry/store publication.
 
 ## Implementation and local verification record (2026-11-08)
@@ -72,7 +75,8 @@ still needs the user's real ChatGPT OAuth retry. No registry/store publication.
   native and Picker code; after gateway release, load the new browser extensions
   and verify the inspector roundtrip. Do not stop user sessions to force
   the new owner code in. Record actual multi-terminal and real Firefox/Chrome
-  acceptance before marking T047/T048 done. Both tasks are in review.
+  acceptance before marking T048 done. T047 was accepted by the user after this
+  deployment and is done; see I069. T048 remains in review.
   Source test notes: I065/I066; candidate/install smoke: **I067**. Final tgz SHA256:
   `550a3d8d9ebf50c316dde096ff3e79ab24691f4d458fb38770577cbb0383e2eb`.
 

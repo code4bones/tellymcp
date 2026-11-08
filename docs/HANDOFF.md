@@ -2,6 +2,20 @@
 
 ## Production0.0.47 deployed: browser Live and Picker auto-attachment (2026-11-08)
 
+**Postdeploy Telegram incident (14:04 UTC):** user reported startup/client-online
+notifications arriving but both /menu and callbacks unresponsive. Gateway HTTP,
+all services and proxied Bot API getMe were healthy; webhook disabled and
+getWebhookInfo showed3 pending updates. Restarted only the gateway container,
+without dropping updates or stopping owners/data services. User confirmed menus
+recovered; pending updates now0, health OK, all production fingerprints and service
+IDs unchanged. Original env restored byte-for-byte (private backup in
+`/opt/tellymcp/backups/env-before-menu-diagnostic-20261108T140408Z`). Three polling
+middleware `fetch failed` errors appeared during restart warm-up. Original hang's
+root cause is **unconfirmed**; do not claim an application fix. Transport starts
+before gateway HTTP setup in bootstrap, so warm-up errors merit separate review
+if repeated. Standard HTTP health does not prove bot update handling is healthy.
+Get a fresh Live→Link after this additional restart.
+
 Current release commit **`124c7a591520314fc48b95747300599e9263c43b`**, tag
 **`v0.0.47`**, image **`tellymcp-gateway:0.0.47-124c7a591520`** on savant.
 Pipeline **[7546](https://gitlab.undoo.ru/c4b/mcp/telegram_mcp/-/pipelines/7546)**

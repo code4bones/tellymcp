@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.0.53 — 2026-11-09
+## 0.0.54 — 2026-11-09
 
 - Remove the session Agent menu (Codex, Claude, Terminal and Stop active turn).
   Ordinary Telegram messages always use the selected console's terminal input,

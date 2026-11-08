@@ -4,7 +4,7 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
-## 0.0.53
+## 0.0.54
 
 - Send ordinary Telegram messages to the selected console's terminal input.
 - Remove the Agent submenu and its delivery-mode selector; start Codex/Claude

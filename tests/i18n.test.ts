@@ -20,12 +20,13 @@ describe("i18n", () => {
     expect(translate("de", "common:menu.refresh")).toBe("🔄 Refresh");
   });
 
-  it("explains how to continue an attached agent chat", () => {
-    expect(translate("ru", "menu:agents.screen.chat_ready_hint")).toContain(
-      "обычным текстом прямо в этот чат",
+  it("includes the selected console in the localized delivery confirmation", () => {
+    const key = "menu:system.gateway_relay_inbox_sent";
+    expect(translate("ru", key, { sessionName: "Test Console" })).toBe(
+      "Сообщение отправлено в сессию Test Console через шлюз.",
     );
-    expect(translate("en", "menu:agents.screen.chat_ready_hint")).toContain(
-      "plain text in this chat",
+    expect(translate("en", key, { sessionName: "Test Console" })).toBe(
+      "Message routed to session Test Console through the gateway.",
     );
   });
 });

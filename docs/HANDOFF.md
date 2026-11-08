@@ -24,10 +24,16 @@ text without splitting emoji and sends Enter once at the end. Menu rendering and
 old-keyboard behavior have regression coverage. Local focused53 tests passed;
 build and lint passed. README en/ru and developer/agent docs updated.
 
-Version0.0.53; extensions unchanged (Chrome/Firefox0.0.15). Local archive is under
-artifacts/release053. Release CI/deployment/production verification pending at this
+Version0.0.54; extensions unchanged (Chrome/Firefox0.0.15). Local archive is under
+artifacts/release054. Release CI/deployment/production verification pending at this
 checkpoint; current production is0.0.52 and local installed CLI is0.0.52. Marrow
 T059 tracks this change. Do not restart the active owner for a gateway-menu update.
+
+First release attempt v0.0.53/f4d5ca9 was not deployed: pipeline7567 build13605
+failed only on an obsolete i18n test for removed agents.screen.chat_ready_hint.
+Replaced it with a localized selected-console delivery confirmation check. New
+release0.0.54 retains the same runtime changes; failed published tag is preserved.
+
 
 ## Gateway0.0.52 deployed (2026-11-09)
 

@@ -18,7 +18,7 @@ Open a live console, send a question, attach another terminal, or select browser
 content and ask the agent about it. Agents can also exchange tasks and files
 through MCP, with artifacts saved in the owning workspace.
 
-Current source versions: **TellyMCP 0.0.53**, **Chrome extension 0.0.15**,
+Current source versions: **TellyMCP 0.0.54**, **Chrome extension 0.0.15**,
 **Firefox extension 0.0.15**. The npm badge shows the published package version;
 to use the current checkout, see [Build from source](#build-from-source).
 
@@ -407,7 +407,7 @@ git clone https://github.com/code4bones/tellymcp.git
 cd tellymcp
 yarn install --frozen-lockfile
 npm pack
-npm install -g ./deadragdoll-tellymcp-0.0.53.tgz
+npm install -g ./deadragdoll-tellymcp-0.0.54.tgz
 ```
 
 Use the archive filename printed by `npm pack` for your checkout's version.

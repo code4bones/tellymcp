@@ -1,6 +1,34 @@
 # HANDOFF
 
-## Authorized0.0.46 release in progress (2026-11-08)
+## Production0.0.46 deployed (2026-11-08)
+
+Authoritative current state; earlier implementation/candidate notes below describe
+their state before this rollout. Release commit
+**`fba3fe2c92682c41a303762f6022bb4307d0bc36`**, tag **`v0.0.46`**, image
+**`tellymcp-gateway:0.0.46-fba3fe2c9268`** is running on savant.
+GitLab pipeline **[7543](https://gitlab.undoo.ru/c4b/mcp/telegram_mcp/-/pipelines/7543)**
+succeeded: build13596, deploy13597. CI475 passed,4 skipped; local477 passed,2
+skipped. Build/lint/package/native PTY passed. Initial pipeline7542 stopped before
+deploy on the unchanged remote resize test's timeout; focused10/10 and the full
+same-tag rerun passed without source changes or skipped checks.
+
+Postdeploy: all five services healthy, public health endpoint OK. Actual HTTP MCP
+initialize/list/close confirms all five inspector tools, marks mode and DOM batch/
+pinned-target fields. Deployed compiled Live handlers pass the RU3/2/1 layout and
+private copyable Link checks using local fakes; no real Telegram message/browser
+action was generated. Environment settings except image, env0600, Redis admin
+principal, all data container IDs and named volumes are preserved. Polling stays
+enabled. Previous app/config: `/opt/tellymcp/releases/20261108T133329Z-13597`;
+rollback restores app/config, not DB. Local global CLI is0.0.46; shared profile
+and session marker hashes match preflight. No user owner sessions were stopped.
+
+Chrome0.0.11 and Firefox0.0.10 ZIPs are rebuilt at their usual package artifact
+paths. Reload/update installed extensions and use an owner running0.0.46 before
+acceptance. T049 automatic delivery and T050 Marks remain in review pending real
+installed-browser acceptance; T048 remaining region/image/privacy/Firefox response
+checks are also separate. No npm or browser store publication was performed.
+
+### Authorized menu and release scope
 
 User explicitly authorized the update after requesting the Live menu follow-up.
 **T-TELLYMCP-051**: first row Fullscreen | Expand | Default, second Link | Attach,
@@ -17,10 +45,9 @@ tests pass; gateway0.0.45 baseline is healthy, polling on, env0600/admin princip
 and PostgreSQL/Redis/RabbitMQ IDs/volumes recorded in private fingerprint-only
 `artifacts/release046/preflight.json`. Local marker/profile fingerprints recorded.
 No local or gateway consoles were online during preflight; none were stopped.
-Build/lint and full suite477 passed,2 skipped. Local0.0.46 package is built under
-`artifacts/release046/`; tagged GitLab rollout is the next step.
-Create `v0.0.46` for the existing GitLab CI deployment flow, preserve production configuration
-and data, then verify live MCP schemas and health. Do not publish to npm/stores.
+Build/lint and full suite477 passed,2 skipped. Local0.0.46 package and private
+verification fingerprints/probes are under `artifacts/release046/`. Tagged GitLab
+rollout and postdeploy checks completed as recorded above.
 
 ## Current continuation: toggle DOM marking groups (2026-11-08)
 
@@ -362,9 +389,9 @@ is archived in Marrow. Retain the research; resume only on a new request.
 
 ### Production deployment — keep distinct from the client version
 
-- Gateway is **0.0.45**, image `tellymcp-gateway:0.0.45-9e9169812cc6` on
+- Gateway is **0.0.46**, image `tellymcp-gateway:0.0.46-fba3fe2c9268` on
   **savant**, not fr-vpn. All five Compose services are healthy after deployment.
-  Previous image0.0.44 remains available for rollback. Local client0.0.41–0.0.43
+  Previous image0.0.45 remains available for rollback. Local client0.0.41–0.0.43
   updates had no corresponding gateway releases.
 - `/opt/tellymcp`: `docker-compose.yml`, secret `.env-gateway` (`0600`),
   `nginx/default.conf`, `state/`, `backups/`, `releases/`. PostgreSQL 16, Redis 7
@@ -376,7 +403,7 @@ is archived in Marrow. Retain the research; resume only on a new request.
 - GitLab CI uses shell runner tag **`telly_savant`**. Main/MR builds produce
   npm `.tgz` artifacts and gateway images. A matching **`vX.Y.Z` tag** deploys
   production after main-ancestry/version checks. A main push alone does not
-  deploy. Latest production release: `v0.0.45`, pipeline **7537**.
+  deploy. Latest production release: `v0.0.46`, pipeline **7543**.
 - Telegram uses **polling**, `TELEGRAM_WEBHOOK_ENABLED=false`: inbound webhook
   traffic cannot reach this network. User confirmed messages, menu and Live work.
   Keep polling during future deploys and rollbacks; older snapshots have webhook

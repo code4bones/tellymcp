@@ -1,5 +1,26 @@
 # HANDOFF
 
+## Next session: Picker acceptance deferred by the user
+
+The user ended today's work and explicitly left Picker testing for tomorrow/the
+next session. **Do not continue feature work or create reminders now.** Resume
+with **T-TELLYMCP-048** and Marrow handoff **I-TELLYMCP-070**.
+
+- Native local/remote terminals, writable Live and shared dimensions were accepted
+  on0.0.45; **T047 is done** (I069). Last attach/resize wins, including Live;
+  disconnect never resizes. Keep this policy.
+- Gateway0.0.45 is deployed and its five `inspector_*` tools were verified over
+  actual HTTP MCP (I068). User installed0.0.45 clients. No additional rollout is
+  needed just to resume manual Picker testing.
+- Next: load/verify Chrome0.0.10 and Firefox0.0.9, bind the target tab to the
+  intended console, test Element/Region → preview/optional crop → Explain/Ask →
+  `inspector_get_selection` → `inspector_response`, including Esc/cleanup and
+  privacy checks. See implementation map in `docs/AI_PICKER_EXTENSION.md` and I066.
+  Restart an old source owner only when the user is ready; preserve live sessions.
+- T048 remains in review until real installed-browser acceptance. Site adapters
+  and annotations are later phases. T046's real ChatGPT OAuth login retry is also
+  still unconfirmed and separate from the completed terminal acceptance.
+
 ## Production gateway0.0.45 deployed (2026-11-08)
 
 The user reported0.0.45 installed everywhere and requested the gateway update.

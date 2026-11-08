@@ -1,5 +1,31 @@
 # HANDOFF
 
+## Release0.0.48 preparation: local Telegram SDK and starfield (2026-11-08)
+
+**T-TELLYMCP-053** bundles the official unchanged SDK from
+`https://telegram.org/js/telegram-web-app.js?64` under vendor/telegram-web-app,
+including source/date/SHA metadata. Snapshot119731 bytes, SHA256
+`124bdff7ba3fe86c8ba5143467afec21e020405e74abdb92cfdda6c0ee3b5908`.
+The gateway serves `/api/webapp/vendor/telegram-web-app.124bdff7ba3fe86c.js`
+(configured WebApp base path respected), GET only, JavaScript MIME and immutable
+one-year cache. Filename derives from bytes; no build/startup download. npm files
+includes the vendor directory; ESLint excludes upstream source. Mini App loader
+uses this same-origin URL; browser direct token path still skips SDK entirely.
+
+User added a predeploy request for the public domain root: black, three dark star
+layers drifting slowly, cursor motion adds acceleration and depth parallax.
+Root GET/HEAD now serves a self-contained canvas page with no network dependencies;
+other paths retain their handlers. It respects reduced motion and pauses when
+hidden. Real Chromium checks: all3 layers move at idle and react to pointer,
+no page errors/external requests, desktop/mobile preview reviewed. SDK browser
+fixtures now use the actual vendored SDK with a simulated native bridge and
+telegram.org blocked; all Mini App modes/bootstrap and SDK-free browser paths pass.
+
+Runtime0.0.48 is being prepared; Chrome0.0.12/Firefox0.0.11 unchanged. Build,
+lint,23 focused checks and full suite494 passed,2 skipped (79 files) pass.
+Package/deployment still pending. Production
+remains0.0.47; preserve user owners and production config/data during rollout.
+
 ## Local follow-up: browser Live toolbar hidden (2026-11-08)
 
 User requested `div.toolbar { display:none }` only for browser Live. Current
@@ -8,8 +34,8 @@ or hash, and scopes the hiding rule to that class. Telegram retains its toolbar;
 both keep the statusbar. Build and21 focused WebApp checks pass; a real Chromium
 layout probe confirms zero toolbar height and terminal/statusbar adjacency for
 both token forms, and visible toolbar for Mini App mode. Focused lint passes.
-This is source-only for the next release: production/global CLI and existing
-package artifacts remain0.0.47; no deployment or owner restart for this CSS change.
+This is included in the0.0.48 preparation above. At initial implementation no
+deployment/owner restart occurred; production/global CLI was0.0.47.
 
 ## Production0.0.47 deployed: browser Live and Picker auto-attachment (2026-11-08)
 

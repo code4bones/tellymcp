@@ -11,6 +11,7 @@ export default tseslint.config(
       "packages/**/dist/**",
       "scripts/**",
       "public/**",
+      "vendor/**",
       "eslint.config.js",
       "src/lib/**/*.js",
       "src/**/*.js",

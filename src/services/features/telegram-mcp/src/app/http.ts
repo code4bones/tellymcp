@@ -29,6 +29,8 @@ import {
   WEBAPP_STYLES_CSS,
   renderWebAppHtml,
 } from "./webapp/assets";
+import { TELEGRAM_SDK_FILENAME, TELEGRAM_SDK_JS } from "./webapp/telegramSdk";
+import { renderStarfieldHtml } from "./webapp/starfield";
 import {
   renderLandingHtml,
   renderPrivacyPolicyHtml,
@@ -793,6 +795,15 @@ export function createMcpHttpHandler(
       });
     }
 
+    if (pathname === "/") {
+      if (method !== "GET" && method !== "HEAD") {
+        writeText(res, 405, "Method not allowed");
+        return;
+      }
+      writeHtml(res, 200, method === "HEAD" ? "" : renderStarfieldHtml());
+      return;
+    }
+
     if (requestUrl.pathname === "/healthz") {
       writeJson(res, 200, {
         ok: true,
@@ -929,6 +940,16 @@ export function createMcpHttpHandler(
             launchMode,
           }),
         );
+        return;
+      }
+
+      if (requestUrl.pathname === `${webAppBasePath}/vendor/${TELEGRAM_SDK_FILENAME}`) {
+        if (method !== "GET") {
+          writeText(res, 405, "Method not allowed");
+          return;
+        }
+        res.setHeader("cache-control", "public, max-age=31536000, immutable");
+        writeJavaScript(res, 200, TELEGRAM_SDK_JS);
         return;
       }
 

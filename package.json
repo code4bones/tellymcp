@@ -1,6 +1,6 @@
 {
   "name": "@deadragdoll/tellymcp",
-  "version": "0.0.47",
+  "version": "0.0.48",
   "description": "TellyMCP - Telegram control plane for MCP-connected coding agents",
   "main": "dist/services/features/telegram-mcp/runtime.service.js",
   "bin": {
@@ -8,6 +8,7 @@
   },
   "files": [
     "dist",
+    "vendor/telegram-web-app",
     "packages/firefox-attach-extension/dist",
     "packages/chrome-attach-extension/dist",
     "scripts",

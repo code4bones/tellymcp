@@ -3,6 +3,10 @@ import { chromium } from "playwright";
 import { describe, expect, it } from "vitest";
 
 import { renderWebAppHtml } from "../src/services/features/telegram-mcp/src/app/webapp/assets";
+import {
+  TELEGRAM_SDK_FILENAME,
+  TELEGRAM_SDK_JS,
+} from "../src/services/features/telegram-mcp/src/app/webapp/telegramSdk";
 
 describe.skipIf(!existsSync(chromium.executablePath()))(
   "Live startup in a browser",
@@ -75,6 +79,7 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
           expect(
             requests.every((url) => new URL(url).hostname === "live.test"),
           ).toBe(true);
+          expect(requests.some((url) => url.includes("/vendor/"))).toBe(false);
         } finally {
           releaseSdk();
           await browser.close();
@@ -89,16 +94,34 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
         try {
           const page = await browser.newPage();
           const bootstraps: unknown[] = [];
+          const requests: string[] = [];
+          page.on("request", (request) => requests.push(request.url()));
           let sdkRequests = 0;
-          await page.route("https://telegram.org/**", async (route) => {
-            sdkRequests++;
-            await route.fulfill({
-              contentType: "application/javascript",
-              body: `window.fixtureCalls=[];window.Telegram={WebApp:{initData:'auth_date=123&hash=fixture',initDataUnsafe:{user:{id:42}},ready(){fixtureCalls.push('ready')},expand(){fixtureCalls.push('expand')},requestFullscreen(){fixtureCalls.push('fullscreen')}}};`,
+          await page.addInitScript(() => {
+            Object.assign(window, {
+              fixtureCalls: [],
+              TelegramWebviewProxy: {
+                postEvent(event: string) {
+                  (
+                    window as unknown as { fixtureCalls: string[] }
+                  ).fixtureCalls.push(event);
+                },
+              },
             });
           });
+          await page.route("https://telegram.org/**", (route) => route.abort());
           await page.route("https://live.test/**", async (route) => {
             if (
+              new URL(route.request().url()).pathname.endsWith(
+                `/vendor/${TELEGRAM_SDK_FILENAME}`,
+              )
+            ) {
+              sdkRequests++;
+              await route.fulfill({
+                contentType: "application/javascript",
+                body: TELEGRAM_SDK_JS,
+              });
+            } else if (
               new URL(route.request().url()).pathname.endsWith("/api/bootstrap")
             ) {
               bootstraps.push(route.request().postDataJSON());
@@ -113,22 +136,47 @@ describe.skipIf(!existsSync(chromium.executablePath()))(
             }
           });
           await page.routeWebSocket("wss://live.test/**", () => {});
-          await page.goto("https://live.test/api/webapp/live/fixture", {
-            waitUntil: "domcontentloaded",
+          const initData = new URLSearchParams({
+            auth_date: "123",
+            hash: "fixture",
+            user: JSON.stringify({ id: 42 }),
+          }).toString();
+          const launchParams = new URLSearchParams({
+            tgWebAppData: initData,
+            tgWebAppVersion: "8.0",
+            tgWebAppPlatform: "tdesktop",
           });
+          await page.goto(
+            "https://live.test/api/webapp/live/fixture#" + launchParams,
+            {
+              waitUntil: "domcontentloaded",
+            },
+          );
           await expect
             .poll(() => bootstraps, { timeout: 3000 })
             .toEqual([
               {
-                initDataRaw: "auth_date=123&hash=fixture",
-                initDataUnsafe: { user: { id: 42 } },
+                initDataRaw: initData,
+                initDataUnsafe: {
+                  user: { id: 42 },
+                  auth_date: "123",
+                  hash: "fixture",
+                },
                 sessionId: "fixture",
               },
             ]);
           expect(sdkRequests).toBe(1);
-          expect(await page.evaluate("window.fixtureCalls")).toEqual(
-            launchMode === "default" ? ["ready"] : ["ready", launchMode],
-          );
+          const events = (await page.evaluate(
+            "window.fixtureCalls",
+          )) as string[];
+          expect(events).toContain("web_app_ready");
+          if (launchMode === "expand")
+            expect(events).toContain("web_app_expand");
+          if (launchMode === "fullscreen")
+            expect(events).toContain("web_app_request_fullscreen");
+          expect(
+            requests.every((url) => new URL(url).hostname === "live.test"),
+          ).toBe(true);
         } finally {
           await browser.close();
         }

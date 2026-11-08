@@ -1,0 +1,10 @@
+Telegram Mini Apps JavaScript SDK, unmodified upstream snapshot.
+Source: https://telegram.org/js/telegram-web-app.js?64
+Documentation: https://core.telegram.org/bots/webapps
+Downloaded: 2026-11-08
+SHA256: 124bdff7ba3fe86c8ba5143467afec21e020405e74abdb92cfdda6c0ee3b5908
+
+Bundled in TellyMCP and served from its gateway for Mini App launches.
+Browser token links do not load this SDK. Builds and runtime startup use this
+local snapshot; they do not download or refresh it. Update this file and its
+provenance when intentionally replacing the upstream snapshot.

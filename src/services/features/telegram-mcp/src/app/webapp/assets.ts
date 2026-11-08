@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { TELEGRAM_SDK_FILENAME } from "./telegramSdk";
 
 type RenderWebAppHtmlInput = {
   basePath: string;
@@ -855,7 +856,7 @@ async function initializeTelegram() {
 
   await new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "https://telegram.org/js/telegram-web-app.js";
+    script.src = config.basePath + "/vendor/${TELEGRAM_SDK_FILENAME}";
     script.async = true;
     const finish = (error) => {
       clearTimeout(timeout);

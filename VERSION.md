@@ -4,6 +4,17 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.48
+
+- Mini Apps load their bundled Telegram SDK from the gateway, avoiding a runtime
+  dependency on telegram.org. Direct browser Live links still load no SDK.
+- Browser Live keeps its statusbar and hides the Telegram button toolbar.
+- The public domain root shows three dark star layers with slow drift, cursor
+  acceleration and parallax, without external assets.
+
+Browser extensions remain Chrome0.0.12 / Firefox0.0.11. These presentation changes
+need a gateway update and page reload; existing console owners can keep running.
+
 ## 0.0.47
 
 - Browser Live links authenticate with their existing token and start without

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.0.48 — 2026-11-08
+
+- Bundle an unmodified, pinned Telegram Mini Apps SDK and serve it from a
+  fingerprinted gateway URL. Mini App startup no longer fetches telegram.org;
+  browser token links continue without loading any Telegram SDK.
+- Add a black public root page with three dim star layers, calm autonomous drift
+  and cursor-controlled acceleration/parallax. No external assets are loaded.
 - Hide the Live toolbar for browser links authenticated by token (query or hash),
   keeping the statusbar and the toolbar in Telegram Mini App launches.
 

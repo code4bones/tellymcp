@@ -9,10 +9,13 @@ import {
 } from "./localProtocol";
 import type { OwnerRecord } from "./localRegistry";
 import { AttachmentInput } from "./attachmentInput";
+import { NativeViewport } from "./nativeViewport";
 import {
   AttachmentOutput,
   snapshotBeginSchema,
   type SnapshotBegin,
+  viewportBeginSchema,
+  type ViewportBegin,
 } from "./attachmentOutput";
 import {
   OUTER_MODE_QUERY,
@@ -82,6 +85,11 @@ export async function attachTerminalConnection(
     bytes = 0,
     chunks: Buffer[] = [];
   let output: AttachmentOutput | undefined;
+  let viewport: NativeViewport | undefined;
+  let viewportSnapshot:
+    | { begin: ViewportBegin; bytes: number; chunks: Buffer[] }
+    | undefined;
+  let lastSize = requested;
   let pendingBytes = 0,
     pendingFrames = 0;
   let chain = Promise.resolve();
@@ -107,6 +115,7 @@ export async function attachTerminalConnection(
     if (detachDeadline) clearTimeout(detachDeadline);
     if (escapeTimer) clearTimeout(escapeTimer);
     socket.destroy();
+    viewport?.dispose();
     stdin.off("data", onInput);
     stdin.off("end", onEof);
     stdin.off("error", onInputError);
@@ -182,7 +191,10 @@ export async function attachTerminalConnection(
   const onResize = () => {
     if (!streaming || finished || detaching) return;
     try {
-      writer.control({ type: "resize", ...dimensions(stdout) });
+      const size = dimensions(stdout);
+      if (size.cols === lastSize.cols && size.rows === lastSize.rows) return;
+      writer.control({ type: "resize", ...size });
+      lastSize = size;
     } catch (error) {
       finish(1, false, error);
     }
@@ -194,6 +206,13 @@ export async function attachTerminalConnection(
   const handle = async (frame: LocalFrame) => {
     if (finished || detaching) return;
     if (frame.type === FrameType.Snapshot) {
+      if (viewportSnapshot) {
+        viewportSnapshot.bytes += frame.payload.length;
+        if (viewportSnapshot.bytes > viewportSnapshot.begin.bytes)
+          throw new Error("Viewport snapshot size mismatch");
+        viewportSnapshot.chunks.push(frame.payload);
+        return;
+      }
       if (!snapshot || output) throw new Error("Unexpected snapshot data");
       bytes += frame.payload.length;
       if (bytes > snapshot.bytes) throw new Error("Snapshot size mismatch");
@@ -201,9 +220,11 @@ export async function attachTerminalConnection(
       return;
     }
     if (frame.type === FrameType.Output) {
+      if (viewportSnapshot)
+        throw new Error("Output interrupted viewport snapshot");
       if (!output) throw new Error("Output before snapshot");
       const data = output.push(frame.payload);
-      if (data?.length) await write(data);
+      if (data?.length) await write(await viewport!.write(data));
       return;
     }
     if (frame.type !== FrameType.Control)
@@ -212,15 +233,20 @@ export async function attachTerminalConnection(
       string,
       unknown
     >;
+    if (viewportSnapshot && message.type !== "viewport_end")
+      throw new Error("Control interrupted viewport snapshot");
     if (message.type === "snapshot_begin") {
       if (snapshot) throw new Error("Duplicate snapshot");
       snapshot = snapshotBeginSchema.parse(message);
       if (
         snapshot.instance !== instance ||
-        snapshot.cols !== requested.cols ||
-        snapshot.rows !== requested.rows
+        snapshot.cols > requested.cols ||
+        snapshot.rows > requested.rows
       )
         throw new Error("Snapshot owner/dimension mismatch");
+      viewport = new NativeViewport(snapshot.cols, snapshot.rows, () =>
+        dimensions(stdout),
+      );
     } else if (message.type === "snapshot_end") {
       if (
         !snapshot ||
@@ -240,7 +266,7 @@ export async function attachTerminalConnection(
       if (finished) return;
       const initial = probe.finish();
       outer.restoreModes(initial.restore);
-      await write(Buffer.concat(chunks, bytes));
+      await write(await viewport!.write(Buffer.concat(chunks, bytes)));
       chunks = [];
       if (finished) return;
       output = new AttachmentOutput(snapshot.sequence);
@@ -256,6 +282,34 @@ export async function attachTerminalConnection(
         sendInput(initial.input);
         scheduleEscape();
       }
+    } else if (message.type === "viewport_begin") {
+      if (!output || !viewport || viewportSnapshot)
+        throw new Error("Unexpected viewport snapshot");
+      output.end();
+      const begin = viewportBeginSchema.parse(message);
+      if (begin.instance !== instance)
+        throw new Error("Viewport owner mismatch");
+      viewportSnapshot = { begin, bytes: 0, chunks: [] };
+    } else if (message.type === "viewport_end") {
+      if (
+        !viewportSnapshot ||
+        !output ||
+        !viewport ||
+        message.instance !== instance ||
+        message.sequence !== viewportSnapshot.begin.sequence ||
+        viewportSnapshot.bytes !== viewportSnapshot.begin.bytes
+      )
+        throw new Error("Invalid viewport snapshot boundary");
+      const current = viewportSnapshot;
+      viewportSnapshot = undefined;
+      output.advance(current.begin.sequence);
+      await write(
+        await viewport.restore(
+          current.begin.cols,
+          current.begin.rows,
+          Buffer.concat(current.chunks, current.bytes).toString("utf8"),
+        ),
+      );
     } else if (message.type === "exit") {
       if (
         !Number.isSafeInteger(message.exitCode) ||
@@ -310,6 +364,7 @@ export async function attachTerminalConnection(
       try {
         decoder.end();
         output?.end();
+        if (viewportSnapshot) throw new Error("Truncated viewport snapshot");
       } catch (error) {
         finish(1, false, error);
         return;

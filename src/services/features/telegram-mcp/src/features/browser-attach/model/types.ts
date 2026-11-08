@@ -221,7 +221,8 @@ export type FirefoxAttachTabActionRequest = {
     | "screenshot"
     | "inject_script"
     | "get_logs"
-    | "clear_logs";
+    | "clear_logs"
+    | `inspector_${"start" | "get_selection" | "highlight" | "response" | "stop"}`;
   payload?: Record<string, unknown> | undefined;
 };
 

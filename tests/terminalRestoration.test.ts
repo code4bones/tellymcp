@@ -251,11 +251,12 @@ describe("ordered restoration and query ownership", () => {
     expect(state(display)).toEqual(state(reference));
   });
 
-  it("reserves one controller, orders prior writes/snapshot/live, ACKs input and rejects stale handles", async () => {
+  it("orders independent concurrent snapshots/live queues, ACKs input and rejects only stale handles", async () => {
     const { model, events, pty } = owner();
     events.emit("data", "before\r\n");
     const pending = model.attach(24, 6);
-    await expect(model.attach(24, 6)).rejects.toThrow("already attached");
+    const parallel = await model.attach(24, 6);
+    parallel.acknowledge();
     events.emit("data", "after\r\n");
     const attached = await pending;
     expect(() => attached.write("premature")).toThrow("acknowledged");
@@ -263,6 +264,7 @@ describe("ordered restoration and query ownership", () => {
     await model.settled();
     attached.acknowledge();
     const frames = attached.drain();
+    expect(parallel.drain()).toEqual(frames);
     expect(frames).toEqual([
       { sequence: attached.snapshot.sequence + 1, data: "after\r\n" },
     ]);
@@ -284,8 +286,11 @@ describe("ordered restoration and query ownership", () => {
     ).toBe("Привет 😀\r");
     attached.detach();
     expect(() => attached.write("stale")).toThrow("expired");
+    parallel.write("parallel stays alive");
+    expect(pty.write).toHaveBeenLastCalledWith("parallel stays alive");
+    parallel.detach();
     const next = await model.attach(32, 8);
-    expect(next.snapshot.generation).toBe(attached.snapshot.generation + 1);
+    expect(next.snapshot.generation).toBe(parallel.snapshot.generation + 1);
     expect(next.snapshot.instance).toBe(attached.snapshot.instance);
     expect(model.status.pid).toBe(12345);
     expect(pty.kill).not.toHaveBeenCalled();

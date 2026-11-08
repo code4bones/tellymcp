@@ -7,7 +7,9 @@
     <style>
       :root {
         color-scheme: light dark;
-        font-family: ui-monospace, "SFMono-Regular", "Cascadia Code", "Fira Code", monospace;
+        font-family:
+          ui-monospace, "SFMono-Regular", "Cascadia Code", "Fira Code",
+          monospace;
         --bg-start: #fffdf8;
         --bg-end: #f3efe2;
         --card-bg: rgba(255, 255, 255, 0.88);
@@ -39,7 +41,11 @@
         margin: 0;
         width: 320px;
         padding: 16px;
-        background: linear-gradient(180deg, var(--bg-start) 0%, var(--bg-end) 100%);
+        background: linear-gradient(
+          180deg,
+          var(--bg-start) 0%,
+          var(--bg-end) 100%
+        );
         color: var(--text);
       }
 
@@ -86,6 +92,10 @@
         <div id="session">Session: -</div>
         <div id="attached-tab">Attached: -</div>
       </div>
+      <p>AI Picker</p>
+      <button id="pick-element" type="button">Element</button>
+      <button id="pick-region" type="button">Region</button>
+      <p id="picker-error" role="status"></p>
       <button id="open-settings" type="button">Open Control Panel</button>
     </div>
     <script src="popup.js"></script>

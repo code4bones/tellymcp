@@ -323,15 +323,30 @@ tellymcp attach --code 12345678 --gateway https://example.com/api/gateway
 
 Use the command with `--gateway` if no gateway is configured on that machine;
 `--env <file>` can select gateway/proxy settings. The code supplies session access,
-so the owner's credentials and workspace marker are not needed. One native local
-or remote attach is allowed; detach the previous one first. Live View keeps its
-mirrored screen and input. Ctrl+] then d disconnects while the owner keeps running.
+so the owner's credentials and workspace marker are not needed. Multiple local
+and remote terminals can attach to the same shell and write simultaneously.
+Live View keeps its mirrored screen and input. The latest attachment or resize,
+including Live, sets the shared PTY dimensions; detach does not change them.
+Smaller windows show a clipped view rather than rewrapping the shared screen.
+Ctrl+] then d disconnects only that terminal while the owner keeps running.
 After disconnection, generate a fresh code; keystrokes are never automatically
 replayed. The five-minute limit applies to code redemption, not connection length.
 
-This needs gateway, session-owner and viewing-client builds **0.0.44 or newer**.
+Remote attach needs gateway **0.0.44 or newer**. Concurrent native attachments
+require a session-owner and viewing clients **0.0.45 or newer** (local protocol2).
 Restart an existing owner when ready to load the new bridge; installing a package
 does not replace code in an already running owner.
+
+### AI Picker in the attached browser
+
+Chrome0.0.10 and Firefox0.0.9 add **Element / Region** to the popup and an
+**Alt+Shift+P** command. Attach a tab to a console in the existing Control Panel,
+select and review content, optionally capture a cropped preview, then choose
+**Explain / Ask**. The bound agent reads `inspector_get_selection` and returns
+`inspector_response`; `inspector_start`, `inspector_highlight` and `inspector_stop`
+support the agent-driven flow. New MCP tools need0.0.45 gateway/console builds.
+Nothing invokes an AI provider automatically. Context expires after five minutes;
+use Esc or Forget to clear it. See [scope and implementation](docs/AI_PICKER_EXTENSION.md#13-карта-реализации-mvp-2026-11-08).
 
 ### Start and continue a coding agent
 

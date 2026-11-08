@@ -91,6 +91,11 @@ import {
   ensureGatewayClientUuid,
 } from "../../distributed-client/model/gatewayClientAccess";
 import type { FirefoxAttachInstanceRecord } from "../../browser-attach/model/browserAttachRegistry";
+import {
+  inspectorInputSchema,
+  validateInspectorResult,
+  type InspectorInput,
+} from "./inspectorProtocol";
 
 type WaitUntilState = "load" | "domcontentloaded" | "networkidle" | "commit";
 
@@ -240,7 +245,8 @@ type BrowserAttachHost = {
       | "screenshot"
       | "inject_script"
       | "get_logs"
-      | "clear_logs";
+      | "clear_logs"
+      | `inspector_${"start" | "get_selection" | "highlight" | "response" | "stop"}`;
     payload?: Record<string, unknown> | undefined;
   }): Promise<Record<string, unknown> | undefined>;
 };
@@ -1993,6 +1999,44 @@ export class BrowserService {
     };
   }
 
+  public async inspector(input: InspectorInput) {
+    const parsed = inspectorInputSchema.parse(input);
+    const resolved =
+      this.projectIdentityResolver.resolveSessionDefaults(parsed);
+    const sessionId = await this.normalizeSessionIdForAccess(
+      resolved.sessionId,
+    );
+    const remote = await this.invokeRemote<
+      ReturnType<typeof validateInspectorResult> & { session_id: string }
+    >(sessionId, "telegramMcp.browser.inspectorRemote", {
+      ...parsed,
+      session_id: sessionId,
+    });
+    if (remote) return remote;
+    this.ensureEnabled();
+    const attached = await this.getAttachedBrowserAttachment(sessionId);
+    if (!attached)
+      throw new Error(
+        "Attach a browser tab to this session before using inspector tools.",
+      );
+    const result = await this.runAttachedTabAction(sessionId, attached, {
+      action: `inspector_${parsed.operation}`,
+      payload: {
+        ...parsed,
+        session_id: sessionId,
+        include_image: parsed.include_image !== false,
+      },
+    });
+    return {
+      session_id: sessionId,
+      ...validateInspectorResult(result, {
+        sessionId,
+        instanceId: attached.instanceId,
+        tabId: attached.tabId,
+      }),
+    };
+  }
+
   public async shutdown(): Promise<void> {
     for (const [sessionId, state] of this.sessionStates.entries()) {
       await this.closeState(sessionId, state);
@@ -2359,7 +2403,8 @@ export class BrowserService {
         | "screenshot"
         | "inject_script"
         | "get_logs"
-        | "clear_logs";
+        | "clear_logs"
+        | `inspector_${"start" | "get_selection" | "highlight" | "response" | "stop"}`;
       payload?: Record<string, unknown> | undefined;
     },
   ): Promise<Record<string, unknown> | undefined> {

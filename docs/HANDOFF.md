@@ -1,5 +1,64 @@
 # HANDOFF
 
+## Gateway0.0.45 update in progress (2026-11-08)
+
+The user reports0.0.45 installed everywhere and requested the gateway update.
+Releasing the verified source through the existing `v0.0.45` GitLab tag pipeline
+on savant. Preserve polling, env/admin grants, data containers and volumes; do not
+restart user-owned session processes. Record final pipeline/image and health/tool
+verification here after deployment. Native viewers disconnect across a gateway
+restart and must reconnect with a fresh code; the source owner stays running.
+
+## Implementation and local verification record (2026-11-08)
+
+- User confirmed real remote terminal access from savant: **I-TELLYMCP-064**.
+  Missing g++ prevented node-pty installation there; g++ was installed, exact CI
+  0.0.44 package installed under NVM Node24.16.0, real PTY smoke passed. Original
+  workstation CLI was then updated from0.0.43 to the same0.0.44 artifact under
+  NVM Node24.13.0; shared profile and marker hashes were unchanged. User restarted
+  the source owner and confirmed the actual Telegram-code/public-WSS attach.
+- User subsequently requested **several simultaneous writable native terminals**
+  (T047), superseding the old exclusive-native policy and the intermediate idea
+  of a busy-confirmation takeover prompt. **Latest attach or resize wins**, also
+  from Live; the user explicitly rejected choosing the smallest window. Detach
+  never resizes. One shell/PID/agent/runtime remains shared.
+- Repository version is now **0.0.45**. T047 source has independent
+  snapshot/ACK/UTF8/output queues, per-client expiry/backpressure, ordered
+  authoritative viewport resnapshots and a VT projection for differing physical
+  sizes (small windows clip). Local protocol2 retains safe protocol1 owner
+  discovery/attach/stop compatibility. Restart source owners and update viewers
+  for simultaneous attach; installing a package does not reload active owners.
+- T048 implements `docs/AI_PICKER_EXTENSION.md` Phase0–2 in shared TypeScript,
+  Chrome0.0.10/Firefox0.0.9 and existing tab RPC/MCP route. See the implementation
+  map at the end of that spec. Five inspector tools support selection pull,
+  highlight, plain-text response and cleanup. Explicit receiver, preview before
+  send, optional masked/cropped image, bounded memory queue with five-minute TTL;
+  no provider invocation, trade actions or separate backend. Real Firefox/store
+  publication acceptance remains separate from Chromium fixture tests.
+- Candidate archives are built locally: `deadragdoll-tellymcp-0.0.45.tgz`,
+  `packages/chrome-attach-extension/webstore-artifacts/tellymcp-chrome-attach-0.0.10.zip`,
+  `packages/firefox-attach-extension/web-ext-artifacts/tellymcp-firefox-attach-0.0.9.zip`.
+  The user subsequently installed0.0.45 on both native sides. Production gateway
+  was0.0.44 before the release recorded above. Picker's tools require the updated
+  gateway/console, while the0.0.44 gateway already relays new native protocol
+  bytes. Preserve the current running user sessions during updates.
+- Final full suite: **468 passed,2 skipped** (76 files). Build, typechecked
+  extension builds and lint passed. After final UTF8 byte-budget/error-message
+  refinement, Picker's four focused suites20 passed. Standalone0.0.45 package
+  installed with `--omit=dev` under `/tmp/tellymcp-045-candidate.k5lCA8`; three
+  compiled CLI scenarios passed: concurrent native PID/I/O/idempotence, shared
+  picker, and SIGTERM/SIGKILL/TTY controls. Test harness accepts explicit
+  `TELLYMCP_TEST_CLI_ENTRY` and disables source runtime for these installed tests.
+  The final pack only additionally includes the linked Picker spec; code files
+  are compared to the tested installation. No registry/store publication.
+- Next review/test: restart a source owner when the user is ready to load new
+  native and Picker code; after gateway release, load the new browser extensions
+  and verify the inspector roundtrip. Do not stop user sessions to force
+  the new owner code in. Record actual multi-terminal and real Firefox/Chrome
+  acceptance before marking T047/T048 done. Both tasks are in review.
+  Source test notes: I065/I066; candidate/install smoke: **I067**. Final tgz SHA256:
+  `550a3d8d9ebf50c316dde096ff3e79ab24691f4d458fb38770577cbb0383e2eb`.
+
 ## Production gateway updated (2026-11-08)
 
 The user authorized the T046 gateway update. **0.0.44** is deployed on savant:

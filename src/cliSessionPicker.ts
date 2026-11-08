@@ -33,7 +33,7 @@ export async function pickLocalSession(
   const available = sessions.filter(
     (session) =>
       action === "stop" ||
-      (session.state === "running" && session.attached === false),
+      session.state === "running",
   );
   if (!available.length) {
     process.stdout.write(
@@ -90,7 +90,7 @@ export async function pickLocalSession(
             ? session.state
             : session.attached
               ? action === "attach"
-                ? "attached · busy"
+                ? "attached · shared"
                 : "attached"
               : "detached";
         return {

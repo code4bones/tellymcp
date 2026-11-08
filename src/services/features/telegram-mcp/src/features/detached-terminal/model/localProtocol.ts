@@ -1,7 +1,7 @@
 import type { Duplex } from "node:stream";
 import { z } from "zod";
 
-export const LOCAL_PROTOCOL_VERSION = 1;
+export const LOCAL_PROTOCOL_VERSION = 2;
 export const MAX_FRAME_BYTES = 65536;
 export const FrameType = {
   Control: 1,

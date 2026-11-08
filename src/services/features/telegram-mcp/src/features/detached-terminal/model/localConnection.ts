@@ -1,10 +1,5 @@
 import net, { type Socket } from "node:net";
-import {
-  FrameDecoder,
-  FrameType,
-  LocalWriter,
-  LOCAL_PROTOCOL_VERSION,
-} from "./localProtocol";
+import { FrameDecoder, FrameType, LocalWriter } from "./localProtocol";
 import { ownerRecordSchema, type OwnerRecord } from "./localRegistry";
 
 /** Reachability during stale recovery: any listener is ambiguous ownership. */
@@ -61,7 +56,7 @@ export function connectOwner(
       try {
         writer.control({
           type: "hello",
-          version: LOCAL_PROTOCOL_VERSION,
+          version: record.protocol,
           instance: record.instance,
           clientUuid: record.clientUuid,
           sessionId: record.sessionId,
@@ -87,7 +82,8 @@ export function connectOwner(
           verified.clientUuid !== record.clientUuid ||
           verified.sessionId !== record.sessionId ||
           verified.processStart !== record.processStart ||
-          verified.pid !== record.pid
+          verified.pid !== record.pid ||
+          verified.protocol !== record.protocol
         )
           throw new Error("Owner identity mismatch");
         clearTimeout(timer);

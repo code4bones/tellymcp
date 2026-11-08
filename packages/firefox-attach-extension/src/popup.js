@@ -62,3 +62,22 @@ browser.storage.onChanged.addListener((changes, areaName) => {
 });
 
 void render();
+
+for (const [id, mode] of [
+  ["pick-element", "element"],
+  ["pick-region", "region"],
+]) {
+  document.getElementById(id).addEventListener("click", async () => {
+    try {
+      const result = await browser.runtime.sendMessage({
+        type: "picker_open",
+        mode,
+      });
+      if (!result?.ok)
+        throw new Error(result?.error || "Could not open picker");
+      window.close();
+    } catch (error) {
+      setText("picker-error", error.message);
+    }
+  });
+}

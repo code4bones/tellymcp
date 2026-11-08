@@ -4,6 +4,27 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.45
+
+### Added
+
+- Several local and remote terminals can attach to one existing shell/agent and
+  write simultaneously alongside Live. Each frontend has its own ordered output
+  queue; disconnect or slow output affects that frontend only.
+- The latest attach or resize, including Live, sets the shared PTY dimensions.
+  Differently sized native windows project the same screen without rewrapping;
+  smaller windows clip it. Detach leaves the shared size unchanged.
+- AI Picker in Chrome0.0.10 / Firefox0.0.9: select an element or region, review
+  sanitized DOM and an optional cropped image, then ask the explicitly bound
+  agent. MCP tools retrieve selections and return plain-text explanations to the
+  tab. No automatic provider invocation or website actions are added.
+
+Concurrent native attach requires updated0.0.45 owners/viewers and an owner
+restart. Protocol1 owners remain discoverable and stoppable. The existing
+0.0.44 gateway relay supports the terminal transport; Picker MCP tools require
+updated0.0.45 gateway and console builds. Browser-store/registry publication is
+separate from local builds.
+
 ## 0.0.44
 
 ### Fixed

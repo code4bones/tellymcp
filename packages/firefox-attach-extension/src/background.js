@@ -29,6 +29,19 @@ const consoleMessagesByTabId = new Map();
 const pageErrorsByTabId = new Map();
 const networkFailuresByTabId = new Map();
 
+const inspectorBridge = globalThis.tellyInspector.createBridge({
+  tab: (tabId) => browser.tabs.get(tabId),
+  active: async () =>
+    (await browser.tabs.query({ active: true, currentWindow: true }))[0],
+  selected: () => attachedTabId,
+  inject: (tabId) =>
+    browser.tabs.executeScript(tabId, { file: "inspector-content.js" }),
+  capture: (windowId) =>
+    browser.tabs.captureVisibleTab(windowId, { format: "png" }),
+  message: (tabId, message) =>
+    browser.tabs.sendMessage(tabId, message, { frameId: 0 }),
+});
+
 function padNumber(value, length = 2) {
   return String(value).padStart(length, "0");
 }
@@ -62,6 +75,7 @@ async function setLocalInstanceId(value) {
 }
 
 async function setAttachedTab(tab) {
+  if (attachedTabId !== null && attachedTabId !== tab?.tab_id) inspectorBridge.invalidateTab(attachedTabId);
   attachedTabId =
     tab && Number.isInteger(tab.tab_id)
       ? Number(tab.tab_id)
@@ -514,6 +528,7 @@ function buildTabActionCode(action, payload) {
 }
 
 async function runTabAction(tabId, action, payload) {
+  if (action.startsWith("inspector_")) return inspectorBridge.action(tabId, action, payload || {});
   const activeTab = await ensureTabIsActive(tabId);
 
   if (action === "attach") {
@@ -996,6 +1011,7 @@ async function handleMessage(rawData) {
 
   switch (message.type) {
     case "hello_ack":
+      inspectorBridge.bind(message.session_id || "", message.instance_id, message.session_label || "");
       await setConnectionStatus({
         state: "connected",
         text: `Connected: ${message.session_label || message.session_id || message.instance_id}`,
@@ -1122,6 +1138,7 @@ async function connect() {
   });
 
   socket.addEventListener("close", () => {
+    inspectorBridge.disconnect();
     socket = null;
     if (manualDisconnect) {
       void setConnectionStatus({
@@ -1220,6 +1237,7 @@ browser.storage.onChanged.addListener((changes, areaName) => {
 });
 
 browser.tabs.onRemoved.addListener((tabId) => {
+  inspectorBridge.forgetTab(tabId);
   consoleMessagesByTabId.delete(tabId);
   pageErrorsByTabId.delete(tabId);
   networkFailuresByTabId.delete(tabId);
@@ -1244,6 +1262,7 @@ browser.tabs.onActivated.addListener(async () => {
 });
 
 browser.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.url !== undefined || changeInfo.status === "loading") inspectorBridge.invalidateTab(tabId);
   if (
     typeof tabId !== "number" ||
     (changeInfo.title === undefined &&
@@ -1305,6 +1324,7 @@ browser.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 });
 
 async function handleRuntimeMessage(message, sender) {
+  if (String(message?.type).startsWith("picker_")) return inspectorBridge.runtime(message, sender);
   if (!message || typeof message !== "object") {
     return undefined;
   }
@@ -1654,3 +1674,11 @@ browser.webRequest.onErrorOccurred.addListener(
 void hydrateAttachedTabSelection();
 void computeInstanceId();
 void connect();
+
+browser.commands.onCommand.addListener((command) => {
+  if (command === "toggle-ai-picker") {
+    void inspectorBridge
+      .runtime({ type: "picker_open", mode: "element" }, {})
+      .catch(() => {});
+  }
+});

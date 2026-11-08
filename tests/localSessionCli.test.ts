@@ -97,17 +97,16 @@ async function setup() {
       .join("\n"),
     { mode: 0o600 },
   );
+  const compiledEntry = process.env.TELLYMCP_TEST_CLI_ENTRY;
   const env = {
     ...process.env,
     ...values,
     TMPDIR: root,
-    TELLYMCP_SOURCE_RUNTIME: "true",
+    TELLYMCP_SOURCE_RUNTIME: compiledEntry ? "false" : "true",
   };
-  const prefix = [
-    "--import",
-    require.resolve("tsx"),
-    path.resolve("src/cli.ts"),
-  ];
+  const prefix = compiledEntry
+    ? [path.resolve(compiledEntry)]
+    : ["--import", require.resolve("tsx"), path.resolve("src/cli.ts")];
   const run = (args: string[], workingDir = cwd) =>
     new Promise<{ code: number | null; out: string; err: string }>(
       (resolve, reject) => {
@@ -237,10 +236,21 @@ it("public detached run is idempotent; attach/stop work without a profile or net
     () => attached.text.includes("CLI_PID=" + session.pty_pid),
     "same shell input",
   );
-  const busy = ctx.pty(["attach", session.handle]);
-  await until(() => busy.code !== undefined, "second controller rejection");
-  expect(busy.code).toBe(1);
-  expect(busy.text).toContain("already has an interactive controller");
+  const shared = ctx.pty(["attach", session.handle]);
+  await until(
+    () => shared.text.includes("\x1bc"),
+    "parallel controller snapshot",
+  );
+  shared.pty.write("echo SHARED_PID=$$\r");
+  await until(
+    () =>
+      shared.text.includes("SHARED_PID=" + session.pty_pid) &&
+      attached.text.includes("SHARED_PID=" + session.pty_pid),
+    "shared shell input/output",
+  );
+  shared.pty.write("\x1dd");
+  await until(() => shared.code !== undefined, "parallel detach");
+  expect(shared.code).toBe(0);
   attached.pty.resize(97, 31);
   attached.pty.write("stty size\r");
   await until(() => attached.text.includes("31 97"), "native resize");
@@ -342,7 +352,7 @@ it("ordinary run returns to an outer shell with exact termios after detach; stop
   await until(() => outer.code !== undefined, "outer shell exit");
 }, 45000);
 
-it("attach menu selects another owner with arrows, works outside a workspace, and skips busy controllers", async () => {
+it("attach menu selects owners outside a workspace and allows already attached sessions", async () => {
   const ctx = await setup();
   expect((await ctx.run(["attach"])).out).toContain("No local sessions.");
   expect((await ctx.run(["run", "--detach", "-s", "First"])).code).toBe(0);
@@ -389,19 +399,28 @@ it("attach menu selects another owner with arrows, works outside a workspace, an
     ctx.env,
   );
   await until(() => other.text.includes("Select a session"), "outside menu");
-  expect(other.text).toContain("attached · busy");
-  other.pty.write("\x1b[B\r"); // Only First is available; busy Second is skipped.
-  await until(() => other.text.includes("\x1bc"), "first owner snapshot");
+  expect(other.text).toContain("attached · shared");
+  other.pty.write("\r"); // Outside a workspace, the first listed session is initially selected.
+  await until(() => other.text.includes("\x1bc"), "shared owner snapshot");
   other.pty.write("echo AVAILABLE_PID=$$\r");
   await until(
-    () => other.text.includes("AVAILABLE_PID=" + first.pty_pid),
-    "available first shell",
+    () =>
+      sessions.some((session) =>
+        other.text.includes("AVAILABLE_PID=" + session.pty_pid),
+      ),
+    "selected shared shell",
   );
-  const blocked = ctx.pty(["attach"]);
-  await until(() => blocked.code !== undefined, "all busy rejection");
-  expect(blocked.code).toBe(1);
-  expect(blocked.text).toContain("No detached local sessions");
-  for (const attached of [selected, other]) {
+  const additional = ctx.pty(["attach"]);
+  await until(
+    () => additional.text.includes("Select a session"),
+    "menu still available with attached sessions",
+  );
+  additional.pty.write("\r");
+  await until(
+    () => additional.text.includes("\x1bc"),
+    "third parallel frontend",
+  );
+  for (const attached of [selected, other, additional]) {
     attached.pty.write("\x1dd");
     await until(() => attached.code !== undefined, "menu frontend detaches");
     expect(attached.code).toBe(0);

@@ -147,16 +147,7 @@ export async function startSessionOwner(input: {
       if (!greeted || !session || !ready) throw new Error("HELLO_REQUIRED");
       if (message.type === "attach") {
         if (attachment) throw new Error("ALREADY_ATTACHED");
-        try {
-          attachment = await session.stream.attach(message.cols, message.rows);
-        } catch (error) {
-          if (
-            error instanceof Error &&
-            error.message === "Controller already attached"
-          )
-            throw new Error("CONTROLLER_BUSY");
-          throw error;
-        }
+        attachment = await session.stream.attach(message.cols, message.rows);
         if (closed) {
           attachment.detach();
           attachment = undefined;
@@ -232,7 +223,22 @@ export async function startSessionOwner(input: {
       try {
         if (final && !acknowledged) attachment.acknowledge();
         for (const frame of attachment.drain()) {
-          writer.output(frame.sequence, Buffer.from(frame.data));
+          if (frame.resize) {
+            const { ansi, ...size } = frame.resize;
+            writer.control({
+              type: "viewport_begin",
+              sequence: frame.sequence,
+              instance: record.instance,
+              bytes: Buffer.byteLength(ansi),
+              ...size,
+            });
+            writer.data(FrameType.Snapshot, Buffer.from(ansi));
+            writer.control({
+              type: "viewport_end",
+              sequence: frame.sequence,
+              instance: record.instance,
+            });
+          } else writer.output(frame.sequence, Buffer.from(frame.data));
         }
       } catch {
         fail("ATTACHMENT_EXPIRED");

@@ -139,11 +139,15 @@ settings on every recoverable exit path, without calling broker shutdown.
 An uncatchable frontend kill must still leave the owner alive; terminal recovery
 after such a kill may require the user to reset the outer terminal.
 
-Only one native terminal attachment owns input and resize, either local or remote.
-A second native attachment reports busy; there is no implicit takeover. **User
-decision on 2026-11-08: Live View remains mirrored and writable alongside native
-attach.** It does not acquire the native attachment lease. Existing Live actions,
-resize behavior and Telegram task delivery retain their routing and ordering.
+**Updated user decision on 2026-11-08 (T047):** several local/remote native
+terminals can read and write the same shell alongside mirrored writable Live.
+Each native attachment has an independent snapshot/ACK, UTF-8 input decoder,
+sequence queue and backpressure. Losing one does not evict the others. No takeover
+or forced eviction is needed for a terminal forgotten on another workstation.
+The latest attach or resize, including Live, sets the one shared PTY size.
+Disconnect does not resize. Native clients with different physical dimensions
+project the authoritative screen; smaller windows clip it instead of rewrapping.
+The earlier single-native-controller rule describes released0.0.44 only.
 
 ## Local discovery and identity
 
@@ -722,3 +726,50 @@ part of this stage.
 Use focused protocol/state tests plus PTY subprocess integration tests. Real SSH
 disconnect and agent TUI checks are release evidence, not substitutes for unit
 tests or claims that a headless fixture proves every terminal emulator works.
+
+
+## Simultaneous native attachments (0.0.45 / T047)
+
+This supersedes single-controller statements in the historical Stage2/3 and
+0.0.44 acceptance notes above. The user confirmed real Telegram/public-WSS
+remote attach from savant in I-TELLYMCP-064, then selected simultaneous writable
+terminals rather than an interactive forced takeover.
+
+One owner keeps one PTY, parser/query authority, shell, agent and runtime. Each
+native connection receives its own snapshot generation, ACK boundary, incremental
+output queue and UTF-8 input decoder. A slow consumer expires independently;
+other input/output continues. Up to eight native peers leave private socket
+capacity for discovery and stop. Local and remote peers obey the same rules;
+Live remains a writable mirror.
+
+**Size policy: latest attach or resize wins, including Live.** The user explicitly
+confirmed the existing Live behavior. No minimum-size negotiation and no resize on
+disconnect. An authoritative resize occupies one ordered output sequence number
+and carries `viewport_begin`, bounded Snapshot chunks and `viewport_end`, all
+bound to the current owner instance. It does not replay historical bells,
+clipboard writes or queries. Viewport snapshots use the same four-MiB upper bound
+as initial snapshots; queued image-free VT state and live bytes have separate
+bounded budgets per peer.
+
+Native clients keep a small headless VT model at the authoritative size. Matching
+physical dimensions use the existing raw-byte path. When dimensions differ, the
+renderer positions styled cells without rewrapping; a smaller terminal clips and
+a larger one pads the viewport. Resize restores an authoritative snapshot rather
+than independently reflowing an old replica, which matters for alternate buffers.
+A clipped cursor is hidden. Normal scrollback, Unicode/wide characters, colors,
+active buffer and keyboard/mouse modes are retained; no additional process or
+PTY is created by this renderer.
+
+Local protocol2 advertises the ordered viewport boundaries. New clients retain
+protocol1 record discovery and handshake so old live owners are not misidentified
+as stale or duplicated; they can still be attached/stopped under the old rules.
+A restarted0.0.45 owner and updated viewers are required for simultaneous native
+attach. The gateway0.0.44 relay already carries these scoped opaque bytes, and
+remote authorization/envelope protocol stays unchanged.
+
+Validation covers concurrent model snapshots/input, isolated backpressure and
+peer cap, real owner-process/shell identity, two remote terminals plus a local
+peer and writable Live, independent detach, final exit, and native CLI pickers.
+VT replay checks compare colored Unicode cells in differently sized windows,
+normal/alternate buffers, scrolling and authoritative native/Live resizes. Exact
+termios restoration and existing raw-byte behavior remain in the CLI suite.

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.0.45 — 2026-11-08
+
+- Allow simultaneous writable native local/remote attachments with independent
+  snapshot/ACK/output queues. Keep last-attach/last-resize-wins dimensions,
+  including Live; never resize on detach. Sequenced authoritative viewport
+  snapshots and a native VT projector preserve cells in differently sized
+  windows. Local protocol2 keeps safe protocol1 owner discovery/stop support.
+- Add shared TypeScript AI Picker to Chrome0.0.10/Firefox0.0.9, popup/hotkey,
+  element/ancestor and region selection, sanitized bounded previews, optional
+  masked PNG crop, explicit session/tab binding, memory-only five-minute queue
+  and five inspector MCP tools for pull/highlight/response/cleanup.
+
 ## 0.0.44 — 2026-11-08
 
 ### Telegram OAuth login

@@ -16,6 +16,10 @@ export const snapshotBeginSchema = z
   })
   .strict();
 export type SnapshotBegin = z.infer<typeof snapshotBeginSchema>;
+export const viewportBeginSchema = snapshotBeginSchema
+  .omit({ generation: true })
+  .extend({ type: z.literal("viewport_begin") });
+export type ViewportBegin = z.infer<typeof viewportBeginSchema>;
 
 /** Reassemble before rendering: no UTF-8 decoding at socket or chunk boundaries. */
 export class AttachmentOutput {
@@ -52,5 +56,11 @@ export class AttachmentOutput {
   }
   end(): void {
     if (this.chunks.length) throw new Error("Truncated output sequence");
+  }
+  advance(sequence: number): void {
+    this.end();
+    if (sequence !== this.sequence + 1)
+      throw new Error("Viewport sequence mismatch");
+    this.sequence = sequence;
   }
 }

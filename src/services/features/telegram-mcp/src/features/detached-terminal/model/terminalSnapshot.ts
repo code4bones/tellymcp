@@ -105,7 +105,7 @@ function bufferState(
   return result;
 }
 
-function attributes(value: Attributes): string {
+export function attributes(value: Attributes): string {
   const params = [0];
   for (const [enabled, code] of [
     [value.isBold(), 1],

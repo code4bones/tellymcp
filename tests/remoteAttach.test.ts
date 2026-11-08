@@ -331,7 +331,7 @@ it("remote CLI preserves PID, screen/raw input/resize and writable Live mirrorin
       first.text.includes("REMOTE_COLOR"),
     "remote raw input",
   );
-  // Existing Live path bypasses native attachment exclusivity, by design.
+  // Existing Live input shares the same shell alongside native clients.
   sendPtyText(ctx.target, "echo LIVE_MIRROR_OK\r");
   await until(
     () => first.text.includes("LIVE_MIRROR_OK\r\n"),
@@ -349,9 +349,40 @@ it("remote CLI preserves PID, screen/raw input/resize and writable Live mirrorin
   });
   local.writer.control({ type: "attach", cols: 80, rows: 24 });
   await until(
-    () => controls.some((value) => value.code === "CONTROLLER_BUSY"),
-    "local busy during remote attach",
+    () => controls.some((value) => value.type === "snapshot_begin"),
+    "local attach alongside remote",
   );
+  const boundary = controls.find((value) => value.type === "snapshot_begin")!;
+  local.writer.control({
+    type: "ack",
+    generation: boundary.generation,
+    sequence: boundary.sequence,
+  });
+  local.writer.send(FrameType.Input, Buffer.from("echo LOCAL_SHARED_PID=$$\r"));
+  await until(
+    () => first.text.includes("LOCAL_SHARED_PID=" + pid),
+    "remote sees concurrent local input",
+  );
+  const parallelRemote = ctx.frontend((await ctx.issue()).code);
+  await until(
+    () => parallelRemote.text.includes("\x1bc"),
+    "second remote snapshot",
+  );
+  parallelRemote.pty.write("echo TWO_REMOTE_PID=$$\r");
+  await until(
+    () =>
+      parallelRemote.text.includes("TWO_REMOTE_PID=" + pid) &&
+      first.text.includes("TWO_REMOTE_PID=" + pid),
+    "both remote terminals share input/output",
+  );
+  parallelRemote.pty.write("\x1dd");
+  await until(
+    () => parallelRemote.code !== undefined,
+    "only second remote detaches",
+  );
+  expect(parallelRemote.code).toBe(0);
+  expect(first.code).toBeUndefined();
+  expect(ctx.stream.status.attached).toBe(true);
   local.socket.destroy();
   first.pty.write("\x1dd");
   await until(() => first.code !== undefined, "remote detach");

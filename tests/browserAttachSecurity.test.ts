@@ -75,7 +75,10 @@ const waitForMessageType = async (
       reject(new Error(`Timed out waiting for ${type}`));
     }, 2_000);
     const onMessage = (payload: WebSocket.RawData): void => {
-      const message = JSON.parse(payload.toString("utf8")) as Record<string, unknown>;
+      const message = JSON.parse(payload.toString("utf8")) as Record<
+        string,
+        unknown
+      >;
       if (message.type !== type) {
         return;
       }
@@ -146,6 +149,52 @@ describe("browser attach WebSocket security", () => {
     return { server, url, logger };
   };
 
+  it("routes inspector RPC through the existing socket and ignores another instance's response", async () => {
+    const { server, url } = await startServer();
+    const first = new WebSocket(url, { origin: EXTENSION_ORIGIN });
+    const other = new WebSocket(url, { origin: EXTENSION_ORIGIN });
+    await Promise.all([waitForOpen(first), waitForOpen(other)]);
+    const acks = [
+      waitForMessageType(first, "hello_ack"),
+      waitForMessageType(other, "hello_ack"),
+    ];
+    first.send(JSON.stringify(hello("picker-target")));
+    other.send(JSON.stringify(hello("other-instance")));
+    await Promise.all(acks);
+    const request = waitForMessageType(first, "tab_action");
+    const output = server.invokeTabAction({
+      instanceId: "picker-target",
+      tabId: 7,
+      action: "inspector_start",
+      payload: { session_id: "test-session", mode: "region" },
+    });
+    const rpc = await request;
+    expect(rpc).toMatchObject({
+      action: "inspector_start",
+      tab_id: 7,
+      payload: { session_id: "test-session" },
+    });
+    other.send(
+      JSON.stringify({
+        type: "tab_action_result",
+        request_id: rpc.request_id,
+        ok: true,
+        result: { status: "forged" },
+      }),
+    );
+    first.send(
+      JSON.stringify({
+        type: "tab_action_result",
+        request_id: rpc.request_id,
+        ok: true,
+        result: { status: "awaiting_user" },
+      }),
+    );
+    await expect(output).resolves.toEqual({ status: "awaiting_user" });
+    first.close();
+    other.close();
+  });
+
   it("rejects webpage origins and requires hello before peer messages", async () => {
     const { url, logger } = await startServer();
 
@@ -160,7 +209,9 @@ describe("browser attach WebSocket security", () => {
           reject(error);
         }
       });
-      webpage.once("open", () => reject(new Error("Webpage origin was accepted")));
+      webpage.once("open", () =>
+        reject(new Error("Webpage origin was accepted")),
+      );
       webpage.once("error", () => undefined);
     });
 

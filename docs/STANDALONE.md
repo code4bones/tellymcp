@@ -195,9 +195,11 @@ In Telegram Live, press **Attach** beside **Open in browser**. The owner receive
 a private single-use eight-digit code, valid for five minutes:
 `tellymcp attach --code <code> [--gateway <url>] [--env <file>]`.
 The same owner/shell/screen is restored; the viewing machine creates no console
-or workspace marker. Native attach is exclusive, while Live remains mirrored and
-writable. Ctrl+] then d detaches. Reconnect needs a fresh code, with no input replay.
-Gateway, owner and client builds **0.0.44** or newer are required; see
+or workspace marker. Native terminals and Live remain mirrored and writable
+simultaneously. The latest attach or resize sets the common PTY size; detach
+leaves it unchanged. Ctrl+] then d detaches only that viewer. Reconnect needs a
+fresh code, with no input replay. Gateway **0.0.44+** supports the relay; owners
+and viewers need **0.0.45+** for concurrent native attachments. See
 [the authorization contract](DETACHED_SESSIONS_DESIGN.md#remote-attach-through-the-gateway).
 
 ## 7. Webhook

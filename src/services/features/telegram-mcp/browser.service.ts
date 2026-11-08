@@ -33,6 +33,7 @@ import type {
   BrowserWaitForUrlInput,
 } from "./src/entities/browser/model/types";
 import { BrowserService } from "./src/features/browser/model/browserService";
+import type { InspectorInput } from "./src/features/browser/model/inspectorProtocol";
 
 export const TELEGRAM_MCP_BROWSER_SERVICE_NAME = "telegramMcp.browser";
 
@@ -51,6 +52,12 @@ const TelegramMcpBrowserService: ServiceSchema = {
   dependencies: [TELEGRAM_MCP_RUNTIME_SERVICE_NAME],
 
   actions: {
+    inspectorRemote: {
+      params: { $$strict: false },
+      async handler(this: BrowserServiceCarrier, ctx: { params: InspectorInput }) {
+        return this.getBrowserService!().inspector(ctx.params);
+      },
+    },
     openRemote: {
       params: { $$strict: false },
       async handler(

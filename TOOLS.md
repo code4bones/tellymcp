@@ -37,6 +37,11 @@ Browser tools:
 - `browser_network_failures`
 - `browser_clear_logs`
 - `browser_dom`
+- `inspector_start`
+- `inspector_get_selection`
+- `inspector_highlight`
+- `inspector_response`
+- `inspector_stop`
 - `browser_computed_style`
 - `browser_screenshot`
 - `browser_close`

@@ -16,12 +16,17 @@ export type RestorationSnapshot = {
   rows: number;
   ansi: string;
 };
-export type RestorationFrame = { sequence: number; data: string };
+export type RestorationFrame = {
+  sequence: number;
+  data: string;
+  resize?: { cols: number; rows: number; ansi: string };
+};
 type Attachment = {
   generation: number;
   ready: boolean;
   frames: RestorationFrame[];
   bytes: number;
+  snapshotBytes: number;
   decoder: StringDecoder;
 };
 export type PrototypeAttachment = {
@@ -49,7 +54,7 @@ export class TerminalRestorationPrototype {
   private readonly output = new VtOutput();
   private readonly subscriptions: Array<{ dispose(): void }>;
   private pipeline = Promise.resolve();
-  private attachment: Attachment | undefined;
+  private readonly attachments = new Set<Attachment>();
   private generation = 0;
   private sequence = 0;
   private pendingBytes = 0;
@@ -147,7 +152,7 @@ export class TerminalRestorationPrototype {
 
   private fail(error: unknown): void {
     this.failure ??= error instanceof Error ? error : new Error(String(error));
-    this.attachment = undefined;
+    this.attachments.clear();
   }
 
   get status() {
@@ -156,7 +161,7 @@ export class TerminalRestorationPrototype {
       sequence: this.sequence,
       exit: this.exit,
       failure: this.failure?.message,
-      attached: !!this.attachment,
+      attached: this.attachments.size > 0,
     };
   }
 
@@ -190,7 +195,7 @@ export class TerminalRestorationPrototype {
       this.pendingOperations > 4096
     ) {
       this.failure = new Error("Prototype parser queue overflow");
-      this.attachment = undefined;
+      this.attachments.clear();
       return;
     }
     void this.enqueue(async () => {
@@ -206,7 +211,6 @@ export class TerminalRestorationPrototype {
           .filter((token) => !isTerminalQuery(token))
           .map((token) => token.data)
           .join("");
-        const current = this.attachment;
         for (const observer of this.observers) {
           try {
             observer(display);
@@ -214,18 +218,7 @@ export class TerminalRestorationPrototype {
             this.observers.delete(observer);
           }
         }
-        if (current) {
-          const frameBytes = Buffer.byteLength(display);
-          if (
-            current.bytes + frameBytes > this.maxQueueBytes ||
-            current.frames.length >= 4096
-          ) {
-            this.attachment = undefined; // Slow consumer must get a fresh snapshot.
-          } else {
-            current.frames.push({ sequence: this.sequence, data: display });
-            current.bytes += frameBytes;
-          }
-        }
+        this.broadcast({ sequence: this.sequence, data: display });
       } finally {
         this.pendingBytes -= bytes;
         this.pendingOperations--;
@@ -250,36 +243,76 @@ export class TerminalRestorationPrototype {
   resize(cols: number, rows: number): Promise<void> {
     validateSize(cols, rows);
     return this.enqueue(() => {
+      this.applySize(cols, rows);
+    });
+  }
+
+  private broadcast(frame: RestorationFrame): void {
+    const bytes = Buffer.byteLength(frame.data) + (frame.resize ? 64 : 0);
+    const snapshotBytes = frame.resize
+      ? Buffer.byteLength(frame.resize.ansi)
+      : 0;
+    for (const current of this.attachments) {
+      if (
+        current.bytes + bytes > this.maxQueueBytes ||
+        current.snapshotBytes + snapshotBytes > 4 * this.maxQueueBytes ||
+        current.frames.length >= 4096
+      ) {
+        this.attachments.delete(current); // Expire only this slow consumer.
+      } else {
+        current.frames.push(frame);
+        current.bytes += bytes;
+        current.snapshotBytes += snapshotBytes;
+      }
+    }
+  }
+
+  private applySize(cols: number, rows: number, force = false): void {
+    if (!force && this.terminal.cols === cols && this.terminal.rows === rows)
+      return;
+    if (this.terminal.cols !== cols || this.terminal.rows !== rows) {
       this.terminal.resize(cols, rows);
       this.pty.resize(cols, rows);
+    }
+    this.sequence++;
+    this.broadcast({
+      sequence: this.sequence,
+      data: "",
+      resize: {
+        cols,
+        rows,
+        ansi: serializeTerminalState(this.terminal, this.addon),
+      },
     });
   }
 
   async attach(cols: number, rows: number): Promise<PrototypeAttachment> {
     validateSize(cols, rows);
     this.assertRunning();
-    if (this.attachment) throw new Error("Controller already attached");
+    // Leave private socket slots for discovery and stop even at the viewer cap.
+    if (this.attachments.size >= 8) throw new Error("ATTACHMENT_LIMIT");
     const current: Attachment = {
       generation: ++this.generation,
       ready: false,
       frames: [],
       bytes: 0,
+      snapshotBytes: 0,
       decoder: new StringDecoder("utf8"),
     };
-    this.attachment = current; // Reserve synchronously, including while the snapshot waits.
+    this.attachments.add(current); // Reserve synchronously, including while the snapshot waits.
     const check = () => {
       if (this.disposed) throw new Error("Prototype disposed");
       if (this.failure) throw this.failure;
-      if (this.attachment !== current)
+      if (!this.attachments.has(current))
         throw new Error("Attachment expired; request a fresh snapshot");
     };
     try {
       const snapshot = await this.enqueue(() => {
         check();
-        this.terminal.resize(cols, rows);
-        this.pty.resize(cols, rows);
+        this.applySize(cols, rows);
         current.frames = [];
         current.bytes = 0;
+        current.snapshotBytes = 0;
         const ansi = serializeTerminalState(this.terminal, this.addon);
         if (Buffer.byteLength(ansi) > 4 * this.maxQueueBytes)
           throw new Error("Prototype snapshot limit exceeded");
@@ -287,8 +320,8 @@ export class TerminalRestorationPrototype {
           instance: this.instance,
           generation: current.generation,
           sequence: this.sequence,
-          cols,
-          rows,
+          cols: this.terminal.cols,
+          rows: this.terminal.rows,
           ansi,
         };
       });
@@ -305,6 +338,7 @@ export class TerminalRestorationPrototype {
           const frames = current.frames;
           current.frames = [];
           current.bytes = 0;
+          current.snapshotBytes = 0;
           return frames;
         },
         write: (data) => {
@@ -326,16 +360,15 @@ export class TerminalRestorationPrototype {
           if (!current.ready) throw new Error("Snapshot must be acknowledged");
           return this.enqueue(() => {
             check();
-            this.terminal.resize(newCols, newRows);
-            this.pty.resize(newCols, newRows);
+            this.applySize(newCols, newRows, true);
           });
         },
         detach: () => {
-          if (this.attachment === current) this.attachment = undefined;
+          this.attachments.delete(current);
         },
       };
     } catch (error) {
-      if (this.attachment === current) this.attachment = undefined;
+      this.attachments.delete(current);
       throw error;
     }
   }
@@ -345,7 +378,7 @@ export class TerminalRestorationPrototype {
     for (const subscription of this.subscriptions) subscription.dispose();
     await this.pipeline;
     this.disposed = true;
-    this.attachment = undefined;
+    this.attachments.clear();
     this.observers.clear();
     if (this.ownsTerminal) this.terminal.dispose(); // Never kill the caller's PTY.
   }

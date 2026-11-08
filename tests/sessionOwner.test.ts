@@ -19,6 +19,8 @@ import {
 } from "../src/services/features/telegram-mcp/src/features/detached-terminal/model/localConnection";
 import {
   FrameType,
+  FrameDecoder,
+  LocalWriter,
   type LocalFrame,
 } from "../src/services/features/telegram-mcp/src/features/detached-terminal/model/localProtocol";
 
@@ -122,6 +124,42 @@ async function attach(record: OwnerRecord) {
 }
 
 describe("private registry", () => {
+  it("discovers and connects to protocol1 owners without treating them as stale", async () => {
+    const ctx = context();
+    const record = ctx.registry.createRecord(ctx.spec, "0.0.44");
+    record.protocol = 1;
+    ctx.registry.reserve(record);
+    ctx.registry.publish(record);
+    let requestedVersion: unknown;
+    const server = net.createServer((socket) => {
+      const decoder = new FrameDecoder(),
+        writer = new LocalWriter(socket);
+      socket.on("data", (chunk) => {
+        for (const frame of decoder.push(chunk)) {
+          const message = JSON.parse(frame.payload.toString());
+          requestedVersion = message.version;
+          writer.control({
+            type: "ready",
+            ...record,
+            state: "ready",
+            ptyPid: 1234,
+            attached: true,
+          });
+        }
+      });
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(record.socketPath, resolve),
+    );
+    cleanups.push(
+      () => new Promise<void>((resolve) => server.close(() => resolve())),
+    );
+    const connection = await connectOwner({ ...record, state: "ready" });
+    connection.socket.destroy();
+    expect(requestedVersion).toBe(1);
+    expect(ctx.registry.list()).toHaveLength(1);
+    expect(ctx.registry.list()[0]?.protocol).toBe(1);
+  });
   it("rejects symlink/public registries and stores no env contents", () => {
     const ctx = context();
     const publicDir = path.join(ctx.root, "public");
@@ -250,8 +288,13 @@ describe("detached owner process", () => {
     await waitFor(() => /PID=\d+/u.test(first.text()), "shell identity");
     const shellPid = Number((/PID=(\d+)/u.exec(first.text()) ?? pidMatch)![1]);
     const second = await attach(firstRecord);
-    expect(second.controls.find((v) => v.type === "error")?.code).toBe(
-      "CONTROLLER_BUSY",
+    expect(second.boundary?.instance).toBe(firstRecord.instance);
+    second.writer.send(FrameType.Input, Buffer.from("echo PARALLEL_PID=$$\r"));
+    await waitFor(
+      () =>
+        first.text().includes("PARALLEL_PID=" + shellPid) &&
+        second.text().includes("PARALLEL_PID=" + shellPid),
+      "both controllers share shell output",
     );
     first.socket.destroy();
     await tick();

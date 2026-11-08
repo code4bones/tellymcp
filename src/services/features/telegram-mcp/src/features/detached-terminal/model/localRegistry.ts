@@ -28,7 +28,7 @@ export type OwnerSpec = z.infer<typeof ownerSpecSchema>;
 export const ownerRecordSchema = z
   .object({
     version: z.literal(1),
-    protocol: z.literal(LOCAL_PROTOCOL_VERSION),
+    protocol: z.union([z.literal(1), z.literal(LOCAL_PROTOCOL_VERSION)]),
     instance: z.uuid(),
     packageVersion: z.string().min(1).max(100),
     pid: z.number().int().positive(),

@@ -46,6 +46,7 @@ import { BrowserComputedStyleTool } from "./src/features/browser/model/browserCo
 import { BrowserConsoleTool } from "./src/features/browser/model/browserConsoleTool";
 import { BrowserDetachTabTool } from "./src/features/browser/model/browserDetachTabTool";
 import { BrowserDomTool } from "./src/features/browser/model/browserDomTool";
+import { InspectorTools } from "./src/features/browser/model/inspectorTools";
 import { BrowserErrorsTool } from "./src/features/browser/model/browserErrorsTool";
 import { BrowserFillTool } from "./src/features/browser/model/browserFillTool";
 import { BrowserInjectScriptTool } from "./src/features/browser/model/browserInjectScriptTool";
@@ -207,6 +208,7 @@ const TelegramMcpMcpServerService: ServiceSchema = {
         new BrowserNetworkFailuresTool(browserService.getBrowserService()),
         new BrowserClearLogsTool(browserService.getBrowserService()),
         new BrowserDomTool(browserService.getBrowserService()),
+        new InspectorTools(browserService.getBrowserService()),
         new BrowserComputedStyleTool(browserService.getBrowserService()),
         new BrowserScreenshotTool(browserService.getBrowserService()),
         new BrowserCloseTool(browserService.getBrowserService()),

@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "TellyMCP Attach",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "Attach TellyMCP to an already running browser session.",
   "icons": {
     "16": "icon-16.png",
@@ -21,9 +21,7 @@
     "<all_urls>"
   ],
   "background": {
-    "scripts": [
-      "background.js"
-    ],
+    "scripts": ["background.js"],
     "persistent": true
   },
   "browser_action": {
@@ -41,12 +39,18 @@
     "page": "options.html",
     "browser_style": true
   },
-  "web_accessible_resources": [
-    "recorder-page.js"
-  ],
+  "web_accessible_resources": ["recorder-page.js"],
   "browser_specific_settings": {
     "gecko": {
       "id": "tellymcp-firefox-attach@deadragdoll"
+    }
+  },
+  "commands": {
+    "toggle-ai-picker": {
+      "suggested_key": {
+        "default": "Alt+Shift+P"
+      },
+      "description": "Select an element with AI Picker"
     }
   }
 }

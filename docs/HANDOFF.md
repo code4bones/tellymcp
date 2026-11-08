@@ -18,11 +18,30 @@ legacy local-xchange save notice and other command/form/approval flows are uncha
 Removed the unused en/ru success text; i18n test now verifies delivery errors.
 
 Local26 tests across5 files passed, including real flow→gateway→owner→PTY text,
-uploads and isolated reaction-rejection checks; build/lint passed. Version0.0.55,
-local archive+checksums in artifacts/release055. Extensions unchanged15; local
-installed CLI remains0.0.52. Marrow T060; T059/T060 share milestone
-"Упростить меню и ввод Telegram". Release CI/deploy/production verification pending
-at this checkpoint; production currently0.0.54. No active owner restart needed.
+uploads and isolated reaction-rejection checks; build/lint passed. Tag v0.0.55 at
+b1fce86 is pushed to GitLab/GitHub. First pipeline7572 stopped before deploy on an
+unrelated remoteAttach resize timeout (immediate stty check races SIGWINCH).
+Isolated remoteAttach recheck passed all10 tests. Retried the same commit without
+code changes: pipeline7573 passed build13611/deploy13612,518 tests passed/15 skipped
+(13 browser checks without Chromium,2 opt-in Codex smoke tests).
+https://gitlab.undoo.ru/c4b/mcp/telegram_mcp/-/pipelines/7573
+
+Production now runs tellymcp-gateway:0.0.55-b1fce860caf8; actual installed package
+version0.0.55 and all5 healthy services verified. Only gateway recreated; other
+container IDs and .env except image are unchanged. Previous config snapshot:
+/opt/tellymcp/releases/20261108T223333Z-13612 . No active owner restart performed.
+Authorized MCP/healthz, Live/SDK/root and session-menu-without-Agent probes passed.
+Deployed TransportMessageFlow probe with fixture ctx.react confirms 👍, zero
+success chat messages and no resubmit/failure notice after reaction rejection.
+No real Telegram message, reaction or user terminal input was sent in verification;
+the actual user message reaction remains for a normal user send to exercise.
+INFO startup logs are unavailable at existing LOG_LEVEL=warn; no polling crash or
+queue retry errors logged. Evidence: artifacts/release055/deploy-preflight.json,
+deploy-state.json and deploy-verification.jsonl.
+
+Local archive+checksums in artifacts/release055; extensions unchanged15 and local
+installed CLI remains0.0.52. Marrow T060 done, project.lastVersion=0.0.55;
+T059/T060 share milestone "Упростить меню и ввод Telegram".
 
 ## Remove Agent submenu and unify Telegram console input (2026-11-09)
 

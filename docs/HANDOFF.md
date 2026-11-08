@@ -1,5 +1,26 @@
 # HANDOFF
 
+## Public README refreshed for Git (2026-11-08)
+
+README.md now presents current0.0.51 features, gateway/client quick start, Live
+Link/Attach menu, local terminal sessions, Picker mode/Send/Snapshot tables, MCP
+routing and extension export/pack/unlisted-sign commands. Region is explicitly
+screenshot-only, with Snapshot off by default. Source versions are distinguished
+from the npm registry badge; no unpublished package/download links are promised.
+
+Fixed wizard env filenames in run examples, optional scope-token wording and the
+normal gateway MCP route. Interactive run does not open a local MCP HTTP listener
+(foregroundRuntime standaloneHttp=false and ENVIRONMENT.md); old CLI MCP help
+still contains legacy local-endpoint wording and was not changed in this docs task.
+Removed the link to untracked/missing screenshots/README.md and condensed internal
+operational history into public setup/usage guidance. README-ru.md was not rewritten.
+
+Validation: Prettier and git diff checks pass; all tracked relative links/heading
+fragments and18 shell blocks checked. Source versions and referenced build scripts
+match the checkout. Actual compiled CLI help/config helper ran successfully for
+the example gateway MCP URL. Runtime source, package versions, built/signed
+artifacts and owners unchanged; no new package, test-suite run or deploy needed.
+
 ## Old local build artifacts cleaned (2026-11-08)
 
 At the user's request, removed25 ignored files (~4.99MiB): client0.0.41–43,

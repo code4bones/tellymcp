@@ -2,176 +2,104 @@
 
 # TellyMCP
 
-**Telegram control plane for MCP-connected coding agents**
+**Control your coding-agent consoles from Telegram and share browser context through MCP.**
 
-[English](./README.md) · [Русский](./README-ru.md) · [Standalone](./docs/STANDALONE.md) · [Standalone RU](./docs/STANDALONE-ru.md)
+[English](./README.md) · [Русский](./README-ru.md) · [Deployment](./docs/STANDALONE.md) · [Release notes](./VERSION.md)
 
 [![npm version](https://img.shields.io/npm/v/@deadragdoll/tellymcp.svg)](https://www.npmjs.com/package/@deadragdoll/tellymcp)
-[![node](https://img.shields.io/badge/node-%3E%3D24-339933.svg)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D24-339933.svg)](https://nodejs.org/)
 [![license](https://img.shields.io/npm/l/@deadragdoll/tellymcp.svg)](./LICENSE)
-[![gateway--first](https://img.shields.io/badge/runtime-gateway--first-1f6feb.svg)](./README.md#current-runtime-model)
-[![telegram webhook](https://img.shields.io/badge/telegram-webhook%20%7C%20polling-26A5E4.svg)](./README.md#webhook-mode)
+[![gateway-first](https://img.shields.io/badge/runtime-gateway--first-1f6feb.svg)](#current-runtime-model)
 
 </div>
 
-`@deadragdoll/tellymcp` is a Telegram control plane for MCP-connected coding agents.
+TellyMCP connects a Telegram bot to the terminals where your agents already work.
+Open a live console, send a question, attach another terminal, or select browser
+content and ask the agent about it. Agents can also exchange tasks and files
+through MCP, with artifacts saved in the owning workspace.
 
-The current model is gateway-first:
+Current source versions: **TellyMCP 0.0.51**, **Chrome extension 0.0.15**,
+**Firefox extension 0.0.14**. The npm badge shows the published package version;
+to use the current checkout, see [Build from source](#build-from-source).
 
-- one gateway process owns the Telegram bot, web app, project state, and live console registry
-- one or more agent processes connect to that gateway
-- each running agent console is a routable target
-- Telegram users work through the gateway menu instead of pairing individual sessions
+## What you can do
 
-## What It Does
+- **Work from Telegram:** choose a connected console with `/menu`, send messages
+  and files, and return answers or screenshots to the same chat.
+- **View and use a live terminal:** open the Mini App or copy a browser link.
+  Attach another native terminal with a short-lived, single-use code.
+- **Share browser context:** select an element, mark several containers, or
+  capture a screen region with the Chrome and Firefox extensions.
+- **Keep sessions running:** detach and reattach to Linux console owners without
+  starting a new shell or agent.
+- **Connect MCP agents:** route work between live consoles and return notes,
+  images and real files.
+- **Automate and record browsers:** use Playwright Chromium or an attached
+  browser, inspect DOM, inject helper scripts, and save recording artifacts.
+- **Use chat clients:** expose the gateway's MCP endpoint through the optional
+  OAuth connector for ChatGPT and Claude.
 
-- exposes MCP tools for human Telegram interaction
-- lets one agent ask another agent to do work and return files or notes
-- lets MCP chat clients retrieve project text, images, and artifacts from a selected console
-- stores structured xchange records in `.mcp-xchange`
-- supports browser automation with Playwright
-- can attach to an already running Firefox or Chrome tab through bundled local extensions
-- records browser sessions into structured `.mcp-xchange/web/...` bundles with HTML, network and console artifacts
-- can inject helper scripts into attached tabs or Playwright pages through `browser_inject_script`
-- serves the Telegram Mini App / Live View from the gateway
-- supports Telegram polling or webhook mode on the gateway
-- ships a bundled Codex workflow plugin for better agent behavior
-
-## Current Runtime Model
-
-Topology:
+## Current runtime model
 
 ```text
-Telegram user
-    |
-Telegram bot + WebApp
-    |
-Gateway
-    |
-    +-- Agent console A
-    +-- Agent console B
-    +-- Agent console C
+Telegram bot / Mini App       MCP client
+           |                     |
+           +--------+------------+
+                    |
+                 Gateway
+                    |
+          +---------+---------+
+          |                   |
+    Agent console A     Agent console B
+    shell + agent       shell + agent
+    browser bridge      browser bridge
+    local artifacts     local artifacts
 ```
 
-Important consequences:
+One gateway owns the Telegram bot, web app, live console registry and shared
+project state. Each client console owns its shell, agent process, browser
+connection and local artifacts.
 
-- there is no session pairing flow in the normal model
-- `/menu` on the gateway bot shows live consoles directly
-- cross-console work uses canonical `session_id = client_uuid:local_session_id`
-- unsolicited work is handled through structured xchange records, not inbox polling APIs
+| Component         | Runs on                          | Needs                                              |
+| ----------------- | -------------------------------- | -------------------------------------------------- |
+| Gateway           | Your server                      | Telegram bot, PostgreSQL, Redis; optional RabbitMQ |
+| Console owner     | Each agent machine               | Node.js and the local terminal runtime             |
+| Browser extension | Your existing Chrome or Firefox  | Connection to the console's local browser bridge   |
+| MCP client        | Your coding agent or chat client | Access to the configured MCP endpoint              |
 
-## Main Surfaces
+The bot lists live consoles directly. A console's canonical address is
+`client_uuid:local_session_id`; use the value returned by
+`list_gateway_sessions` when routing MCP calls.
 
-Human-facing:
+## Install
 
-- `telegram_message` records
-- `notify_telegram`
-- `browser_screenshot(send_to_telegram=true)`
-- `get_file` for returning screenshots and artifacts to MCP chat clients
-
-Agent-to-agent:
-
-- `partner_note` records
-- `send_partner_note`
-- `send_partner_file`
-- `list_gateway_sessions`
-
-Diagnostics:
-
-- `get_runtime_diagnostics` for safe end-to-end gateway/client health checks
-
-Browser:
-
-- `browser_open`
-- `browser_click`
-- `browser_fill`
-- `browser_inject_script`
-- `browser_press`
-- `browser_wait_for`
-- `browser_screenshot`
-- `browser_recording_start`
-- `browser_recording_stop`
-- `browser_recording_status`
-
-Files:
-
-- `get_file_list(source=..., limit=...)`
-- `get_file(file_path=..., type="url")`
-- `get_file(file_path=..., type="image")`
-- `get_file(file_path=..., type="text")`
-- `get_file(file_path=..., type="base64")`
-- `get_file(selector="latest_screenshot")`
-
-Tools sync:
-
-- `refresh_tools_markdown`
-- `.mcpsession.json` keeps startup identity and the last known tools hashes
-
-## Requirements
-
-- Node.js `>= 24`
-- Python 3, `make`, and a C/C++ toolchain on Linux so `node-pty` can build its native addon; npm lifecycle scripts must be enabled
-- Redis for gateway and `both` modes only; clients do not use Redis
-- PostgreSQL for gateway mode
-- optional RabbitMQ for durable gateway fanout
-- Playwright browser binaries if you use browser tools
-
-## Installation
-
-On Debian/Ubuntu, install the native PTY build prerequisites first:
+Requirements: **Node.js 24 or newer**. On Debian/Ubuntu, install the native PTY
+build prerequisites and keep npm lifecycle scripts enabled:
 
 ```bash
 sudo apt install -y python3 make g++
 npm config set ignore-scripts false
-```
-
-```bash
 npm install -g @deadragdoll/tellymcp --foreground-scripts
 ```
 
-The published `node-pty` dependency does not provide a Linux ARM64 binary, so
-the install lifecycle builds `pty.node` locally. If a previous installation
-completed without it, repair the global package with:
+The terminal runtime uses `node-pty`, which may need to compile its native addon.
+If an earlier install left `pty.node` missing, reinstall with lifecycle scripts
+enabled. Use `tellymcp doctor --env <file>` to check the setup.
 
-```bash
-npm uninstall -g @deadragdoll/tellymcp
-npm install -g @deadragdoll/tellymcp@latest --foreground-scripts
-tellymcp doctor --env <file>
-```
-
-`tellymcp --help` and setup commands do not load the native PTY module. Runtime
-startup validates it and prints the same recovery instructions instead of a
-raw native-module stack trace.
-
-Optional browser runtime:
+For Playwright browser automation, also run:
 
 ```bash
 tellymcp browser install
 ```
 
-Optional attached-browser extensions:
+Attached Chrome/Firefox tabs use the extension bridge and do not require a
+separate Playwright browser installation.
 
-```bash
-tellymcp extension firefox
-tellymcp extension chrome
-```
+## Quick start
 
-This exports unpacked extension bundles into the current directory:
+### 1. Configure the gateway
 
-- `./tellymcp-firefox-attach`
-- `./tellymcp-chrome-attach`
-
-Optional Codex workflow plugin:
-
-```bash
-tellymcp codex-plugin install
-```
-
-## Quick Start
-
-### 1. Gateway
-
-Create a gateway workspace and env:
+Start Redis and PostgreSQL, then create a gateway workspace:
 
 ```bash
 mkdir -p ~/telly-gateway
@@ -179,43 +107,29 @@ cd ~/telly-gateway
 tellymcp configure
 ```
 
-This opens a token-protected local page on `127.0.0.1`. Choose `Gateway` in the
-wizard, fill and validate the settings, then save `.env-gateway` through the
-normal browser download flow. Set its permissions to `0600` before use. Use
-`tellymcp init gateway` when you specifically want a commented template for
-manual editing.
+The command opens a token-protected local setup page. Choose **Gateway**, enter
+your bot and infrastructure settings, and validate the connections. Enter the
+public URL once; the wizard derives the HTTP, WebSocket, Mini App and webhook
+addresses.
 
-Enter the public origin or API base only once. The wizard derives gateway HTTP,
-WebSocket, Mini App, webhook, root-prefix, and optional OAuth connector URLs.
-The key stages include live connection checks for Telegram, Redis, PostgreSQL,
-the gateway HTTP/WebSocket endpoints, and optional RabbitMQ.
-
-Or copy the sample from this package:
-
-- [.env.example.gateway](./.env.example.gateway)
-
-Required gateway values:
-
-- `TELEGRAM_BOT_TOKEN`
-- `REDIS_HOST`
-- `DB_HOST`
-- `DB_USER`
-- `DB_PASSWORD`
-- `DB_NAME`
-- `GATEWAY_PUBLIC_URL`
-- `GATEWAY_WS_URL`
-- `GATEWAY_SCOPE_TOKEN`
-- `GATEWAY_AUTH_TOKEN`
-
-Then run:
+Save the downloaded `.env-gateway` in this workspace, then run:
 
 ```bash
-tellymcp run --env .env
+chmod 600 .env-gateway
+tellymcp run --env .env-gateway
 ```
 
-### 2. Agent
+For a manual template, use `tellymcp init gateway` or
+[.env.example.gateway](./.env.example.gateway). The full settings contract is in
+[Environment configuration](./docs/ENVIRONMENT.md).
 
-Create one workspace per agent console:
+Configure HTTPS for public Mini App, browser Live and webhook access. Reverse
+proxy examples are in [the deployment guide](./docs/STANDALONE.md) and
+[the Nginx configuration](./docs/tellymcp.gw.conf).
+
+### 2. Start an agent console
+
+On an agent machine:
 
 ```bash
 mkdir -p ~/agent-a
@@ -223,374 +137,333 @@ cd ~/agent-a
 tellymcp configure
 ```
 
-Choose `Client` in the wizard. The form includes the gateway connection, local
-console identity, terminal, browser, MCP, and advanced runtime settings.
-After validation the browser downloads `.env-client`. Use `--no-open` to print
-the local URL without opening a browser automatically.
-
-For clients, the same Public base URL automatically produces
-`GATEWAY_PUBLIC_URL`, `GATEWAY_WS_URL`, and `GATEWAY_WS_PATH`.
-
-Or copy:
-
-- [.env.example.client](./.env.example.client)
-
-Required client values:
-
-- `GATEWAY_PUBLIC_URL`
-- `GATEWAY_WS_URL`
-- `GATEWAY_SCOPE_TOKEN`
-- `GATEWAY_AUTH_TOKEN` (the same transport token configured on the gateway)
-- `GATEWAY_USER_UUID` if this console should be scoped to a specific Telegram owner
-
-Recommended:
-
-- built-in PTY terminal runtime is used by default
-- name the console with `-s`; its identity is saved in the workspace marker
-
-First run:
+Choose **Client**, enter the gateway connection settings, and save the downloaded
+`.env-client` in the workspace. Gateway and client must share
+`GATEWAY_AUTH_TOKEN`. `GATEWAY_SCOPE_TOKEN` is an optional data-scope key;
+`GATEWAY_USER_UUID` optionally binds the console to a Telegram owner.
 
 ```bash
-tellymcp run --ws 9999 -s NEW
+chmod 600 .env-client
+tellymcp run --env .env-client --ws 9999 -s "My console"
 ```
 
-The shared client profile is `$HOME/.tellymcp/.env`; `tellymcp init client`
-creates it. An explicit `--env` takes precedence, followed by the workspace's
-saved profile and local `.env`, then the shared home profile.
-`--ws 9999` enables the browser-extension listener on that port for this launch.
-Without `--ws`, browser attach uses the env settings; the flag does not rewrite them.
+This starts the console and enables the browser-extension listener on port 9999.
+The `--ws` flag applies to this launch; it does not rewrite the env file. Without
+it, the browser-attach env settings apply.
 
-After that, `.mcpsession.json` stores:
-
-- `local_session_id`
-- `session_label`
-- `env_file`
-- `gateway_client_uuid`
-
-Client runtime state is local and does not require Redis. The persisted
-`gateway_client_uuid` keeps the client identity stable across restarts.
-
-So later the same workspace can usually start with:
+The workspace marker, `.mcpsession.json`, stores the console identity, label,
+profile path and stable gateway client UUID. Later launches can use:
 
 ```bash
 tellymcp run
 ```
 
-### Local detach/attach (Linux)
+Clients keep local state and do not need Redis. The shared client profile is
+`$HOME/.tellymcp/.env`; `tellymcp init client` creates it. Profile discovery uses
+explicit `--env`, then the saved workspace profile, a workspace `.env`, and the
+shared profile. See [.env.example.client](./.env.example.client).
 
-Client-mode `run` now starts or reuses a background owner and attaches to its
-existing shell. `run --detach` returns after readiness without requiring a TTY.
+### 3. Open the console in Telegram
+
+Open the gateway bot. If a scope token is configured, authorize with
+`/auth <GATEWAY_SCOPE_TOKEN>`, then use `/menu` to select the live console.
+
+The selected console receives your messages. Its agent can read structured
+xchange records and return text, files or screenshots through the MCP tools.
+
+### Start a managed coding agent
+
+Provider adapters are included for Codex and Claude Code. The corresponding
+vendor CLI belongs on the agent machine; the gateway does not need it.
 
 ```bash
-tellymcp run --detach
-tellymcp sessions           # add --json for machine-readable output
-tellymcp attach             # choose a session, or attach <handle> directly
-tellymcp stop               # choose sessions to stop, or stop <handle> directly
+tellymcp provider list
+tellymcp provider status codex
+tellymcp provider status claude
+tellymcp provider install codex
+tellymcp run --env .env-client --agent codex
 ```
 
-Without a handle, attach opens an interactive session picker: arrows to move,
-Enter to attach, Esc or Ctrl+C to cancel. The current workspace is selected by
-default when available; busy and unavailable sessions cannot be selected.
-Stop without a handle opens a repeating picker: each selection stops that session
-and refreshes the list. Attached sessions can also be stopped. The menu ends when
-no sessions remain, or with Esc/Ctrl+C; cancellation leaves the remaining sessions
-running. A stop error is shown and returns to selection.
+The Telegram **Agent** menu can also start an available provider in the selected
+console. TellyMCP prevents a second managed agent from starting in a console
+while the first is running.
 
-Press **Ctrl+]**, then **d** to return to the outer shell. Double Ctrl+] forwards
-a literal prefix; bracketed paste preserves pasted prefix bytes. One interactive
-controller is allowed. Frontend loss keeps the owner and services alive; shell
-exit or stop ends them. Attach/list/stop need no profile or gateway connection.
-Changed startup configuration or a different explicit provider/bridge setting
-requires stopping the old owner first. Managed agents still use `--agent`.
+Keep the TellyMCP MCP connection configured in the agent. Codex uses its local
+app-server integration for structured Telegram turns; Claude Code uses the PTY
+adapter. The bundled workflow plugin helps agents follow the reply and artifact
+delivery paths:
 
-Launch from the outer shell: old foreground sessions cannot be converted in place.
-Interactive attach needs Linux `stty`. For source testing, run `yarn build`, then
-use `node /absolute/path/to/tellymcp/dist/cli.js`. To install a local build, run
-`npm pack`, then `npm install -g /path/to/deadragdoll-tellymcp-<version>.tgz`.
-SSH/cgroup, real agent TUIs and remote attach remain separate acceptance
-checks. See [the contract](docs/DETACHED_SESSIONS_DESIGN.md).
+```bash
+tellymcp codex-plugin install
+tellymcp codex-plugin status
+```
 
-### Terminal attach through the gateway
+## Live view and terminal attachment
 
-In Telegram, open the session's Live menu and press **Attach**, beside **Open in
-browser**. The owner receives an eight-digit, single-use code valid for five
-minutes, with a ready command for another workstation:
+The console's **Live** menu offers:
+
+```text
+Fullscreen | Expand | Default
+Link       | Attach
+           Back
+```
+
+- **Fullscreen / Expand / Default** open the terminal Mini App in Telegram.
+- **Link** sends a copyable, temporary browser URL to your private chat.
+- **Attach** creates a single-use terminal attachment code, valid for five
+  minutes.
+- **Back** returns to the selected console's menu.
+
+Browser Live keeps the statusbar and hides Telegram-specific toolbar controls.
+Browser links use their launch token; Telegram Mini Apps load their bundled
+Telegram SDK from the gateway.
+
+To attach a terminal from another workstation, use the command sent by the bot:
 
 ```bash
 tellymcp attach --code 12345678
 tellymcp attach --code 12345678 --gateway https://example.com/api/gateway
 ```
 
-Use the command with `--gateway` if no gateway is configured on that machine;
-`--env <file>` can select gateway/proxy settings. The code supplies session access,
-so the owner's credentials and workspace marker are not needed. Multiple local
-and remote terminals can attach to the same shell and write simultaneously.
-Live View keeps its mirrored screen and input. The latest attachment or resize,
-including Live, sets the shared PTY dimensions; detach does not change them.
-Smaller windows show a clipped view rather than rewrapping the shared screen.
-Ctrl+] then d disconnects only that terminal while the owner keeps running.
-After disconnection, generate a fresh code; keystrokes are never automatically
-replayed. The five-minute limit applies to code redemption, not connection length.
+The code grants access to that session without copying the owner's workspace
+marker. Local terminals, remote terminals and Live can share the same PTY.
+The latest attachment or resize sets the shared terminal dimensions.
 
-Remote attach needs gateway **0.0.44 or newer**. Concurrent native attachments
-require a session-owner and viewing clients **0.0.45 or newer** (local protocol2).
-Restart an existing owner when ready to load the new bridge; installing a package
-does not replace code in an already running owner.
+With terminal prompt scanning enabled, numbered terminal choices can appear as
+Telegram buttons for digits, Enter and Esc. Configure the
+`TERMINAL_PROMPT_SCAN_*` settings in the client profile; see
+[Environment configuration](./docs/ENVIRONMENT.md).
 
-### AI Picker in the attached browser
-
-Chrome0.0.15 and Firefox0.0.14 provide **Element / Region / Mark elements** and an
-**Alt+Shift+P** command. Connect the extension to a console in the Control Panel,
-use **Ctrl+click** to select an element or toggle a mark. Ordinary clicks work
-on the page, so you can open a popup before selecting it. Region uses normal
-dragging. A local image is captured at selection time without masking; toggle
-**Snapshot** to preview and include it (off by default). **Send** asks the agent
-to answer in its console; **Ctrl+Send** also requests `inspector_response` back
-to the browser, with a green Send hover. The owning console saves an artifact
-and notifies its agent. Optional browser replies require owner0.0.51 and a
-restart of that owner. The
-source tab is automatically attached on Send, with confirmation from the
-console before delivery; no manual tab attachment is needed.
-Mark elements toggles whole DOM containers and sends only group selectors and
-the question; the agent reads their live contents with `browser_dom(all=true)`.
-Automatic tab attachment requires0.0.47 owner builds, an owner restart
-and reloaded extensions. No separate AI provider or agent is started. Live
-selection state expires after five minutes; saved artifacts remain available.
-Use Esc or Forget to clear the live state. See [scope and implementation](docs/AI_PICKER_EXTENSION.md#13-карта-реализации-mvp-2026-11-08).
-
-### Start and continue a coding agent
-
-TellyMCP has built-in provider adapters for Codex and Claude Code. The vendor
-CLIs are optional: a client can use either one, and the gateway does not need to
-have either CLI installed.
-
-Inspect the client machine:
+### Local sessions on Linux
 
 ```bash
-tellymcp provider list
-tellymcp provider status codex
-tellymcp provider status claude
+tellymcp run --detach
+tellymcp sessions
+tellymcp sessions --json
+tellymcp attach
+tellymcp stop
 ```
 
-Prepare the integration and start an agent together with the console:
+Without a handle, `attach` opens a session picker; `stop` opens a repeating
+picker. Both accept an explicit session handle. Press **Ctrl+]**, then **d** to
+detach from a terminal while leaving its console owner running.
+
+Installing a new package does not replace an existing owner process. Restart
+that owner when ready to load updated runtime code.
+
+## Browser extensions and AI Picker
+
+Export the extensions bundled with the installed package:
 
 ```bash
-tellymcp provider install codex
-tellymcp run --env .env-client --agent codex
+tellymcp extension chrome
+tellymcp extension firefox
 ```
 
-`provider install codex` also prepares the bundled TellyMCP Codex workflow
-plugin. Claude Code uses the built-in adapter and the existing
-`tellymcp mcp --format claude` configuration helper; install the vendor CLI
-itself separately.
+The commands create `./tellymcp-chrome-attach` and
+`./tellymcp-firefox-attach` directories.
 
-After selecting a console in Telegram, open `🤖 Agent` to see which providers
-are available on that client and start Codex or Claude Code. For Codex, TellyMCP
-starts a local `codex app-server` on a private Unix socket and connects the
-console TUI with `codex --remote`; Claude Code currently uses the direct PTY
-adapter. Telegram messages then go to that same terminal conversation. The
-gateway never needs either vendor CLI. TellyMCP prevents a second agent from
-being launched into a console while the first one is still running and stops
-the managed Codex app-server when its TUI exits.
+- **Chrome:** open `chrome://extensions`, enable Developer mode and choose
+  **Load unpacked**.
+- **Firefox development:** open `about:debugging#/runtime/this-firefox`, choose
+  **Load Temporary Add-on**, and select the exported `manifest.json`.
+- **Firefox regular installation:** use a Mozilla-signed XPI; the source signing
+  command is documented [below](#package-the-extensions).
 
-Keep the TellyMCP MCP endpoint configured in the selected agent so its workflow
-can return files to Telegram with the existing notify tools. Codex text messages
-from Telegram are submitted directly with app-server `turn/start`, and the final
-agent message is delivered back through the selected console's Telegram route.
-The PTY keyboard relay remains the fallback for Claude Code and other
-non-structured providers. A second Telegram turn is rejected while the first is
-still running; app-server approval requests are currently denied safely until
-the Telegram approval UI is connected to this provider adapter.
+Connect the extension to your console's browser bridge in **Control Panel**.
+Open the Picker from the extension popup or with **Alt+Shift+P**.
 
-## Webhook Mode
+### Choose what to send
 
-Gateway supports Telegram webhook mode.
+| Mode              | Gesture                                        | What the agent receives                                                |
+| ----------------- | ---------------------------------------------- | ---------------------------------------------------------------------- |
+| **Element**       | Ctrl+click; Alt+↑/↓ navigates parents/children | A sanitized DOM/text snapshot saved at selection time                  |
+| **Mark elements** | Ctrl+click toggles a mark; Enter opens review  | Group selectors and your question; the agent reads the marked DOM live |
+| **Region**        | Drag a rectangle                               | The cropped screenshot when Snapshot is enabled; no DOM collection     |
 
-Typical nginx setup can proxy everything under `/api/` to the standalone gateway listener. The webhook route is just another backend route:
+Ordinary clicks and typing work on the page, so you can open a popup before
+selecting it. In Marks, Ctrl+click inside an already marked container removes the
+whole container's mark. Selecting a parent coalesces its marked descendants.
 
-- `/api/telegram/webhook`
+Element and Region capture a local image at selection time. **Snapshot** toggles
+whether that saved image is previewed and included in the request; it is
+**off by default**. Re-enabling it uses the same image after the original popup
+has closed. Screenshots are captured without masking.
 
-Relevant env:
+**Region is screenshot-only. Enable Snapshot to send the region's contents.**
+Without it, a Region request contains your question and page/rectangle metadata.
+Marks sends selectors only and has no Snapshot control.
+
+### Ask the agent
+
+Type your question, then use the single Send button:
+
+| Action        | Answer destination                         |
+| ------------- | ------------------------------------------ |
+| **Send**      | The agent's console conversation           |
+| **Ctrl+Send** | The console conversation and the extension |
+
+Send turns green on hover while Ctrl is held. The source tab attaches
+automatically before delivery, so a separate manual tab attachment is unnecessary.
+
+The console saves the question and selected context under
+`.mcp-xchange/{date}/picker/{id}/`, including an optional `selection.png`, then
+notifies the agent in its existing conversation. An Element request uses the
+saved DOM snapshot even if the original node later changes or disappears.
+A Marks request uses `browser_dom(all=true)` against the original marked tab.
+
+Browser replies use the exact request and selection IDs from the artifact.
+Selection state expires after five minutes; saved artifacts remain available.
+Esc or **Forget / close** clears the live selection.
+
+The current Send/Ctrl+Send behavior needs a **0.0.51 or newer console owner** and
+the current extension. After updating, restart the owner and reload the extension
+and target page. See [Picker implementation and limits](./docs/AI_PICKER_EXTENSION.md#13-карта-реализации-mvp-2026-11-08).
+
+### Automation and recording
+
+Browser tools can use Playwright Chromium or a selected attached tab. They cover
+navigation, clicks, form input, DOM inspection, screenshots, helper-script
+injection and structured browser recording.
+
+Recordings are saved as `.mcp-xchange/web/...` bundles with HTML, network and
+console artifacts. Screenshots can be returned to the human with
+`browser_screenshot(send_to_telegram=true)`, to another console with
+`send_partner_file`, or to a connected MCP client with `get_file`.
+
+## MCP usage and collaboration
+
+For the gateway-first setup, point your MCP client at the gateway's MCP route,
+for example:
+
+```text
+https://example.com/api/mcp
+```
+
+Print a configuration snippet with:
+
+```bash
+tellymcp mcp --url https://example.com/api/mcp
+```
+
+The helper prints configuration for you to copy into the MCP client.
+Authentication uses `MCP_HTTP_BEARER_TOKEN`, when configured, or the
+[OAuth connector](./docs/CHAT_CONNECTOR.md). Interactive `tellymcp run` does not
+open a local MCP HTTP listener; the local `127.0.0.1:8787/mcp` endpoint belongs
+to separately configured standalone/development runtimes.
+
+Useful tools:
+
+| Purpose                              | Tools                                                                            |
+| ------------------------------------ | -------------------------------------------------------------------------------- |
+| Find a console and check routing     | `list_gateway_sessions`, `get_runtime_diagnostics`                               |
+| Read incoming work                   | `list_xchange_records`, `get_xchange_record`, `mark_xchange_record_read`         |
+| Reply to a Telegram user             | `notify_telegram`, `browser_screenshot`                                          |
+| Exchange work between agents         | `send_partner_note`, `send_partner_file`                                         |
+| Read browser context                 | `browser_dom`, `inspector_get_selection`                                         |
+| Control Picker requests              | `inspector_start`, `inspector_highlight`, `inspector_response`, `inspector_stop` |
+| Retrieve saved files                 | `get_file_list`, `get_file`                                                      |
+| Refresh the workspace tool reference | `refresh_tools_markdown`                                                         |
+
+Agent-to-agent work arrives as structured `partner_note` records. Read the
+request, do the work in the target console, return the note or file, then mark
+the record read after the required reply succeeds. Picker artifacts specify
+whether a browser reply is requested; console-only requests finish after the
+answer is written in the agent conversation.
+
+## Webhook mode
+
+The gateway supports polling and webhooks. To use a webhook behind a reverse
+proxy with `ROOT_PREFIX=/api`:
 
 ```env
 TELEGRAM_WEBHOOK_ENABLED=true
 TELEGRAM_WEBHOOK_PATH=/telegram/webhook
-TELEGRAM_WEBHOOK_PUBLIC_URL=https://your-domain.example/api/telegram/webhook
-TELEGRAM_WEBHOOK_SECRET=change_me_webhook_secret
+TELEGRAM_WEBHOOK_PUBLIC_URL=https://example.com/api/telegram/webhook
+TELEGRAM_WEBHOOK_SECRET=replace_with_a_private_webhook_secret
 ```
 
-When webhook mode is enabled:
+The gateway registers the webhook on startup and checks the
+`x-telegram-bot-api-secret-token` header on incoming updates. Polling is used
+when webhook mode is disabled. See [Environment configuration](./docs/ENVIRONMENT.md)
+for proxy and transport settings.
 
-- the gateway registers Telegram webhook on startup
-- polling is not started
-- the secret is checked via `x-telegram-bot-api-secret-token`
+## Build from source
 
-## MCP Usage
-
-### Local HTTP
-
-In client mode the local MCP endpoint is usually:
-
-```text
-http://127.0.0.1:8787/mcp
-```
-
-Helper:
+The checkout can be ahead of the npm release:
 
 ```bash
-tellymcp mcp --url http://127.0.0.1:8787/mcp
+git clone https://github.com/code4bones/tellymcp.git
+cd tellymcp
+yarn install --frozen-lockfile
+npm pack
+npm install -g ./deadragdoll-tellymcp-0.0.51.tgz
 ```
 
-Use the MCP HTTP endpoint exposed by `tellymcp run` for Codex and similar agents.
+Use the archive filename printed by `npm pack` for your checkout's version.
+The pack lifecycle builds the runtime and both unpacked extension bundles.
 
-## Codex Plugin
-
-The package bundles a local Codex plugin with workflow skills for:
-
-- human Telegram replies
-- partner notes
-- browser screenshot tasks
-- artifact-return flows
-
-Commands:
+Development checks:
 
 ```bash
-tellymcp codex-plugin status
-tellymcp codex-plugin install
+yarn build
+yarn build:extensions
+yarn lint
+yarn test
 ```
 
-The installer:
+### Package the extensions
 
-- copies the bundled plugin into a managed local Codex path
-- updates the personal marketplace manifest
-- installs or updates the plugin if the Codex CLI is available
-
-## Browser Workflows
-
-Browser tools use Playwright Chromium.
-
-Preferred path:
-
-1. `browser_open`
-2. `browser_screenshot`
-3. either:
-   - `send_to_telegram=true` for direct human reply
-   - `send_partner_file` for cross-console artifact return
-
-If browser binaries are missing:
+From the repository root, build a Chrome ZIP and optionally a CRX:
 
 ```bash
-tellymcp browser install
+node packages/chrome-attach-extension/scripts/zip.mjs
+node packages/chrome-attach-extension/scripts/pack.mjs
 ```
 
-Do not replace browser workflows with ad hoc shell Playwright commands unless you are debugging the runtime itself.
+Outputs go to `packages/chrome-attach-extension/webstore-artifacts/` and
+`packages/chrome-attach-extension/crx-artifacts/`. CRX packaging uses
+`CHROME_BINARY` or `chromium-gost` and reuses `key.pem` to preserve its signing
+identity. On the first CRX build, the script creates that local key.
 
-## Terminal Blockers
-
-Gateway prompt scanning is now live-client driven:
-
-- the scanner is armed on gateway startup but starts working only after a live client connects
-- relay console materialization happens from gateway hello/owner-route hydration, not from `/menu`
-- prompt detection works on the tail of the captured terminal buffer
-
-Primary blocker heuristic:
-
-- contiguous numbered choices like `1.`, `2.`, `3.`
-- nearby action hints such as `press`, `input`, `choose`, `enter`, `esc`, `yes`, `no`
-- optional context lines above the menu block are included in the Telegram notice
-
-When a blocker is detected, the gateway can send inline Telegram buttons for:
-
-- `1..N`
-- `Enter`
-- `Esc`
-
-Those buttons send exactly the digit or terminal action to the target console. No marker navigation is used.
-
-Operational notes:
-
-- repeated scans of the same blocker fingerprint do not resend the notice
-- relay capture misses for offline agents are treated as debug-only noise
-- `Storage` and `Screenshots` on the gateway are relay-aware and read console metadata through gateway routes instead of the gateway filesystem
-
-## Collaboration Model
-
-Projects:
-
-- live console presence comes from gateway live registry
-- project membership is tracked separately from live presence
-- one console can participate in a project
-- one client can have several live consoles at the same time
-
-Expected agent behavior:
-
-- resolve targets through `list_gateway_sessions`
-- read incoming work through `list_xchange_records` and `get_xchange_record`
-- return real files with `send_partner_file`
-- call `mark_xchange_record_read` only after the required reply was successfully sent
-
-## Environment Files
-
-Use the shipped samples as the canonical starting point:
-
-- [Environment contract and migration guide](./docs/ENVIRONMENT.md)
-- [.env.example.gateway](./.env.example.gateway)
-- [.env.example.client](./.env.example.client)
-
-Bundled init templates:
-
-- [config/templates/env.gateway.template](./config/templates/env.gateway.template)
-- [config/templates/env.client.template](./config/templates/env.client.template)
-- [config/templates/env.both.template](./config/templates/env.both.template)
-
-The samples were cleaned to match the current runtime:
-
-- removed old inbox-only settings
-- removed obsolete pairing-oriented wording
-- removed unused secrets like `SESSION_SECRET`
-- removed unused `APP_NAME`
-- renamed ambiguous legacy keys to `TERMINAL_*`, `GATEWAY_SCOPE_TOKEN`,
-  `TELEGRAM_REQUEST_MODE`, `DB_SCHEMA`, and `LOGFEED_ENABLED`
-
-## Operational Commands
-
-Health check:
+For Firefox, configure `AMO_API_KEY` and `AMO_API_SECRET` in
+`packages/firefox-attach-extension/.env`, then run:
 
 ```bash
-tellymcp doctor --env .env
+node --env-file=packages/firefox-attach-extension/.env packages/firefox-attach-extension/scripts/sign.mjs
 ```
 
-Destructive local+gateway cleanup:
+The script rebuilds the extension, submits it to Mozilla on the **unlisted**
+channel and downloads the signed XPI into
+`packages/firefox-attach-extension/web-ext-artifacts/` after approval.
+
+Each extension has its own version. `yarn release:extensions` synchronizes their
+versions before packaging/signing; use the separate scripts above when retaining
+different Chrome and Firefox versions. Package outputs, signing keys and signing
+credentials are local files, excluded from Git.
+
+## Operations and documentation
+
+Check a runtime or migrate an older profile:
 
 ```bash
-tellymcp system-prune --env .env --yes
+tellymcp doctor --env .env-client
+tellymcp migrate-env ./old.env > ./new.env
 ```
 
-Normalize an older env file to the current role-aware contract:
+Use `.env-gateway` for gateway diagnostics. See `tellymcp help` for all commands.
 
-```bash
-tellymcp migrate-env ./old.env > ./.migrated-env
-```
+| Guide                                                                   | Contents                                               |
+| ----------------------------------------------------------------------- | ------------------------------------------------------ |
+| [Deployment](./docs/STANDALONE.md) · [Русский](./docs/STANDALONE-ru.md) | Gateway, infrastructure and agent setup                |
+| [Environment configuration](./docs/ENVIRONMENT.md)                      | Role-specific settings, auth, profiles and proxies     |
+| [Chat connector](./docs/CHAT_CONNECTOR.md)                              | MCP OAuth setup                                        |
+| [AI Picker](./docs/AI_PICKER_EXTENSION.md)                              | Selection payloads, delivery and implementation limits |
+| [Tool reference](./TOOLS.md)                                            | MCP tool catalog                                       |
+| [Development](./docs/DEVELOPMENT.md)                                    | Runtime architecture and development notes             |
+| [Release notes](./VERSION.md) · [Changelog](./CHANGELOG.md)             | User-facing changes and engineering history            |
+| [Русский README](./README-ru.md)                                        | Russian-language overview                              |
 
-The runtime does not fall back to the old schema. If legacy keys are detected,
-startup stops and prints the migration command.
+## License
 
-## Documentation Map
-
-- [README-ru.md](./README-ru.md)
-- [STANDALONE.md](./docs/STANDALONE.md)
-- [STANDALONE-ru.md](./docs/STANDALONE-ru.md)
-- [CHAT_CONNECTOR.md](./docs/CHAT_CONNECTOR.md) — ChatGPT/Claude OAuth connector
-- [TOOLS.md](./TOOLS.md)
-- [screenshots/README.md](./screenshots/README.md)
-
-## Status
-
-This README describes the current gateway-first model.
-
-Legacy concepts that should not be used for new setups:
-
-- pairing codes
-- session inbox APIs
-- `Local` partner menu
-- linked-session flows outside `partner_note` / project collaboration
+[MIT](./LICENSE).

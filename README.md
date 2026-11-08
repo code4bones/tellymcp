@@ -18,7 +18,7 @@ Open a live console, send a question, attach another terminal, or select browser
 content and ask the agent about it. Agents can also exchange tasks and files
 through MCP, with artifacts saved in the owning workspace.
 
-Current source versions: **TellyMCP 0.0.54**, **Chrome extension 0.0.15**,
+Current source versions: **TellyMCP 0.0.55**, **Chrome extension 0.0.15**,
 **Firefox extension 0.0.15**. The npm badge shows the published package version;
 to use the current checkout, see [Build from source](#build-from-source).
 
@@ -187,6 +187,7 @@ tellymcp run --env .env-client --agent codex
 Start the provider locally, then select its running console in Telegram.
 Ordinary messages, file captions and file uploads go to that console's terminal
 input. There is no separate Agent menu or Telegram delivery-mode selector.
+Successful delivery adds a 👍 reaction to your message; errors appear in the chat.
 Service commands and replies to explicit confirmation requests keep their own
 handlers. TellyMCP prevents a second managed agent from starting in a console
 while the first is running.
@@ -407,7 +408,7 @@ git clone https://github.com/code4bones/tellymcp.git
 cd tellymcp
 yarn install --frozen-lockfile
 npm pack
-npm install -g ./deadragdoll-tellymcp-0.0.54.tgz
+npm install -g ./deadragdoll-tellymcp-0.0.55.tgz
 ```
 
 Use the archive filename printed by `npm pack` for your checkout's version.

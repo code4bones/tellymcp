@@ -4,6 +4,11 @@ Public, user-facing release notes for published versions of `@deadragdoll/tellym
 
 For detailed engineering history, refactors, and internal development notes, see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.0.55
+
+- A successful Telegram console delivery adds 👍 to your message instead of
+  sending a separate confirmation. Delivery errors still appear in the chat.
+
 ## 0.0.54
 
 - Send ordinary Telegram messages to the selected console's terminal input.

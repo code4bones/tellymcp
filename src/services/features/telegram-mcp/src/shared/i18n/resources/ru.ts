@@ -777,8 +777,6 @@ export const ruMenu = {
   system: {
     sessions_menu_unavailable:
       "Меню сессий временно недоступно. Попробуй /menu ещё раз.",
-    gateway_relay_inbox_sent:
-      "Сообщение отправлено в сессию {{sessionName}} через шлюз.",
     gateway_relay_inbox_failed:
       "Не удалось отправить сообщение в выбранную gateway-сессию.",
     error_prefix: "Ошибка: {{message}}",

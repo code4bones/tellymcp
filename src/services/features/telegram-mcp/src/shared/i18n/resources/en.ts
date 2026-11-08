@@ -771,8 +771,6 @@ export const enMenu = {
   system: {
     sessions_menu_unavailable:
       "Sessions menu is temporarily unavailable. Try /menu again.",
-    gateway_relay_inbox_sent:
-      "Message routed to session {{sessionName}} through the gateway.",
     gateway_relay_inbox_failed:
       "Failed to route the message to the selected gateway session.",
     error_prefix: "Error: {{message}}",

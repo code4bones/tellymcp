@@ -575,13 +575,18 @@ export class TransportMessageFlow {
         return;
       }
 
-      await this.host.replyText(
-        ctx,
-        await this.host.tForContext(ctx, "menu:system.gateway_relay_inbox_sent", {
-          sessionName: session?.label ?? relayTarget.localSessionId,
-        }),
-        { kind: "transport", sessionId },
-      );
+      // Delivery succeeded. Reaction errors must not report a failed delivery
+      // or cause the terminal input to be submitted again.
+      try {
+        await ctx.react("👍");
+      } catch (error) {
+        this.host.logger.warn("Telegram delivery reaction failed", {
+          sessionId,
+          chatId,
+          messageId: message.message_id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       return;
     }
 

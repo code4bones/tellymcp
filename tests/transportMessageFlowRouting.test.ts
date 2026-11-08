@@ -109,7 +109,7 @@ function fixture() {
   const flow = new TransportMessageFlow({
     bindingStore: store,
     sessionStore: { getSession: async (sessionId: string) => ({ sessionId }) },
-    logger: { info: vi.fn(), debug: vi.fn(), error: vi.fn() },
+    logger: { info: vi.fn(), debug: vi.fn(), error: vi.fn(), warn: vi.fn() },
     extractIncomingText,
     collectIncomingAttachments,
     buildInboxText,
@@ -138,6 +138,7 @@ function fixture() {
 }
 function message(text?: string) {
   return {
+    react: vi.fn(async () => true),
     from: { id: 7, first_name: "Ada" },
     chat: { id: 42 },
     message: {
@@ -165,7 +166,10 @@ describe("Telegram → selected console → real PTY", () => {
         principal,
         buildLiveRelaySessionId("client-1", selected),
       );
-      await f.flow.handleInboxCapture(message("TELEGRAM_PTY_CHECK"));
+      const ctx = message("TELEGRAM_PTY_CHECK");
+      await f.flow.handleInboxCapture(ctx);
+      expect(ctx.react).toHaveBeenCalledExactlyOnceWith("👍");
+      expect(f.replyText).not.toHaveBeenCalled();
       await waitForOutput(async () =>
         (await f.snapshot(selected)).includes("TELEGRAM_PTY_CHECK"),
       );
@@ -230,6 +234,8 @@ describe("Telegram → selected console → real PTY", () => {
         ...(caption ? { caption } : {}),
       });
       await f.flow.handleInboxCapture(ctx);
+      expect(ctx.react).toHaveBeenCalledExactlyOnceWith("👍");
+      expect(f.replyText).not.toHaveBeenCalled();
       await waitForOutput(async () =>
         (await f.snapshot("second")).includes("test-only-upload.txt"),
       );
@@ -243,13 +249,31 @@ describe("Telegram → selected console → real PTY", () => {
       );
     },
   );
+  it("keeps a successful delivery silent when Telegram rejects the reaction", async () => {
+    const f = fixture();
+    await f.store.setActiveSessionIdForPrincipal(
+      principal,
+      buildLiveRelaySessionId("client-1", "first"),
+    );
+    const ctx = message("REACTION_FAILURE_CHECK");
+    vi.mocked(ctx.react).mockRejectedValue(new Error("reactions not allowed"));
+    await expect(f.flow.handleInboxCapture(ctx)).resolves.toBeUndefined();
+    await waitForOutput(async () =>
+      (await f.snapshot("first")).includes("REACTION_FAILURE_CHECK"),
+    );
+    expect(f.callBroker).toHaveBeenCalledTimes(2);
+    expect(ctx.react).toHaveBeenCalledExactlyOnceWith("👍");
+    expect(f.replyText).not.toHaveBeenCalled();
+  });
   it("reports an unavailable target without submitting to another console", async () => {
     const f = fixture();
     await f.store.setActiveSessionIdForPrincipal(
       principal,
       buildLiveRelaySessionId("client-1", "missing"),
     );
-    await f.flow.handleInboxCapture(message("NEVER_REDIRECT"));
+    const ctx = message("NEVER_REDIRECT");
+    await f.flow.handleInboxCapture(ctx);
+    expect(ctx.react).not.toHaveBeenCalled();
     expect(f.replyText).toHaveBeenCalledWith(
       expect.anything(),
       "menu:system.gateway_relay_inbox_failed",
@@ -261,7 +285,9 @@ describe("Telegram → selected console → real PTY", () => {
   });
   it("asks for a console when none is selected", async () => {
     const f = fixture();
-    await f.flow.handleInboxCapture(message("UNSELECTED"));
+    const ctx = message("UNSELECTED");
+    await f.flow.handleInboxCapture(ctx);
+    expect(ctx.react).not.toHaveBeenCalled();
     expect(f.callGatewayJson).not.toHaveBeenCalled();
     expect(f.replyText).toHaveBeenCalledWith(
       expect.anything(),

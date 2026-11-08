@@ -1,5 +1,29 @@
 # HANDOFF
 
+## Replace relay-delivery chat acknowledgements with reactions (2026-11-09)
+
+User requested replacing "Сообщение отправлено в сессию ... через шлюз" with a
+toast, then chose a reaction on the incoming message after API constraints were
+explained. Official Bot API answerCallbackQuery requires a callback_query_id;
+ordinary incoming messages cannot receive that toast. Standard ReactionTypeEmoji
+does not include ✅; user was told the implementation uses supported 👍.
+Sources: https://core.telegram.org/bots/api#answercallbackquery and
+https://core.telegram.org/bots/api#reactiontypeemoji .
+
+Relay success no longer calls replyText; after successful console input it calls
+ctx.react("👍"). Separate reaction try/catch logs failure without resubmitting
+input or claiming delivery failed. Actual delivery errors and no-selection prompts
+remain visible and do not react. Uploads/captions use the same success path. The
+legacy local-xchange save notice and other command/form/approval flows are unchanged.
+Removed the unused en/ru success text; i18n test now verifies delivery errors.
+
+Local26 tests across5 files passed, including real flow→gateway→owner→PTY text,
+uploads and isolated reaction-rejection checks; build/lint passed. Version0.0.55,
+local archive+checksums in artifacts/release055. Extensions unchanged15; local
+installed CLI remains0.0.52. Marrow T060; T059/T060 share milestone
+"Упростить меню и ввод Telegram". Release CI/deploy/production verification pending
+at this checkpoint; production currently0.0.54. No active owner restart needed.
+
 ## Remove Agent submenu and unify Telegram console input (2026-11-09)
 
 User requested checking delivery to the selected console and removing the whole

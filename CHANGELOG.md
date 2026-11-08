@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.0.55 — 2026-11-09
+
+- Replace successful Telegram console-delivery chat confirmations with a 👍
+  reaction on the original message, including uploads and captions. Preserve
+  delivery-error messages. A rejected reaction is logged without resubmitting
+  input or claiming that delivery failed.
+
 ## 0.0.54 — 2026-11-09
 
 - Remove the session Agent menu (Codex, Claude, Terminal and Stop active turn).

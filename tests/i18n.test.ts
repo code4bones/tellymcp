@@ -20,13 +20,13 @@ describe("i18n", () => {
     expect(translate("de", "common:menu.refresh")).toBe("🔄 Refresh");
   });
 
-  it("includes the selected console in the localized delivery confirmation", () => {
-    const key = "menu:system.gateway_relay_inbox_sent";
-    expect(translate("ru", key, { sessionName: "Test Console" })).toBe(
-      "Сообщение отправлено в сессию Test Console через шлюз.",
+  it("keeps delivery errors visible in both supported locales", () => {
+    const key = "menu:system.gateway_relay_inbox_failed";
+    expect(translate("ru", key)).toBe(
+      "Не удалось отправить сообщение в выбранную gateway-сессию.",
     );
-    expect(translate("en", key, { sessionName: "Test Console" })).toBe(
-      "Message routed to session Test Console through the gateway.",
+    expect(translate("en", key)).toBe(
+      "Failed to route the message to the selected gateway session.",
     );
   });
 });

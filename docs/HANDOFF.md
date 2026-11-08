@@ -1,5 +1,30 @@
 # HANDOFF
 
+## Состояние для следующей сессии — 2026-11-09
+
+- Текущая production-версия: **0.0.55**, образ на savant:
+  `tellymcp-gateway:0.0.55-b1fce860caf8`. Pipeline7573 прошёл, все5 сервисов healthy.
+- Меню «Агент» удалено целиком. Обычные Telegram-сообщения и вложения идут в
+  терминал выбранной консоли; команды, формы и подтверждения имеют свои обработчики.
+- Успешная доставка отмечается **👍 на исходном сообщении**, отдельного chat
+  acknowledgement нет. Ошибка реакции не повторяет ввод; ошибки доставки видимы.
+  Пользователь подтвердил результат: «да ! отлично !».
+- Локально установлен CLI **0.0.52**; исходники/пакет текущего релиза **0.0.55**.
+  Работающий owner не перезапускали. Последние изменения меню/реакций работают
+  на шлюзе; для этих изменений обновление клиента не требовалось.
+- Chrome/Firefox extensions остаются **0.0.15**, Firefox подписан. Артефакты и
+  проверки последнего релиза: `artifacts/release055/`; предыдущие записи ниже
+  сохраняют историю, а не обозначают текущую production-версию.
+- Marrow: проект `tellymcp`, T059/T060 **done**, milestone
+  «Упростить меню и ввод Telegram», project.lastVersion=0.0.55.
+- Текущий запрос полностью завершён. Из известных follow-up: T006/T036 остаются
+  review; в CI7572 один раз упал remoteAttach resize-тест, отдельный и повторный
+  общий прогон прошли без изменений. Этот нестабильный тест отдельно не исправляли.
+- Сохранить решения Picker: Region только screenshot; Element хранит снимок DOM
+  на момент выбора; Marks использует живые маркеры; Ctrl+click для выбора;
+  Snapshot опционален без маскирования; Send — ответ в консоль, Ctrl+Send — ещё
+  ответ в расширение. Не возвращать удалённое меню «Агент».
+
 ## Replace relay-delivery chat acknowledgements with reactions (2026-11-09)
 
 User requested replacing "Сообщение отправлено в сессию ... через шлюз" with a
@@ -34,7 +59,7 @@ Authorized MCP/healthz, Live/SDK/root and session-menu-without-Agent probes pass
 Deployed TransportMessageFlow probe with fixture ctx.react confirms 👍, zero
 success chat messages and no resubmit/failure notice after reaction rejection.
 No real Telegram message, reaction or user terminal input was sent in verification;
-the actual user message reaction remains for a normal user send to exercise.
+the user subsequently confirmed the resulting behavior in this conversation.
 INFO startup logs are unavailable at existing LOG_LEVEL=warn; no polling crash or
 queue retry errors logged. Evidence: artifacts/release055/deploy-preflight.json,
 deploy-state.json and deploy-verification.jsonl.
